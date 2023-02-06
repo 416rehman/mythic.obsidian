@@ -1,0 +1,139 @@
+{
+  "strategy": "default",
+  "matchStrategy": "prefix",
+  "maxNumberOfSuggestions": 5,
+  "maxNumberOfWordsAsPhrase": 3,
+  "minNumberOfCharactersTriggered": 0,
+  "minNumberOfWordsTriggeredPhrase": 1,
+  "complementAutomatically": true,
+  "delayMilliSeconds": 0,
+  "disableSuggestionsDuringImeOn": false,
+  "insertAfterCompletion": true,
+  "firstCharactersDisableSuggestions": ":/^",
+  "showMatchStrategy": true,
+  "showComplementAutomatically": true,
+  "showIndexingStatus": true,
+  "descriptionOnSuggestion": "Short",
+  "selectSuggestionKeys": "Tab",
+  "additionalCycleThroughSuggestionsKeys": "None",
+  "disableUpDownKeysForCycleThroughSuggestionsKeys": false,
+  "openSourceFileKey": "Ctrl/Cmd+Enter",
+  "propagateEsc": false,
+  "enableCurrentFileComplement": true,
+  "currentFileMinNumberOfCharacters": 0,
+  "onlyComplementEnglishOnCurrentFileComplement": false,
+  "enableCurrentVaultComplement": true,
+  "currentVaultMinNumberOfCharacters": 0,
+  "includeCurrentVaultPathPrefixPatterns": "Notes/",
+  "excludeCurrentVaultPathPrefixPatterns": "",
+  "includeCurrentVaultOnlyFilesUnderCurrentDirectory": false,
+  "enableCustomDictionaryComplement": false,
+  "customDictionaryPaths": "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-no-swears.txt",
+  "columnDelimiter": "Tab",
+  "customDictionaryWordRegexPattern": "",
+  "delimiterToHideSuggestion": "",
+  "delimiterToDivideSuggestionsForDisplayFromInsertion": "",
+  "caretLocationSymbolAfterComplement": "",
+  "displayedTextSuffix": " => ...",
+  "enableInternalLinkComplement": true,
+  "suggestInternalLinkWithAlias": true,
+  "excludeInternalLinkPathPrefixPatterns": "",
+  "enableFrontMatterComplement": true,
+  "frontMatterComplementMatchStrategy": "inherit",
+  "insertCommaAfterFrontMatterCompletion": false,
+  "intelligentSuggestionPrioritization": {
+    "maxDaysToKeepHistory": 30,
+    "maxNumberOfHistoryToKeep": 0
+  },
+  "showLogAboutPerformanceInConsole": false,
+  "selectionHistoryTree": {
+    "test": {
+      "test": {
+        "internalLink": {
+          "count": 1,
+          "lastUpdated": 1675648012429
+        }
+      }
+    },
+    "plugin": {
+      "plugin": {
+        "currentVault": {
+          "count": 1,
+          "lastUpdated": 1675648018524
+        }
+      }
+    },
+    "something": {
+      "something": {
+        "currentVault": {
+          "count": 1,
+          "lastUpdated": 1675648021562
+        }
+      }
+    },
+    "about": {
+      "about": {
+        "currentVault": {
+          "count": 1,
+          "lastUpdated": 1675648025546
+        }
+      }
+    },
+    "Plugin": {
+      "Plugin": {
+        "currentFile": {
+          "count": 1,
+          "lastUpdated": 1675648046601
+        }
+      }
+    },
+    "Untitled": {
+      "Untitled": {
+        "internalLink": {
+          "count": 1,
+          "lastUpdated": 1675648052715
+        }
+      }
+    },
+    "Contains": {
+      "Contains": {
+        "currentFile": {
+          "count": 1,
+          "lastUpdated": 1675648141825
+        }
+      }
+    },
+    "Excalidraw": {
+      "Excalidraw": {
+        "currentFile": {
+          "count": 1,
+          "lastUpdated": 1675648152187
+        }
+      }
+    },
+    "_excalidraw.template": {
+      "_excalidraw.template": {
+        "internalLink": {
+          "count": 1,
+          "lastUpdated": 1675648172942
+        }
+      }
+    },
+    "Kanban-plugin": {
+      "Kanban-plugin": {
+        "currentVault": {
+          "count": 1,
+          "lastUpdated": 1675648199589
+        }
+      }
+    },
+    "excalidraw": {
+      "excalidraw": {
+        "currentFile": {
+          "count": 2,
+          "lastUpdated": 1675650731371
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "date-colors": [],
+  "show-checkboxes": true,
+  "new-note-folder": "Boards/_kanban_tasks",
+  "new-note-template": "_obsidian/_templates/_task.template.md"
+}
