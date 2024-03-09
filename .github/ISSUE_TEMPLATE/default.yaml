@@ -2,7 +2,7 @@ name: Issue
 description: Create a new issue.
 title: "New Issue"
 labels: []
-projects: ["416rehman/projects/8"]
+projects: ["416rehman/8"]
 body:
   - type: textarea
     id: comment
