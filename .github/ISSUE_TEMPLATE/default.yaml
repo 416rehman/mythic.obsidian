@@ -1,6 +1,6 @@
 name: Issue
 description: Create a new issue.
-title: ""
+title: "New Issue"
 labels: []
 projects: ["416rehman/projects/8"]
 body:
