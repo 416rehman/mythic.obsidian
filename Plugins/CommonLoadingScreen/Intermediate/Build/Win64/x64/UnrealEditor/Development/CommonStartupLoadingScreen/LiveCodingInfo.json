@@ -1,0 +1,10 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.CommonStartupLoadingScreen.cpp.obj": [
+			"CommonPreLoadScreen.cpp.obj",
+			"CommonStartupLoadingScreen.cpp.obj",
+			"SCommonPreLoadingScreenWidget.cpp.obj"
+		]
+	}
+}

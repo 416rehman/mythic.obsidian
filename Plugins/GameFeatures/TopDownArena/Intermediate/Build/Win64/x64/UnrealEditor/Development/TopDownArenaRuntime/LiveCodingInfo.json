@@ -1,0 +1,13 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.TopDownArenaRuntime.cpp.obj": [
+			"TopDownArenaRuntime.init.gen.cpp.obj",
+			"LyraCameraMode_TopDownArenaCamera.cpp.obj",
+			"TopDownArenaAttributeSet.cpp.obj",
+			"TopDownArenaMovementComponent.cpp.obj",
+			"TopDownArenaPickupUIData.cpp.obj",
+			"TopDownArenaRuntimeModule.cpp.obj"
+		]
+	}
+}

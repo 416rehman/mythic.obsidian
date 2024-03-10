@@ -1,0 +1,12 @@
+/NOLOGO
+/errorReport:prompt
+/MACHINE:x64
+/SUBSYSTEM:WINDOWS
+/DEF
+/NAME:"UnrealEditor-ShooterCoreRuntime.dll"
+/IGNORE:4221
+/NODEFAULTLIB
+"D:\gameProjects\projectMythic\Mythic\Intermediate\Build\Win64\x64\MythicEditor\Development\UnrealEd\SharedPCH.UnrealEd.Cpp20.h.obj"
+"D:\gameProjects\projectMythic\Mythic\Plugins\GameFeatures\ShooterCore\Intermediate\Build\Win64\x64\UnrealEditor\Development\ShooterCoreRuntime\Module.ShooterCoreRuntime.cpp.obj"
+"D:\gameProjects\projectMythic\Mythic\Plugins\GameFeatures\ShooterCore\Intermediate\Build\Win64\x64\UnrealEditor\Development\ShooterCoreRuntime\Default.rc2.res"
+/OUT:"D:\gameProjects\projectMythic\Mythic\Plugins\GameFeatures\ShooterCore\Intermediate\Build\Win64\x64\UnrealEditor\Development\ShooterCoreRuntime\UnrealEditor-ShooterCoreRuntime.lib"

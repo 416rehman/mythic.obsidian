@@ -1,0 +1,13 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.CommonLoadingScreen.cpp.obj": [
+			"CommonLoadingScreen.init.gen.cpp.obj",
+			"LoadingProcessInterface.gen.cpp.obj",
+			"CommonLoadingScreenModule.cpp.obj",
+			"CommonLoadingScreenSettings.cpp.obj",
+			"LoadingScreenManager.cpp.obj",
+			"LoadingProcessTask.cpp.obj"
+		]
+	}
+}

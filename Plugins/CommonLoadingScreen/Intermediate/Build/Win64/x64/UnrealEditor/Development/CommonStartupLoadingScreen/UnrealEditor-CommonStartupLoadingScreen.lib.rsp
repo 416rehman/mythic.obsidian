@@ -1,0 +1,12 @@
+/NOLOGO
+/errorReport:prompt
+/MACHINE:x64
+/SUBSYSTEM:WINDOWS
+/DEF
+/NAME:"UnrealEditor-CommonStartupLoadingScreen.dll"
+/IGNORE:4221
+/NODEFAULTLIB
+"D:\gameProjects\projectMythic\Mythic\Intermediate\Build\Win64\x64\MythicEditor\Development\Engine\SharedPCH.Engine.Cpp20.h.obj"
+"D:\gameProjects\projectMythic\Mythic\Plugins\CommonLoadingScreen\Intermediate\Build\Win64\x64\UnrealEditor\Development\CommonStartupLoadingScreen\Module.CommonStartupLoadingScreen.cpp.obj"
+"D:\gameProjects\projectMythic\Mythic\Plugins\CommonLoadingScreen\Intermediate\Build\Win64\x64\UnrealEditor\Development\CommonStartupLoadingScreen\Default.rc2.res"
+/OUT:"D:\gameProjects\projectMythic\Mythic\Plugins\CommonLoadingScreen\Intermediate\Build\Win64\x64\UnrealEditor\Development\CommonStartupLoadingScreen\UnrealEditor-CommonStartupLoadingScreen.lib"

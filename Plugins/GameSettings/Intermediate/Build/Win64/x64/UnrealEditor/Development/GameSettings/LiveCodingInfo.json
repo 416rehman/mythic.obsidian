@@ -1,0 +1,38 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.GameSettings.cpp.obj": [
+			"GameSettings.init.gen.cpp.obj",
+			"KeyAlreadyBoundWarning.gen.cpp.obj",
+			"GameSettingDataSourceDynamic.cpp.obj",
+			"WhenPlatformHasTrait.cpp.obj",
+			"WhenPlayingAsPrimaryPlayer.cpp.obj",
+			"GameSetting.cpp.obj",
+			"GameSettingAction.cpp.obj",
+			"GameSettingCollection.cpp.obj",
+			"GameSettingFilterState.cpp.obj",
+			"GameSettingsModule.cpp.obj",
+			"GameSettingValue.cpp.obj",
+			"GameSettingValueDiscrete.cpp.obj",
+			"GameSettingValueDiscreteDynamic.cpp.obj",
+			"GameSettingValueScalar.cpp.obj",
+			"GameSettingValueScalarDynamic.cpp.obj",
+			"GameSettingRegistry.cpp.obj",
+			"GameSettingRegistryChangeTracker.cpp.obj",
+			"GameSettingDetailExtension.cpp.obj",
+			"GameSettingDetailView.cpp.obj",
+			"GameSettingListEntry.cpp.obj",
+			"GameSettingListView.cpp.obj",
+			"GameSettingPanel.cpp.obj",
+			"GameSettingScreen.cpp.obj",
+			"GameSettingVisualData.cpp.obj",
+			"IGameSettingActionInterface.cpp.obj",
+			"GameSettingPressAnyKey.cpp.obj",
+			"GameSettingRotator.cpp.obj",
+			"KeyAlreadyBoundWarning.cpp.obj",
+			"GameResponsivePanel.cpp.obj",
+			"GameResponsivePanelSlot.cpp.obj",
+			"SGameResponsivePanel.cpp.obj"
+		]
+	}
+}

@@ -1,0 +1,34 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "d:\\gameprojects\\projectmythic\\mythic\\plugins\\commonloadingscreen\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\commonstartuploadingscreen\\module.commonstartuploadingscreen.cpp",
+        "ProvidedModule": "",
+        "PCH": "d:\\gameprojects\\projectmythic\\mythic\\intermediate\\build\\win64\\x64\\mythiceditor\\development\\engine\\sharedpch.engine.cpp20.h.pch",
+        "Includes": [
+            "d:\\gameprojects\\projectmythic\\mythic\\plugins\\commonloadingscreen\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\commonstartuploadingscreen\\definitions.commonstartuploadingscreen.h",
+            "d:\\gameprojects\\projectmythic\\mythic\\plugins\\commonloadingscreen\\source\\commonstartuploadingscreen\\private\\commonpreloadscreen.cpp",
+            "d:\\gameprojects\\projectmythic\\mythic\\plugins\\commonloadingscreen\\source\\commonstartuploadingscreen\\private\\commonpreloadscreen.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\preloadscreen\\public\\preloadscreenbase.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\preloadscreen\\public\\preloadscreen.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\analytics\\analyticset\\public\\ianalyticsprovideret.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\analytics\\analyticset\\public\\analyticset.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\analytics\\analytics\\public\\analyticsproviderconfigurationdelegate.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\analytics\\analytics\\public\\interfaces\\ianalyticsprovidermodule.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\analytics\\analytics\\public\\analyticseventattribute.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\analytics\\analytics\\public\\analyticsconversion.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\analytics\\analytics\\public\\interfaces\\ianalyticsprovider.h",
+            "d:\\gameprojects\\projectmythic\\mythic\\plugins\\commonloadingscreen\\source\\commonstartuploadingscreen\\private\\scommonpreloadingscreenwidget.h",
+            "d:\\gameprojects\\projectmythic\\mythic\\plugins\\commonloadingscreen\\source\\commonstartuploadingscreen\\private\\commonstartuploadingscreen.cpp",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\preloadscreen\\public\\preloadscreenmanager.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\slate\\public\\widgets\\svirtualwindow.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\rendercore\\public\\tickableobjectrenderthread.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\preloadscreen\\public\\preloadslatethreading.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\applicationcore\\public\\hal\\platformapplicationmisc.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\applicationcore\\public\\windows\\windowsplatformapplicationmisc.h",
+            "e:\\unrealengine\\ue_5.3\\engine\\source\\runtime\\applicationcore\\public\\genericplatform\\genericplatformapplicationmisc.h",
+            "d:\\gameprojects\\projectmythic\\mythic\\plugins\\commonloadingscreen\\source\\commonstartuploadingscreen\\private\\scommonpreloadingscreenwidget.cpp"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}

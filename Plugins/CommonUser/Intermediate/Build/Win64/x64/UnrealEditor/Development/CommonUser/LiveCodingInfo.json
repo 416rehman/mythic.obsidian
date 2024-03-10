@@ -1,0 +1,14 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.CommonUser.cpp.obj": [
+			"CommonUser.init.gen.cpp.obj",
+			"CommonUserTypes.gen.cpp.obj",
+			"AsyncAction_CommonUserInitialize.cpp.obj",
+			"CommonSessionSubsystem.cpp.obj",
+			"CommonUserModule.cpp.obj",
+			"CommonUserSubsystem.cpp.obj",
+			"CommonUserTypes.cpp.obj"
+		]
+	}
+}

@@ -1,0 +1,9 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.AsyncMixin.cpp.obj": [
+			"AsyncMixin.cpp.obj",
+			"AsyncMixinModule.cpp.obj"
+		]
+	}
+}
