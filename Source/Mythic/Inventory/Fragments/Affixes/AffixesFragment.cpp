@@ -1,11 +1,11 @@
 ﻿#include "AffixesFragment.h"
 #include "AbilitySystemComponent.h"
-#include "Mythic/Inventory/InventoryComponent.h"
-#include "Mythic/Inventory/InventorySlot.h"
-#include "Mythic/Inventory/ItemInstance.h"
+#include "Mythic/Inventory/MythicInventoryComponent.h"
+#include "Mythic/Inventory/MythicInventorySlot.h"
+#include "Mythic/Inventory/MythicItemInstance.h"
 #include "AbilitySystemGlobals.h"
 
-void UAffixesFragment::OnInstanced(UItemInstance* Instance) {
+void UAffixesFragment::OnInstanced(UMythicItemInstance* Instance) {
     if (this->GEClass == nullptr) {
         UE_LOG(Mythic, Error, TEXT("AffixesInstFragment::OnInstanced: GEClass is null."));
         return;
@@ -81,7 +81,7 @@ void UAffixesFragment::OnInstanced(UItemInstance* Instance) {
 	}
 }
 
-void UAffixesFragment::OnSlotChanged(UInventorySlot* newSlot, UInventorySlot* oldSlot) {
+void UAffixesFragment::OnSlotChanged(UMythicInventorySlot* newSlot, UMythicInventorySlot* oldSlot) {
     // TODO
 	// Super::OnSlotChanged(newSlot, oldSlot);
 	// if (oldSlot == newSlot) return;

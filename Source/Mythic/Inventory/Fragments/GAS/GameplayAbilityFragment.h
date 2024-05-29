@@ -27,9 +27,9 @@ public:
 	UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category = "Gameplay Ability", meta=(Categories="Itemization.ActionType"))
 	FGameplayTagContainer GrantConditionTags;
 	
-	virtual void Action(UItemInstance* ItemInstance) override;
-	virtual void OnActiveItem(UItemInstance* ItemInstance) override;
-	virtual void OnInactiveItem(UItemInstance* ItemInstance) override;
+	virtual void Action(UMythicItemInstance* ItemInstance) override;
+	virtual void OnActiveItem(UMythicItemInstance* ItemInstance) override;
+	virtual void OnInactiveItem(UMythicItemInstance* ItemInstance) override;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override {
 		Super::GetLifetimeReplicatedProps(OutLifetimeProps);

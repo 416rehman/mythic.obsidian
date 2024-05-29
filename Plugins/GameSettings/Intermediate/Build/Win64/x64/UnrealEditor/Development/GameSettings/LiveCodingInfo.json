@@ -2,6 +2,8 @@
 	"RemapUnityFiles": 
 	{
 		"Module.GameSettings.cpp.obj": [
+			"GameSettings.init.gen.cpp.obj",
+			"KeyAlreadyBoundWarning.gen.cpp.obj",
 			"GameSettingDataSourceDynamic.cpp.obj",
 			"WhenPlatformHasTrait.cpp.obj",
 			"WhenPlayingAsPrimaryPlayer.cpp.obj",
@@ -30,9 +32,7 @@
 			"KeyAlreadyBoundWarning.cpp.obj",
 			"GameResponsivePanel.cpp.obj",
 			"GameResponsivePanelSlot.cpp.obj",
-			"SGameResponsivePanel.cpp.obj",
-			"GameSettings.init.gen.cpp.obj",
-			"KeyAlreadyBoundWarning.gen.cpp.obj"
+			"SGameResponsivePanel.cpp.obj"
 		]
 	}
 }

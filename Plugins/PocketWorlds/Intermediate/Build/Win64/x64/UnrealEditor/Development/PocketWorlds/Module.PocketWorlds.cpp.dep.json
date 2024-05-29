@@ -6,6 +6,7 @@
         "PCH": "d:\\gameprojects\\projectmythic\\mythic\\intermediate\\build\\win64\\x64\\mythiceditor\\development\\unrealed\\sharedpch.unrealed.project.novalfmtstr.valapi.cpp20.h.pch",
         "Includes": [
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\pocketworlds\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\pocketworlds\\definitions.pocketworlds.h",
+            "d:\\gameprojects\\projectmythic\\mythic\\plugins\\pocketworlds\\intermediate\\build\\win64\\unrealeditor\\inc\\pocketworlds\\uht\\pocketworlds.init.gen.cpp",
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\pocketworlds\\source\\private\\pocketcapture.cpp",
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\pocketworlds\\source\\public\\pocketcapture.h",
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\pocketworlds\\intermediate\\build\\win64\\unrealeditor\\inc\\pocketworlds\\uht\\pocketcapture.generated.h",

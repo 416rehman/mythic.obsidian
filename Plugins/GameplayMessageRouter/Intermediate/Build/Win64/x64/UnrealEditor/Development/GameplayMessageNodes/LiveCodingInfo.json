@@ -2,9 +2,9 @@
 	"RemapUnityFiles": 
 	{
 		"Module.GameplayMessageNodes.cpp.obj": [
+			"GameplayMessageNodes.init.gen.cpp.obj",
 			"GameplayMessageNodesModule.cpp.obj",
-			"K2Node_AsyncAction_ListenForGameplayMessages.cpp.obj",
-			"GameplayMessageNodes.init.gen.cpp.obj"
+			"K2Node_AsyncAction_ListenForGameplayMessages.cpp.obj"
 		]
 	}
 }

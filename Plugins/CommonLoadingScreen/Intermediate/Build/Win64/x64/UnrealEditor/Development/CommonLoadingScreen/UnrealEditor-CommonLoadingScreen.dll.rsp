@@ -38,8 +38,6 @@
 /NATVIS:"..\Intermediate\Build\Win64\x64\UnrealEditor\Development\RenderCore\RenderCore.natvis"
 "D:\gameProjects\projectMythic\Mythic\Intermediate\Build\Win64\x64\MythicEditor\Development\UnrealEd\SharedPCH.UnrealEd.Project.NoValFmtStr.ValApi.Cpp20.h.obj"
 "D:\gameProjects\projectMythic\Mythic\Plugins\CommonLoadingScreen\Intermediate\Build\Win64\x64\UnrealEditor\Development\CommonLoadingScreen\Module.CommonLoadingScreen.cpp.obj"
-"D:\gameProjects\projectMythic\Mythic\Plugins\CommonLoadingScreen\Intermediate\Build\Win64\x64\UnrealEditor\Development\CommonLoadingScreen\CommonLoadingScreen.init.gen.cpp.obj"
-"D:\gameProjects\projectMythic\Mythic\Plugins\CommonLoadingScreen\Intermediate\Build\Win64\x64\UnrealEditor\Development\CommonLoadingScreen\LoadingProcessInterface.gen.cpp.obj"
 "D:\gameProjects\projectMythic\Mythic\Plugins\CommonLoadingScreen\Intermediate\Build\Win64\x64\UnrealEditor\Development\CommonLoadingScreen\Default.rc2.res"
 "..\Intermediate\Build\Win64\x64\UnrealEditor\Development\CoreUObject\UnrealEditor-CoreUObject.lib"
 "..\Intermediate\Build\Win64\x64\UnrealEditor\Development\Engine\UnrealEditor-Engine.lib"

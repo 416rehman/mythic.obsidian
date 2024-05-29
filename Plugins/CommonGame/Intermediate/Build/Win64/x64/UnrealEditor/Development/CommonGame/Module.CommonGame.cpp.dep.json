@@ -6,6 +6,7 @@
         "PCH": "d:\\gameprojects\\projectmythic\\mythic\\intermediate\\build\\win64\\x64\\mythiceditor\\development\\unrealed\\sharedpch.unrealed.project.novalfmtstr.valapi.cpp20.h.pch",
         "Includes": [
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\commongame\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\commongame\\definitions.commongame.h",
+            "d:\\gameprojects\\projectmythic\\mythic\\plugins\\commongame\\intermediate\\build\\win64\\unrealeditor\\inc\\commongame\\uht\\commongame.init.gen.cpp",
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\commongame\\source\\private\\actions\\asyncaction_createwidgetasync.cpp",
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\commongame\\source\\public\\actions\\asyncaction_createwidgetasync.h",
             "f:\\ue_5.4\\engine\\source\\runtime\\engine\\classes\\engine\\cancellableasyncaction.h",

@@ -1,28 +1,28 @@
 ﻿#pragma once
 #include "GameplayTagContainer.h"
 #include "Engine/DataTable.h"
-#include "Mythic/Utility/ReplicatedObject.h"
+#include "Mythic/Utility/MythicReplicatedObject.h"
 #include "ItemFragment.generated.h"
 
-class UItemInstance;
-class UInventorySlot;
-class UInventoryComponent;
+class UMythicItemInstance;
+class UMythicInventorySlot;
+class UMythicInventoryComponent;
 
 /**
  *ItemFragments are actors unique to each item instance, and are used to define the item's behavior.
  *These receive events such as OnInstanced, OnPutInSlot, OnRemovedFromSlot, OnActiveItem, OnInactiveItem, etc.
  */
 UCLASS(DefaultToInstanced, BlueprintType, Blueprintable, EditInlineNew, Abstract)
-class MYTHIC_API UItemFragment  : public UReplicatedObject {
+class MYTHIC_API UItemFragment  : public UMythicReplicatedObject {
 	GENERATED_BODY()
 public:
 	// This is called after the item fragment has been instanced and added to an item instance. Sets the Config property.
-	virtual void OnInstanced(UItemInstance* Instance) {}
-	virtual void OnPutInSlot(TObjectPtr<UInventorySlot> newSlot) {}
-	virtual void OnRemovedFromSlot(TObjectPtr<UInventorySlot> oldSlot, bool bIsSwappingBetweenSlots) {}
-	virtual void OnActiveItem(UItemInstance* ItemInstance){}
-	virtual void OnInactiveItem(UItemInstance* ItemInstance){}
-	virtual void OnSlotChanged(UInventorySlot* newSlot, UInventorySlot* oldSlot) {}
+	virtual void OnInstanced(UMythicItemInstance* Instance) {}
+	virtual void OnPutInSlot(TObjectPtr<UMythicInventorySlot> newSlot) {}
+	virtual void OnRemovedFromSlot(TObjectPtr<UMythicInventorySlot> oldSlot, bool bIsSwappingBetweenSlots) {}
+	virtual void OnActiveItem(UMythicItemInstance* ItemInstance){}
+	virtual void OnInactiveItem(UMythicItemInstance* ItemInstance){}
+	virtual void OnSlotChanged(UMythicInventorySlot* newSlot, UMythicInventorySlot* oldSlot) {}
 };
 
 // A fragment that comes with a primary and secondary action. Should only contain self-dependent logic.
@@ -42,6 +42,6 @@ public:
 	FDataTableRowHandle ActionRowName;
 
 	UFUNCTION(BlueprintCallable, Category = "Action")
-	virtual void Action(UItemInstance* ItemInstance) {}
+	virtual void Action(UMythicItemInstance* ItemInstance) {}
 };
 

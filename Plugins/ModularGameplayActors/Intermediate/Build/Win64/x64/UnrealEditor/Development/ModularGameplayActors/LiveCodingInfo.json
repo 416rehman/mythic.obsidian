@@ -2,6 +2,7 @@
 	"RemapUnityFiles": 
 	{
 		"Module.ModularGameplayActors.cpp.obj": [
+			"ModularGameplayActors.init.gen.cpp.obj",
 			"ModularAIController.cpp.obj",
 			"ModularCharacter.cpp.obj",
 			"ModularGameMode.cpp.obj",
@@ -9,8 +10,7 @@
 			"ModularGameState.cpp.obj",
 			"ModularPawn.cpp.obj",
 			"ModularPlayerController.cpp.obj",
-			"ModularPlayerState.cpp.obj",
-			"ModularGameplayActors.init.gen.cpp.obj"
+			"ModularPlayerState.cpp.obj"
 		]
 	}
 }

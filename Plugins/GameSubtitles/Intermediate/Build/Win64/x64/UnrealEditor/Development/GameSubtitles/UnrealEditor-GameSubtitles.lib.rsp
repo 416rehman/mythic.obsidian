@@ -8,7 +8,5 @@
 /NODEFAULTLIB
 "D:\gameProjects\projectMythic\Mythic\Intermediate\Build\Win64\x64\MythicEditor\Development\UnrealEd\SharedPCH.UnrealEd.Project.NoValFmtStr.ValApi.Cpp20.h.obj"
 "D:\gameProjects\projectMythic\Mythic\Plugins\GameSubtitles\Intermediate\Build\Win64\x64\UnrealEditor\Development\GameSubtitles\Module.GameSubtitles.cpp.obj"
-"D:\gameProjects\projectMythic\Mythic\Plugins\GameSubtitles\Intermediate\Build\Win64\x64\UnrealEditor\Development\GameSubtitles\GameSubtitles.init.gen.cpp.obj"
-"D:\gameProjects\projectMythic\Mythic\Plugins\GameSubtitles\Intermediate\Build\Win64\x64\UnrealEditor\Development\GameSubtitles\SubtitleDisplayOptions.gen.cpp.obj"
 "D:\gameProjects\projectMythic\Mythic\Plugins\GameSubtitles\Intermediate\Build\Win64\x64\UnrealEditor\Development\GameSubtitles\Default.rc2.res"
 /OUT:"D:\gameProjects\projectMythic\Mythic\Plugins\GameSubtitles\Intermediate\Build\Win64\x64\UnrealEditor\Development\GameSubtitles\UnrealEditor-GameSubtitles.lib"

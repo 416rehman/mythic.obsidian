@@ -87,6 +87,6 @@ public:
 
 	void DeactivateAffixes(UAbilitySystemComponent* ASC);
 	void ActivateAffixes(UAbilitySystemComponent* ASC);
-	virtual void OnInstanced(UItemInstance* Instance) override;
-	virtual void OnSlotChanged(UInventorySlot* newSlot, UInventorySlot* oldSlot) override;
+	virtual void OnInstanced(UMythicItemInstance* Instance) override;
+	virtual void OnSlotChanged(UMythicInventorySlot* newSlot, UMythicInventorySlot* oldSlot) override;
 };

@@ -6,9 +6,9 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
 #include "Mythic/Mythic.h"
-#include "Mythic/Inventory/InventoryComponent.h"
+#include "Mythic/Inventory/MythicInventoryComponent.h"
 
-void UGameplayAbilityFragment::Action(UItemInstance* ItemInstance) {
+void UGameplayAbilityFragment::Action(UMythicItemInstance* ItemInstance) {
 	// activate the gameplay ability
 	if (GameplayAbility && ItemInstance) {
 		if (ItemInstance->GetSlot() == nullptr) {
@@ -39,7 +39,7 @@ void UGameplayAbilityFragment::Action(UItemInstance* ItemInstance) {
 	};
 }
 
-void UGameplayAbilityFragment::OnActiveItem(UItemInstance* ItemInstance) {
+void UGameplayAbilityFragment::OnActiveItem(UMythicItemInstance* ItemInstance) {
 	Super::OnActiveItem(ItemInstance);
 
     // TODO
@@ -65,7 +65,7 @@ void UGameplayAbilityFragment::OnActiveItem(UItemInstance* ItemInstance) {
 	// }
 }
 
-void UGameplayAbilityFragment::OnInactiveItem(UItemInstance* ItemInstance) {
+void UGameplayAbilityFragment::OnInactiveItem(UMythicItemInstance* ItemInstance) {
 	Super::OnInactiveItem(ItemInstance);
 	// TODO
 	// // check if the handle is valid

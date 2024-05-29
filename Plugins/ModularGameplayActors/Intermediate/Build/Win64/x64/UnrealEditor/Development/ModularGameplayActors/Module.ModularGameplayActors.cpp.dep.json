@@ -6,6 +6,7 @@
         "PCH": "d:\\gameprojects\\projectmythic\\mythic\\intermediate\\build\\win64\\x64\\mythiceditor\\development\\unrealed\\sharedpch.unrealed.project.novalfmtstr.valapi.cpp20.h.pch",
         "Includes": [
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\modulargameplayactors\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\modulargameplayactors\\definitions.modulargameplayactors.h",
+            "d:\\gameprojects\\projectmythic\\mythic\\plugins\\modulargameplayactors\\intermediate\\build\\win64\\unrealeditor\\inc\\modulargameplayactors\\uht\\modulargameplayactors.init.gen.cpp",
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\modulargameplayactors\\source\\modulargameplayactors\\private\\modularaicontroller.cpp",
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\modulargameplayactors\\source\\modulargameplayactors\\public\\modularaicontroller.h",
             "f:\\ue_5.4\\engine\\source\\runtime\\aimodule\\classes\\aicontroller.h",

@@ -14,7 +14,7 @@ void UMythicGameplayAbility::OnAvatarSet(const FGameplayAbilityActorInfo *ActorI
     }
 }
 
-// APCMythic * UMythicGameplayAbility::GetMythicPlayerControllerFromActorInfo() const {
+// AMythicPlayerController * UMythicGameplayAbility::GetMythicPlayerControllerFromActorInfo() const {
     // TODO
-    // return (CurrentActorInfo ? Cast<APCMythic>(CurrentActorInfo->PlayerController.Get()) : nullptr);
+    // return (CurrentActorInfo ? Cast<AMythicPlayerController>(CurrentActorInfo->PlayerController.Get()) : nullptr);
 // }

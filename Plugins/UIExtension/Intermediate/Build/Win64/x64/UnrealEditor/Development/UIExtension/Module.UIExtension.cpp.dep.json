@@ -6,6 +6,7 @@
         "PCH": "d:\\gameprojects\\projectmythic\\mythic\\intermediate\\build\\win64\\x64\\mythiceditor\\development\\unrealed\\sharedpch.unrealed.project.novalfmtstr.valapi.cpp20.h.pch",
         "Includes": [
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\uiextension\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\uiextension\\definitions.uiextension.h",
+            "d:\\gameprojects\\projectmythic\\mythic\\plugins\\uiextension\\intermediate\\build\\win64\\unrealeditor\\inc\\uiextension\\uht\\uiextension.init.gen.cpp",
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\uiextension\\source\\private\\loguiextension.cpp",
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\uiextension\\source\\private\\loguiextension.h",
             "d:\\gameprojects\\projectmythic\\mythic\\plugins\\uiextension\\source\\private\\uiextensionmodule.cpp",

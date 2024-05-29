@@ -6,7 +6,7 @@
 #include "Abilities/GameplayAbility.h"
 #include "MythicGameplayAbility.generated.h"
 
-class APCMythic;
+class AMythicPlayerController;
 /**
  * 
  */
@@ -23,5 +23,5 @@ public:
     virtual void OnAvatarSet(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec) override;
 
     // UFUNCTION(BlueprintCallable, Category = "Lyra|Ability")
-    // APCMythic* GetMythicPlayerControllerFromActorInfo() const;
+    // AMythicPlayerController* GetMythicPlayerControllerFromActorInfo() const;
 };
