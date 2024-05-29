@@ -40,5 +40,5 @@ public:
     void SetLootSource(class UMythicLootSource* NewLootSource);
     
     // UFUNCTION(BlueprintCallable, Category="Loot")
-    // void RequestLoot(UAbilitySystemComponent *AbilitySystemComponent, ELootType Type);
+    void RequestLoot(UAbilitySystemComponent *AbilitySystemComponent, ELootType Type);
 };
