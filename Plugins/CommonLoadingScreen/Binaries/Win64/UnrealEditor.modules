@@ -1,8 +1,0 @@
-{
-	"BuildId": "33043543",
-	"Modules": 
-	{
-		"CommonLoadingScreen": "UnrealEditor-CommonLoadingScreen.dll",
-		"CommonStartupLoadingScreen": "UnrealEditor-CommonStartupLoadingScreen.dll"
-	}
-}

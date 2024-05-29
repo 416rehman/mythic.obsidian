@@ -57,6 +57,7 @@ Session.vim
 # Visual Studio
 .vs
 
-Binaries
-Intermediate
-DerivedDataCache
+**/Intermediate/
+**/Binaries/
+/Plugins/**/Intermediate/
+/Plugins/**/Intermediate/

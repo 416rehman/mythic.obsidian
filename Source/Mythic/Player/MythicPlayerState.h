@@ -17,7 +17,7 @@ class MYTHIC_API AMythicPlayerState : public ALyraPlayerState
 	GENERATED_BODY()
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ability System")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Ability System")
     TObjectPtr<UMythicAbilitySystemComponent_Player> MythicAbilitySystemComponent;
     
 	UPROPERTY(Transient)
