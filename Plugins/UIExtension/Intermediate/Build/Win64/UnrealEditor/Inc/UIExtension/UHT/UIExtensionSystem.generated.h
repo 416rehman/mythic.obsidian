@@ -47,11 +47,7 @@ template<> UIEXTENSION_API UScriptStruct* StaticStruct<struct FUIExtensionReques
 UIEXTENSION_API void FExtendExtensionPointDynamicDelegate_DelegateWrapper(const FScriptDelegate& ExtendExtensionPointDynamicDelegate, EUIExtensionAction Action, FUIExtensionRequest const& ExtensionRequest);
 
 
-#define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_SPARSE_DATA
-#define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_RPC_WRAPPERS_NO_PURE_DECLS \
- \
 	DECLARE_FUNCTION(execK2_RegisterExtensionAsDataForContext); \
 	DECLARE_FUNCTION(execK2_RegisterExtensionAsData); \
 	DECLARE_FUNCTION(execK2_RegisterExtensionAsWidgetForContext); \
@@ -61,7 +57,6 @@ UIEXTENSION_API void FExtendExtensionPointDynamicDelegate_DelegateWrapper(const 
 	DECLARE_FUNCTION(execUnregisterExtension);
 
 
-#define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_ACCESSORS
 #define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUUIExtensionSubsystem(); \
@@ -76,8 +71,8 @@ public: \
 	NO_API UUIExtensionSubsystem(); \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UUIExtensionSubsystem(UUIExtensionSubsystem&&); \
-	NO_API UUIExtensionSubsystem(const UUIExtensionSubsystem&); \
+	UUIExtensionSubsystem(UUIExtensionSubsystem&&); \
+	UUIExtensionSubsystem(const UUIExtensionSubsystem&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UUIExtensionSubsystem); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UUIExtensionSubsystem); \
@@ -89,11 +84,7 @@ public: \
 #define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_SPARSE_DATA \
-	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_ACCESSORS \
 	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_192_ENHANCED_CONSTRUCTORS \
 private: \
@@ -102,16 +93,11 @@ PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 template<> UIEXTENSION_API UClass* StaticClass<class UUIExtensionSubsystem>();
 
-#define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_SPARSE_DATA
-#define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_RPC_WRAPPERS_NO_PURE_DECLS \
- \
 	DECLARE_FUNCTION(execIsValid); \
 	DECLARE_FUNCTION(execUnregister);
 
 
-#define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_ACCESSORS
 #define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUUIExtensionHandleFunctions(); \
@@ -124,8 +110,8 @@ public: \
 #define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UUIExtensionHandleFunctions(UUIExtensionHandleFunctions&&); \
-	NO_API UUIExtensionHandleFunctions(const UUIExtensionHandleFunctions&); \
+	UUIExtensionHandleFunctions(UUIExtensionHandleFunctions&&); \
+	UUIExtensionHandleFunctions(const UUIExtensionHandleFunctions&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UUIExtensionHandleFunctions); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UUIExtensionHandleFunctions); \
@@ -137,11 +123,7 @@ public: \
 #define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_SPARSE_DATA \
-	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_ACCESSORS \
 	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_256_ENHANCED_CONSTRUCTORS \
 private: \
@@ -150,16 +132,11 @@ PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 template<> UIEXTENSION_API UClass* StaticClass<class UUIExtensionHandleFunctions>();
 
-#define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_SPARSE_DATA
-#define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_RPC_WRAPPERS_NO_PURE_DECLS \
- \
 	DECLARE_FUNCTION(execIsValid); \
 	DECLARE_FUNCTION(execUnregister);
 
 
-#define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_ACCESSORS
 #define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUUIExtensionPointHandleFunctions(); \
@@ -172,8 +149,8 @@ public: \
 #define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UUIExtensionPointHandleFunctions(UUIExtensionPointHandleFunctions&&); \
-	NO_API UUIExtensionPointHandleFunctions(const UUIExtensionPointHandleFunctions&); \
+	UUIExtensionPointHandleFunctions(UUIExtensionPointHandleFunctions&&); \
+	UUIExtensionPointHandleFunctions(const UUIExtensionPointHandleFunctions&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UUIExtensionPointHandleFunctions); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UUIExtensionPointHandleFunctions); \
@@ -185,11 +162,7 @@ public: \
 #define FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_SPARSE_DATA \
-	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_ACCESSORS \
 	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_UIExtension_Source_Public_UIExtensionSystem_h_271_ENHANCED_CONSTRUCTORS \
 private: \

@@ -28,11 +28,6 @@ template<> GAMESETTINGS_API UScriptStruct* StaticStruct<struct FGameSettingClass
 
 template<> GAMESETTINGS_API UScriptStruct* StaticStruct<struct FGameSettingNameExtensions>();
 
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_SPARSE_DATA
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_RPC_WRAPPERS_NO_PURE_DECLS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_ACCESSORS
 #define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUGameSettingVisualData(); \
@@ -47,8 +42,8 @@ public: \
 	NO_API UGameSettingVisualData(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get()); \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UGameSettingVisualData(UGameSettingVisualData&&); \
-	NO_API UGameSettingVisualData(const UGameSettingVisualData&); \
+	UGameSettingVisualData(UGameSettingVisualData&&); \
+	UGameSettingVisualData(const UGameSettingVisualData&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UGameSettingVisualData); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UGameSettingVisualData); \
@@ -60,11 +55,6 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_SPARSE_DATA \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_ACCESSORS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingVisualData_h_44_ENHANCED_CONSTRUCTORS \
 private: \

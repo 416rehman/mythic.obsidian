@@ -2,7 +2,6 @@
 	"RemapUnityFiles": 
 	{
 		"Module.CommonGame.cpp.obj": [
-			"CommonGame.init.gen.cpp.obj",
 			"AsyncAction_CreateWidgetAsync.cpp.obj",
 			"AsyncAction_PushContentToLayerForPlayer.cpp.obj",
 			"AsyncAction_ShowConfirmation.cpp.obj",
@@ -17,7 +16,8 @@
 			"LogCommonGame.cpp.obj",
 			"CommonGameDialog.cpp.obj",
 			"CommonMessagingSubsystem.cpp.obj",
-			"PrimaryGameLayout.cpp.obj"
+			"PrimaryGameLayout.cpp.obj",
+			"CommonGame.init.gen.cpp.obj"
 		]
 	}
 }

@@ -8,37 +8,30 @@
 #include "GameplayMessageRuntime/Public/GameFramework/GameplayMessageTypes2.h"
 PRAGMA_DISABLE_DEPRECATION_WARNINGS
 void EmptyLinkFunctionForGeneratedCodeGameplayMessageTypes2() {}
-// Cross Module References
-	GAMEPLAYMESSAGERUNTIME_API UEnum* Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch();
-	UPackage* Z_Construct_UPackage__Script_GameplayMessageRuntime();
+
+// Begin Cross Module References
+GAMEPLAYMESSAGERUNTIME_API UEnum* Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch();
+UPackage* Z_Construct_UPackage__Script_GameplayMessageRuntime();
 // End Cross Module References
-	static FEnumRegistrationInfo Z_Registration_Info_UEnum_EGameplayMessageMatch;
-	static UEnum* EGameplayMessageMatch_StaticEnum()
+
+// Begin Enum EGameplayMessageMatch
+static FEnumRegistrationInfo Z_Registration_Info_UEnum_EGameplayMessageMatch;
+static UEnum* EGameplayMessageMatch_StaticEnum()
+{
+	if (!Z_Registration_Info_UEnum_EGameplayMessageMatch.OuterSingleton)
 	{
-		if (!Z_Registration_Info_UEnum_EGameplayMessageMatch.OuterSingleton)
-		{
-			Z_Registration_Info_UEnum_EGameplayMessageMatch.OuterSingleton = GetStaticEnum(Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch, (UObject*)Z_Construct_UPackage__Script_GameplayMessageRuntime(), TEXT("EGameplayMessageMatch"));
-		}
-		return Z_Registration_Info_UEnum_EGameplayMessageMatch.OuterSingleton;
+		Z_Registration_Info_UEnum_EGameplayMessageMatch.OuterSingleton = GetStaticEnum(Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch, (UObject*)Z_Construct_UPackage__Script_GameplayMessageRuntime(), TEXT("EGameplayMessageMatch"));
 	}
-	template<> GAMEPLAYMESSAGERUNTIME_API UEnum* StaticEnum<EGameplayMessageMatch>()
-	{
-		return EGameplayMessageMatch_StaticEnum();
-	}
-	struct Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics
-	{
-		static const UECodeGen_Private::FEnumeratorParam Enumerators[];
+	return Z_Registration_Info_UEnum_EGameplayMessageMatch.OuterSingleton;
+}
+template<> GAMEPLAYMESSAGERUNTIME_API UEnum* StaticEnum<EGameplayMessageMatch>()
+{
+	return EGameplayMessageMatch_StaticEnum();
+}
+struct Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics
+{
 #if WITH_METADATA
-		static const UECodeGen_Private::FMetaDataPairParam Enum_MetaDataParams[];
-#endif
-		static const UECodeGen_Private::FEnumParams EnumParams;
-	};
-	const UECodeGen_Private::FEnumeratorParam Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::Enumerators[] = {
-		{ "EGameplayMessageMatch::ExactMatch", (int64)EGameplayMessageMatch::ExactMatch },
-		{ "EGameplayMessageMatch::PartialMatch", (int64)EGameplayMessageMatch::PartialMatch },
-	};
-#if WITH_METADATA
-	const UECodeGen_Private::FMetaDataPairParam Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::Enum_MetaDataParams[] = {
+	static constexpr UECodeGen_Private::FMetaDataPairParam Enum_MetaDataParams[] = {
 		{ "BlueprintType", "true" },
 #if !UE_BUILD_SHIPPING
 		{ "Comment", "// Match rule for message listeners\n" },
@@ -54,36 +47,45 @@ void EmptyLinkFunctionForGeneratedCodeGameplayMessageTypes2() {}
 		{ "ToolTip", "Match rule for message listeners" },
 #endif
 	};
-#endif
-	const UECodeGen_Private::FEnumParams Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::EnumParams = {
-		(UObject*(*)())Z_Construct_UPackage__Script_GameplayMessageRuntime,
-		nullptr,
-		"EGameplayMessageMatch",
-		"EGameplayMessageMatch",
-		Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::Enumerators,
-		RF_Public|RF_Transient|RF_MarkAsNative,
-		UE_ARRAY_COUNT(Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::Enumerators),
-		EEnumFlags::None,
-		(uint8)UEnum::ECppForm::EnumClass,
-		METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::Enum_MetaDataParams), Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::Enum_MetaDataParams)
+#endif // WITH_METADATA
+	static constexpr UECodeGen_Private::FEnumeratorParam Enumerators[] = {
+		{ "EGameplayMessageMatch::ExactMatch", (int64)EGameplayMessageMatch::ExactMatch },
+		{ "EGameplayMessageMatch::PartialMatch", (int64)EGameplayMessageMatch::PartialMatch },
 	};
-	UEnum* Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch()
+	static const UECodeGen_Private::FEnumParams EnumParams;
+};
+const UECodeGen_Private::FEnumParams Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::EnumParams = {
+	(UObject*(*)())Z_Construct_UPackage__Script_GameplayMessageRuntime,
+	nullptr,
+	"EGameplayMessageMatch",
+	"EGameplayMessageMatch",
+	Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::Enumerators,
+	RF_Public|RF_Transient|RF_MarkAsNative,
+	UE_ARRAY_COUNT(Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::Enumerators),
+	EEnumFlags::None,
+	(uint8)UEnum::ECppForm::EnumClass,
+	METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::Enum_MetaDataParams), Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::Enum_MetaDataParams)
+};
+UEnum* Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch()
+{
+	if (!Z_Registration_Info_UEnum_EGameplayMessageMatch.InnerSingleton)
 	{
-		if (!Z_Registration_Info_UEnum_EGameplayMessageMatch.InnerSingleton)
-		{
-			UECodeGen_Private::ConstructUEnum(Z_Registration_Info_UEnum_EGameplayMessageMatch.InnerSingleton, Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::EnumParams);
-		}
-		return Z_Registration_Info_UEnum_EGameplayMessageMatch.InnerSingleton;
+		UECodeGen_Private::ConstructUEnum(Z_Registration_Info_UEnum_EGameplayMessageMatch.InnerSingleton, Z_Construct_UEnum_GameplayMessageRuntime_EGameplayMessageMatch_Statics::EnumParams);
 	}
-	struct Z_CompiledInDeferFile_FID_Mythic_Plugins_GameplayMessageRouter_Source_GameplayMessageRuntime_Public_GameFramework_GameplayMessageTypes2_h_Statics
-	{
-		static const FEnumRegisterCompiledInInfo EnumInfo[];
+	return Z_Registration_Info_UEnum_EGameplayMessageMatch.InnerSingleton;
+}
+// End Enum EGameplayMessageMatch
+
+// Begin Registration
+struct Z_CompiledInDeferFile_FID_Mythic_Plugins_GameplayMessageRouter_Source_GameplayMessageRuntime_Public_GameFramework_GameplayMessageTypes2_h_Statics
+{
+	static constexpr FEnumRegisterCompiledInInfo EnumInfo[] = {
+		{ EGameplayMessageMatch_StaticEnum, TEXT("EGameplayMessageMatch"), &Z_Registration_Info_UEnum_EGameplayMessageMatch, CONSTRUCT_RELOAD_VERSION_INFO(FEnumReloadVersionInfo, 1992465379U) },
 	};
-	const FEnumRegisterCompiledInInfo Z_CompiledInDeferFile_FID_Mythic_Plugins_GameplayMessageRouter_Source_GameplayMessageRuntime_Public_GameFramework_GameplayMessageTypes2_h_Statics::EnumInfo[] = {
-		{ EGameplayMessageMatch_StaticEnum, TEXT("EGameplayMessageMatch"), &Z_Registration_Info_UEnum_EGameplayMessageMatch, CONSTRUCT_RELOAD_VERSION_INFO(FEnumReloadVersionInfo, 3309916309U) },
-	};
-	static FRegisterCompiledInInfo Z_CompiledInDeferFile_FID_Mythic_Plugins_GameplayMessageRouter_Source_GameplayMessageRuntime_Public_GameFramework_GameplayMessageTypes2_h_275582762(TEXT("/Script/GameplayMessageRuntime"),
-		nullptr, 0,
-		nullptr, 0,
-		Z_CompiledInDeferFile_FID_Mythic_Plugins_GameplayMessageRouter_Source_GameplayMessageRuntime_Public_GameFramework_GameplayMessageTypes2_h_Statics::EnumInfo, UE_ARRAY_COUNT(Z_CompiledInDeferFile_FID_Mythic_Plugins_GameplayMessageRouter_Source_GameplayMessageRuntime_Public_GameFramework_GameplayMessageTypes2_h_Statics::EnumInfo));
+};
+static FRegisterCompiledInInfo Z_CompiledInDeferFile_FID_Mythic_Plugins_GameplayMessageRouter_Source_GameplayMessageRuntime_Public_GameFramework_GameplayMessageTypes2_h_2137425532(TEXT("/Script/GameplayMessageRuntime"),
+	nullptr, 0,
+	nullptr, 0,
+	Z_CompiledInDeferFile_FID_Mythic_Plugins_GameplayMessageRouter_Source_GameplayMessageRuntime_Public_GameFramework_GameplayMessageTypes2_h_Statics::EnumInfo, UE_ARRAY_COUNT(Z_CompiledInDeferFile_FID_Mythic_Plugins_GameplayMessageRouter_Source_GameplayMessageRuntime_Public_GameFramework_GameplayMessageTypes2_h_Statics::EnumInfo));
+// End Registration
 PRAGMA_ENABLE_DEPRECATION_WARNINGS

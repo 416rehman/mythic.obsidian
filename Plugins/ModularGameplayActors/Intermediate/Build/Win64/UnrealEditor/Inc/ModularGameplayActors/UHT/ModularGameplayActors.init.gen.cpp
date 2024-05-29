@@ -17,13 +17,13 @@ void EmptyLinkFunctionForGeneratedCodeModularGameplayActors_init() {}
 				nullptr,
 				0,
 				PKG_CompiledIn | 0x00000000,
-				0x0B298EF1,
-				0xD6BFA687,
+				0x34A73466,
+				0xFF05ED5D,
 				METADATA_PARAMS(0, nullptr)
 			};
 			UECodeGen_Private::ConstructUPackage(Z_Registration_Info_UPackage__Script_ModularGameplayActors.OuterSingleton, PackageParams);
 		}
 		return Z_Registration_Info_UPackage__Script_ModularGameplayActors.OuterSingleton;
 	}
-	static FRegisterCompiledInInfo Z_CompiledInDeferPackage_UPackage__Script_ModularGameplayActors(Z_Construct_UPackage__Script_ModularGameplayActors, TEXT("/Script/ModularGameplayActors"), Z_Registration_Info_UPackage__Script_ModularGameplayActors, CONSTRUCT_RELOAD_VERSION_INFO(FPackageReloadVersionInfo, 0x0B298EF1, 0xD6BFA687));
+	static FRegisterCompiledInInfo Z_CompiledInDeferPackage_UPackage__Script_ModularGameplayActors(Z_Construct_UPackage__Script_ModularGameplayActors, TEXT("/Script/ModularGameplayActors"), Z_Registration_Info_UPackage__Script_ModularGameplayActors, CONSTRUCT_RELOAD_VERSION_INFO(FPackageReloadVersionInfo, 0x34A73466, 0xFF05ED5D));
 PRAGMA_ENABLE_DEPRECATION_WARNINGS

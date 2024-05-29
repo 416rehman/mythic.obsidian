@@ -22,17 +22,12 @@ enum class ECommonMessagingResult : uint8;
 COMMONGAME_API void FCommonMessagingResultMCDelegate_DelegateWrapper(const FMulticastScriptDelegate& CommonMessagingResultMCDelegate, ECommonMessagingResult Result);
 
 
-#define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_SPARSE_DATA
-#define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_RPC_WRAPPERS \
- \
 	DECLARE_FUNCTION(execShowConfirmationCustom); \
 	DECLARE_FUNCTION(execShowConfirmationOkCancel); \
 	DECLARE_FUNCTION(execShowConfirmationYesNo);
 
 
-#define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_ACCESSORS
 #define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_INCLASS \
 private: \
 	static void StaticRegisterNativesUAsyncAction_ShowConfirmation(); \
@@ -50,8 +45,8 @@ public: \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UAsyncAction_ShowConfirmation); \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UAsyncAction_ShowConfirmation(UAsyncAction_ShowConfirmation&&); \
-	NO_API UAsyncAction_ShowConfirmation(const UAsyncAction_ShowConfirmation&); \
+	UAsyncAction_ShowConfirmation(UAsyncAction_ShowConfirmation&&); \
+	UAsyncAction_ShowConfirmation(const UAsyncAction_ShowConfirmation&); \
 public: \
 	NO_API virtual ~UAsyncAction_ShowConfirmation();
 
@@ -60,11 +55,7 @@ public: \
 #define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_GENERATED_BODY_LEGACY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_SPARSE_DATA \
-	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_RPC_WRAPPERS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_ACCESSORS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_INCLASS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_ShowConfirmation_h_25_STANDARD_CONSTRUCTORS \
 public: \

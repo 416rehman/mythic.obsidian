@@ -1,6 +1,6 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "5.3",
+	"EngineAssociation": "5.4",
 	"Category": "",
 	"Description": "",
 	"Modules": [
@@ -146,49 +146,6 @@
 			"Enabled": true
 		},
 		{
-			"Name": "MagicLeap",
-			"Enabled": false
-		},
-		{
-			"Name": "MagicLeapMedia",
-			"Enabled": false
-		},
-		{
-			"Name": "MagicLeapPassableWorld",
-			"Enabled": false
-		},
-		{
-			"Name": "OpenXREyeTracker",
-			"Enabled": false
-		},
-		{
-			"Name": "OpenXRHandTracking",
-			"Enabled": false
-		},
-		{
-			"Name": "OpenXRHMD",
-			"Enabled": false
-		},
-		{
-			"Name": "SteamVR",
-			"Enabled": false
-		},
-		{
-			"Name": "GearVR",
-			"Enabled": false
-		},
-		{
-			"Name": "LuminPlatformFeatures",
-			"Enabled": false,
-			"SupportedTargetPlatforms": [
-				"Lumin"
-			]
-		},
-		{
-			"Name": "MLSDK",
-			"Enabled": false
-		},
-		{
 			"Name": "OnlineFramework",
 			"Enabled": true
 		},
@@ -273,39 +230,11 @@
 			"Enabled": true
 		},
 		{
-			"Name": "ResonanceAudio",
-			"Enabled": false
-		},
-		{
-			"Name": "RuntimePhysXCooking",
-			"Enabled": false
-		},
-		{
 			"Name": "Spatialization",
 			"Enabled": true
 		},
 		{
-			"Name": "ShooterCore",
-			"Enabled": true
-		},
-		{
-			"Name": "ShooterMaps",
-			"Enabled": true
-		},
-		{
-			"Name": "TopDownArena",
-			"Enabled": true
-		},
-		{
 			"Name": "FunctionalTestingEditor",
-			"Enabled": true
-		},
-		{
-			"Name": "ShooterExplorer",
-			"Enabled": true
-		},
-		{
-			"Name": "ShooterTests",
 			"Enabled": true
 		},
 		{

@@ -21,11 +21,6 @@ PRAGMA_DISABLE_DEPRECATION_WARNINGS
 
 template<> COMMONGAME_API UScriptStruct* StaticStruct<struct FRootViewportLayoutInfo>();
 
-#define FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_SPARSE_DATA
-#define FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_RPC_WRAPPERS_NO_PURE_DECLS
-#define FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_ACCESSORS
 #define FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUGameUIPolicy(); \
@@ -41,8 +36,8 @@ public: \
 	NO_API UGameUIPolicy(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get()); \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UGameUIPolicy(UGameUIPolicy&&); \
-	NO_API UGameUIPolicy(const UGameUIPolicy&); \
+	UGameUIPolicy(UGameUIPolicy&&); \
+	UGameUIPolicy(const UGameUIPolicy&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UGameUIPolicy); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UGameUIPolicy); \
@@ -54,11 +49,6 @@ public: \
 #define FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_SPARSE_DATA \
-	FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_ACCESSORS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_GameUIPolicy_h_57_ENHANCED_CONSTRUCTORS \
 private: \

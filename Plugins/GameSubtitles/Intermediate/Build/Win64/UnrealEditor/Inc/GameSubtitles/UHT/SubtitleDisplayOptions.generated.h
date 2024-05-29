@@ -14,11 +14,6 @@ PRAGMA_DISABLE_DEPRECATION_WARNINGS
 #endif
 #define GAMESUBTITLES_SubtitleDisplayOptions_generated_h
 
-#define FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_SPARSE_DATA
-#define FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_RPC_WRAPPERS_NO_PURE_DECLS
-#define FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_ACCESSORS
 #define FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUSubtitleDisplayOptions(); \
@@ -31,8 +26,8 @@ public: \
 #define FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API USubtitleDisplayOptions(USubtitleDisplayOptions&&); \
-	NO_API USubtitleDisplayOptions(const USubtitleDisplayOptions&); \
+	USubtitleDisplayOptions(USubtitleDisplayOptions&&); \
+	USubtitleDisplayOptions(const USubtitleDisplayOptions&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, USubtitleDisplayOptions); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(USubtitleDisplayOptions); \
@@ -44,11 +39,6 @@ public: \
 #define FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_SPARSE_DATA \
-	FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_ACCESSORS \
 	FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_GameSubtitles_Source_Public_SubtitleDisplayOptions_h_58_ENHANCED_CONSTRUCTORS \
 private: \

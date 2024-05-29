@@ -17,18 +17,13 @@ class UUserWidget;
 #define UIEXTENSION_UIExtensionPointWidget_generated_h
 
 #define FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_25_DELEGATE \
-static TSubclassOf<UUserWidget>  FOnGetWidgetClassForData_DelegateWrapper(const FScriptDelegate& OnGetWidgetClassForData, UObject* DataItem);
+static TSubclassOf<UUserWidget> FOnGetWidgetClassForData_DelegateWrapper(const FScriptDelegate& OnGetWidgetClassForData, UObject* DataItem);
 
 
 #define FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_26_DELEGATE \
 static void FOnConfigureWidgetForData_DelegateWrapper(const FScriptDelegate& OnConfigureWidgetForData, UUserWidget* Widget, UObject* DataItem);
 
 
-#define FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_SPARSE_DATA
-#define FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_RPC_WRAPPERS_NO_PURE_DECLS
-#define FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_ACCESSORS
 #define FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUUIExtensionPointWidget(); \
@@ -41,8 +36,8 @@ public: \
 #define FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UUIExtensionPointWidget(UUIExtensionPointWidget&&); \
-	NO_API UUIExtensionPointWidget(const UUIExtensionPointWidget&); \
+	UUIExtensionPointWidget(UUIExtensionPointWidget&&); \
+	UUIExtensionPointWidget(const UUIExtensionPointWidget&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UUIExtensionPointWidget); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UUIExtensionPointWidget); \
@@ -54,11 +49,6 @@ public: \
 #define FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_SPARSE_DATA \
-	FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_ACCESSORS \
 	FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_UIExtension_Source_Public_Widgets_UIExtensionPointWidget_h_21_ENHANCED_CONSTRUCTORS \
 private: \

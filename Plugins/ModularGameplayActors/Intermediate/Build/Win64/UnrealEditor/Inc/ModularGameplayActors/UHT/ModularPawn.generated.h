@@ -14,11 +14,6 @@ PRAGMA_DISABLE_DEPRECATION_WARNINGS
 #endif
 #define MODULARGAMEPLAYACTORS_ModularPawn_generated_h
 
-#define FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_SPARSE_DATA
-#define FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_RPC_WRAPPERS_NO_PURE_DECLS
-#define FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_ACCESSORS
 #define FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesAModularPawn(); \
@@ -33,8 +28,8 @@ public: \
 	NO_API AModularPawn(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get()); \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API AModularPawn(AModularPawn&&); \
-	NO_API AModularPawn(const AModularPawn&); \
+	AModularPawn(AModularPawn&&); \
+	AModularPawn(const AModularPawn&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, AModularPawn); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(AModularPawn); \
@@ -46,11 +41,6 @@ public: \
 #define FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_SPARSE_DATA \
-	FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_ACCESSORS \
 	FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_ModularGameplayActors_Source_ModularGameplayActors_Public_ModularPawn_h_15_ENHANCED_CONSTRUCTORS \
 private: \

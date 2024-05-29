@@ -14,11 +14,6 @@ PRAGMA_DISABLE_DEPRECATION_WARNINGS
 #endif
 #define COMMONGAME_CommonLocalPlayer_generated_h
 
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_SPARSE_DATA
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_RPC_WRAPPERS_NO_PURE_DECLS
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_ACCESSORS
 #define FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUCommonLocalPlayer(); \
@@ -31,8 +26,8 @@ public: \
 #define FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UCommonLocalPlayer(UCommonLocalPlayer&&); \
-	NO_API UCommonLocalPlayer(const UCommonLocalPlayer&); \
+	UCommonLocalPlayer(UCommonLocalPlayer&&); \
+	UCommonLocalPlayer(const UCommonLocalPlayer&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UCommonLocalPlayer); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UCommonLocalPlayer); \
@@ -44,11 +39,6 @@ public: \
 #define FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_SPARSE_DATA \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_ACCESSORS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_CommonLocalPlayer_h_20_ENHANCED_CONSTRUCTORS \
 private: \

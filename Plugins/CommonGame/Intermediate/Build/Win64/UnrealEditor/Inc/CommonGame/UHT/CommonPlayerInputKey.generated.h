@@ -23,11 +23,7 @@ struct FKey;
 
 template<> COMMONGAME_API UScriptStruct* StaticStruct<struct FMeasuredText>();
 
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_SPARSE_DATA
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_RPC_WRAPPERS_NO_PURE_DECLS \
- \
 	DECLARE_FUNCTION(execIsBoundKeyValid); \
 	DECLARE_FUNCTION(execIsHoldKeybind); \
 	DECLARE_FUNCTION(execStopHoldProgress); \
@@ -42,7 +38,6 @@ template<> COMMONGAME_API UScriptStruct* StaticStruct<struct FMeasuredText>();
 	DECLARE_FUNCTION(execUpdateKeybindWidget);
 
 
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_ACCESSORS
 #define FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUCommonPlayerInputKey(); \
@@ -55,8 +50,8 @@ public: \
 #define FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UCommonPlayerInputKey(UCommonPlayerInputKey&&); \
-	NO_API UCommonPlayerInputKey(const UCommonPlayerInputKey&); \
+	UCommonPlayerInputKey(UCommonPlayerInputKey&&); \
+	UCommonPlayerInputKey(const UCommonPlayerInputKey&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UCommonPlayerInputKey); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UCommonPlayerInputKey); \
@@ -68,11 +63,7 @@ public: \
 #define FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_SPARSE_DATA \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_ACCESSORS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_CommonPlayerInputKey_h_53_ENHANCED_CONSTRUCTORS \
 private: \

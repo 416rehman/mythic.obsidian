@@ -16,15 +16,10 @@ class UWidget;
 #endif
 #define GAMESETTINGS_GameResponsivePanel_generated_h
 
-#define FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_SPARSE_DATA
-#define FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_RPC_WRAPPERS \
- \
 	DECLARE_FUNCTION(execAddChildToGameResponsivePanel);
 
 
-#define FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_ACCESSORS
 #define FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_INCLASS \
 private: \
 	static void StaticRegisterNativesUGameResponsivePanel(); \
@@ -42,8 +37,8 @@ public: \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UGameResponsivePanel); \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UGameResponsivePanel(UGameResponsivePanel&&); \
-	NO_API UGameResponsivePanel(const UGameResponsivePanel&); \
+	UGameResponsivePanel(UGameResponsivePanel&&); \
+	UGameResponsivePanel(const UGameResponsivePanel&); \
 public: \
 	NO_API virtual ~UGameResponsivePanel();
 
@@ -52,11 +47,7 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_GENERATED_BODY_LEGACY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_SPARSE_DATA \
-	FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_RPC_WRAPPERS \
-	FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_ACCESSORS \
 	FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_INCLASS \
 	FID_Mythic_Plugins_GameSettings_Source_Private_Widgets_Responsive_GameResponsivePanel_h_19_STANDARD_CONSTRUCTORS \
 public: \

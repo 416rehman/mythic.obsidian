@@ -14,11 +14,6 @@ PRAGMA_DISABLE_DEPRECATION_WARNINGS
 #endif
 #define GAMESETTINGS_GameSettingCollection_generated_h
 
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_SPARSE_DATA
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_RPC_WRAPPERS_NO_PURE_DECLS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_ACCESSORS
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUGameSettingCollection(); \
@@ -31,8 +26,8 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UGameSettingCollection(UGameSettingCollection&&); \
-	NO_API UGameSettingCollection(const UGameSettingCollection&); \
+	UGameSettingCollection(UGameSettingCollection&&); \
+	UGameSettingCollection(const UGameSettingCollection&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UGameSettingCollection); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UGameSettingCollection); \
@@ -44,11 +39,6 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_SPARSE_DATA \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_ACCESSORS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_18_ENHANCED_CONSTRUCTORS \
 private: \
@@ -57,11 +47,6 @@ PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 template<> GAMESETTINGS_API UClass* StaticClass<class UGameSettingCollection>();
 
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_SPARSE_DATA
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_RPC_WRAPPERS_NO_PURE_DECLS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_ACCESSORS
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUGameSettingCollectionPage(); \
@@ -74,8 +59,8 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UGameSettingCollectionPage(UGameSettingCollectionPage&&); \
-	NO_API UGameSettingCollectionPage(const UGameSettingCollectionPage&); \
+	UGameSettingCollectionPage(UGameSettingCollectionPage&&); \
+	UGameSettingCollectionPage(const UGameSettingCollectionPage&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UGameSettingCollectionPage); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UGameSettingCollectionPage); \
@@ -87,11 +72,6 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_SPARSE_DATA \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_ACCESSORS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingCollection_h_44_ENHANCED_CONSTRUCTORS \
 private: \

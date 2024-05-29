@@ -14,11 +14,6 @@ PRAGMA_DISABLE_DEPRECATION_WARNINGS
 #endif
 #define GAMESETTINGS_GameSettingAction_generated_h
 
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_SPARSE_DATA
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_RPC_WRAPPERS_NO_PURE_DECLS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_ACCESSORS
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUGameSettingAction(); \
@@ -31,8 +26,8 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UGameSettingAction(UGameSettingAction&&); \
-	NO_API UGameSettingAction(const UGameSettingAction&); \
+	UGameSettingAction(UGameSettingAction&&); \
+	UGameSettingAction(const UGameSettingAction&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UGameSettingAction); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UGameSettingAction); \
@@ -44,11 +39,6 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_SPARSE_DATA \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_ACCESSORS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_GameSettingAction_h_23_ENHANCED_CONSTRUCTORS \
 private: \

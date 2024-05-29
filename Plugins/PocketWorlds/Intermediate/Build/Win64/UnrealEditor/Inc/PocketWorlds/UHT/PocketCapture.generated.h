@@ -16,11 +16,7 @@ class UTextureRenderTarget2D;
 #endif
 #define POCKETWORLDS_PocketCapture_generated_h
 
-#define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_SPARSE_DATA
-#define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_RPC_WRAPPERS_NO_PURE_DECLS \
- \
 	DECLARE_FUNCTION(execGetRendererIndex); \
 	DECLARE_FUNCTION(execReclaimResources); \
 	DECLARE_FUNCTION(execReleaseResources); \
@@ -35,7 +31,6 @@ class UTextureRenderTarget2D;
 	DECLARE_FUNCTION(execSetRenderTargetSize);
 
 
-#define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_ACCESSORS
 #define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUPocketCapture(); \
@@ -49,8 +44,8 @@ public: \
 #define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UPocketCapture(UPocketCapture&&); \
-	NO_API UPocketCapture(const UPocketCapture&); \
+	UPocketCapture(UPocketCapture&&); \
+	UPocketCapture(const UPocketCapture&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UPocketCapture); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UPocketCapture); \
@@ -62,11 +57,7 @@ public: \
 #define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_SPARSE_DATA \
-	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_ACCESSORS \
 	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketCapture_h_22_ENHANCED_CONSTRUCTORS \
 private: \

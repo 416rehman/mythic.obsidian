@@ -16,15 +16,10 @@ struct FGameplayTag;
 #endif
 #define COMMONGAME_PrimaryGameLayout_generated_h
 
-#define FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_SPARSE_DATA
-#define FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_RPC_WRAPPERS_NO_PURE_DECLS \
- \
 	DECLARE_FUNCTION(execRegisterLayer);
 
 
-#define FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_ACCESSORS
 #define FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUPrimaryGameLayout(); \
@@ -37,8 +32,8 @@ public: \
 #define FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UPrimaryGameLayout(UPrimaryGameLayout&&); \
-	NO_API UPrimaryGameLayout(const UPrimaryGameLayout&); \
+	UPrimaryGameLayout(UPrimaryGameLayout&&); \
+	UPrimaryGameLayout(const UPrimaryGameLayout&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UPrimaryGameLayout); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UPrimaryGameLayout); \
@@ -50,11 +45,7 @@ public: \
 #define FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_SPARSE_DATA \
-	FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_ACCESSORS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_PrimaryGameLayout_h_38_ENHANCED_CONSTRUCTORS \
 private: \

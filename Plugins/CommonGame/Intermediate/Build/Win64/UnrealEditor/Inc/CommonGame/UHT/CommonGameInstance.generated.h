@@ -19,17 +19,12 @@ struct FGameplayTag;
 #endif
 #define COMMONGAME_CommonGameInstance_generated_h
 
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_SPARSE_DATA
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_RPC_WRAPPERS_NO_PURE_DECLS \
- \
 	DECLARE_FUNCTION(execHandlerUserInitialized); \
 	DECLARE_FUNCTION(execHandlePrivilegeChanged); \
 	DECLARE_FUNCTION(execHandleSystemMessage);
 
 
-#define FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_ACCESSORS
 #define FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUCommonGameInstance(); \
@@ -42,8 +37,8 @@ public: \
 #define FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UCommonGameInstance(UCommonGameInstance&&); \
-	NO_API UCommonGameInstance(const UCommonGameInstance&); \
+	UCommonGameInstance(UCommonGameInstance&&); \
+	UCommonGameInstance(const UCommonGameInstance&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UCommonGameInstance); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UCommonGameInstance); \
@@ -55,11 +50,7 @@ public: \
 #define FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_SPARSE_DATA \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_ACCESSORS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_CommonGameInstance_h_25_ENHANCED_CONSTRUCTORS \
 private: \

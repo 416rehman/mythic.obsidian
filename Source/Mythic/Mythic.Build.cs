@@ -45,7 +45,8 @@ public class Mythic : ModuleRules
 			"AsyncMixin",
 			"ControlFlows",
 			"PropertyPath", 
-			"NavigationSystem" 
+			"NavigationSystem",
+            "LyraGame"
 		});
 		
 		PrivateDependencyModuleNames.AddRange(new string[]

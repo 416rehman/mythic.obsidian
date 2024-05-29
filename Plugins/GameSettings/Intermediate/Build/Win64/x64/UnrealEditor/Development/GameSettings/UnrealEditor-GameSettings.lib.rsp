@@ -6,7 +6,9 @@
 /NAME:"UnrealEditor-GameSettings.dll"
 /IGNORE:4221
 /NODEFAULTLIB
-"D:\gameProjects\projectMythic\Mythic\Intermediate\Build\Win64\x64\MythicEditor\Development\UnrealEd\SharedPCH.UnrealEd.Cpp20.h.obj"
+"D:\gameProjects\projectMythic\Mythic\Intermediate\Build\Win64\x64\MythicEditor\Development\UnrealEd\SharedPCH.UnrealEd.Project.NoValFmtStr.ValApi.Cpp20.h.obj"
 "D:\gameProjects\projectMythic\Mythic\Plugins\GameSettings\Intermediate\Build\Win64\x64\UnrealEditor\Development\GameSettings\Module.GameSettings.cpp.obj"
+"D:\gameProjects\projectMythic\Mythic\Plugins\GameSettings\Intermediate\Build\Win64\x64\UnrealEditor\Development\GameSettings\GameSettings.init.gen.cpp.obj"
+"D:\gameProjects\projectMythic\Mythic\Plugins\GameSettings\Intermediate\Build\Win64\x64\UnrealEditor\Development\GameSettings\KeyAlreadyBoundWarning.gen.cpp.obj"
 "D:\gameProjects\projectMythic\Mythic\Plugins\GameSettings\Intermediate\Build\Win64\x64\UnrealEditor\Development\GameSettings\Default.rc2.res"
 /OUT:"D:\gameProjects\projectMythic\Mythic\Plugins\GameSettings\Intermediate\Build\Win64\x64\UnrealEditor\Development\GameSettings\UnrealEditor-GameSettings.lib"

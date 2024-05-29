@@ -16,17 +16,12 @@ class UObject;
 #endif
 #define COMMONLOADINGSCREEN_LoadingProcessTask_generated_h
 
-#define FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_SPARSE_DATA
-#define FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_RPC_WRAPPERS_NO_PURE_DECLS \
- \
 	DECLARE_FUNCTION(execSetShowLoadingScreenReason); \
 	DECLARE_FUNCTION(execUnregister); \
 	DECLARE_FUNCTION(execCreateLoadingScreenProcessTask);
 
 
-#define FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_ACCESSORS
 #define FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesULoadingProcessTask(); \
@@ -40,8 +35,8 @@ public: \
 #define FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API ULoadingProcessTask(ULoadingProcessTask&&); \
-	NO_API ULoadingProcessTask(const ULoadingProcessTask&); \
+	ULoadingProcessTask(ULoadingProcessTask&&); \
+	ULoadingProcessTask(const ULoadingProcessTask&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, ULoadingProcessTask); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(ULoadingProcessTask); \
@@ -53,11 +48,7 @@ public: \
 #define FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_SPARSE_DATA \
-	FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_ACCESSORS \
 	FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_CommonLoadingScreen_Source_CommonLoadingScreen_Public_LoadingProcessTask_h_15_ENHANCED_CONSTRUCTORS \
 private: \

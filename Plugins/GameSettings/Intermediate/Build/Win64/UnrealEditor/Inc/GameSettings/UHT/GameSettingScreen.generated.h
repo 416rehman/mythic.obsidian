@@ -15,11 +15,7 @@ class UGameSettingCollection;
 #endif
 #define GAMESETTINGS_GameSettingScreen_generated_h
 
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_SPARSE_DATA
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_RPC_WRAPPERS_NO_PURE_DECLS \
- \
 	DECLARE_FUNCTION(execHaveSettingsBeenChanged); \
 	DECLARE_FUNCTION(execApplyChanges); \
 	DECLARE_FUNCTION(execCancelChanges); \
@@ -30,7 +26,6 @@ class UGameSettingCollection;
 	DECLARE_FUNCTION(execNavigateToSetting);
 
 
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_ACCESSORS
 #define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_CALLBACK_WRAPPERS
 #define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_INCLASS_NO_PURE_DECLS \
 private: \
@@ -46,8 +41,8 @@ public: \
 	NO_API UGameSettingScreen(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get()); \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UGameSettingScreen(UGameSettingScreen&&); \
-	NO_API UGameSettingScreen(const UGameSettingScreen&); \
+	UGameSettingScreen(UGameSettingScreen&&); \
+	UGameSettingScreen(const UGameSettingScreen&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UGameSettingScreen); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UGameSettingScreen); \
@@ -59,11 +54,7 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_SPARSE_DATA \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_ACCESSORS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_CALLBACK_WRAPPERS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingScreen_h_26_ENHANCED_CONSTRUCTORS \

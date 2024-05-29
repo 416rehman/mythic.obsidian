@@ -14,11 +14,6 @@ PRAGMA_DISABLE_DEPRECATION_WARNINGS
 #endif
 #define POCKETWORLDS_PocketLevel_generated_h
 
-#define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_SPARSE_DATA
-#define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_RPC_WRAPPERS_NO_PURE_DECLS
-#define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_ACCESSORS
 #define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUPocketLevel(); \
@@ -31,8 +26,8 @@ public: \
 #define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UPocketLevel(UPocketLevel&&); \
-	NO_API UPocketLevel(const UPocketLevel&); \
+	UPocketLevel(UPocketLevel&&); \
+	UPocketLevel(const UPocketLevel&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UPocketLevel); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UPocketLevel); \
@@ -44,11 +39,6 @@ public: \
 #define FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_SPARSE_DATA \
-	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_ACCESSORS \
 	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_PocketWorlds_Source_Public_PocketLevel_h_18_ENHANCED_CONSTRUCTORS \
 private: \

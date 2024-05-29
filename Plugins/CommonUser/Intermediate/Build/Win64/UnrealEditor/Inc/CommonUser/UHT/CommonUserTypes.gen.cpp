@@ -8,47 +8,35 @@
 #include "CommonUser/Public/CommonUserTypes.h"
 PRAGMA_DISABLE_DEPRECATION_WARNINGS
 void EmptyLinkFunctionForGeneratedCodeCommonUserTypes() {}
-// Cross Module References
-	COMMONUSER_API UEnum* Z_Construct_UEnum_CommonUser_ECommonUserAvailability();
-	COMMONUSER_API UEnum* Z_Construct_UEnum_CommonUser_ECommonUserInitializationState();
-	COMMONUSER_API UEnum* Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext();
-	COMMONUSER_API UEnum* Z_Construct_UEnum_CommonUser_ECommonUserPrivilege();
-	COMMONUSER_API UEnum* Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult();
-	COMMONUSER_API UScriptStruct* Z_Construct_UScriptStruct_FOnlineResultInformation();
-	UPackage* Z_Construct_UPackage__Script_CommonUser();
+
+// Begin Cross Module References
+COMMONUSER_API UEnum* Z_Construct_UEnum_CommonUser_ECommonUserAvailability();
+COMMONUSER_API UEnum* Z_Construct_UEnum_CommonUser_ECommonUserInitializationState();
+COMMONUSER_API UEnum* Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext();
+COMMONUSER_API UEnum* Z_Construct_UEnum_CommonUser_ECommonUserPrivilege();
+COMMONUSER_API UEnum* Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult();
+COMMONUSER_API UScriptStruct* Z_Construct_UScriptStruct_FOnlineResultInformation();
+UPackage* Z_Construct_UPackage__Script_CommonUser();
 // End Cross Module References
-	static FEnumRegistrationInfo Z_Registration_Info_UEnum_ECommonUserOnlineContext;
-	static UEnum* ECommonUserOnlineContext_StaticEnum()
+
+// Begin Enum ECommonUserOnlineContext
+static FEnumRegistrationInfo Z_Registration_Info_UEnum_ECommonUserOnlineContext;
+static UEnum* ECommonUserOnlineContext_StaticEnum()
+{
+	if (!Z_Registration_Info_UEnum_ECommonUserOnlineContext.OuterSingleton)
 	{
-		if (!Z_Registration_Info_UEnum_ECommonUserOnlineContext.OuterSingleton)
-		{
-			Z_Registration_Info_UEnum_ECommonUserOnlineContext.OuterSingleton = GetStaticEnum(Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext, (UObject*)Z_Construct_UPackage__Script_CommonUser(), TEXT("ECommonUserOnlineContext"));
-		}
-		return Z_Registration_Info_UEnum_ECommonUserOnlineContext.OuterSingleton;
+		Z_Registration_Info_UEnum_ECommonUserOnlineContext.OuterSingleton = GetStaticEnum(Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext, (UObject*)Z_Construct_UPackage__Script_CommonUser(), TEXT("ECommonUserOnlineContext"));
 	}
-	template<> COMMONUSER_API UEnum* StaticEnum<ECommonUserOnlineContext>()
-	{
-		return ECommonUserOnlineContext_StaticEnum();
-	}
-	struct Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics
-	{
-		static const UECodeGen_Private::FEnumeratorParam Enumerators[];
+	return Z_Registration_Info_UEnum_ECommonUserOnlineContext.OuterSingleton;
+}
+template<> COMMONUSER_API UEnum* StaticEnum<ECommonUserOnlineContext>()
+{
+	return ECommonUserOnlineContext_StaticEnum();
+}
+struct Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics
+{
 #if WITH_METADATA
-		static const UECodeGen_Private::FMetaDataPairParam Enum_MetaDataParams[];
-#endif
-		static const UECodeGen_Private::FEnumParams EnumParams;
-	};
-	const UECodeGen_Private::FEnumeratorParam Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::Enumerators[] = {
-		{ "ECommonUserOnlineContext::Game", (int64)ECommonUserOnlineContext::Game },
-		{ "ECommonUserOnlineContext::Default", (int64)ECommonUserOnlineContext::Default },
-		{ "ECommonUserOnlineContext::Service", (int64)ECommonUserOnlineContext::Service },
-		{ "ECommonUserOnlineContext::ServiceOrDefault", (int64)ECommonUserOnlineContext::ServiceOrDefault },
-		{ "ECommonUserOnlineContext::Platform", (int64)ECommonUserOnlineContext::Platform },
-		{ "ECommonUserOnlineContext::PlatformOrDefault", (int64)ECommonUserOnlineContext::PlatformOrDefault },
-		{ "ECommonUserOnlineContext::Invalid", (int64)ECommonUserOnlineContext::Invalid },
-	};
-#if WITH_METADATA
-	const UECodeGen_Private::FMetaDataPairParam Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::Enum_MetaDataParams[] = {
+	static constexpr UECodeGen_Private::FMetaDataPairParam Enum_MetaDataParams[] = {
 		{ "BlueprintType", "true" },
 #if !UE_BUILD_SHIPPING
 		{ "Comment", "/** Enum specifying where and how to run online queries */" },
@@ -79,59 +67,58 @@ void EmptyLinkFunctionForGeneratedCodeCommonUserTypes() {}
 		{ "ToolTip", "Enum specifying where and how to run online queries" },
 #endif
 	};
-#endif
-	const UECodeGen_Private::FEnumParams Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::EnumParams = {
-		(UObject*(*)())Z_Construct_UPackage__Script_CommonUser,
-		nullptr,
-		"ECommonUserOnlineContext",
-		"ECommonUserOnlineContext",
-		Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::Enumerators,
-		RF_Public|RF_Transient|RF_MarkAsNative,
-		UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::Enumerators),
-		EEnumFlags::None,
-		(uint8)UEnum::ECppForm::EnumClass,
-		METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::Enum_MetaDataParams), Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::Enum_MetaDataParams)
+#endif // WITH_METADATA
+	static constexpr UECodeGen_Private::FEnumeratorParam Enumerators[] = {
+		{ "ECommonUserOnlineContext::Game", (int64)ECommonUserOnlineContext::Game },
+		{ "ECommonUserOnlineContext::Default", (int64)ECommonUserOnlineContext::Default },
+		{ "ECommonUserOnlineContext::Service", (int64)ECommonUserOnlineContext::Service },
+		{ "ECommonUserOnlineContext::ServiceOrDefault", (int64)ECommonUserOnlineContext::ServiceOrDefault },
+		{ "ECommonUserOnlineContext::Platform", (int64)ECommonUserOnlineContext::Platform },
+		{ "ECommonUserOnlineContext::PlatformOrDefault", (int64)ECommonUserOnlineContext::PlatformOrDefault },
+		{ "ECommonUserOnlineContext::Invalid", (int64)ECommonUserOnlineContext::Invalid },
 	};
-	UEnum* Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext()
+	static const UECodeGen_Private::FEnumParams EnumParams;
+};
+const UECodeGen_Private::FEnumParams Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::EnumParams = {
+	(UObject*(*)())Z_Construct_UPackage__Script_CommonUser,
+	nullptr,
+	"ECommonUserOnlineContext",
+	"ECommonUserOnlineContext",
+	Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::Enumerators,
+	RF_Public|RF_Transient|RF_MarkAsNative,
+	UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::Enumerators),
+	EEnumFlags::None,
+	(uint8)UEnum::ECppForm::EnumClass,
+	METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::Enum_MetaDataParams), Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::Enum_MetaDataParams)
+};
+UEnum* Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext()
+{
+	if (!Z_Registration_Info_UEnum_ECommonUserOnlineContext.InnerSingleton)
 	{
-		if (!Z_Registration_Info_UEnum_ECommonUserOnlineContext.InnerSingleton)
-		{
-			UECodeGen_Private::ConstructUEnum(Z_Registration_Info_UEnum_ECommonUserOnlineContext.InnerSingleton, Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::EnumParams);
-		}
-		return Z_Registration_Info_UEnum_ECommonUserOnlineContext.InnerSingleton;
+		UECodeGen_Private::ConstructUEnum(Z_Registration_Info_UEnum_ECommonUserOnlineContext.InnerSingleton, Z_Construct_UEnum_CommonUser_ECommonUserOnlineContext_Statics::EnumParams);
 	}
-	static FEnumRegistrationInfo Z_Registration_Info_UEnum_ECommonUserInitializationState;
-	static UEnum* ECommonUserInitializationState_StaticEnum()
+	return Z_Registration_Info_UEnum_ECommonUserOnlineContext.InnerSingleton;
+}
+// End Enum ECommonUserOnlineContext
+
+// Begin Enum ECommonUserInitializationState
+static FEnumRegistrationInfo Z_Registration_Info_UEnum_ECommonUserInitializationState;
+static UEnum* ECommonUserInitializationState_StaticEnum()
+{
+	if (!Z_Registration_Info_UEnum_ECommonUserInitializationState.OuterSingleton)
 	{
-		if (!Z_Registration_Info_UEnum_ECommonUserInitializationState.OuterSingleton)
-		{
-			Z_Registration_Info_UEnum_ECommonUserInitializationState.OuterSingleton = GetStaticEnum(Z_Construct_UEnum_CommonUser_ECommonUserInitializationState, (UObject*)Z_Construct_UPackage__Script_CommonUser(), TEXT("ECommonUserInitializationState"));
-		}
-		return Z_Registration_Info_UEnum_ECommonUserInitializationState.OuterSingleton;
+		Z_Registration_Info_UEnum_ECommonUserInitializationState.OuterSingleton = GetStaticEnum(Z_Construct_UEnum_CommonUser_ECommonUserInitializationState, (UObject*)Z_Construct_UPackage__Script_CommonUser(), TEXT("ECommonUserInitializationState"));
 	}
-	template<> COMMONUSER_API UEnum* StaticEnum<ECommonUserInitializationState>()
-	{
-		return ECommonUserInitializationState_StaticEnum();
-	}
-	struct Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics
-	{
-		static const UECodeGen_Private::FEnumeratorParam Enumerators[];
+	return Z_Registration_Info_UEnum_ECommonUserInitializationState.OuterSingleton;
+}
+template<> COMMONUSER_API UEnum* StaticEnum<ECommonUserInitializationState>()
+{
+	return ECommonUserInitializationState_StaticEnum();
+}
+struct Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics
+{
 #if WITH_METADATA
-		static const UECodeGen_Private::FMetaDataPairParam Enum_MetaDataParams[];
-#endif
-		static const UECodeGen_Private::FEnumParams EnumParams;
-	};
-	const UECodeGen_Private::FEnumeratorParam Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::Enumerators[] = {
-		{ "ECommonUserInitializationState::Unknown", (int64)ECommonUserInitializationState::Unknown },
-		{ "ECommonUserInitializationState::DoingInitialLogin", (int64)ECommonUserInitializationState::DoingInitialLogin },
-		{ "ECommonUserInitializationState::DoingNetworkLogin", (int64)ECommonUserInitializationState::DoingNetworkLogin },
-		{ "ECommonUserInitializationState::FailedtoLogin", (int64)ECommonUserInitializationState::FailedtoLogin },
-		{ "ECommonUserInitializationState::LoggedInOnline", (int64)ECommonUserInitializationState::LoggedInOnline },
-		{ "ECommonUserInitializationState::LoggedInLocalOnly", (int64)ECommonUserInitializationState::LoggedInLocalOnly },
-		{ "ECommonUserInitializationState::Invalid", (int64)ECommonUserInitializationState::Invalid },
-	};
-#if WITH_METADATA
-	const UECodeGen_Private::FMetaDataPairParam Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::Enum_MetaDataParams[] = {
+	static constexpr UECodeGen_Private::FMetaDataPairParam Enum_MetaDataParams[] = {
 		{ "BlueprintType", "true" },
 #if !UE_BUILD_SHIPPING
 		{ "Comment", "/** Enum describing the state of initialization for a specific user */" },
@@ -162,59 +149,58 @@ void EmptyLinkFunctionForGeneratedCodeCommonUserTypes() {}
 		{ "Unknown.Name", "ECommonUserInitializationState::Unknown" },
 		{ "Unknown.ToolTip", "User has not started login process" },
 	};
-#endif
-	const UECodeGen_Private::FEnumParams Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::EnumParams = {
-		(UObject*(*)())Z_Construct_UPackage__Script_CommonUser,
-		nullptr,
-		"ECommonUserInitializationState",
-		"ECommonUserInitializationState",
-		Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::Enumerators,
-		RF_Public|RF_Transient|RF_MarkAsNative,
-		UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::Enumerators),
-		EEnumFlags::None,
-		(uint8)UEnum::ECppForm::EnumClass,
-		METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::Enum_MetaDataParams), Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::Enum_MetaDataParams)
+#endif // WITH_METADATA
+	static constexpr UECodeGen_Private::FEnumeratorParam Enumerators[] = {
+		{ "ECommonUserInitializationState::Unknown", (int64)ECommonUserInitializationState::Unknown },
+		{ "ECommonUserInitializationState::DoingInitialLogin", (int64)ECommonUserInitializationState::DoingInitialLogin },
+		{ "ECommonUserInitializationState::DoingNetworkLogin", (int64)ECommonUserInitializationState::DoingNetworkLogin },
+		{ "ECommonUserInitializationState::FailedtoLogin", (int64)ECommonUserInitializationState::FailedtoLogin },
+		{ "ECommonUserInitializationState::LoggedInOnline", (int64)ECommonUserInitializationState::LoggedInOnline },
+		{ "ECommonUserInitializationState::LoggedInLocalOnly", (int64)ECommonUserInitializationState::LoggedInLocalOnly },
+		{ "ECommonUserInitializationState::Invalid", (int64)ECommonUserInitializationState::Invalid },
 	};
-	UEnum* Z_Construct_UEnum_CommonUser_ECommonUserInitializationState()
+	static const UECodeGen_Private::FEnumParams EnumParams;
+};
+const UECodeGen_Private::FEnumParams Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::EnumParams = {
+	(UObject*(*)())Z_Construct_UPackage__Script_CommonUser,
+	nullptr,
+	"ECommonUserInitializationState",
+	"ECommonUserInitializationState",
+	Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::Enumerators,
+	RF_Public|RF_Transient|RF_MarkAsNative,
+	UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::Enumerators),
+	EEnumFlags::None,
+	(uint8)UEnum::ECppForm::EnumClass,
+	METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::Enum_MetaDataParams), Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::Enum_MetaDataParams)
+};
+UEnum* Z_Construct_UEnum_CommonUser_ECommonUserInitializationState()
+{
+	if (!Z_Registration_Info_UEnum_ECommonUserInitializationState.InnerSingleton)
 	{
-		if (!Z_Registration_Info_UEnum_ECommonUserInitializationState.InnerSingleton)
-		{
-			UECodeGen_Private::ConstructUEnum(Z_Registration_Info_UEnum_ECommonUserInitializationState.InnerSingleton, Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::EnumParams);
-		}
-		return Z_Registration_Info_UEnum_ECommonUserInitializationState.InnerSingleton;
+		UECodeGen_Private::ConstructUEnum(Z_Registration_Info_UEnum_ECommonUserInitializationState.InnerSingleton, Z_Construct_UEnum_CommonUser_ECommonUserInitializationState_Statics::EnumParams);
 	}
-	static FEnumRegistrationInfo Z_Registration_Info_UEnum_ECommonUserPrivilege;
-	static UEnum* ECommonUserPrivilege_StaticEnum()
+	return Z_Registration_Info_UEnum_ECommonUserInitializationState.InnerSingleton;
+}
+// End Enum ECommonUserInitializationState
+
+// Begin Enum ECommonUserPrivilege
+static FEnumRegistrationInfo Z_Registration_Info_UEnum_ECommonUserPrivilege;
+static UEnum* ECommonUserPrivilege_StaticEnum()
+{
+	if (!Z_Registration_Info_UEnum_ECommonUserPrivilege.OuterSingleton)
 	{
-		if (!Z_Registration_Info_UEnum_ECommonUserPrivilege.OuterSingleton)
-		{
-			Z_Registration_Info_UEnum_ECommonUserPrivilege.OuterSingleton = GetStaticEnum(Z_Construct_UEnum_CommonUser_ECommonUserPrivilege, (UObject*)Z_Construct_UPackage__Script_CommonUser(), TEXT("ECommonUserPrivilege"));
-		}
-		return Z_Registration_Info_UEnum_ECommonUserPrivilege.OuterSingleton;
+		Z_Registration_Info_UEnum_ECommonUserPrivilege.OuterSingleton = GetStaticEnum(Z_Construct_UEnum_CommonUser_ECommonUserPrivilege, (UObject*)Z_Construct_UPackage__Script_CommonUser(), TEXT("ECommonUserPrivilege"));
 	}
-	template<> COMMONUSER_API UEnum* StaticEnum<ECommonUserPrivilege>()
-	{
-		return ECommonUserPrivilege_StaticEnum();
-	}
-	struct Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics
-	{
-		static const UECodeGen_Private::FEnumeratorParam Enumerators[];
+	return Z_Registration_Info_UEnum_ECommonUserPrivilege.OuterSingleton;
+}
+template<> COMMONUSER_API UEnum* StaticEnum<ECommonUserPrivilege>()
+{
+	return ECommonUserPrivilege_StaticEnum();
+}
+struct Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics
+{
 #if WITH_METADATA
-		static const UECodeGen_Private::FMetaDataPairParam Enum_MetaDataParams[];
-#endif
-		static const UECodeGen_Private::FEnumParams EnumParams;
-	};
-	const UECodeGen_Private::FEnumeratorParam Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::Enumerators[] = {
-		{ "ECommonUserPrivilege::CanPlay", (int64)ECommonUserPrivilege::CanPlay },
-		{ "ECommonUserPrivilege::CanPlayOnline", (int64)ECommonUserPrivilege::CanPlayOnline },
-		{ "ECommonUserPrivilege::CanCommunicateViaTextOnline", (int64)ECommonUserPrivilege::CanCommunicateViaTextOnline },
-		{ "ECommonUserPrivilege::CanCommunicateViaVoiceOnline", (int64)ECommonUserPrivilege::CanCommunicateViaVoiceOnline },
-		{ "ECommonUserPrivilege::CanUseUserGeneratedContent", (int64)ECommonUserPrivilege::CanUseUserGeneratedContent },
-		{ "ECommonUserPrivilege::CanUseCrossPlay", (int64)ECommonUserPrivilege::CanUseCrossPlay },
-		{ "ECommonUserPrivilege::Invalid_Count", (int64)ECommonUserPrivilege::Invalid_Count },
-	};
-#if WITH_METADATA
-	const UECodeGen_Private::FMetaDataPairParam Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::Enum_MetaDataParams[] = {
+	static constexpr UECodeGen_Private::FMetaDataPairParam Enum_MetaDataParams[] = {
 		{ "BlueprintType", "true" },
 		{ "CanCommunicateViaTextOnline.Comment", "/** Whether the user can use text chat */" },
 		{ "CanCommunicateViaTextOnline.Name", "ECommonUserPrivilege::CanCommunicateViaTextOnline" },
@@ -246,58 +232,58 @@ void EmptyLinkFunctionForGeneratedCodeCommonUserTypes() {}
 		{ "ToolTip", "Enum specifying different privileges and capabilities available to a user" },
 #endif
 	};
-#endif
-	const UECodeGen_Private::FEnumParams Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::EnumParams = {
-		(UObject*(*)())Z_Construct_UPackage__Script_CommonUser,
-		nullptr,
-		"ECommonUserPrivilege",
-		"ECommonUserPrivilege",
-		Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::Enumerators,
-		RF_Public|RF_Transient|RF_MarkAsNative,
-		UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::Enumerators),
-		EEnumFlags::None,
-		(uint8)UEnum::ECppForm::EnumClass,
-		METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::Enum_MetaDataParams), Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::Enum_MetaDataParams)
+#endif // WITH_METADATA
+	static constexpr UECodeGen_Private::FEnumeratorParam Enumerators[] = {
+		{ "ECommonUserPrivilege::CanPlay", (int64)ECommonUserPrivilege::CanPlay },
+		{ "ECommonUserPrivilege::CanPlayOnline", (int64)ECommonUserPrivilege::CanPlayOnline },
+		{ "ECommonUserPrivilege::CanCommunicateViaTextOnline", (int64)ECommonUserPrivilege::CanCommunicateViaTextOnline },
+		{ "ECommonUserPrivilege::CanCommunicateViaVoiceOnline", (int64)ECommonUserPrivilege::CanCommunicateViaVoiceOnline },
+		{ "ECommonUserPrivilege::CanUseUserGeneratedContent", (int64)ECommonUserPrivilege::CanUseUserGeneratedContent },
+		{ "ECommonUserPrivilege::CanUseCrossPlay", (int64)ECommonUserPrivilege::CanUseCrossPlay },
+		{ "ECommonUserPrivilege::Invalid_Count", (int64)ECommonUserPrivilege::Invalid_Count },
 	};
-	UEnum* Z_Construct_UEnum_CommonUser_ECommonUserPrivilege()
+	static const UECodeGen_Private::FEnumParams EnumParams;
+};
+const UECodeGen_Private::FEnumParams Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::EnumParams = {
+	(UObject*(*)())Z_Construct_UPackage__Script_CommonUser,
+	nullptr,
+	"ECommonUserPrivilege",
+	"ECommonUserPrivilege",
+	Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::Enumerators,
+	RF_Public|RF_Transient|RF_MarkAsNative,
+	UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::Enumerators),
+	EEnumFlags::None,
+	(uint8)UEnum::ECppForm::EnumClass,
+	METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::Enum_MetaDataParams), Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::Enum_MetaDataParams)
+};
+UEnum* Z_Construct_UEnum_CommonUser_ECommonUserPrivilege()
+{
+	if (!Z_Registration_Info_UEnum_ECommonUserPrivilege.InnerSingleton)
 	{
-		if (!Z_Registration_Info_UEnum_ECommonUserPrivilege.InnerSingleton)
-		{
-			UECodeGen_Private::ConstructUEnum(Z_Registration_Info_UEnum_ECommonUserPrivilege.InnerSingleton, Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::EnumParams);
-		}
-		return Z_Registration_Info_UEnum_ECommonUserPrivilege.InnerSingleton;
+		UECodeGen_Private::ConstructUEnum(Z_Registration_Info_UEnum_ECommonUserPrivilege.InnerSingleton, Z_Construct_UEnum_CommonUser_ECommonUserPrivilege_Statics::EnumParams);
 	}
-	static FEnumRegistrationInfo Z_Registration_Info_UEnum_ECommonUserAvailability;
-	static UEnum* ECommonUserAvailability_StaticEnum()
+	return Z_Registration_Info_UEnum_ECommonUserPrivilege.InnerSingleton;
+}
+// End Enum ECommonUserPrivilege
+
+// Begin Enum ECommonUserAvailability
+static FEnumRegistrationInfo Z_Registration_Info_UEnum_ECommonUserAvailability;
+static UEnum* ECommonUserAvailability_StaticEnum()
+{
+	if (!Z_Registration_Info_UEnum_ECommonUserAvailability.OuterSingleton)
 	{
-		if (!Z_Registration_Info_UEnum_ECommonUserAvailability.OuterSingleton)
-		{
-			Z_Registration_Info_UEnum_ECommonUserAvailability.OuterSingleton = GetStaticEnum(Z_Construct_UEnum_CommonUser_ECommonUserAvailability, (UObject*)Z_Construct_UPackage__Script_CommonUser(), TEXT("ECommonUserAvailability"));
-		}
-		return Z_Registration_Info_UEnum_ECommonUserAvailability.OuterSingleton;
+		Z_Registration_Info_UEnum_ECommonUserAvailability.OuterSingleton = GetStaticEnum(Z_Construct_UEnum_CommonUser_ECommonUserAvailability, (UObject*)Z_Construct_UPackage__Script_CommonUser(), TEXT("ECommonUserAvailability"));
 	}
-	template<> COMMONUSER_API UEnum* StaticEnum<ECommonUserAvailability>()
-	{
-		return ECommonUserAvailability_StaticEnum();
-	}
-	struct Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics
-	{
-		static const UECodeGen_Private::FEnumeratorParam Enumerators[];
+	return Z_Registration_Info_UEnum_ECommonUserAvailability.OuterSingleton;
+}
+template<> COMMONUSER_API UEnum* StaticEnum<ECommonUserAvailability>()
+{
+	return ECommonUserAvailability_StaticEnum();
+}
+struct Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics
+{
 #if WITH_METADATA
-		static const UECodeGen_Private::FMetaDataPairParam Enum_MetaDataParams[];
-#endif
-		static const UECodeGen_Private::FEnumParams EnumParams;
-	};
-	const UECodeGen_Private::FEnumeratorParam Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::Enumerators[] = {
-		{ "ECommonUserAvailability::Unknown", (int64)ECommonUserAvailability::Unknown },
-		{ "ECommonUserAvailability::NowAvailable", (int64)ECommonUserAvailability::NowAvailable },
-		{ "ECommonUserAvailability::PossiblyAvailable", (int64)ECommonUserAvailability::PossiblyAvailable },
-		{ "ECommonUserAvailability::CurrentlyUnavailable", (int64)ECommonUserAvailability::CurrentlyUnavailable },
-		{ "ECommonUserAvailability::AlwaysUnavailable", (int64)ECommonUserAvailability::AlwaysUnavailable },
-		{ "ECommonUserAvailability::Invalid", (int64)ECommonUserAvailability::Invalid },
-	};
-#if WITH_METADATA
-	const UECodeGen_Private::FMetaDataPairParam Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::Enum_MetaDataParams[] = {
+	static constexpr UECodeGen_Private::FMetaDataPairParam Enum_MetaDataParams[] = {
 		{ "AlwaysUnavailable.Comment", "/** This feature will never be available for the rest of this session due to hard account or platform restrictions */" },
 		{ "AlwaysUnavailable.Name", "ECommonUserAvailability::AlwaysUnavailable" },
 		{ "AlwaysUnavailable.ToolTip", "This feature will never be available for the rest of this session due to hard account or platform restrictions" },
@@ -325,62 +311,57 @@ void EmptyLinkFunctionForGeneratedCodeCommonUserTypes() {}
 		{ "Unknown.Name", "ECommonUserAvailability::Unknown" },
 		{ "Unknown.ToolTip", "State is completely unknown and needs to be queried" },
 	};
-#endif
-	const UECodeGen_Private::FEnumParams Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::EnumParams = {
-		(UObject*(*)())Z_Construct_UPackage__Script_CommonUser,
-		nullptr,
-		"ECommonUserAvailability",
-		"ECommonUserAvailability",
-		Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::Enumerators,
-		RF_Public|RF_Transient|RF_MarkAsNative,
-		UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::Enumerators),
-		EEnumFlags::None,
-		(uint8)UEnum::ECppForm::EnumClass,
-		METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::Enum_MetaDataParams), Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::Enum_MetaDataParams)
+#endif // WITH_METADATA
+	static constexpr UECodeGen_Private::FEnumeratorParam Enumerators[] = {
+		{ "ECommonUserAvailability::Unknown", (int64)ECommonUserAvailability::Unknown },
+		{ "ECommonUserAvailability::NowAvailable", (int64)ECommonUserAvailability::NowAvailable },
+		{ "ECommonUserAvailability::PossiblyAvailable", (int64)ECommonUserAvailability::PossiblyAvailable },
+		{ "ECommonUserAvailability::CurrentlyUnavailable", (int64)ECommonUserAvailability::CurrentlyUnavailable },
+		{ "ECommonUserAvailability::AlwaysUnavailable", (int64)ECommonUserAvailability::AlwaysUnavailable },
+		{ "ECommonUserAvailability::Invalid", (int64)ECommonUserAvailability::Invalid },
 	};
-	UEnum* Z_Construct_UEnum_CommonUser_ECommonUserAvailability()
+	static const UECodeGen_Private::FEnumParams EnumParams;
+};
+const UECodeGen_Private::FEnumParams Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::EnumParams = {
+	(UObject*(*)())Z_Construct_UPackage__Script_CommonUser,
+	nullptr,
+	"ECommonUserAvailability",
+	"ECommonUserAvailability",
+	Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::Enumerators,
+	RF_Public|RF_Transient|RF_MarkAsNative,
+	UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::Enumerators),
+	EEnumFlags::None,
+	(uint8)UEnum::ECppForm::EnumClass,
+	METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::Enum_MetaDataParams), Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::Enum_MetaDataParams)
+};
+UEnum* Z_Construct_UEnum_CommonUser_ECommonUserAvailability()
+{
+	if (!Z_Registration_Info_UEnum_ECommonUserAvailability.InnerSingleton)
 	{
-		if (!Z_Registration_Info_UEnum_ECommonUserAvailability.InnerSingleton)
-		{
-			UECodeGen_Private::ConstructUEnum(Z_Registration_Info_UEnum_ECommonUserAvailability.InnerSingleton, Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::EnumParams);
-		}
-		return Z_Registration_Info_UEnum_ECommonUserAvailability.InnerSingleton;
+		UECodeGen_Private::ConstructUEnum(Z_Registration_Info_UEnum_ECommonUserAvailability.InnerSingleton, Z_Construct_UEnum_CommonUser_ECommonUserAvailability_Statics::EnumParams);
 	}
-	static FEnumRegistrationInfo Z_Registration_Info_UEnum_ECommonUserPrivilegeResult;
-	static UEnum* ECommonUserPrivilegeResult_StaticEnum()
+	return Z_Registration_Info_UEnum_ECommonUserAvailability.InnerSingleton;
+}
+// End Enum ECommonUserAvailability
+
+// Begin Enum ECommonUserPrivilegeResult
+static FEnumRegistrationInfo Z_Registration_Info_UEnum_ECommonUserPrivilegeResult;
+static UEnum* ECommonUserPrivilegeResult_StaticEnum()
+{
+	if (!Z_Registration_Info_UEnum_ECommonUserPrivilegeResult.OuterSingleton)
 	{
-		if (!Z_Registration_Info_UEnum_ECommonUserPrivilegeResult.OuterSingleton)
-		{
-			Z_Registration_Info_UEnum_ECommonUserPrivilegeResult.OuterSingleton = GetStaticEnum(Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult, (UObject*)Z_Construct_UPackage__Script_CommonUser(), TEXT("ECommonUserPrivilegeResult"));
-		}
-		return Z_Registration_Info_UEnum_ECommonUserPrivilegeResult.OuterSingleton;
+		Z_Registration_Info_UEnum_ECommonUserPrivilegeResult.OuterSingleton = GetStaticEnum(Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult, (UObject*)Z_Construct_UPackage__Script_CommonUser(), TEXT("ECommonUserPrivilegeResult"));
 	}
-	template<> COMMONUSER_API UEnum* StaticEnum<ECommonUserPrivilegeResult>()
-	{
-		return ECommonUserPrivilegeResult_StaticEnum();
-	}
-	struct Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics
-	{
-		static const UECodeGen_Private::FEnumeratorParam Enumerators[];
+	return Z_Registration_Info_UEnum_ECommonUserPrivilegeResult.OuterSingleton;
+}
+template<> COMMONUSER_API UEnum* StaticEnum<ECommonUserPrivilegeResult>()
+{
+	return ECommonUserPrivilegeResult_StaticEnum();
+}
+struct Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics
+{
 #if WITH_METADATA
-		static const UECodeGen_Private::FMetaDataPairParam Enum_MetaDataParams[];
-#endif
-		static const UECodeGen_Private::FEnumParams EnumParams;
-	};
-	const UECodeGen_Private::FEnumeratorParam Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::Enumerators[] = {
-		{ "ECommonUserPrivilegeResult::Unknown", (int64)ECommonUserPrivilegeResult::Unknown },
-		{ "ECommonUserPrivilegeResult::Available", (int64)ECommonUserPrivilegeResult::Available },
-		{ "ECommonUserPrivilegeResult::UserNotLoggedIn", (int64)ECommonUserPrivilegeResult::UserNotLoggedIn },
-		{ "ECommonUserPrivilegeResult::LicenseInvalid", (int64)ECommonUserPrivilegeResult::LicenseInvalid },
-		{ "ECommonUserPrivilegeResult::VersionOutdated", (int64)ECommonUserPrivilegeResult::VersionOutdated },
-		{ "ECommonUserPrivilegeResult::NetworkConnectionUnavailable", (int64)ECommonUserPrivilegeResult::NetworkConnectionUnavailable },
-		{ "ECommonUserPrivilegeResult::AgeRestricted", (int64)ECommonUserPrivilegeResult::AgeRestricted },
-		{ "ECommonUserPrivilegeResult::AccountTypeRestricted", (int64)ECommonUserPrivilegeResult::AccountTypeRestricted },
-		{ "ECommonUserPrivilegeResult::AccountUseRestricted", (int64)ECommonUserPrivilegeResult::AccountUseRestricted },
-		{ "ECommonUserPrivilegeResult::PlatformFailure", (int64)ECommonUserPrivilegeResult::PlatformFailure },
-	};
-#if WITH_METADATA
-	const UECodeGen_Private::FMetaDataPairParam Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::Enum_MetaDataParams[] = {
+	static constexpr UECodeGen_Private::FMetaDataPairParam Enum_MetaDataParams[] = {
 		{ "AccountTypeRestricted.Comment", "/** Account does not have a required subscription or account type */" },
 		{ "AccountTypeRestricted.Name", "ECommonUserPrivilegeResult::AccountTypeRestricted" },
 		{ "AccountTypeRestricted.ToolTip", "Account does not have a required subscription or account type" },
@@ -420,28 +401,45 @@ void EmptyLinkFunctionForGeneratedCodeCommonUserTypes() {}
 		{ "VersionOutdated.Name", "ECommonUserPrivilegeResult::VersionOutdated" },
 		{ "VersionOutdated.ToolTip", "The game needs to be updated or patched before this will be available" },
 	};
-#endif
-	const UECodeGen_Private::FEnumParams Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::EnumParams = {
-		(UObject*(*)())Z_Construct_UPackage__Script_CommonUser,
-		nullptr,
-		"ECommonUserPrivilegeResult",
-		"ECommonUserPrivilegeResult",
-		Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::Enumerators,
-		RF_Public|RF_Transient|RF_MarkAsNative,
-		UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::Enumerators),
-		EEnumFlags::None,
-		(uint8)UEnum::ECppForm::EnumClass,
-		METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::Enum_MetaDataParams), Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::Enum_MetaDataParams)
+#endif // WITH_METADATA
+	static constexpr UECodeGen_Private::FEnumeratorParam Enumerators[] = {
+		{ "ECommonUserPrivilegeResult::Unknown", (int64)ECommonUserPrivilegeResult::Unknown },
+		{ "ECommonUserPrivilegeResult::Available", (int64)ECommonUserPrivilegeResult::Available },
+		{ "ECommonUserPrivilegeResult::UserNotLoggedIn", (int64)ECommonUserPrivilegeResult::UserNotLoggedIn },
+		{ "ECommonUserPrivilegeResult::LicenseInvalid", (int64)ECommonUserPrivilegeResult::LicenseInvalid },
+		{ "ECommonUserPrivilegeResult::VersionOutdated", (int64)ECommonUserPrivilegeResult::VersionOutdated },
+		{ "ECommonUserPrivilegeResult::NetworkConnectionUnavailable", (int64)ECommonUserPrivilegeResult::NetworkConnectionUnavailable },
+		{ "ECommonUserPrivilegeResult::AgeRestricted", (int64)ECommonUserPrivilegeResult::AgeRestricted },
+		{ "ECommonUserPrivilegeResult::AccountTypeRestricted", (int64)ECommonUserPrivilegeResult::AccountTypeRestricted },
+		{ "ECommonUserPrivilegeResult::AccountUseRestricted", (int64)ECommonUserPrivilegeResult::AccountUseRestricted },
+		{ "ECommonUserPrivilegeResult::PlatformFailure", (int64)ECommonUserPrivilegeResult::PlatformFailure },
 	};
-	UEnum* Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult()
+	static const UECodeGen_Private::FEnumParams EnumParams;
+};
+const UECodeGen_Private::FEnumParams Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::EnumParams = {
+	(UObject*(*)())Z_Construct_UPackage__Script_CommonUser,
+	nullptr,
+	"ECommonUserPrivilegeResult",
+	"ECommonUserPrivilegeResult",
+	Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::Enumerators,
+	RF_Public|RF_Transient|RF_MarkAsNative,
+	UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::Enumerators),
+	EEnumFlags::None,
+	(uint8)UEnum::ECppForm::EnumClass,
+	METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::Enum_MetaDataParams), Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::Enum_MetaDataParams)
+};
+UEnum* Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult()
+{
+	if (!Z_Registration_Info_UEnum_ECommonUserPrivilegeResult.InnerSingleton)
 	{
-		if (!Z_Registration_Info_UEnum_ECommonUserPrivilegeResult.InnerSingleton)
-		{
-			UECodeGen_Private::ConstructUEnum(Z_Registration_Info_UEnum_ECommonUserPrivilegeResult.InnerSingleton, Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::EnumParams);
-		}
-		return Z_Registration_Info_UEnum_ECommonUserPrivilegeResult.InnerSingleton;
+		UECodeGen_Private::ConstructUEnum(Z_Registration_Info_UEnum_ECommonUserPrivilegeResult.InnerSingleton, Z_Construct_UEnum_CommonUser_ECommonUserPrivilegeResult_Statics::EnumParams);
 	}
-	static FStructRegistrationInfo Z_Registration_Info_UScriptStruct_OnlineResultInformation;
+	return Z_Registration_Info_UEnum_ECommonUserPrivilegeResult.InnerSingleton;
+}
+// End Enum ECommonUserPrivilegeResult
+
+// Begin ScriptStruct FOnlineResultInformation
+static FStructRegistrationInfo Z_Registration_Info_UScriptStruct_OnlineResultInformation;
 class UScriptStruct* FOnlineResultInformation::StaticStruct()
 {
 	if (!Z_Registration_Info_UScriptStruct_OnlineResultInformation.OuterSingleton)
@@ -454,30 +452,10 @@ template<> COMMONUSER_API UScriptStruct* StaticStruct<FOnlineResultInformation>(
 {
 	return FOnlineResultInformation::StaticStruct();
 }
-	struct Z_Construct_UScriptStruct_FOnlineResultInformation_Statics
-	{
+struct Z_Construct_UScriptStruct_FOnlineResultInformation_Statics
+{
 #if WITH_METADATA
-		static const UECodeGen_Private::FMetaDataPairParam Struct_MetaDataParams[];
-#endif
-		static void* NewStructOps();
-#if WITH_METADATA
-		static const UECodeGen_Private::FMetaDataPairParam NewProp_bWasSuccessful_MetaData[];
-#endif
-		static void NewProp_bWasSuccessful_SetBit(void* Obj);
-		static const UECodeGen_Private::FBoolPropertyParams NewProp_bWasSuccessful;
-#if WITH_METADATA
-		static const UECodeGen_Private::FMetaDataPairParam NewProp_ErrorId_MetaData[];
-#endif
-		static const UECodeGen_Private::FStrPropertyParams NewProp_ErrorId;
-#if WITH_METADATA
-		static const UECodeGen_Private::FMetaDataPairParam NewProp_ErrorText_MetaData[];
-#endif
-		static const UECodeGen_Private::FTextPropertyParams NewProp_ErrorText;
-		static const UECodeGen_Private::FPropertyParamsBase* const PropPointers[];
-		static const UECodeGen_Private::FStructParams ReturnStructParams;
-	};
-#if WITH_METADATA
-	const UECodeGen_Private::FMetaDataPairParam Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::Struct_MetaDataParams[] = {
+	static constexpr UECodeGen_Private::FMetaDataPairParam Struct_MetaDataParams[] = {
 		{ "BlueprintType", "true" },
 #if !UE_BUILD_SHIPPING
 		{ "Comment", "/** Detailed information about the online error. Effectively a wrapper for FOnlineError. */" },
@@ -487,13 +465,7 @@ template<> COMMONUSER_API UScriptStruct* StaticStruct<FOnlineResultInformation>(
 		{ "ToolTip", "Detailed information about the online error. Effectively a wrapper for FOnlineError." },
 #endif
 	};
-#endif
-	void* Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewStructOps()
-	{
-		return (UScriptStruct::ICppStructOps*)new UScriptStruct::TCppStructOps<FOnlineResultInformation>();
-	}
-#if WITH_METADATA
-	const UECodeGen_Private::FMetaDataPairParam Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_bWasSuccessful_MetaData[] = {
+	static constexpr UECodeGen_Private::FMetaDataPairParam NewProp_bWasSuccessful_MetaData[] = {
 		{ "Category", "OnlineResultInformation" },
 #if !UE_BUILD_SHIPPING
 		{ "Comment", "/** Whether the operation was successful or not. If it was successful, the error fields of this struct will not contain extra information. */" },
@@ -503,14 +475,7 @@ template<> COMMONUSER_API UScriptStruct* StaticStruct<FOnlineResultInformation>(
 		{ "ToolTip", "Whether the operation was successful or not. If it was successful, the error fields of this struct will not contain extra information." },
 #endif
 	};
-#endif
-	void Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_bWasSuccessful_SetBit(void* Obj)
-	{
-		((FOnlineResultInformation*)Obj)->bWasSuccessful = 1;
-	}
-	const UECodeGen_Private::FBoolPropertyParams Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_bWasSuccessful = { "bWasSuccessful", nullptr, (EPropertyFlags)0x0010000000000014, UECodeGen_Private::EPropertyGenFlags::Bool | UECodeGen_Private::EPropertyGenFlags::NativeBool, RF_Public|RF_Transient|RF_MarkAsNative, nullptr, nullptr, 1, sizeof(bool), sizeof(FOnlineResultInformation), &Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_bWasSuccessful_SetBit, METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_bWasSuccessful_MetaData), Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_bWasSuccessful_MetaData) };
-#if WITH_METADATA
-	const UECodeGen_Private::FMetaDataPairParam Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorId_MetaData[] = {
+	static constexpr UECodeGen_Private::FMetaDataPairParam NewProp_ErrorId_MetaData[] = {
 		{ "Category", "OnlineResultInformation" },
 #if !UE_BUILD_SHIPPING
 		{ "Comment", "/** The unique error id. Can be used to compare against specific handled errors. */" },
@@ -520,10 +485,7 @@ template<> COMMONUSER_API UScriptStruct* StaticStruct<FOnlineResultInformation>(
 		{ "ToolTip", "The unique error id. Can be used to compare against specific handled errors." },
 #endif
 	};
-#endif
-	const UECodeGen_Private::FStrPropertyParams Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorId = { "ErrorId", nullptr, (EPropertyFlags)0x0010000000000014, UECodeGen_Private::EPropertyGenFlags::Str, RF_Public|RF_Transient|RF_MarkAsNative, nullptr, nullptr, 1, STRUCT_OFFSET(FOnlineResultInformation, ErrorId), METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorId_MetaData), Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorId_MetaData) };
-#if WITH_METADATA
-	const UECodeGen_Private::FMetaDataPairParam Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorText_MetaData[] = {
+	static constexpr UECodeGen_Private::FMetaDataPairParam NewProp_ErrorText_MetaData[] = {
 		{ "Category", "OnlineResultInformation" },
 #if !UE_BUILD_SHIPPING
 		{ "Comment", "/** Error text to display to the user. */" },
@@ -533,52 +495,71 @@ template<> COMMONUSER_API UScriptStruct* StaticStruct<FOnlineResultInformation>(
 		{ "ToolTip", "Error text to display to the user." },
 #endif
 	};
-#endif
-	const UECodeGen_Private::FTextPropertyParams Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorText = { "ErrorText", nullptr, (EPropertyFlags)0x0010000000000014, UECodeGen_Private::EPropertyGenFlags::Text, RF_Public|RF_Transient|RF_MarkAsNative, nullptr, nullptr, 1, STRUCT_OFFSET(FOnlineResultInformation, ErrorText), METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorText_MetaData), Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorText_MetaData) };
-	const UECodeGen_Private::FPropertyParamsBase* const Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::PropPointers[] = {
-		(const UECodeGen_Private::FPropertyParamsBase*)&Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_bWasSuccessful,
-		(const UECodeGen_Private::FPropertyParamsBase*)&Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorId,
-		(const UECodeGen_Private::FPropertyParamsBase*)&Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorText,
-	};
-	const UECodeGen_Private::FStructParams Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::ReturnStructParams = {
-		(UObject* (*)())Z_Construct_UPackage__Script_CommonUser,
-		nullptr,
-		&NewStructOps,
-		"OnlineResultInformation",
-		Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::PropPointers,
-		UE_ARRAY_COUNT(Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::PropPointers),
-		sizeof(FOnlineResultInformation),
-		alignof(FOnlineResultInformation),
-		RF_Public|RF_Transient|RF_MarkAsNative,
-		EStructFlags(0x00000001),
-		METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::Struct_MetaDataParams), Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::Struct_MetaDataParams)
-	};
-	static_assert(UE_ARRAY_COUNT(Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::PropPointers) < 2048);
-	UScriptStruct* Z_Construct_UScriptStruct_FOnlineResultInformation()
+#endif // WITH_METADATA
+	static void NewProp_bWasSuccessful_SetBit(void* Obj);
+	static const UECodeGen_Private::FBoolPropertyParams NewProp_bWasSuccessful;
+	static const UECodeGen_Private::FStrPropertyParams NewProp_ErrorId;
+	static const UECodeGen_Private::FTextPropertyParams NewProp_ErrorText;
+	static const UECodeGen_Private::FPropertyParamsBase* const PropPointers[];
+	static void* NewStructOps()
 	{
-		if (!Z_Registration_Info_UScriptStruct_OnlineResultInformation.InnerSingleton)
-		{
-			UECodeGen_Private::ConstructUScriptStruct(Z_Registration_Info_UScriptStruct_OnlineResultInformation.InnerSingleton, Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::ReturnStructParams);
-		}
-		return Z_Registration_Info_UScriptStruct_OnlineResultInformation.InnerSingleton;
+		return (UScriptStruct::ICppStructOps*)new UScriptStruct::TCppStructOps<FOnlineResultInformation>();
 	}
-	struct Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_Statics
+	static const UECodeGen_Private::FStructParams StructParams;
+};
+void Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_bWasSuccessful_SetBit(void* Obj)
+{
+	((FOnlineResultInformation*)Obj)->bWasSuccessful = 1;
+}
+const UECodeGen_Private::FBoolPropertyParams Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_bWasSuccessful = { "bWasSuccessful", nullptr, (EPropertyFlags)0x0010000000000014, UECodeGen_Private::EPropertyGenFlags::Bool | UECodeGen_Private::EPropertyGenFlags::NativeBool, RF_Public|RF_Transient|RF_MarkAsNative, nullptr, nullptr, 1, sizeof(bool), sizeof(FOnlineResultInformation), &Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_bWasSuccessful_SetBit, METADATA_PARAMS(UE_ARRAY_COUNT(NewProp_bWasSuccessful_MetaData), NewProp_bWasSuccessful_MetaData) };
+const UECodeGen_Private::FStrPropertyParams Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorId = { "ErrorId", nullptr, (EPropertyFlags)0x0010000000000014, UECodeGen_Private::EPropertyGenFlags::Str, RF_Public|RF_Transient|RF_MarkAsNative, nullptr, nullptr, 1, STRUCT_OFFSET(FOnlineResultInformation, ErrorId), METADATA_PARAMS(UE_ARRAY_COUNT(NewProp_ErrorId_MetaData), NewProp_ErrorId_MetaData) };
+const UECodeGen_Private::FTextPropertyParams Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorText = { "ErrorText", nullptr, (EPropertyFlags)0x0010000000000014, UECodeGen_Private::EPropertyGenFlags::Text, RF_Public|RF_Transient|RF_MarkAsNative, nullptr, nullptr, 1, STRUCT_OFFSET(FOnlineResultInformation, ErrorText), METADATA_PARAMS(UE_ARRAY_COUNT(NewProp_ErrorText_MetaData), NewProp_ErrorText_MetaData) };
+const UECodeGen_Private::FPropertyParamsBase* const Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::PropPointers[] = {
+	(const UECodeGen_Private::FPropertyParamsBase*)&Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_bWasSuccessful,
+	(const UECodeGen_Private::FPropertyParamsBase*)&Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorId,
+	(const UECodeGen_Private::FPropertyParamsBase*)&Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewProp_ErrorText,
+};
+static_assert(UE_ARRAY_COUNT(Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::PropPointers) < 2048);
+const UECodeGen_Private::FStructParams Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::StructParams = {
+	(UObject* (*)())Z_Construct_UPackage__Script_CommonUser,
+	nullptr,
+	&NewStructOps,
+	"OnlineResultInformation",
+	Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::PropPointers,
+	UE_ARRAY_COUNT(Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::PropPointers),
+	sizeof(FOnlineResultInformation),
+	alignof(FOnlineResultInformation),
+	RF_Public|RF_Transient|RF_MarkAsNative,
+	EStructFlags(0x00000001),
+	METADATA_PARAMS(UE_ARRAY_COUNT(Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::Struct_MetaDataParams), Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::Struct_MetaDataParams)
+};
+UScriptStruct* Z_Construct_UScriptStruct_FOnlineResultInformation()
+{
+	if (!Z_Registration_Info_UScriptStruct_OnlineResultInformation.InnerSingleton)
 	{
-		static const FEnumRegisterCompiledInInfo EnumInfo[];
-		static const FStructRegisterCompiledInInfo ScriptStructInfo[];
+		UECodeGen_Private::ConstructUScriptStruct(Z_Registration_Info_UScriptStruct_OnlineResultInformation.InnerSingleton, Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::StructParams);
+	}
+	return Z_Registration_Info_UScriptStruct_OnlineResultInformation.InnerSingleton;
+}
+// End ScriptStruct FOnlineResultInformation
+
+// Begin Registration
+struct Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_Statics
+{
+	static constexpr FEnumRegisterCompiledInInfo EnumInfo[] = {
+		{ ECommonUserOnlineContext_StaticEnum, TEXT("ECommonUserOnlineContext"), &Z_Registration_Info_UEnum_ECommonUserOnlineContext, CONSTRUCT_RELOAD_VERSION_INFO(FEnumReloadVersionInfo, 3178011620U) },
+		{ ECommonUserInitializationState_StaticEnum, TEXT("ECommonUserInitializationState"), &Z_Registration_Info_UEnum_ECommonUserInitializationState, CONSTRUCT_RELOAD_VERSION_INFO(FEnumReloadVersionInfo, 2275509869U) },
+		{ ECommonUserPrivilege_StaticEnum, TEXT("ECommonUserPrivilege"), &Z_Registration_Info_UEnum_ECommonUserPrivilege, CONSTRUCT_RELOAD_VERSION_INFO(FEnumReloadVersionInfo, 3165184135U) },
+		{ ECommonUserAvailability_StaticEnum, TEXT("ECommonUserAvailability"), &Z_Registration_Info_UEnum_ECommonUserAvailability, CONSTRUCT_RELOAD_VERSION_INFO(FEnumReloadVersionInfo, 3023508109U) },
+		{ ECommonUserPrivilegeResult_StaticEnum, TEXT("ECommonUserPrivilegeResult"), &Z_Registration_Info_UEnum_ECommonUserPrivilegeResult, CONSTRUCT_RELOAD_VERSION_INFO(FEnumReloadVersionInfo, 2681083962U) },
 	};
-	const FEnumRegisterCompiledInInfo Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_Statics::EnumInfo[] = {
-		{ ECommonUserOnlineContext_StaticEnum, TEXT("ECommonUserOnlineContext"), &Z_Registration_Info_UEnum_ECommonUserOnlineContext, CONSTRUCT_RELOAD_VERSION_INFO(FEnumReloadVersionInfo, 2596656004U) },
-		{ ECommonUserInitializationState_StaticEnum, TEXT("ECommonUserInitializationState"), &Z_Registration_Info_UEnum_ECommonUserInitializationState, CONSTRUCT_RELOAD_VERSION_INFO(FEnumReloadVersionInfo, 2296305739U) },
-		{ ECommonUserPrivilege_StaticEnum, TEXT("ECommonUserPrivilege"), &Z_Registration_Info_UEnum_ECommonUserPrivilege, CONSTRUCT_RELOAD_VERSION_INFO(FEnumReloadVersionInfo, 2438391218U) },
-		{ ECommonUserAvailability_StaticEnum, TEXT("ECommonUserAvailability"), &Z_Registration_Info_UEnum_ECommonUserAvailability, CONSTRUCT_RELOAD_VERSION_INFO(FEnumReloadVersionInfo, 4287094436U) },
-		{ ECommonUserPrivilegeResult_StaticEnum, TEXT("ECommonUserPrivilegeResult"), &Z_Registration_Info_UEnum_ECommonUserPrivilegeResult, CONSTRUCT_RELOAD_VERSION_INFO(FEnumReloadVersionInfo, 1983666156U) },
+	static constexpr FStructRegisterCompiledInInfo ScriptStructInfo[] = {
+		{ FOnlineResultInformation::StaticStruct, Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewStructOps, TEXT("OnlineResultInformation"), &Z_Registration_Info_UScriptStruct_OnlineResultInformation, CONSTRUCT_RELOAD_VERSION_INFO(FStructReloadVersionInfo, sizeof(FOnlineResultInformation), 2359200286U) },
 	};
-	const FStructRegisterCompiledInInfo Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_Statics::ScriptStructInfo[] = {
-		{ FOnlineResultInformation::StaticStruct, Z_Construct_UScriptStruct_FOnlineResultInformation_Statics::NewStructOps, TEXT("OnlineResultInformation"), &Z_Registration_Info_UScriptStruct_OnlineResultInformation, CONSTRUCT_RELOAD_VERSION_INFO(FStructReloadVersionInfo, sizeof(FOnlineResultInformation), 3987690306U) },
-	};
-	static FRegisterCompiledInInfo Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_2662987123(TEXT("/Script/CommonUser"),
-		nullptr, 0,
-		Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_Statics::ScriptStructInfo, UE_ARRAY_COUNT(Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_Statics::ScriptStructInfo),
-		Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_Statics::EnumInfo, UE_ARRAY_COUNT(Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_Statics::EnumInfo));
+};
+static FRegisterCompiledInInfo Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_4233871903(TEXT("/Script/CommonUser"),
+	nullptr, 0,
+	Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_Statics::ScriptStructInfo, UE_ARRAY_COUNT(Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_Statics::ScriptStructInfo),
+	Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_Statics::EnumInfo, UE_ARRAY_COUNT(Z_CompiledInDeferFile_FID_Mythic_Plugins_CommonUser_Source_CommonUser_Public_CommonUserTypes_h_Statics::EnumInfo));
+// End Registration
 PRAGMA_ENABLE_DEPRECATION_WARNINGS

@@ -16,11 +16,7 @@ struct FGameplayTagContainer;
 #endif
 #define GAMESETTINGS_GameSetting_generated_h
 
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_SPARSE_DATA
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_RPC_WRAPPERS_NO_PURE_DECLS \
- \
 	DECLARE_FUNCTION(execGetWarningRichText); \
 	DECLARE_FUNCTION(execGetDynamicDetails); \
 	DECLARE_FUNCTION(execGetTags); \
@@ -30,7 +26,6 @@ struct FGameplayTagContainer;
 	DECLARE_FUNCTION(execGetDevName);
 
 
-#define FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_ACCESSORS
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUGameSetting(); \
@@ -43,8 +38,8 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UGameSetting(UGameSetting&&); \
-	NO_API UGameSetting(const UGameSetting&); \
+	UGameSetting(UGameSetting&&); \
+	UGameSetting(const UGameSetting&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UGameSetting); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UGameSetting); \
@@ -56,11 +51,7 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_SPARSE_DATA \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_ACCESSORS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_GameSetting_h_27_ENHANCED_CONSTRUCTORS \
 private: \

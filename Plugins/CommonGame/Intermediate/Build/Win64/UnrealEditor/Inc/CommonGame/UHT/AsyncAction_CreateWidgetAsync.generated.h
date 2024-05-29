@@ -22,15 +22,10 @@ class UUserWidget;
 COMMONGAME_API void FCreateWidgetAsyncDelegate_DelegateWrapper(const FMulticastScriptDelegate& CreateWidgetAsyncDelegate, UUserWidget* UserWidget);
 
 
-#define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_SPARSE_DATA
-#define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_RPC_WRAPPERS \
- \
 	DECLARE_FUNCTION(execCreateWidgetAsync);
 
 
-#define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_ACCESSORS
 #define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_INCLASS \
 private: \
 	static void StaticRegisterNativesUAsyncAction_CreateWidgetAsync(); \
@@ -48,8 +43,8 @@ public: \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UAsyncAction_CreateWidgetAsync); \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UAsyncAction_CreateWidgetAsync(UAsyncAction_CreateWidgetAsync&&); \
-	NO_API UAsyncAction_CreateWidgetAsync(const UAsyncAction_CreateWidgetAsync&); \
+	UAsyncAction_CreateWidgetAsync(UAsyncAction_CreateWidgetAsync&&); \
+	UAsyncAction_CreateWidgetAsync(const UAsyncAction_CreateWidgetAsync&); \
 public: \
 	NO_API virtual ~UAsyncAction_CreateWidgetAsync();
 
@@ -58,11 +53,7 @@ public: \
 #define FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_GENERATED_BODY_LEGACY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_SPARSE_DATA \
-	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_RPC_WRAPPERS \
-	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_ACCESSORS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_INCLASS \
 	FID_Mythic_Plugins_CommonGame_Source_Public_Actions_AsyncAction_CreateWidgetAsync_h_25_STANDARD_CONSTRUCTORS \
 public: \

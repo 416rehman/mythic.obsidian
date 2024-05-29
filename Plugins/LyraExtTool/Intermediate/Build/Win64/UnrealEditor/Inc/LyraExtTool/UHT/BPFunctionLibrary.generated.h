@@ -16,15 +16,10 @@ class UStaticMesh;
 #endif
 #define LYRAEXTTOOL_BPFunctionLibrary_generated_h
 
-#define FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_SPARSE_DATA
-#define FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_RPC_WRAPPERS_NO_PURE_DECLS \
- \
 	DECLARE_FUNCTION(execChangeMeshMaterials);
 
 
-#define FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_ACCESSORS
 #define FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUBPFunctionLibrary(); \
@@ -39,8 +34,8 @@ public: \
 	NO_API UBPFunctionLibrary(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get()); \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UBPFunctionLibrary(UBPFunctionLibrary&&); \
-	NO_API UBPFunctionLibrary(const UBPFunctionLibrary&); \
+	UBPFunctionLibrary(UBPFunctionLibrary&&); \
+	UBPFunctionLibrary(const UBPFunctionLibrary&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UBPFunctionLibrary); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UBPFunctionLibrary); \
@@ -52,11 +47,7 @@ public: \
 #define FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_SPARSE_DATA \
-	FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_ACCESSORS \
 	FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_LyraExtTool_Source_LyraExtTool_Public_BPFunctionLibrary_h_21_ENHANCED_CONSTRUCTORS \
 private: \

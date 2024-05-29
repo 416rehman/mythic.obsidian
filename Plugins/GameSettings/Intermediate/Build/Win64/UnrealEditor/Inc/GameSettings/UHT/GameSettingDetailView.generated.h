@@ -14,11 +14,6 @@ PRAGMA_DISABLE_DEPRECATION_WARNINGS
 #endif
 #define GAMESETTINGS_GameSettingDetailView_generated_h
 
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_SPARSE_DATA
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_RPC_WRAPPERS_NO_PURE_DECLS
-#define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_ACCESSORS
 #define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_INCLASS_NO_PURE_DECLS \
 private: \
 	static void StaticRegisterNativesUGameSettingDetailView(); \
@@ -31,8 +26,8 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_ENHANCED_CONSTRUCTORS \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API UGameSettingDetailView(UGameSettingDetailView&&); \
-	NO_API UGameSettingDetailView(const UGameSettingDetailView&); \
+	UGameSettingDetailView(UGameSettingDetailView&&); \
+	UGameSettingDetailView(const UGameSettingDetailView&); \
 public: \
 	DECLARE_VTABLE_PTR_HELPER_CTOR(NO_API, UGameSettingDetailView); \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(UGameSettingDetailView); \
@@ -44,11 +39,6 @@ public: \
 #define FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_GENERATED_BODY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_SPARSE_DATA \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_RPC_WRAPPERS_NO_PURE_DECLS \
-	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_ACCESSORS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_INCLASS_NO_PURE_DECLS \
 	FID_Mythic_Plugins_GameSettings_Source_Public_Widgets_GameSettingDetailView_h_24_ENHANCED_CONSTRUCTORS \
 private: \

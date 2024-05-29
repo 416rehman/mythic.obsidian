@@ -21,13 +21,13 @@ void EmptyLinkFunctionForGeneratedCodeGameplayMessageRuntime_init() {}
 				SingletonFuncArray,
 				UE_ARRAY_COUNT(SingletonFuncArray),
 				PKG_CompiledIn | 0x00000000,
-				0x0567D806,
-				0xA0734B77,
+				0xB60CCC75,
+				0x364B925A,
 				METADATA_PARAMS(0, nullptr)
 			};
 			UECodeGen_Private::ConstructUPackage(Z_Registration_Info_UPackage__Script_GameplayMessageRuntime.OuterSingleton, PackageParams);
 		}
 		return Z_Registration_Info_UPackage__Script_GameplayMessageRuntime.OuterSingleton;
 	}
-	static FRegisterCompiledInInfo Z_CompiledInDeferPackage_UPackage__Script_GameplayMessageRuntime(Z_Construct_UPackage__Script_GameplayMessageRuntime, TEXT("/Script/GameplayMessageRuntime"), Z_Registration_Info_UPackage__Script_GameplayMessageRuntime, CONSTRUCT_RELOAD_VERSION_INFO(FPackageReloadVersionInfo, 0x0567D806, 0xA0734B77));
+	static FRegisterCompiledInInfo Z_CompiledInDeferPackage_UPackage__Script_GameplayMessageRuntime(Z_Construct_UPackage__Script_GameplayMessageRuntime, TEXT("/Script/GameplayMessageRuntime"), Z_Registration_Info_UPackage__Script_GameplayMessageRuntime, CONSTRUCT_RELOAD_VERSION_INFO(FPackageReloadVersionInfo, 0xB60CCC75, 0x364B925A));
 PRAGMA_ENABLE_DEPRECATION_WARNINGS

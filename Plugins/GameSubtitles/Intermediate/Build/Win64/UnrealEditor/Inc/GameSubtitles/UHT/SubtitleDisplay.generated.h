@@ -14,15 +14,10 @@ PRAGMA_DISABLE_DEPRECATION_WARNINGS
 #endif
 #define GAMESUBTITLES_SubtitleDisplay_generated_h
 
-#define FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_SPARSE_DATA
-#define FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_SPARSE_DATA_PROPERTY_ACCESSORS
-#define FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS
 #define FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_RPC_WRAPPERS \
- \
 	DECLARE_FUNCTION(execHasSubtitles);
 
 
-#define FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_ACCESSORS
 #define FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_INCLASS \
 private: \
 	static void StaticRegisterNativesUSubtitleDisplay(); \
@@ -40,8 +35,8 @@ public: \
 	DEFINE_VTABLE_PTR_HELPER_CTOR_CALLER(USubtitleDisplay); \
 private: \
 	/** Private move- and copy-constructors, should never be used */ \
-	NO_API USubtitleDisplay(USubtitleDisplay&&); \
-	NO_API USubtitleDisplay(const USubtitleDisplay&); \
+	USubtitleDisplay(USubtitleDisplay&&); \
+	USubtitleDisplay(const USubtitleDisplay&); \
 public: \
 	NO_API virtual ~USubtitleDisplay();
 
@@ -50,11 +45,7 @@ public: \
 #define FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_GENERATED_BODY_LEGACY \
 PRAGMA_DISABLE_DEPRECATION_WARNINGS \
 public: \
-	FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_SPARSE_DATA \
-	FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_SPARSE_DATA_PROPERTY_ACCESSORS \
-	FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_EDITOR_ONLY_SPARSE_DATA_PROPERTY_ACCESSORS \
 	FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_RPC_WRAPPERS \
-	FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_ACCESSORS \
 	FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_INCLASS \
 	FID_Mythic_Plugins_GameSubtitles_Source_Public_Widgets_SubtitleDisplay_h_18_STANDARD_CONSTRUCTORS \
 public: \

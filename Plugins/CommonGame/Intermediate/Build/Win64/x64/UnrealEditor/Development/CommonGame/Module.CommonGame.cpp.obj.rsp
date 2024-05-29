@@ -1,8 +1,8 @@
 "D:\gameProjects\projectMythic\Mythic\Plugins\CommonGame\Intermediate\Build\Win64\x64\UnrealEditor\Development\CommonGame\Module.CommonGame.cpp"
-/FI"D:\gameProjects\projectMythic\Mythic\Intermediate\Build\Win64\x64\MythicEditor\Development\UnrealEd\SharedPCH.UnrealEd.Cpp20.h"
+/FI"D:\gameProjects\projectMythic\Mythic\Intermediate\Build\Win64\x64\MythicEditor\Development\UnrealEd\SharedPCH.UnrealEd.Project.NoValFmtStr.ValApi.Cpp20.h"
 /FI"D:\gameProjects\projectMythic\Mythic\Plugins\CommonGame\Intermediate\Build\Win64\x64\UnrealEditor\Development\CommonGame\Definitions.CommonGame.h"
-/Yu"D:\gameProjects\projectMythic\Mythic\Intermediate\Build\Win64\x64\MythicEditor\Development\UnrealEd\SharedPCH.UnrealEd.Cpp20.h"
-/Fp"D:\gameProjects\projectMythic\Mythic\Intermediate\Build\Win64\x64\MythicEditor\Development\UnrealEd\SharedPCH.UnrealEd.Cpp20.h.pch"
+/Yu"D:\gameProjects\projectMythic\Mythic\Intermediate\Build\Win64\x64\MythicEditor\Development\UnrealEd\SharedPCH.UnrealEd.Project.NoValFmtStr.ValApi.Cpp20.h"
+/Fp"D:\gameProjects\projectMythic\Mythic\Intermediate\Build\Win64\x64\MythicEditor\Development\UnrealEd\SharedPCH.UnrealEd.Project.NoValFmtStr.ValApi.Cpp20.h.pch"
 /Fo"D:\gameProjects\projectMythic\Mythic\Plugins\CommonGame\Intermediate\Build\Win64\x64\UnrealEditor\Development\CommonGame\Module.CommonGame.cpp.obj"
 /sourceDependencies "D:\gameProjects\projectMythic\Mythic\Plugins\CommonGame\Intermediate\Build\Win64\x64\UnrealEditor\Development\CommonGame\Module.CommonGame.cpp.dep.json"
 @"D:\gameProjects\projectMythic\Mythic\Plugins\CommonGame\Intermediate\Build\Win64\x64\UnrealEditor\Development\CommonGame\CommonGame.Shared.rsp"
@@ -25,6 +25,7 @@
 /D_WINDLL
 /D_DISABLE_EXTENDED_ALIGNED_STORAGE
 /Ob2
+/d2ExtendedWarningInfo
 /Ox
 /Ot
 /GF
