@@ -2,10 +2,17 @@
 
 #include "MythicPlayerController.h"
 
+#include "MythicPlayerState.h"
+
 AMythicPlayerController::AMythicPlayerController() {
 	bShowMouseCursor = true;
 	DefaultMouseCursor = EMouseCursor::Default;
 	bReplicateUsingRegisteredSubObjectList = true;
+}
+
+UAbilitySystemComponent * AMythicPlayerController::GetAbilitySystemComponent() const {
+    auto PS = GetPlayerState<AMythicPlayerState>();
+    return PS ? PS->GetAbilitySystemComponent() : nullptr;
 }
 
 void AMythicPlayerController::BeginPlay() {

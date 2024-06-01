@@ -15,6 +15,11 @@
 				"CommonUI",
 				"GameplayAbilities"
 			]
+		},
+		{
+			"Name": "LyraGame",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [

@@ -1,15 +1,12 @@
 
 #include "MythicPlayerState.h"
-
-#include "GAS/AttributeSets/MythicAttributeSet.h"
 #include "Net/UnrealNetwork.h"
 
 AMythicPlayerState::AMythicPlayerState() {
 	MythicAbilitySystemComponent = CreateDefaultSubobject<UMythicAbilitySystemComponent_Player>(TEXT("MythicAbilitySystemComponent"));
 	MythicAbilitySystemComponent->SetIsReplicated(true);
 	MythicAbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
-
-	AttributeSet = CreateDefaultSubobject<UMythicAttributeSet>(TEXT("AttributeSet"));
+    UE_LOG(LogTemp, Warning, TEXT("MythicAbilitySystemComponent %s created"), *MythicAbilitySystemComponent->GetName());
 
 	NetUpdateFrequency = 30.0f;
 }
@@ -26,13 +23,4 @@ void AMythicPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMythicPlayerState, MythicAbilitySystemComponent);
-}
-
-void AMythicPlayerState::BeginPlay() {
-	Super::BeginPlay();
-
-	// add default abilities
-	for (TSubclassOf<class UGameplayAbility> Ability : DefaultAbilities) {
-		MythicAbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(Ability, 1, 0, this));
-	}
 }

@@ -45,8 +45,7 @@ public class Mythic : ModuleRules
 			"AsyncMixin",
 			"ControlFlows",
 			"PropertyPath", 
-			"NavigationSystem",
-            "LyraGame"
+			"NavigationSystem"
 		});
 		
 		PrivateDependencyModuleNames.AddRange(new string[]
@@ -75,7 +74,8 @@ public class Mythic : ModuleRules
 			"ClientPilot",
 			"AudioModulation",
 			"EngineSettings",
-			"DTLSHandlerComponent", "CommonLoadingScreen",
+			"DTLSHandlerComponent", 
+			"CommonLoadingScreen",
 		});
 		
 		DynamicallyLoadedModuleNames.AddRange(

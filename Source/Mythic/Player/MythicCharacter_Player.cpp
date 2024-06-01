@@ -55,8 +55,17 @@ void AMythicCharacter_Player::Tick(float DeltaSeconds)
 
 void AMythicCharacter_Player::InitPlayer() {
 	if (AMythicPlayerState* PS = GetPlayerState<AMythicPlayerState>()) {
-		PS->GetAbilitySystemComponent()->InitAbilityActorInfo(PS, this);
-	}
+	    auto ASC = PS->GetAbilitySystemComponent();
+	    if (ASC != nullptr) {
+	        ASC->InitAbilityActorInfo(PS, this);
+	        UE_LOG(LogTemp, Warning, TEXT("PlayerState %s ability system component initialized"), *PS->GetName());
+	    }
+        else {
+            UE_LOG(LogTemp, Warning, TEXT("PlayerState %s has no AbilitySystemComponent"), *PS->GetName());
+        }
+	} else {
+        UE_LOG(LogTemp, Warning, TEXT("Player has no PlayerState"));
+    }
 }
 
 void AMythicCharacter_Player::PossessedBy(AController* NewController) {

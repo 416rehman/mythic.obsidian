@@ -1,8 +1,8 @@
 ﻿// 
 
 #pragma once
+#include "CommonActivatableWidget.h"
 
-#include "UI/LyraActivatableWidget.h"
 #include "MythicActivatableWidget.generated.h"
 
 class UCommonActivatableWidget;

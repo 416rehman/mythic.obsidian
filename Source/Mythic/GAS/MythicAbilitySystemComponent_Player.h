@@ -1,7 +1,6 @@
 ﻿#pragma once
 #include "AbilitySystemComponent.h"
 #include "MythicAbilitySystemComponent.h"
-#include "AbilitySystem/LyraAbilitySystemComponent.h"
 #include "MythicAbilitySystemComponent_Player.generated.h"
 
 UCLASS(ClassGroup=AbilitySystem, hidecategories=(Object,LOD,Lighting,Transform,Sockets,TextureStreaming), editinlinenew, meta=(BlueprintSpawnableComponent))

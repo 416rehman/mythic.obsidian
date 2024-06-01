@@ -16,6 +16,7 @@ public class LyraGame : ModuleRules
 
 		PrivateIncludePaths.AddRange(
 			new string[] {
+				"LyraGame"
 			}
 		);
 

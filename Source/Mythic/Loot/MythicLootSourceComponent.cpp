@@ -3,11 +3,11 @@
 
 #include "MythicLootSourceComponent.h"
 
-#include "MythicGameMode.h"
 #include "MythicLootManagerSubsystem.h"
 #include "MythicLootSource.h"
 #include "MythicLootTable.h"
 #include "GameFramework/PlayerState.h"
+#include "GameModes/MythicGameMode.h"
 #include "Mythic/Inventory/ItemDefinition.h"
 #include "Mythic/GAS/AttributeSets/MythicAttributeSet_PlayerProgression.h"
 

@@ -13,9 +13,10 @@ public class MythicTarget : TargetRules
 	public MythicTarget(TargetInfo Target) : base(Target)
 	{
 		Type = TargetType.Game;
-		DefaultBuildSettings = BuildSettingsVersion.V4;
+		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
 		ExtraModuleNames.Add("Mythic");
+		ExtraModuleNames.Add("LyraGame");
 	}
 	
 	private static bool bHasWarnedAboutShared = false;

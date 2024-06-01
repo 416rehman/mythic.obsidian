@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CommonLocalPlayer.h"
-#include "Player/LyraLocalPlayer.h"
 
 #include "MythicLocalPlayer.generated.h"
 
@@ -11,7 +10,7 @@
  * UMythicLocalPlayer
  */
 UCLASS()
-class MYTHIC_API UMythicLocalPlayer : public ULyraLocalPlayer
+class MYTHIC_API UMythicLocalPlayer : public UCommonLocalPlayer
 {
 	GENERATED_BODY()
 

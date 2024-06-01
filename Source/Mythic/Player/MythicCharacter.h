@@ -3,11 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Character/LyraCharacter.h"
+#include "GameFramework/Character.h"
 #include "MythicCharacter.generated.h"
 
 UCLASS(Blueprintable)
-class AMythicCharacter : public ALyraCharacter {
+class AMythicCharacter : public ACharacter {
     GENERATED_BODY()
 
 public:
