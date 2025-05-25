@@ -1,0 +1,8 @@
+#pragma once
+#include "NativeGameplayTags.h"
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(Environment_Weather);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(Environment_Weather_Clear);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(Environment_Weather_Overcast);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(Environment_Weather_Rain);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(Environment_Weather_Snow);

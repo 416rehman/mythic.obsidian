@@ -1,0 +1,45 @@
+#include "MythicTags_AI.h"
+
+UE_DEFINE_GAMEPLAY_TAG(AI_TIER_NORMAL, "AI.Tier.Normal");
+UE_DEFINE_GAMEPLAY_TAG(AI_TIER_ELITE, "AI.Tier.Elite");
+UE_DEFINE_GAMEPLAY_TAG(AI_TIER_CHAMPION, "AI.Tier.Champion");
+UE_DEFINE_GAMEPLAY_TAG(AI_TIER_BOSS, "AI.Tier.Boss");
+
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_HUMAN, "AI.Affiliation.Human");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_HUMAN_VALIAN, "AI.Affiliation.Human.Valian");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_HUMAN_TARSIS, "AI.Affiliation.Human.Tarsis");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_HUMAN_AURELIAN, "AI.Affiliation.Human.Aurelian");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_HUMAN_BLACKROSE, "AI.Affiliation.Human.BlackRose");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_HUMAN_BANDIT, "AI.Affiliation.Human.Bandit");
+
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_ANIMAL, "AI.Affiliation.Animal");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_ANIMAL_CARNIVORE, "AI.Affiliation.Animal.Carnivore");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_ANIMAL_CARNIVORE_WOLF, "AI.Affiliation.Animal.Carnivore.Wolf");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_ANIMAL_CARNIVORE_BEAR, "AI.Affiliation.Animal.Carnivore.Bear");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_ANIMAL_HERBIVORE, "AI.Affiliation.Animal.Herbivore");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_ANIMAL_HERBIVORE_DEER, "AI.Affiliation.Animal.Herbivore.Deer");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_ANIMAL_HERBIVORE_RABBIT, "AI.Affiliation.Animal.Herbivore.Rabbit");
+
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_MONSTER, "AI.Affiliation.Monster");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_MONSTER_UNDEAD, "AI.Affiliation.Monster.Undead");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_MONSTER_UNDEAD_SKELETON, "AI.Affiliation.Monster.Undead.Skeleton");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_MONSTER_UNDEAD_ZOMBIE, "AI.Affiliation.Monster.Undead.Zombie");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_MONSTER_WEREWOLF, "AI.Affiliation.Monster.Werewolf");
+UE_DEFINE_GAMEPLAY_TAG(AI_AFFILIATION_MONSTER_VAMPIRE, "AI.Affiliation.Monster.Vampire");
+
+int32 GetAITierInt(const FGameplayTag &TierTag) {
+    if (TierTag.MatchesTag(AI_TIER_NORMAL)) {
+        return 1;
+    }
+    else if (TierTag.MatchesTag(AI_TIER_ELITE)) {
+        return 2;
+    }
+    else if (TierTag.MatchesTag(AI_TIER_CHAMPION)) {
+        return 3;
+    }
+    else if (TierTag.MatchesTag(AI_TIER_BOSS)) {
+        return 4;
+    }
+
+    return -1;
+}
