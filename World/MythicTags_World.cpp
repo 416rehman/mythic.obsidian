@@ -1,0 +1,5 @@
+#include "MythicTags_World.h"
+
+UE_DEFINE_GAMEPLAY_TAG(WORLD_RESOURCE_TREE, "World.Resource.Tree")
+UE_DEFINE_GAMEPLAY_TAG(WORLD_RESOURCE_STONE, "World.Resource.Stone")
+UE_DEFINE_GAMEPLAY_TAG(WORLD_RESOURCE_DRAGONSTONE, "World.Resource.Dragonstone")
