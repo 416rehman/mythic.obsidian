@@ -31,13 +31,13 @@ struct FAffixesRuntimeReplicatedData {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadWrite)
-    TArray<FRolledAffix> RolledCoreAffixes;
+    TArray<FRolledAffix> RolledCoreAffixes = TArray<FRolledAffix>();
 
     UPROPERTY(BlueprintReadWrite)
-    TArray<FRolledAffix> RolledAffixes;
+    TArray<FRolledAffix> RolledAffixes = TArray<FRolledAffix>();
 
     UPROPERTY(BlueprintReadOnly)
-    UAbilitySystemComponent *ASC;
+    UAbilitySystemComponent *ASC = nullptr;
 };
 
 USTRUCT(BlueprintType)
@@ -61,13 +61,13 @@ struct FAffixesBuildData {
 
     // Core Stats are GUARANTEED to be rolled when this item is instanced
     UPROPERTY(EditDefaultsOnly)
-    TMap<FGameplayAttribute, FRollDefinition> CoreAffixes;
+    TMap<FGameplayAttribute, FRollDefinition> CoreAffixes = TMap<FGameplayAttribute, FRollDefinition>();
 
     // Affixes from this pool will be applied to this item when it is instanced.
     // The amount of affixes on the final item is determined by the "Rarity" of the item.
     // Common = 1; Rare = 2; Epic = 3; Legendary = 4; Exotic = 5;
     UPROPERTY(EditDefaultsOnly)
-    TMap<FGameplayAttribute, FRollDefinition> AffixPoolMap;
+    TMap<FGameplayAttribute, FRollDefinition> AffixPoolMap = TMap<FGameplayAttribute, FRollDefinition>();
 };
 
 
@@ -85,27 +85,27 @@ public:
     /** Designer friendly configuration data that defines this fragment. */
     /** REPLICATED and fields should be BlueprintReadOnly */
     UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties))
-    FAffixesConfig AffixesConfig;
+    FAffixesConfig AffixesConfig = FAffixesConfig();
 
     /** This is used in the OnInstanced method to calculate/fill the rest of the data. */
     /** This should not be replicated or blueprint accessible and safely discarded after being used in the OnInstanced method. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties))
-    FAffixesBuildData AffixesBuildData;
+    FAffixesBuildData AffixesBuildData = FAffixesBuildData();
 
     /** Contains the runtime state of the fragment (replicated to client) */
     /** REPLICATED */
     UPROPERTY(Replicated, BlueprintReadOnly)
-    FAffixesRuntimeReplicatedData AffixesRuntimeReplicatedData;
+    FAffixesRuntimeReplicatedData AffixesRuntimeReplicatedData = FAffixesRuntimeReplicatedData();
 
     /** Contains the runtime client side state of the fragment for use in methods like OnActiveItemClient */
     /** Shouldn't be accessed on server side methods like OnActiveItem. */
     UPROPERTY(BlueprintReadOnly)
-    FAffixesRuntimeClientOnlyData AffixesRuntimeClientOnlyData;
+    FAffixesRuntimeClientOnlyData AffixesRuntimeClientOnlyData = FAffixesRuntimeClientOnlyData();
 
     /** Contains the runtime server-only state of the fragment for use in methods like OnActiveItem */
     /** Shouldn't be accessed on client side methods like OnActiveItemClient. */
     UPROPERTY(BlueprintReadOnly)
-    FAffixesRuntimeServerOnlyData AffixesRuntimeServerOnlyData;
+    FAffixesRuntimeServerOnlyData AffixesRuntimeServerOnlyData = FAffixesRuntimeServerOnlyData();
 
     // Rolls the affixes for this item
     void RollAffixes(int ItemLevel, int Qty);

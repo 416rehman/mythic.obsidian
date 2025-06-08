@@ -46,8 +46,11 @@ public class Mythic : ModuleRules
 			"ControlFlows",
 			"PropertyPath",
 			// EOS
-			"OnlineSubsystem", "OnlineSubsystemUtils", "OnlineSubsystemEOS",
+			"OnlineSubsystem",
+			"OnlineSubsystemUtils",
+			"OnlineSubsystemEOS",
 			"NavigationSystem",
+			"LuaMachine",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
@@ -78,7 +81,7 @@ public class Mythic : ModuleRules
 			"EngineSettings",
 			"DTLSHandlerComponent",
 			"CommonLoadingScreen",
-			"ModelViewViewModel",
+			"ModelViewViewModel"
 		});
 
 		DynamicallyLoadedModuleNames.AddRange(

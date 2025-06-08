@@ -4,6 +4,7 @@
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Mythic.h"
 #include "Mythic/Itemization/Inventory/MythicInventoryComponent.h"
+#include "System/Modding/ModdingSubsystem.h"
 
 UMythicItemInstance *UMythicLootManagerSubsystem::Create(UItemDefinition *item_def, int32 quantity_if_stackable, AController *TargetRecipient, int32 level) {
     // Check if the item definition is valid
@@ -32,6 +33,21 @@ UMythicItemInstance *UMythicLootManagerSubsystem::Create(UItemDefinition *item_d
         ItemInstance->SetOwner(GameState);
     }
     ItemInstance->Initialize(item_def, quantity_if_stackable, level);
+
+    // Call modding hook before dropping
+    if (UModdingSubsystem* ModdingSystem = GetGameInstance()->GetSubsystem<UModdingSubsystem>())
+    {
+        FItemDropHookData HookData = ModdingSystem->CallItemDropHook(item_def, FVector::ZeroVector);
+        
+        if (HookData.bCancelDrop) {
+            UE_LOG(LogTemp, Log, TEXT("Item drop cancelled by mod"));
+            return nullptr;
+        }
+        
+        // Use potentially modified location
+        UE_LOG(Mythic, Warning, TEXT("Item drop hook cancelled. New location: %s"), *HookData.DropLocation.ToString());
+    }
+    
     return ItemInstance;
 }
 

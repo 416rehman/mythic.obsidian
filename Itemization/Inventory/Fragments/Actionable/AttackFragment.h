@@ -14,7 +14,7 @@ struct FAttackRuntimeServerOnlyData {
     GENERATED_BODY()
 
     UPROPERTY()
-    TArray<int> InputBindings;
+    TArray<int> InputBindings = TArray<int>();
 };
 
 USTRUCT(Blueprintable, BlueprintType)
@@ -22,7 +22,7 @@ struct FAttackRuntimeClientOnlyData {
     GENERATED_BODY()
 
     UPROPERTY()
-    TArray<int> InputBindings;
+    TArray<int> InputBindings = TArray<int>();
 };
 
 USTRUCT(Blueprintable, BlueprintType)
@@ -30,13 +30,13 @@ struct FAttackRuntimeReplicatedData {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly)
-    FRolledAttributeSpec RolledDamageSpec;
+    FRolledAttributeSpec RolledDamageSpec = FRolledAttributeSpec();
 
     UPROPERTY()
-    UAbilitySystemComponent *ASC;
+    UAbilitySystemComponent *ASC = nullptr;
 
     UPROPERTY()
-    FGameplayAbilitySpecHandle AbilityHandle;
+    FGameplayAbilitySpecHandle AbilityHandle = FGameplayAbilitySpecHandle();
 };
 
 USTRUCT(Blueprintable, BlueprintType)
@@ -44,7 +44,7 @@ struct FAttackConfig {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
-    TSubclassOf<UGameplayAbility> TriggerAbility;
+    TSubclassOf<UGameplayAbility> TriggerAbility = nullptr;
 
     // The ability will be trigerred with this tag when the attack is executed
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Attack")
@@ -56,7 +56,7 @@ struct FAttackConfig {
 
     // The animation montage to play when this attack is executed
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Attack")
-    UAnimMontage *AttackMontage;
+    UAnimMontage *AttackMontage = nullptr;
 };
 
 USTRUCT(Blueprintable, BlueprintType)
@@ -69,7 +69,7 @@ struct FAttackBuildData {
 
     // damage attribute roll definition - Modifier has no effect (Override is always used)
     UPROPERTY(EditAnywhere)
-    FRollDefinition DamageRollDefinition;
+    FRollDefinition DamageRollDefinition = FRollDefinition();
 };
 
 /**
@@ -85,27 +85,27 @@ public:
     /** Designer friendly configuration data that defines this fragment. */
     /** REPLICATED and fields should be BlueprintReadOnly */
     UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties))
-    FAttackConfig AttackConfig;
+    FAttackConfig AttackConfig = FAttackConfig();
 
     /** This is used in the OnInstanced method to calculate/fill the rest of the data. */
     /** This should not be replicated or blueprint accessible and safely discarded after being used in the OnInstanced method. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties))
-    FAttackBuildData AttackBuildData;
+    FAttackBuildData AttackBuildData = FAttackBuildData();
 
     /** Contains the runtime state of the fragment (replicated to client) */
     /** REPLICATED */
     UPROPERTY(Replicated, BlueprintReadOnly)
-    FAttackRuntimeReplicatedData AttackRuntimeReplicatedData;
+    FAttackRuntimeReplicatedData AttackRuntimeReplicatedData = FAttackRuntimeReplicatedData();
 
     /** Contains the runtime client side state of the fragment for use in methods like OnActiveItemClient */
     /** Shouldn't be accessed on server side methods like OnActiveItem. */
     UPROPERTY(BlueprintReadOnly)
-    FAttackRuntimeClientOnlyData AttackRuntimeClientOnlyData;
+    FAttackRuntimeClientOnlyData AttackRuntimeClientOnlyData = FAttackRuntimeClientOnlyData();
 
     /** Contains the runtime server-only state of the fragment for use in methods like OnActiveItem */
     /** Shouldn't be accessed on client side methods like OnActiveItemClient. */
     UPROPERTY(BlueprintReadOnly)
-    FAttackRuntimeServerOnlyData AttackRuntimeServerOnlyData;
+    FAttackRuntimeServerOnlyData AttackRuntimeServerOnlyData = FAttackRuntimeServerOnlyData();
 
     // Overrides
     virtual bool IsValidFragment(FText &OutErrorMessage) const override;

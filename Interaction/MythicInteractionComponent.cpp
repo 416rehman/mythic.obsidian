@@ -47,7 +47,7 @@ void UMythicInteractionComponent::UpdateUILayerRootWidget(ACommonPlayerControlle
 // Called when the game starts
 void UMythicInteractionComponent::BeginPlay() {
     Super::BeginPlay();
-    
+
     this->OwningController = Cast<ACommonPlayerController>(GetOwner());
     if (!this->OwningController) {
         UE_LOG(Mythic, Error, TEXT("InteractionComponent should only be attached to a CommonPlayerController"));
@@ -85,42 +85,44 @@ void UMythicInteractionComponent::ScanForInteractableActors() {
     auto PlayerForward = this->OwningController->GetPawn()->GetActorForwardVector();
     auto World = GetWorld();
 
-    // Check for interactable actors in a sphere around the owning actor
-    TArray<FHitResult> HitResults;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(this->OwningController);
-    World->SweepMultiByChannel(HitResults, PlayerLoc, PlayerLoc, FQuat::Identity, ECollisionChannel::ECC_Visibility,
-                               FCollisionShape::MakeSphere(InteractionRange), QueryParams);
-
     // If items are within this distance, then use dot product to pick the one closest to the player's forward vector
     auto bestDot = -1.f;
     AActor *bestActor = nullptr;
 
-    // Iterate over all hit results
-    for (auto &hit : HitResults) {
-        auto actor = hit.GetActor();
-        if (!actor) {
-            continue;
-        }
+    // Check for interactable actors in a sphere around the owning actor
+    TArray<FHitResult> HitResults;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this->OwningController);
+    auto HasResults = World->SweepMultiByChannel(HitResults, PlayerLoc, PlayerLoc, FQuat::Identity, ECollisionChannel::ECC_Visibility,
+                                                 FCollisionShape::MakeSphere(InteractionRange), QueryParams);
 
-        // Check if the actor implements the IMythicInteractable interface
-        if (actor->GetClass()->ImplementsInterface(UMythicInteractable::StaticClass())) {
-            auto thisActorLocation = actor->GetActorLocation();
-
-            // If the item is within the distance threshold, then use the dot product to pick the one closest to the player's forward vector
-            auto distance = (thisActorLocation - PlayerLoc).Size();
-            if (distance < InteractionRange) {
-                auto toActor = (thisActorLocation - PlayerLoc).GetSafeNormal();
-                auto dot = FVector::DotProduct(PlayerForward, toActor);
-                if (dot > bestDot) {
-                    bestDot = dot;
-                    bestActor = actor;
-                }
+    if (HasResults) {
+        // Iterate over all hit results
+        for (auto &hit : HitResults) {
+            auto actor = hit.GetActor();
+            if (!actor) {
+                continue;
             }
-            else {
-                // If the item is outside the distance threshold, then just pick the closest one
-                if (!bestActor || distance < (bestActor->GetActorLocation() - PlayerLoc).Size()) {
-                    bestActor = actor;
+
+            // Check if the actor implements the IMythicInteractable interface
+            if (actor->GetClass()->ImplementsInterface(UMythicInteractable::StaticClass())) {
+                auto thisActorLocation = actor->GetActorLocation();
+
+                // If the item is within the distance threshold, then use the dot product to pick the one closest to the player's forward vector
+                auto distance = (thisActorLocation - PlayerLoc).Size();
+                if (distance < InteractionRange) {
+                    auto toActor = (thisActorLocation - PlayerLoc).GetSafeNormal();
+                    auto dot = FVector::DotProduct(PlayerForward, toActor);
+                    if (dot > bestDot) {
+                        bestDot = dot;
+                        bestActor = actor;
+                    }
+                }
+                else {
+                    // If the item is outside the distance threshold, then just pick the closest one
+                    if (!bestActor || distance < (bestActor->GetActorLocation() - PlayerLoc).Size()) {
+                        bestActor = actor;
+                    }
                 }
             }
         }

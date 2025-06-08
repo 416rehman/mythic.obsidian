@@ -87,4 +87,6 @@ public:
     // Algorithm to determine the number of hits till destruction - MUST OVERRIDE IN BLUEPRINT
     UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MythicResource")
     int32 CalculateHitsTillDestruction();
+
+    virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty> &OutLifetimeProps) const override;
 };

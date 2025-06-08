@@ -32,7 +32,6 @@ bool UFamilyDefinition::SetFamilyForNPCDef(const TSoftObjectPtr<UNPCDefinition> 
 
         FSavePackageArgs SaveArgs;
         SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-        SaveArgs.SaveFlags = SAVE_KeepGUID;
         UPackage::SavePackage(Package, LoadedMember,
                               *FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension()), SaveArgs);
     }

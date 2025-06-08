@@ -9,6 +9,8 @@
 #include "GameFramework/Actor.h"
 #include "MythicEnvironmentController.generated.h"
 
+class UExponentialHeightFogComponent;
+class USkyAtmosphereComponent;
 class ASkyAtmosphere;
 class AExponentialHeightFog;
 
@@ -123,11 +125,11 @@ private:
 
     // The actual component of the height fog actor in the scene
     UPROPERTY()
-    UExponentialHeightFogComponent *FogComponent;
+    UExponentialHeightFogComponent *FogComponent = nullptr;
 
     // The actual component of the sky atmosphere actor in the scene
     UPROPERTY()
-    USkyAtmosphereComponent *SkyAtmosphereComponent;
+    USkyAtmosphereComponent *SkyAtmosphereComponent = nullptr;
 
     // Inlined so we skip the function call overhead
     inline void TimeTick();

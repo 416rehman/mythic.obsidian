@@ -24,7 +24,7 @@ struct FConsumableActionRuntimeReplicatedData {
 
     // Cache the ASC for the player
     UPROPERTY(BlueprintReadOnly)
-    UAbilitySystemComponent *ASC;
+    UAbilitySystemComponent *ASC = nullptr;
 };
 
 USTRUCT(Blueprintable, BlueprintType)
@@ -33,16 +33,16 @@ struct FConsumableActionConfig {
 
     // The tag to add to the player ASC when the item is consumed
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tags")
-    FGameplayTagContainer TagsToAdd;
+    FGameplayTagContainer TagsToAdd = FGameplayTagContainer();
 
     // The tag to remove from the player ASC when the item is consumed
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tags")
-    FGameplayTagContainer TagsToRemove;
+    FGameplayTagContainer TagsToRemove = FGameplayTagContainer();
 
     // The Gameplay ability to grant to the player ASC when the item is consumed
     // To activate the ability on grant, consider using a Passive ability
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Abilities")
-    TSoftClassPtr<UGameplayAbility> GameplayAbility;
+    TSoftClassPtr<UGameplayAbility> GameplayAbility = nullptr;
 
     // Should we remove the ability instead of granting it
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Abilities")
@@ -50,7 +50,7 @@ struct FConsumableActionConfig {
 
     // The gameplay event to trigger when the item is consumed
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay Events")
-    FGameplayTag EventTag;
+    FGameplayTag EventTag = FGameplayTag();
 };
 
 USTRUCT(Blueprintable, BlueprintType)
@@ -75,27 +75,27 @@ public:
     /** Designer friendly configuration data that defines this fragment. */
     /** REPLICATED and fields should be BlueprintReadOnly */
     UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties))
-    FConsumableActionConfig ConsumableActionConfig;
+    FConsumableActionConfig ConsumableActionConfig = FConsumableActionConfig();
 
     /** This is used in the OnInstanced method to calculate/fill the rest of the data. */
     /** This should not be replicated or blueprint accessible and safely discarded after being used in the OnInstanced method. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties))
-    FConsumableActionBuildData ConsumableActionBuildData;
+    FConsumableActionBuildData ConsumableActionBuildData = FConsumableActionBuildData();
 
     /** Contains the runtime state of the fragment (replicated to client) */
     /** REPLICATED */
     UPROPERTY(Replicated, BlueprintReadOnly)
-    FConsumableActionRuntimeReplicatedData ConsumableActionRuntimeReplicatedData;
+    FConsumableActionRuntimeReplicatedData ConsumableActionRuntimeReplicatedData = FConsumableActionRuntimeReplicatedData();
 
     /** Contains the runtime client side state of the fragment for use in methods like OnActiveItemClient */
     /** Shouldn't be accessed on server side methods like OnActiveItem. */
     UPROPERTY(BlueprintReadOnly)
-    FConsumableActionRuntimeClientOnlyData ConsumableActionRuntimeClientOnlyData;
+    FConsumableActionRuntimeClientOnlyData ConsumableActionRuntimeClientOnlyData = FConsumableActionRuntimeClientOnlyData();
 
     /** Contains the runtime server-only state of the fragment for use in methods like OnActiveItem */
     /** Shouldn't be accessed on client side methods like OnActiveItemClient. */
     UPROPERTY(BlueprintReadOnly)
-    FConsumableActionRuntimeServerOnlyData ConsumableActionRuntimeServerOnlyData;
+    FConsumableActionRuntimeServerOnlyData ConsumableActionRuntimeServerOnlyData = FConsumableActionRuntimeServerOnlyData();
 
     virtual void OnClientActionEnd(UMythicItemInstance *ItemInstance) override;
 

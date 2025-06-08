@@ -14,23 +14,23 @@ struct FTrackedDestructibleData : public FFastArraySerializerItem {
 
     // The actor owning the component with the ResourceType tag
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Resource")
-    AActor *Actor;
+    AActor *Actor = nullptr;
 
     // The transform of the resource
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Resource")
-    FTransform Transform;
+    FTransform Transform = FTransform::Identity;
 
     // Hits till destruction
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Resource")
-    int32 HitsTillDestruction;
+    int32 HitsTillDestruction = 1;
 
     // Tags
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Resource")
-    FGameplayTag DestructibleType;
+    FGameplayTag DestructibleType = FGameplayTag();
 
     // Instance Id
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Resource")
-    int32 InstanceId;
+    int32 InstanceId = -1;
 
     void PreReplicatedRemove(const struct FTrackedDestructibleDataArray &InArraySerializer);
     void PostReplicatedAdd(const struct FTrackedDestructibleDataArray &InArraySerializer);
@@ -41,7 +41,7 @@ USTRUCT(BlueprintType)
 struct FTrackedDestructibleDataArray : public FFastArraySerializer {
     GENERATED_BODY()
     UPROPERTY()
-    TArray<FTrackedDestructibleData> Items;
+    TArray<FTrackedDestructibleData> Items = TArray<FTrackedDestructibleData>();
 
     /** Step 4: Copy this, replace example with your names */
     bool NetDeltaSerialize(FNetDeltaSerializeInfo &DeltaParms) {
@@ -63,7 +63,7 @@ class MYTHIC_API UMythicDestructiblesManagerComponent : public UActorComponent {
 
     // Fast Array Serializer
     UPROPERTY(ReplicatedUsing=OnRep_TrackedResources)
-    FTrackedDestructibleDataArray TrackedResources;
+    FTrackedDestructibleDataArray TrackedResources = FTrackedDestructibleDataArray();
 
     // OnRep_TrackedResources
     UFUNCTION()

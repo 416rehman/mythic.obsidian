@@ -23,3 +23,4 @@ IMPLEMENT_PRIMARY_GAME_MODULE(FMythicGameModule, Mythic, "Mythic");
 
 DEFINE_LOG_CATEGORY(Mythic)
 DEFINE_LOG_CATEGORY(Mythic_Environment)
+DEFINE_LOG_CATEGORY(Mythic_Mods)
