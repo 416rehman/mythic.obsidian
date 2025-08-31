@@ -9,32 +9,35 @@
 
 
 void FTrackedDestructibleData::PreReplicatedRemove(const struct FTrackedDestructibleDataArray &InArraySerializer) {
+    UE_LOG(Mythic, Log, TEXT("FTrackedDestructibleData::PreReplicatedRemove"));
     // Spawn the resource back up
-    if (this->HitsTillDestruction <= 0) {}
-
-    UE_LOG(Mythic, Warning, TEXT("PreReplicatedRemove"));
+    if (this->HitsTillDestruction <= 0) {
+        return;
+    }
 }
 
 void FTrackedDestructibleData::PostReplicatedAdd(const struct FTrackedDestructibleDataArray &InArraySerializer) {
+    UE_LOG(Mythic, Log, TEXT("FTrackedDestructibleData::PostReplicatedAdd"));
+
     // Update the resource
     if (this->HitsTillDestruction <= 0) {
         return;
     }
-
-    UE_LOG(Mythic, Warning, TEXT("PostReplicatedAdd"));
 }
 
 void FTrackedDestructibleData::PostReplicatedChange(const struct FTrackedDestructibleDataArray &InArraySerializer) {
+    UE_LOG(Mythic, Log, TEXT("FTrackedDestructibleData::PostReplicatedChange"));
+
     // Update the resource
     if (this->HitsTillDestruction <= 0) {
         return;
     }
-
-    UE_LOG(Mythic, Warning, TEXT("PostReplicatedChange"));
 }
 
 
 void UMythicDestructiblesManagerComponent::OnRep_TrackedResources() const {
+    UE_LOG(Mythic, Log, TEXT("UMythicDestructiblesManagerComponent::OnRep_TrackedResources"));
+
     // Synchronize state
     SyncResourcesState(TrackedResources.Items);
 }
@@ -48,10 +51,16 @@ UMythicDestructiblesManagerComponent::UMythicDestructiblesManagerComponent() {
     SetIsReplicatedByDefault(true);
 }
 
+// Authority Only - Transform is only used for restoring purposes
 void UMythicDestructiblesManagerComponent::AddOrUpdateResource(AActor *Actor, FTransform Transform, int32 HitsTillDestruction, FGameplayTag DestructibleTag,
                                                                int32 InstanceId) {
+    if (!this->GetOwner()->HasAuthority()) {
+        return;
+    }
+    
     auto found_item = this->TrackedResources.Items.FindByPredicate([&](FTrackedDestructibleData &TrackedResource) {
-        return TrackedResource.Transform.GetLocation() == Transform.GetLocation();
+        // return TrackedResource.Transform.GetLocation() == Transform.GetLocation();
+        return TrackedResource.Actor == Actor && TrackedResource.InstanceId == InstanceId && TrackedResource.DestructibleType == DestructibleTag;
     });
 
     if (found_item) {

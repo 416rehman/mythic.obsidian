@@ -93,34 +93,41 @@ int UMythicResourceStaticMeshComponent::InitializeHitsTillDestruction_Implementa
 }
 
 void UMythicResourceStaticMeshComponent::SetHitsTillDestruction(int32 InstanceIndex, int32 NewHitsTillDestruction, FTransform Transform) {
+    UE_LOG(Mythic, Log, TEXT("SetHitsTillDestruction: InstanceIndex=%d, NewHitsTillDestruction=%d"), InstanceIndex, NewHitsTillDestruction);
     if (NewHitsTillDestruction < 0) {
         return;
     }
 
     // If the instance is not in the map, calculate the hits till destruction and add it to the map
     if (!ResourceData.Contains(InstanceIndex)) {
-        ResourceData.Add(InstanceIndex, FResourceInstanceData{
-                             InitializeHitsTillDestruction(Transform.GetScale3D().Z)
-                         });
+        auto NewHits = InitializeHitsTillDestruction(Transform.GetScale3D().Z);
+        UE_LOG(Mythic, Log, TEXT("SetHitsTillDestruction: Initializing new tracked resource instance with %d hits"), NewHits);
+        ResourceData.Add(InstanceIndex, FResourceInstanceData{NewHits});
     }
 
     auto ResourceInstance = ResourceData.Find(InstanceIndex);
     if (!ResourceInstance) {
+        UE_LOG(Mythic, Warning, TEXT("SetHitsTillDestruction: Failed to find tracked resource instance for index %d"), InstanceIndex);
         return;
     }
 
     if (ResourceInstance->HitsTillDestruction == NewHitsTillDestruction) {
+        UE_LOG(Mythic, Log, TEXT("SetHitsTillDestruction: No change in hits till destruction for instance index %d"), InstanceIndex);
         return;
     }
 
     // Update the hits till destruction
     ResourceInstance->HitsTillDestruction = NewHitsTillDestruction;
+    UE_LOG(Mythic, Log, TEXT("SetHitsTillDestruction: Updated hits till destruction for instance index %d to %d"), InstanceIndex,
+           ResourceInstance->HitsTillDestruction);
 
     // Check if the resource is destroyed
     bool IsDestroyed = ResourceInstance->HitsTillDestruction <= 0;
 
     // If the resource is destroyed, remove it from the map
-    if (IsDestroyed) {
+    if (IsDestroyed && InstanceIndex >= 0) {
+        UE_LOG(Mythic, Log, TEXT("SetHitsTillDestruction: Destroying resource instance index %d because hits till destruction is %d"), InstanceIndex,
+               ResourceInstance->HitsTillDestruction);
         ResourceData.Remove(InstanceIndex);
 
         // Draw Debug sphere at this instance index location
@@ -130,6 +137,10 @@ void UMythicResourceStaticMeshComponent::SetHitsTillDestruction(int32 InstanceIn
 
         // Remove the instance from the component
         RemoveInstance(InstanceIndex);
+    }
+    else {
+        UE_LOG(Mythic, Log, TEXT("SetHitsTillDestruction: Resource instance index %d has %d hits remaining"), InstanceIndex,
+               ResourceInstance->HitsTillDestruction);
     }
 }
 
@@ -149,6 +160,7 @@ FRewardsToGive UMythicResourceStaticMeshComponent::GetOnKillRewards(AActor *Kill
 }
 
 void SyncResourcesState(const TArray<FTrackedDestructibleData> &TrackedResources) {
+    UE_LOG(Mythic, Log, TEXT("SyncResourcesState: Syncing %d resources"), TrackedResources.Num());
     // For each of these data items, do a trace and remove
     for (auto Resource : TrackedResources) {
         // Check if actor is same as hit result
@@ -158,18 +170,29 @@ void SyncResourcesState(const TArray<FTrackedDestructibleData> &TrackedResources
 
         auto comps = Resource.Actor->GetComponents();
         for (auto Comp : comps) {
-            UE_LOG(LogTemp, Warning, TEXT("%s"), *Comp->GetName());
+            UE_LOG(Mythic, Log, TEXT("SyncResourcesState: Checking component %s"), *Comp->GetName());
 
             // Cast to UMythicResourceStaticMeshComponent
             auto ResourceComponent = Cast<UMythicResourceStaticMeshComponent>(Comp);
             if (!ResourceComponent) {
+                UE_LOG(Mythic, Warning, TEXT("SyncResourcesState: Component %s is not a UMythicResourceStaticMeshComponent"), *Comp->GetName());
                 continue;
             }
 
-            if (ResourceComponent->ResourceType == Resource.DestructibleType) {
-                auto InstanceIndex = ResourceComponent->GetInstanceIndexForId(FPrimitiveInstanceId(Resource.InstanceId));
-                ResourceComponent->SetHitsTillDestruction(InstanceIndex, Resource.HitsTillDestruction, Resource.Transform);
+            if (ResourceComponent->ResourceType != Resource.DestructibleType) {
+                UE_LOG(Mythic, Warning, TEXT("SyncResourcesState: Resource type mismatch: %s != %s"), *ResourceComponent->ResourceType.ToString(),
+                       *Resource.DestructibleType.ToString());
             }
+
+            auto InstanceIndex = ResourceComponent->GetInstanceIndexForId(FPrimitiveInstanceId(Resource.InstanceId));
+            UE_LOG(Mythic, Log, TEXT("SyncResourcesState: Instance index %d"), InstanceIndex);
+
+            if (InstanceIndex < 0) {
+                UE_LOG(Mythic, Warning, TEXT("SyncResourcesState: Instance index not found for id %d"), Resource.InstanceId);
+                continue;
+            }
+
+            ResourceComponent->SetHitsTillDestruction(InstanceIndex, Resource.HitsTillDestruction, Resource.Transform);
         }
     }
 }

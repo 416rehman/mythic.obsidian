@@ -57,7 +57,7 @@ private:
     virtual int CalculateHitsLeft(int32 InstanceIndex, AActor *DamageCauser, float Damage) override;
     virtual FGameplayTag GetDestructibleType() override;
 
-    // Keeps track of the data for each instance of the resource
+    // Keeps track of the data for each instance of the resource - Key is InstanceIndex (NOT INSTANCE ID)
     TMap<int32, FResourceInstanceData> ResourceData;
 };
 

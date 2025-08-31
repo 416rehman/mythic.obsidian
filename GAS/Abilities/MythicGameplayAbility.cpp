@@ -67,10 +67,7 @@ void UMythicGameplayAbility::SendEvent(FGameplayAbilityTargetDataHandle TargetDa
     UE_LOG(Mythic, Warning, TEXT("BeforeDamage event sent to source %d abilities"), activations);
 }
 
-TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainerSpec(const FMythicDamageContainerSpec &ContainerSpec) {
-    UAbilitySystemComponent* const AbilitySystemComponent = CurrentActorInfo->AbilitySystemComponent.Get();
-    FScopedPredictionWindow NewScopedWindow(AbilitySystemComponent, true);
-    
+TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainerSpec(const FMythicDamageContainerSpec &ContainerSpec) {    
     TArray<FActiveGameplayEffectHandle> AllEffects;
 
     // 1. CREATE DAMAGE CONTEXT - This stage only sets the context like isCritical, isBlocked, etc. No damage is calculated yet.
@@ -79,6 +76,10 @@ TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainer
     }
     auto CalculationEffectHandle = K2_ApplyGameplayEffectSpecToOwner(ContainerSpec.DamageCalculationEffectSpec);
     AllEffects.Push(CalculationEffectHandle);
+
+    // Scoped prediction window for the damage application
+    UAbilitySystemComponent* const AbilitySystemComponent = CurrentActorInfo->AbilitySystemComponent.Get();
+    FScopedPredictionWindow NewScopedWindow(AbilitySystemComponent, true);
 
     // 2. SEND DAMAGE PRE EVENT
     if (ContainerSpec.TargetsHandle.Num() > 0) {
