@@ -50,7 +50,6 @@ public class Mythic : ModuleRules
 			"OnlineSubsystemUtils",
 			"OnlineSubsystemEOS",
 			"NavigationSystem",
-			"LuaMachine",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
