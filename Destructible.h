@@ -4,7 +4,7 @@
 #include "Rewards/RewardBase.h"
 #include "Destructible.generated.h"
 
-class UMythicDestructiblesManagerComponent;
+class UMythicResourceManagerComponent;
 // This class does not need to be modified.
 UINTERFACE(NotBlueprintable, MinimalAPI)
 class UDestructible : public UInterface {
@@ -20,11 +20,4 @@ class MYTHIC_API IDestructible {
 public:
     // The rewards to give to the player when they kill this actor.
     virtual FRewardsToGive GetOnKillRewards(AActor *Killer = nullptr) = 0;
-
-    // CalculateHitsLeft: Returns hits till destruction. If returns 0, the actor is destroyed, and should call "Destruct()".
-    UFUNCTION(BlueprintCallable)
-    virtual int CalculateHitsLeft(int32 InstanceIndex, AActor *DamageCauser, float Damage = 1) = 0;
-
-    UFUNCTION(BlueprintCallable)
-    virtual FGameplayTag GetDestructibleType() = 0;
 };

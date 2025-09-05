@@ -2,6 +2,7 @@
 #include "MythicPlayerController.h"
 #include "MythicPlayerState.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Net/UnrealNetwork.h"
 
 AMythicCharacter::AMythicCharacter() {

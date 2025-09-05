@@ -77,10 +77,10 @@ public:
     friend class ACraftingStation;
 
     /// Resource Sync with Server
-    UFUNCTION(BlueprintCallable, Category = "Resource Sync", Server, Reliable)
-    void Server_RequestDestructiblesState();
-
-    // Sync resources to owner
-    UFUNCTION(BlueprintCallable, Category = "Resource Sync", Client, Reliable)
-    void Client_RecvDestructiblesState(const TArray<FTrackedDestructibleData> &DestructibleData);
+    // UFUNCTION(BlueprintCallable, Category = "Resource Sync", Server, Reliable)
+    // void Server_RequestDestructiblesState();
+    //
+    // // Sync resources to owner
+    // UFUNCTION(BlueprintCallable, Category = "Resource Sync", Client, Reliable)
+    // void Client_RecvDestructiblesState(const TArray<FTrackedDestructibleData> &DestructibleData);
 };

@@ -86,7 +86,7 @@ FItemDropHookData UModdingSubsystem::CallItemDropHook(UItemDefinition *Item, FVe
         Args.Add(LocationY);
         Args.Add(LocationZ);
 
-        // Call the Lua function
+        // Call the Lua function - it should return a boolean indicating whether to cancel the drop
         FLuaValue ReturnValue;
         if (MythicLuaState->Call(4, ReturnValue, 1)) {
             // Check if the function returned false to cancel the drop

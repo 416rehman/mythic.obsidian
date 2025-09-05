@@ -10,7 +10,7 @@
 #include "MythicGameState.generated.h"
 
 struct FTrackedDestructibleDataArray;
-class UMythicDestructiblesManagerComponent;
+class UMythicResourceManagerComponent;
 class URewardManager;
 class UWorldTierAttributes;
 /**
@@ -32,7 +32,7 @@ protected:
 
     // Resource Manager Component - Used to track instanced static mesh based resources
     UPROPERTY(Blueprintable, BlueprintReadOnly, Replicated, VisibleAnywhere, Category = "Mythic")
-    TObjectPtr<UMythicDestructiblesManagerComponent> DestructiblesManagerComponent;
+    TObjectPtr<UMythicResourceManagerComponent> ResourceManagerComponent;
 
     // Array of World Attributes Initialization Effects - Index 0 is the lowest tier, index 1 is the next tier, etc.
     UPROPERTY(EditDefaultsOnly, Category = "Mythic")

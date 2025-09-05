@@ -18,8 +18,8 @@ AMythicGameState::AMythicGameState(const FObjectInitializer &ObjectInitializer) 
     AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
 
     // Resource Manager Component
-    DestructiblesManagerComponent = CreateDefaultSubobject<UMythicDestructiblesManagerComponent>(TEXT("DestructiblesManagerComponent"));
-    DestructiblesManagerComponent->SetIsReplicated(true);
+    ResourceManagerComponent = CreateDefaultSubobject<UMythicResourceManagerComponent>(TEXT("ResourceManagerComponent"));
+    ResourceManagerComponent->SetIsReplicated(true);
 
     // Initialize the World Tier Attributes
     WorldTierAttributes = CreateDefaultSubobject<UWorldTierAttributes>(TEXT("WorldTierAttributes"));
@@ -88,9 +88,9 @@ void AMythicGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &Out
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
     DOREPLIFETIME(AMythicGameState, AbilitySystemComponent);
-    DOREPLIFETIME(AMythicGameState, DestructiblesManagerComponent);
+    DOREPLIFETIME(AMythicGameState, ResourceManagerComponent);
 }
 
 TArray<FTrackedDestructibleData> AMythicGameState::GetTrackedDestructibles() const {
-    return this->DestructiblesManagerComponent->GetTrackedDestructibles();
+    return this->ResourceManagerComponent->GetTrackedDestructibles();
 }

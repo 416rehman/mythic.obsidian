@@ -10,7 +10,7 @@
 #include "Interfaces/OnlineIdentityInterface.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Proficiency/ProficiencyComponent.h"
-#include "Resources/MythicResourceStaticMeshComponent.h"
+#include "Resources/MythicResourceISM.h"
 
 AMythicPlayerController::AMythicPlayerController() {
     bShowMouseCursor = true;
@@ -47,9 +47,9 @@ void AMythicPlayerController::OnRep_PlayerState() {
     Super::OnRep_PlayerState();
 
     // Request Destructibles State
-    if (this->IsLocalPlayerController()) {
-        Server_RequestDestructiblesState();
-    }
+    // if (this->IsLocalPlayerController()) {
+    //     Server_RequestDestructiblesState();
+    // }
 
     OnPossessedOnClient();
 }
@@ -170,22 +170,22 @@ const UMythicInventoryComponent *AMythicPlayerController::GetHotbar() const {
     return Hotbar;
 }
 
-void AMythicPlayerController::Client_RecvDestructiblesState_Implementation(const TArray<FTrackedDestructibleData> &DestructibleData) {
-    // Clear the timer
-    UE_LOG(Mythic, Log, TEXT("Destructibles State Received for %d Items"), DestructibleData.Num());
-    SyncResourcesState(DestructibleData);
-}
-
-void AMythicPlayerController::Server_RequestDestructiblesState_Implementation() {
-    // Get Mythic Game State
-    auto GameState = this->GetWorld()->GetGameStateChecked<AMythicGameState>();
-    checkf(GameState, TEXT("GameState is invalid"))
-
-    // Send to owning client
-    auto Data = GameState->GetTrackedDestructibles();
-    Client_RecvDestructiblesState(Data);
-    UE_LOG(Mythic, Log, TEXT("Destructibles State Sent for %d Items"), Data.Num());
-}
+// void AMythicPlayerController::Client_RecvDestructiblesState_Implementation(const TArray<FTrackedDestructibleData> &DestructibleData) {
+//     // Clear the timer
+//     UE_LOG(Mythic, Log, TEXT("Destructibles State Received for %d Items"), DestructibleData.Num());
+//     HandleResourceDestruction(DestructibleData);
+// }
+//
+// void AMythicPlayerController::Server_RequestDestructiblesState_Implementation() {
+//     // Get Mythic Game State
+//     auto GameState = this->GetWorld()->GetGameStateChecked<AMythicGameState>();
+//     checkf(GameState, TEXT("GameState is invalid"))
+//
+//     // Send to owning client
+//     auto Data = GameState->GetTrackedDestructibles();
+//     Client_RecvDestructiblesState(Data);
+//     UE_LOG(Mythic, Log, TEXT("Destructibles State Sent for %d Items"), Data.Num());
+// }
 
 void AMythicPlayerController::SetupInputComponent() {
     // set up gameplay key bindings
