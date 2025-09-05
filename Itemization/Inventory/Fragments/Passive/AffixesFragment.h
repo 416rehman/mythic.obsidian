@@ -127,7 +127,9 @@ public:
     }
 
     //~ Overrides
+#if WITH_EDITOR
     virtual bool IsValidFragment(FText &OutErrorMessage) const override;
+#endif
     virtual void OnInstanced(UMythicItemInstance *Instance) override;
     virtual void OnItemActivated(UMythicItemInstance *ItemInstance) override;
     virtual void OnItemDeactivated(UMythicItemInstance *ItemInstance) override;

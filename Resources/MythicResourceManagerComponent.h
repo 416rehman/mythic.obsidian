@@ -56,8 +56,8 @@ struct FTrackedDestructibleData : public FFastArraySerializerItem {
 
         FVector Start = Transform.GetLocation() + FVector(0, 0, 500);
         FVector End = Transform.GetLocation() - FVector(0, 0, 500);
-        DrawDebugLine(World, Start, End, FColor::Cyan, true, 10.0f,1, 5.0f);
-        
+        DrawDebugLine(World, Start, End, FColor::Cyan, true, 10.0f, 1, 5.0f);
+
         FCollisionQueryParams Params;
         Params.bReturnPhysicalMaterial = false;
         Params.bTraceComplex = false;
@@ -109,7 +109,10 @@ struct FTrackedDestructibleDataArray : public FFastArraySerializer {
     UPROPERTY()
     TArray<FTrackedDestructibleData> Items = TArray<FTrackedDestructibleData>();
 
-    /** Step 4: Copy this, replace example with your names */
+    // Store reference to the owning component
+    UPROPERTY(NotReplicated)
+    TWeakObjectPtr<UMythicResourceManagerComponent> OwnerComponent;
+
     bool NetDeltaSerialize(FNetDeltaSerializeInfo &DeltaParms) {
         return FastArrayDeltaSerialize<FTrackedDestructibleData, FTrackedDestructibleDataArray>(Items, DeltaParms, *this);
     }
@@ -117,6 +120,11 @@ struct FTrackedDestructibleDataArray : public FFastArraySerializer {
     void PreReplicatedRemove(const TArrayView<int32> &RemovedIndices, int32 FinalSize);
     void PostReplicatedAdd(const TArrayView<int32> &AddedIndices, int32 FinalSize);
     void PostReplicatedChange(const TArrayView<int32> &ChangedIndices, int32 FinalSize);
+    
+    // Helper function to get the owner safely
+    UMythicResourceManagerComponent* GetOwnerComponent() const {
+        return OwnerComponent.IsValid() ? OwnerComponent.Get() : nullptr;
+    }
 };
 
 template <>
@@ -187,6 +195,6 @@ public:
     TArray<FTrackedDestructibleData> GetTrackedDestructibles() const;
 
     // Used for handling destruction of resources after they are added to the destroyed resources array
-    static void HandleResourceDestruction(const TArray<FTrackedDestructibleData>& DestroyedResources, UWorld* World);
-    static void HandleResourceRespawn(const TArray<FTrackedDestructibleData>& RespawnedResources, UWorld* World);
+    static void HandleResourceDestruction(const TArray<FTrackedDestructibleData> &DestroyedResources, UWorld *World);
+    static void HandleResourceRespawn(const TArray<FTrackedDestructibleData> &RespawnedResources, UWorld *World);
 };

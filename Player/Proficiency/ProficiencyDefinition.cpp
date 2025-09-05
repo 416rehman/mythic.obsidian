@@ -63,7 +63,7 @@ float UProficiencyDefinition::CalcXPRemainingForLevel(float CurrentXP, int32 Tar
     float RequiredXP = CalcCumulativeXPForLevel(TargetLevel, Def);
     return FMath::Max(RequiredXP - CurrentXP, 0.0f);
 }
-
+#if WITH_EDITOR
 FString UProficiencyDefinition::GetProgressionBreakdown() const {
     // Warn on high growth rates.
     if (GrowthRate > 1.4f) {
@@ -157,3 +157,5 @@ void UProficiencyDefinition::PostEditChangeProperty(FPropertyChangedEvent &Prope
     Super::PostEditChangeProperty(PropertyChangedEvent);
     UE_LOG(Mythic, Log, TEXT("%s"), *GetProgressionBreakdown());
 }
+
+#endif

@@ -40,7 +40,9 @@ public:
     TArray<uint32> InputBindings;
 
     /** Fragment Overrides */
+#if WITH_EDITOR
     virtual bool IsValidFragment(FText &OutErrorMessage) const override;
+#endif
     virtual void OnClientItemActivated(UMythicItemInstance *ItemInstance) override;
     virtual void OnClientItemDeactivated(UMythicItemInstance *ItemInstance) override;
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;

@@ -77,7 +77,7 @@ void UAffixesFragment::RollCoreAffixes(int ItemLevel) {
         this->AffixesRuntimeReplicatedData.RolledCoreAffixes.Add(FRolledAffix(Attribute, ItemLevel, RollDef, true));
     }
 }
-
+#if WITH_EDITOR
 bool UAffixesFragment::IsValidFragment(FText &OutErrorMessage) const {
     auto AffixPoolMap = this->AffixesBuildData.AffixPoolMap;
     auto CoreAffixes = this->AffixesBuildData.CoreAffixes;
@@ -110,6 +110,7 @@ bool UAffixesFragment::IsValidFragment(FText &OutErrorMessage) const {
 
     return Super::IsValidFragment(OutErrorMessage);
 }
+#endif
 
 void UAffixesFragment::OnInstanced(UMythicItemInstance *Instance) {
     Super::OnInstanced(Instance);

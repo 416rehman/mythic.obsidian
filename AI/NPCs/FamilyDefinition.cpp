@@ -5,11 +5,11 @@
 
 #include "Mythic.h"
 
-#ifdef WITH_EDITOR
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/ObjectSaveContext.h"
 #include "UObject/SavePackage.h"
 
+#if WITH_EDITOR
 bool UFamilyDefinition::SetFamilyForNPCDef(const TSoftObjectPtr<UNPCDefinition> MemberAsset, const UFamilyDefinition *NewFam) {
     if (!MemberAsset.IsValid()) {
         return false;

@@ -7,6 +7,7 @@
 
 class AMythicGameState;
 
+#if WITH_EDITOR
 bool UAttackFragment::IsValidFragment(FText &OutErrorMessage) const {
     if (!this->AttackConfig.TriggerAbility) {
         OutErrorMessage = FText::FromString("AttackFragment: TriggerAbility is not set");
@@ -34,6 +35,7 @@ bool UAttackFragment::IsValidFragment(FText &OutErrorMessage) const {
 
     return Super::IsValidFragment(OutErrorMessage);
 }
+#endif
 
 void UAttackFragment::OnInstanced(UMythicItemInstance *Instance) {
     Super::OnInstanced(Instance);

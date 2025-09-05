@@ -4,6 +4,7 @@
 #include "AbilitySystemComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 
+#if WITH_EDITOR
 bool UTalentFragment::IsValidFragment(FText &OutErrorMessage) const {
     auto TalentDef = this->TalentBuildData.TalentPool;
 
@@ -21,7 +22,7 @@ bool UTalentFragment::IsValidFragment(FText &OutErrorMessage) const {
 
     return Super::IsValidFragment(OutErrorMessage);
 }
-
+#endif
 void UTalentFragment::RollTalents(UTalentPool *TalentPool, int NumTalentsToRoll) {
     // In case, there are not enough talents to add, or the item level is too low, clamp to however many affixes there are.
     int ClampedQty = FMath::Min(NumTalentsToRoll, TalentPool->TalentDefs.Num());

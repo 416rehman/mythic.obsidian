@@ -1,7 +1,7 @@
 #include "ActionableItemFragment.h"
 
 #include "EnhancedInputComponent.h"
-
+#if WITH_EDITOR
 bool UActionableItemFragment::IsValidFragment(FText &OutErrorMessage) const {
     if (!this->InputAction) {
         OutErrorMessage = FText::FromString("ActionableItemFragment: InputAction is not set");
@@ -10,6 +10,7 @@ bool UActionableItemFragment::IsValidFragment(FText &OutErrorMessage) const {
 
     return Super::IsValidFragment(OutErrorMessage);
 }
+#endif
 
 void UActionableItemFragment::OnClientItemActivated(UMythicItemInstance *ItemInstance) {
     if (!InputAction) {

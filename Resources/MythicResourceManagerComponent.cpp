@@ -39,7 +39,7 @@ void FTrackedDestructibleDataArray::PostReplicatedAdd(const TArrayView<int32> &A
         }
     }
 
-    auto Owner = this->OwningObject;
+    auto Owner = this->GetOwnerComponent();
     if (!Owner) {
         UE_LOG(Mythic, Error, TEXT("FTrackedDestructibleData::PostReplicatedAdd: OwningObject is null"));
         return;
@@ -65,7 +65,7 @@ void FTrackedDestructibleDataArray::PostReplicatedChange(const TArrayView<int32>
         }
     }
 
-    auto Owner = this->OwningObject;
+    auto Owner = this->GetOwnerComponent();
     if (!Owner) {
         UE_LOG(Mythic, Error, TEXT("FTrackedDestructibleData::PostReplicatedChange: OwningObject is null"));
         return;
@@ -268,6 +268,9 @@ void UMythicResourceManagerComponent::AddToDestroyedResources(FTrackedDestructib
 // Called when the game starts
 void UMythicResourceManagerComponent::BeginPlay() {
     Super::BeginPlay();
+
+    // Set owner of DestroyedResources for replication callbacks
+    DestroyedResources.OwnerComponent = this;
 
     // Only server runs the batch respawn system
     if (GetOwner()->HasAuthority()) {
