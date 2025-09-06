@@ -48,8 +48,11 @@ void UMythicResourceISM::BeginPlay() {
     }
 }
 
+
+// Updated MythicResourceISM.cpp implementation
 void UMythicResourceISM::DestroyResource(int32 InstanceId, FTransform Transform, bool UpdateRender) {
-    UE_LOG(Mythic, Log, TEXT("MarkResourceAsDestroyed: InstanceId=%d, Component=%s, Owner=%s"), InstanceId, *GetName(), *GetOwner()->GetName());
+    UE_LOG(Mythic, Log, TEXT("DestroyResource: InstanceId=%d, Component=%s, Owner=%s"), 
+           InstanceId, *GetName(), *GetOwner()->GetName());
 
     // Convert InstanceId to InstanceIndex
     int32 InstanceIndex = GetInstanceIndexForId(FPrimitiveInstanceId(InstanceId));
@@ -58,21 +61,44 @@ void UMythicResourceISM::DestroyResource(int32 InstanceId, FTransform Transform,
         return;
     }
 
-    // Draw Debug sphere at this instance index location
+    // Check if already destroyed
+    if (IsInstanceDestroyed(InstanceIndex)) {
+        UE_LOG(Mythic, Warning, TEXT("DestroyResource: Instance %d (InstanceId=%d) is already destroyed"), 
+               InstanceIndex, InstanceId);
+        return;
+    }
+
+    // Get current transform
+    FTransform CurrentTransform;
+    GetInstanceTransform(InstanceIndex, CurrentTransform, true);
+    
+    // Draw Debug sphere at current location
     auto World = this->GetWorld();
-    GetInstanceTransform(InstanceIndex, Transform, true);
-    DrawDebugSphere(World, Transform.GetTranslation(), 4, 12, FColor::Red, true);
+    DrawDebugSphere(World, CurrentTransform.GetTranslation(), 4, 12, FColor::Red, true);
 
+    // Move it under landscape
+    FTransform HiddenTransform = CurrentTransform;
+    HiddenTransform.AddToTranslation(FVector(0, 0, -1000000));
+    UpdateInstanceTransform(InstanceIndex, HiddenTransform, true, UpdateRender);
 
-    // Move it +Z 100 units
-    FTransform HiddenTransform = Transform;
-    HiddenTransform.AddToTranslation(FVector(0, 0, 100));
-    UpdateInstanceTransform(InstanceIndex, HiddenTransform, true, true);
+    // Mark as destroyed in our tracking
+    DestroyedInstances.Add(InstanceIndex);
+    
+    UE_LOG(Mythic, Log, TEXT("DestroyResource: Successfully destroyed InstanceIndex %d. Total destroyed: %d"), 
+           InstanceIndex, DestroyedInstances.Num());
 }
 
-// Function to restore hidden instances - useful for respawning
 void UMythicResourceISM::RestoreResource(int32 InstanceIndex, FTransform OriginalTransform, bool ShouldUpdateRender) {
+    // Restore the transform
     UpdateInstanceTransform(InstanceIndex, OriginalTransform, true, ShouldUpdateRender);
+    
+    // Remove from destroyed tracking
+    if (DestroyedInstances.Remove(InstanceIndex)) {
+        UE_LOG(Mythic, Log, TEXT("RestoreResource: Restored InstanceIndex %d. Total destroyed: %d"), 
+               InstanceIndex, DestroyedInstances.Num());
+    } else {
+        UE_LOG(Mythic, Warning, TEXT("RestoreResource: InstanceIndex %d was not in destroyed tracking"), InstanceIndex);
+    }
 }
 
 // Helper function to get max health based on transform Z value and destructible type

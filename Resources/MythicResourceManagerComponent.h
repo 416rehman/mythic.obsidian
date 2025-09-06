@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameplayTagContainer.h"
 #include "Mythic.h"
 #include "MythicResourceISM.h"
 #include "Components/ActorComponent.h"
@@ -56,7 +55,7 @@ struct FTrackedDestructibleData : public FFastArraySerializerItem {
 
         FVector Start = Transform.GetLocation() + FVector(0, 0, 500);
         FVector End = Transform.GetLocation() - FVector(0, 0, 500);
-        DrawDebugLine(World, Start, End, FColor::Cyan, true, 10.0f, 1, 5.0f);
+        DrawDebugLine(World, Start, End, FColor::Cyan, false, 3.0f, 1, 1.0f);
 
         FCollisionQueryParams Params;
         Params.bReturnPhysicalMaterial = false;
@@ -101,14 +100,32 @@ struct FTrackedDestructibleData : public FFastArraySerializerItem {
 
         return index;
     }
+
+    bool operator==(const FTrackedDestructibleData &other) const {
+        // Primary check: InstanceId must match
+        if (this->InstanceId != other.InstanceId) {
+            return false;
+        }
+
+        // Secondary check: X/Y coordinates must match (ignore Z for underground movement)
+        const FVector ThisLoc = this->Transform.GetLocation();
+        const FVector OtherLoc = other.Transform.GetLocation();
+        const float Tolerance = 1.0f;
+
+        return FMath::IsNearlyEqual(ThisLoc.X, OtherLoc.X, Tolerance) &&
+            FMath::IsNearlyEqual(ThisLoc.Y, OtherLoc.Y, Tolerance);
+    }
 };
 
 USTRUCT(BlueprintType)
 struct FTrackedDestructibleDataArray : public FFastArraySerializer {
     GENERATED_BODY()
+
+private:
     UPROPERTY()
     TArray<FTrackedDestructibleData> Items = TArray<FTrackedDestructibleData>();
 
+public:
     // Store reference to the owning component
     UPROPERTY(NotReplicated)
     TWeakObjectPtr<UMythicResourceManagerComponent> OwnerComponent;
@@ -120,10 +137,38 @@ struct FTrackedDestructibleDataArray : public FFastArraySerializer {
     void PreReplicatedRemove(const TArrayView<int32> &RemovedIndices, int32 FinalSize);
     void PostReplicatedAdd(const TArrayView<int32> &AddedIndices, int32 FinalSize);
     void PostReplicatedChange(const TArrayView<int32> &ChangedIndices, int32 FinalSize);
-    
+
     // Helper function to get the owner safely
-    UMythicResourceManagerComponent* GetOwnerComponent() const {
+    UMythicResourceManagerComponent *GetOwnerComponent() const {
         return OwnerComponent.IsValid() ? OwnerComponent.Get() : nullptr;
+    }
+
+    const TArray<FTrackedDestructibleData> *GetItems() const {
+        return &this->Items;
+    }
+
+    // Add an item and mark the array dirty and call PreReplicatedAdd manually (because server doesn't call it automatically)
+    void AddItem(const FTrackedDestructibleData &NewItem) {
+        Items.Add(NewItem);
+        MarkItemDirty(Items.Last());
+
+        // Manually call PostReplicatedAdd on server as it won't be called automatically
+        TArray<int32> AddedIndices;
+        AddedIndices.Add(Items.Num() - 1);
+        PostReplicatedAdd(AddedIndices, Items.Num());
+    }
+
+    // Batch remove
+    void RemoveItems(const TArrayView<int32> &RemovedIndices) {
+        PreReplicatedRemove(RemovedIndices, Items.Num() - RemovedIndices.Num());
+
+        for (int32 Index : RemovedIndices) {
+            if (Items.IsValidIndex(Index)) {
+                Items.RemoveAt(Index);
+            }
+        }
+
+        MarkArrayDirty();
     }
 };
 
@@ -168,7 +213,7 @@ protected:
 
     // OnRep_DestroyedResources
     UFUNCTION()
-    void OnRep_DestroyedResources() const;
+    void OnRep_DestroyedResources();
 
 public:
     // Sets default values for this component's properties

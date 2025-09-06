@@ -49,6 +49,29 @@ public:
 private:
     GENERATED_BODY()
 
+    // Track destroyed instances to prevent double destruction
+    UPROPERTY()
+    TSet<int32> DestroyedInstances;
+    
+public:
+    // Check if an instance is already destroyed
+    UFUNCTION(BlueprintCallable)
+    bool IsInstanceDestroyed(int32 InstanceIndex) const {
+        return DestroyedInstances.Contains(InstanceIndex);
+    }
+
+    // Get all destroyed instance indices
+    UFUNCTION(BlueprintCallable)
+    TArray<int32> GetDestroyedInstances() const {
+        return DestroyedInstances.Array();
+    }
+
+    // Clear destroyed tracking (useful for respawning all)
+    UFUNCTION(BlueprintCallable)
+    void ClearDestroyedTracking() {
+        DestroyedInstances.Empty();
+    }
+
 public:
     // BeginPlay
     virtual void BeginPlay() override;

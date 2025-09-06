@@ -31,7 +31,7 @@ UMythicItemInstance *UMythicLootManagerSubsystem::Create(UItemDefinition *item_d
         ItemInstance->SetOwner(GameState);
     }
     ItemInstance->Initialize(item_def, quantity_if_stackable, level);
-    
+
     return ItemInstance;
 }
 
