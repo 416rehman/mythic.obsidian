@@ -20,14 +20,14 @@ void FTrackedDestructibleDataArray::PreReplicatedRemove(const TArrayView<int32> 
     }
 
     // For each removed instance
-    // auto itemsToSync = TArray<FTrackedDestructibleData>();
-    // for (auto index : RemovedIndices) {
-    //     if (Items.IsValidIndex(index)) {
-    //         itemsToSync.Add(Items[index]);
-    //     }
-    // }
-    //
-    // UMythicResourceManagerComponent::HandleResourceRespawn(itemsToSync);
+    auto itemsToSync = TArray<FTrackedDestructibleData>();
+    for (auto index : RemovedIndices) {
+        if (Items.IsValidIndex(index)) {
+            itemsToSync.Add(Items[index]);
+        }
+    }
+
+    UMythicResourceManagerComponent::HandleResourceRespawn(itemsToSync);
 }
 
 // Called on clients after a destroyed resource is added to the array on the server - cosmetic only
@@ -58,7 +58,7 @@ void FTrackedDestructibleDataArray::PostReplicatedAdd(const TArrayView<int32> &A
         return;
     }
 
-    UMythicResourceManagerComponent::HandleResourceDestruction(itemsToSync, World);
+    UMythicResourceManagerComponent::HandleResourceDestruction(itemsToSync);
 }
 
 // Called on clients after the destroyed resources array has changed - Cosmetic only
@@ -89,7 +89,7 @@ void FTrackedDestructibleDataArray::PostReplicatedChange(const TArrayView<int32>
         return;
     }
 
-    UMythicResourceManagerComponent::HandleResourceDestruction(itemsToSync, World);
+    UMythicResourceManagerComponent::HandleResourceDestruction(itemsToSync);
 }
 
 
@@ -131,21 +131,20 @@ void UMythicResourceManagerComponent::OnRep_DestroyedResources() {
     UE_LOG(Mythic, Log, TEXT("UMythicResourceManagerComponent::OnRep_DestroyedResources"));
 
     // Synchronize state - On first connect, we need a delay to give time to the world to load
-    if (UWorld *World = GetWorld()) {
+    if (GetWorld()) {
         UE_LOG(Mythic, Log, TEXT("UMythicResourceManagerComponent::OnRep_DestroyedResources: Handling resource destruction after delay"));
         auto Items = DestroyedResources.GetItems();
-        HandleResourceDestruction(*Items, World);
+        HandleResourceDestruction(*Items);
     }
     else {
         // Keep trying next frame
         UE_LOG(Mythic, Warning, TEXT("UMythicResourceManagerComponent::OnRep_DestroyedResources: World is null, retrying next frame"));
 
-        FTimerHandle DelayHandle;
-        GetWorld()->GetTimerManager().SetTimer(DelayHandle, [this]() {
+        GetWorld()->GetTimerManager().SetTimerForNextTick([this]() {
             UE_LOG(Mythic, Log,
                    TEXT("UMythicResourceManagerComponent::OnRep_DestroyedResources: Retrying OnRep_DestroyedResources because World should be valid now"));
             OnRep_DestroyedResources();
-        }, 1, false);
+        });
     }
 }
 
@@ -159,7 +158,8 @@ UMythicResourceManagerComponent::UMythicResourceManagerComponent() {
 }
 
 // Authority Only - Transform is only used for restoring purposes
-void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount, APlayerController* PlayerController) {
+void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount,
+                                                          APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32 index) {
     // Early return for non-authority
     if (!GetOwner()->HasAuthority()) {
         UE_LOG(Mythic, Error, TEXT("UMythicResourceManagerComponent::AddOrUpdateResource called on non-authority"));
@@ -171,20 +171,32 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
         return;
     }
 
+    if (ResourceISM) {
+        auto Trans = FTransform();
+        ResourceISM->GetInstanceTransform(index, Trans, true);
+        // Draw
+        auto start = Trans.GetLocation();
+        auto end = start + FVector3d(0, 0, 1000);
+        const auto color = FColor::Black;
+        const auto thickness = 5.0f;
+        DrawDebugLine(GetWorld(), start, end, color, false, 20, 1, thickness);
+    }
+
     // Try to find existing resource
     FTrackedDestructibleData *ExistingResource = TrackedResources.FindByPredicate([&](const FTrackedDestructibleData &TrackedResource) {
-        return TrackedResource.ResourceISMCClass == ISMClass && TrackedResource.Transform.GetLocation().Equals(Transform.GetLocation(), 1.0f);
+        return TrackedResource.ResourceISM == ResourceISM && TrackedResource.Transform.GetLocation().Equals(Transform.GetLocation(), 1.0f);
+        // return TrackedResource.ResourceISMCClass == ISMClass && TrackedResource.Transform.GetLocation().Equals(Transform.GetLocation(), 1.0f);
     });
 
     if (ExistingResource) {
         ApplyDamageToResource(*ExistingResource, DamageAmount, PlayerController);
     }
     else {
-        AddNewResource(Transform, ISMClass, DamageAmount, PlayerController);
+        AddNewResource(Transform, ISMClass, DamageAmount, PlayerController, ResourceISM, index);
     }
 }
 
-void UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount, APlayerController* PlayerController) {
+void UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount, APlayerController *PlayerController) {
     int32 PreviousHits = Resource.HitsTillDestruction;
     Resource.HitsTillDestruction = FMath::Max(0, Resource.HitsTillDestruction - DamageAmount);
 
@@ -194,24 +206,32 @@ void UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructible
     // Check if resource is now destroyed
     if (Resource.HitsTillDestruction <= 0 && PreviousHits > 0) {
         UE_LOG(Mythic, Log, TEXT("UMythicResourceManagerComponent::ApplyDamageToResource: Resource destroyed!"));
-        // Create destroyed resource with respawn time
-        AddToDestroyedResources(Resource, PlayerController);
 
         // Remove from tracked resources
-        TrackedResources.RemoveAll([&](const FTrackedDestructibleData &TrackedResource) {
-            return TrackedResource.ResourceISMCClass == Resource.ResourceISMCClass && TrackedResource.Transform.GetLocation().Equals(
-                Resource.Transform.GetLocation(), 1.0f);
+        auto NumRemoved = TrackedResources.RemoveAll([&](const FTrackedDestructibleData &TrackedResource) {
+            return TrackedResource == Resource;
         });
+
+        if (NumRemoved <= 0) {
+            UE_LOG(Mythic, Error, TEXT("UMythicResourceManagerComponent::ApplyDamageToResource: Could not remove resource from tracked resources"));
+            return;
+        }
+
+        // Create destroyed resource with respawn time
+        AddToDestroyedResources(Resource, PlayerController);
     }
 }
 
-void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount, APlayerController* PlayerController) {
+void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount,
+                                                     APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32 Index) {
     FTrackedDestructibleData NewResource = FTrackedDestructibleData();
-    NewResource.ResourceISMCClass = ISMClass;
+    NewResource.ResourceISM = ResourceISM;
     NewResource.Transform = Transform;
 
-    auto World = this->GetWorld();
-    auto ISMComponent = NewResource.GetISMComponent(World);
+    // auto World = this->GetWorld();
+
+    // auto ISMComponent = NewResource.GetISMComponent(World);
+    auto ISMComponent = NewResource.ResourceISM;
     if (!ISMComponent) {
         UE_LOG(Mythic, Error, TEXT("UMythicResourceManagerComponent::AddNewResource: Could not find ISM component for class %s"), *ISMClass->GetName());
         return;
@@ -222,21 +242,6 @@ void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, TSubc
     if (MaxHealth <= 0) {
         UE_LOG(Mythic, Error, TEXT("UMythicResourceManagerComponent::AddNewResource: Calculated MaxHealth is <= 0 for ISM %s at location %s"),
                *ISMComponent->GetName(), *Transform.GetLocation().ToString());
-        return;
-    }
-
-    auto Index = NewResource.GetInstanceIndex(World);
-    if (Index < 0) {
-        UE_LOG(Mythic, Error, TEXT("UMythicResourceManagerComponent::AddNewResource: Could not find instance at location %s on ISM %s"),
-               *Transform.GetLocation().ToString(),
-               *ISMComponent->GetName());
-        return;
-    }
-
-    auto InstanceTransform = ISMComponent->GetInstanceTransform(Index, NewResource.Transform, true);
-    if (!InstanceTransform) {
-        UE_LOG(Mythic, Error, TEXT("UMythicResourceManagerComponent::AddNewResource: Could not get instance transform for index %d on ISM %s"), Index,
-               *ISMComponent->GetName());
         return;
     }
 
@@ -266,7 +271,7 @@ void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, TSubc
 }
 
 // Authority only - Make sure the resource is removed from tracked resources
-void UMythicResourceManagerComponent::AddToDestroyedResources(FTrackedDestructibleData DestroyedResource, APlayerController* PlayerController) {
+void UMythicResourceManagerComponent::AddToDestroyedResources(FTrackedDestructibleData DestroyedResource, APlayerController *PlayerController) {
     // Set respawn time
     DestroyedResource.RespawnTime = GetWorld()->GetTimeSeconds() + DefaultRespawnDelay;
 
@@ -277,15 +282,8 @@ void UMythicResourceManagerComponent::AddToDestroyedResources(FTrackedDestructib
            TEXT("UMythicResourceManagerComponent::AddToDestroyedResources: Resource %d added to destroyed resources, will respawn in %.1f seconds"),
            DestroyedResource.InstanceId, DefaultRespawnDelay);
 
-    // Give loot
-    auto CDO = DestroyedResource.ResourceISMCClass.GetDefaultObject();
-    if (!CDO) {
-        UE_LOG(Mythic, Error, TEXT("UMythicResourceManagerComponent::AddToDestroyedResources: Could not get default object for class %s"),
-               *DestroyedResource.ResourceISMCClass->GetName());
-        return;
-    }
-
-    CDO->OnKillRewards.Give(PlayerController);
+    // Give rewards
+    DestroyedResource.ResourceISM->OnKillRewards.Give(PlayerController, false);
 }
 
 // Called when the game starts
@@ -319,14 +317,15 @@ TArray<FTrackedDestructibleData> UMythicResourceManagerComponent::GetTrackedDest
 }
 
 // This is only called OnRep of the MythicResourceManagerComponent's DestroyedResources array to catch up state on clients
-void UMythicResourceManagerComponent::HandleResourceDestruction(const TArray<FTrackedDestructibleData> &DestroyedResources, UWorld *World) {
+void UMythicResourceManagerComponent::HandleResourceDestruction(const TArray<FTrackedDestructibleData> &DestroyedResources) {
     UE_LOG(Mythic, Log, TEXT("HandleResourceDestruction: Syncing destruction of %d resources"), DestroyedResources.Num());
 
     auto length = DestroyedResources.Num();
     for (int i = 0; i < length; i++) {
         auto Resource = DestroyedResources[i];
 
-        auto ResourceComponent = Resource.GetISMComponent(World);
+        // auto ResourceComponent = Resource.GetISMComponent(World);
+        auto ResourceComponent = Resource.ResourceISM;
         if (!ResourceComponent) {
             // TODO - Should we have a retry queue so when the ISM's owning actor is loaded we can retry?
             UE_LOG(Mythic, Error, TEXT("HandleResourceDestruction: ResourceISMC is null or not loaded"));
@@ -343,16 +342,15 @@ void UMythicResourceManagerComponent::HandleResourceDestruction(const TArray<FTr
 }
 
 // This is only called on PreReplicateRemove of the MythicResourceManagerComponent's DestroyedResources array to respawn resources as they are removed
-void UMythicResourceManagerComponent::HandleResourceRespawn(const TArray<FTrackedDestructibleData> &RespawnedResources, UWorld *World) {
+void UMythicResourceManagerComponent::HandleResourceRespawn(const TArray<FTrackedDestructibleData> &RespawnedResources) {
     UE_LOG(Mythic, Log, TEXT("HandleResourceRespawn: Syncing respawn of %d resources"), RespawnedResources.Num());
 
     auto length = RespawnedResources.Num();
     for (int i = 0; i < length; i++) {
         auto Resource = RespawnedResources[i];
 
-        auto ResourceComponent = Resource.GetISMComponent(World);
+        auto ResourceComponent = Resource.ResourceISM;
         if (!ResourceComponent) {
-            // TODO - Should we have a retry queue so when the ISM's owning actor is loaded we can retry?
             UE_LOG(Mythic, Error, TEXT("HandleResourceRespawn: ResourceISMC is null or not loaded"));
             continue;
         }

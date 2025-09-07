@@ -78,7 +78,7 @@ void UMythicResourceISM::DestroyResource(int32 InstanceId, FTransform Transform,
 
     // Move it under landscape
     FTransform HiddenTransform = CurrentTransform;
-    HiddenTransform.AddToTranslation(FVector(0, 0, -1000000));
+    HiddenTransform.AddToTranslation(FVector(0, 0, -999999));
     UpdateInstanceTransform(InstanceIndex, HiddenTransform, true, UpdateRender);
 
     // Mark as destroyed in our tracking

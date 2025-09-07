@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Mythic.h"
 #include "MythicResourceISM.h"
 #include "Components/ActorComponent.h"
 #include "Net/Serialization/FastArraySerializer.h"
@@ -13,7 +12,7 @@ USTRUCT(BlueprintType, Blueprintable)
 struct FTrackedDestructibleData : public FFastArraySerializerItem {
     GENERATED_BODY()
 
-    // Instance Id
+    // Instance Id (not index)
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Resource")
     int32 InstanceId = -1;
 
@@ -29,91 +28,12 @@ struct FTrackedDestructibleData : public FFastArraySerializerItem {
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Resource")
     double RespawnTime;
 
-    // The ISM class that owns this resource
+    // The ISM this resource belongs to
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Resource")
-    TSubclassOf<UMythicResourceISM> ResourceISMCClass;
-
-    // Non replicated - Cached Resource ISM component
-    UPROPERTY(Transient)
-    TWeakObjectPtr<UMythicResourceISM> ResourceISMC;
-
-    // Non replicated - Cached hit result from trace to find ISM component
-    UPROPERTY(Transient)
-    FHitResult Hit = FHitResult();
-
-    // Returns the ISM component, doing a trace to find it if not already cached
-    UMythicResourceISM *GetISMComponent(UWorld *World) {
-        if (ResourceISMC.IsValid()) {
-            return ResourceISMC.Get();
-        }
-
-        // Do a trace to find the actor at this location, account for slight offsets
-        if (!World) {
-            UE_LOG(Mythic, Error, TEXT("FTrackedDestructibleData::GetISMComponent: World is null"));
-            return nullptr;
-        }
-
-        FVector Start = Transform.GetLocation() + FVector(0, 0, 500);
-        FVector End = Transform.GetLocation() - FVector(0, 0, 500);
-        DrawDebugLine(World, Start, End, FColor::Cyan, false, 3.0f, 1, 1.0f);
-
-        FCollisionQueryParams Params;
-        Params.bReturnPhysicalMaterial = false;
-        Params.bTraceComplex = false;
-        Params.AddIgnoredActor(nullptr); // Ignore no actors
-        this->Hit = FHitResult();
-        bool bHit = World->LineTraceSingleByChannel(this->Hit, Start, End, ECC_Visibility, Params);
-        if (!bHit || !this->Hit.GetActor()) {
-            UE_LOG(Mythic, Error, TEXT("FTrackedDestructibleData::GetISMComponent: Could not find actor at location %s"), *Transform.GetLocation().ToString());
-            return nullptr;
-        }
-        auto actor = this->Hit.GetActor();
-        if (!actor) {
-            UE_LOG(Mythic, Error, TEXT("FTrackedDestructibleData::GetISMComponent: HitResult actor is null"));
-            return nullptr;
-        }
-
-        auto ISMComponent = actor->FindComponentByClass<UMythicResourceISM>();
-        if (!ISMComponent) {
-            UE_LOG(Mythic, Error, TEXT("FTrackedDestructibleData::GetISMComponent: Could not find UMythicResourceISM component on actor %s"),
-                   *actor->GetName());
-            return nullptr;
-        }
-
-        this->ResourceISMC = ISMComponent;
-
-        return ISMComponent;
-    }
-
-    int32 GetInstanceIndex(UWorld *World) {
-        auto ISMComponent = GetISMComponent(World);
-        if (!ISMComponent) {
-            UE_LOG(Mythic, Error, TEXT("FTrackedDestructibleData::GetInstanceIndex: ISMComponent is null"));
-            return -1;
-        }
-
-        auto index = this->Hit.Item;
-        if (index < 0) {
-            UE_LOG(Mythic, Error, TEXT("FTrackedDestructibleData::GetInstanceIndex: HitResult.Item is invalid"));
-            return -1;
-        }
-
-        return index;
-    }
-
+    UMythicResourceISM *ResourceISM;
+    
     bool operator==(const FTrackedDestructibleData &other) const {
-        // Primary check: InstanceId must match
-        if (this->InstanceId != other.InstanceId) {
-            return false;
-        }
-
-        // Secondary check: X/Y coordinates must match (ignore Z for underground movement)
-        const FVector ThisLoc = this->Transform.GetLocation();
-        const FVector OtherLoc = other.Transform.GetLocation();
-        const float Tolerance = 1.0f;
-
-        return FMath::IsNearlyEqual(ThisLoc.X, OtherLoc.X, Tolerance) &&
-            FMath::IsNearlyEqual(ThisLoc.Y, OtherLoc.Y, Tolerance);
+        return other.ResourceISM == this->ResourceISM && other.InstanceId == this->InstanceId;
     }
 };
 
@@ -221,13 +141,14 @@ public:
 
     // Add a resource to the tracked list
     UFUNCTION(BlueprintCallable, Category = "Resource", BlueprintAuthorityOnly)
-    void AddOrUpdateResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount, APlayerController* PlayerController);
+    void AddOrUpdateResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount, APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32 index);
 
 private:
     // Helper functions
-    void ApplyDamageToResource(FTrackedDestructibleData& Resource, int32 DamageAmount, APlayerController* PlayerController);
-    void AddNewResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount, APlayerController* PlayerController);
-    void AddToDestroyedResources(FTrackedDestructibleData DestroyedResource, APlayerController* PlayerController);
+    void ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount, APlayerController *PlayerController);
+    void AddNewResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount, APlayerController* PlayerController, UMythicResourceISM* ResourceISM, int32
+                        Index);
+    void AddToDestroyedResources(FTrackedDestructibleData DestroyedResource, APlayerController *PlayerController);
 
 protected:
     // Called when the game starts
@@ -240,6 +161,6 @@ public:
     TArray<FTrackedDestructibleData> GetTrackedDestructibles() const;
 
     // Used for handling destruction of resources after they are added to the destroyed resources array
-    static void HandleResourceDestruction(const TArray<FTrackedDestructibleData> &DestroyedResources, UWorld *World);
-    static void HandleResourceRespawn(const TArray<FTrackedDestructibleData> &RespawnedResources, UWorld *World);
+    static void HandleResourceDestruction(const TArray<FTrackedDestructibleData>& DestroyedResources);
+    static void HandleResourceRespawn(const TArray<FTrackedDestructibleData>& RespawnedResources);
 };

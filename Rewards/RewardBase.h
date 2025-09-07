@@ -64,6 +64,8 @@ struct FRewardsToGive {
     TObjectPtr<UAttributeReward> AttributeReward;
 
     // Default helper to give reward to player. Uses default for each reward's context.
+    // IsPrivateItem: if set, any items dropped will be private to the player
+    // ItemLevel: if not ZERO, any items dropped will be at this level (otherwise, uses player's level)
     // Returns false if any error occured.
-    bool Give(APlayerController *PlayerController) const;
+    bool Give(APlayerController *PlayerController, bool IsPrivateItem = true, int32 ItemLevel = 0) const;
 };

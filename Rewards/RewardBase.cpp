@@ -9,7 +9,7 @@
 #include "AbilityReward.h"
 #include "AttributeReward.h"
 
-bool FRewardsToGive::Give(APlayerController *PlayerController) const {
+bool FRewardsToGive::Give(APlayerController *PlayerController, bool IsPrivateItem, int32 ItemLevel) const {
     if (!PlayerController) {
         UE_LOG(Mythic, Error, TEXT("FRewardsToGive::Give PlayerController is null"));
         return false;
@@ -25,12 +25,15 @@ bool FRewardsToGive::Give(APlayerController *PlayerController) const {
 
     if (this->ItemReward) {
         auto Context = FItemRewardContext(PlayerController);
+        Context.bIsPrivate = IsPrivateItem;
+        Context.ItemLevel = ItemLevel;
         retval = this->ItemReward->Give(Context) && retval;
         UE_LOG(Mythic, Log, TEXT("FRewardsToGive::Give Gave Item Reward"))
     }
 
     if (this->LootReward) {
         auto Context = FLootRewardContext(PlayerController);
+        Context.ItemLevel = ItemLevel;
         retval = this->LootReward->Give(Context) && retval;
         UE_LOG(Mythic, Log, TEXT("FRewardsToGive::Give Gave Loot Reward"))
     }
