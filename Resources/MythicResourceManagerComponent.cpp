@@ -159,7 +159,7 @@ UMythicResourceManagerComponent::UMythicResourceManagerComponent() {
 }
 
 // Authority Only - Transform is only used for restoring purposes
-void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount) {
+void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount, APlayerController* PlayerController) {
     // Early return for non-authority
     if (!GetOwner()->HasAuthority()) {
         UE_LOG(Mythic, Error, TEXT("UMythicResourceManagerComponent::AddOrUpdateResource called on non-authority"));
@@ -177,14 +177,14 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
     });
 
     if (ExistingResource) {
-        ApplyDamageToResource(*ExistingResource, DamageAmount);
+        ApplyDamageToResource(*ExistingResource, DamageAmount, PlayerController);
     }
     else {
-        AddNewResource(Transform, ISMClass, DamageAmount);
+        AddNewResource(Transform, ISMClass, DamageAmount, PlayerController);
     }
 }
 
-void UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount) {
+void UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount, APlayerController* PlayerController) {
     int32 PreviousHits = Resource.HitsTillDestruction;
     Resource.HitsTillDestruction = FMath::Max(0, Resource.HitsTillDestruction - DamageAmount);
 
@@ -195,7 +195,7 @@ void UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructible
     if (Resource.HitsTillDestruction <= 0 && PreviousHits > 0) {
         UE_LOG(Mythic, Log, TEXT("UMythicResourceManagerComponent::ApplyDamageToResource: Resource destroyed!"));
         // Create destroyed resource with respawn time
-        AddToDestroyedResources(Resource);
+        AddToDestroyedResources(Resource, PlayerController);
 
         // Remove from tracked resources
         TrackedResources.RemoveAll([&](const FTrackedDestructibleData &TrackedResource) {
@@ -205,7 +205,7 @@ void UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructible
     }
 }
 
-void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount) {
+void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount, APlayerController* PlayerController) {
     FTrackedDestructibleData NewResource = FTrackedDestructibleData();
     NewResource.ResourceISMCClass = ISMClass;
     NewResource.Transform = Transform;
@@ -257,7 +257,7 @@ void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, TSubc
 
     // If the health is <= 0, no need to add to tracked resources and we can just add to destroyed resources
     if (NewResource.HitsTillDestruction <= 0) {
-        AddToDestroyedResources(NewResource);
+        AddToDestroyedResources(NewResource, PlayerController);
     }
     else {
         TrackedResources.Add(NewResource);
@@ -266,20 +266,26 @@ void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, TSubc
 }
 
 // Authority only - Make sure the resource is removed from tracked resources
-void UMythicResourceManagerComponent::AddToDestroyedResources(FTrackedDestructibleData DestroyedResource) {
+void UMythicResourceManagerComponent::AddToDestroyedResources(FTrackedDestructibleData DestroyedResource, APlayerController* PlayerController) {
     // Set respawn time
     DestroyedResource.RespawnTime = GetWorld()->GetTimeSeconds() + DefaultRespawnDelay;
 
     // Add to destroyed resources
     DestroyedResources.AddItem(DestroyedResource);
 
-    // Call DestroyResource locally as OnRep won't be called on server
-    // auto ShouldReRender = true;
-    // LocalISMComponent->DestroyResource(DestroyedResource.InstanceId, DestroyedResource.Transform, ShouldReRender);
-
     UE_LOG(Mythic, Log,
            TEXT("UMythicResourceManagerComponent::AddToDestroyedResources: Resource %d added to destroyed resources, will respawn in %.1f seconds"),
            DestroyedResource.InstanceId, DefaultRespawnDelay);
+
+    // Give loot
+    auto CDO = DestroyedResource.ResourceISMCClass.GetDefaultObject();
+    if (!CDO) {
+        UE_LOG(Mythic, Error, TEXT("UMythicResourceManagerComponent::AddToDestroyedResources: Could not get default object for class %s"),
+               *DestroyedResource.ResourceISMCClass->GetName());
+        return;
+    }
+
+    CDO->OnKillRewards.Give(PlayerController);
 }
 
 // Called when the game starts

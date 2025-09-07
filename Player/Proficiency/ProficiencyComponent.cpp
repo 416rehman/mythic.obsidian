@@ -6,7 +6,6 @@
 #include "AbilitySystemInterface.h"
 #include "Mythic.h"
 #include "ProficiencyDefinition.h"
-#include "GAS/AttributeSets/Shared/MythicAttributeSet_Proficiencies.h"
 #include "Net/UnrealNetwork.h"
 #include "Rewards/AttributeReward.h"
 
@@ -126,27 +125,18 @@ void UProficiencyComponent::ConfigureProgressionAttribute(FProficiency &Proficie
     }
 
     // Get the attribute set class from the attribute
-    auto AttributeSetClass = Proficiency.ProgressAttribute.GetAttributeSetClass();
-    if (!AttributeSetClass) {
-        UE_LOG(Mythic, Error, TEXT("Proficiency: Progress Attribute is NOT from MythicAttributeSet_Proficiencies"));
-        return;
-    }
-
-    // Get the attribute set from the ASC. Throw away the constness so we can "SetMaximumValue".
-    auto AttributeSet = const_cast<UMythicAttributeSet_Proficiencies *>(Cast<UMythicAttributeSet_Proficiencies>(ASC->GetAttributeSet(AttributeSetClass)));
-    if (!AttributeSet) {
-        UE_LOG(Mythic, Error, TEXT("Proficiency: Progress Attribute is NOT from MythicAttributeSet_Proficiencies"));
-        return;
+    auto HasAttribute = ASC->HasAttributeSetForAttribute(Proficiency.ProgressAttribute);
+    if (!HasAttribute) {
+        auto AttributeSet = Proficiency.ProgressAttribute.GetAttributeSetClass()->GetDefaultObject<UAttributeSet>();
+        ASC->AddSpawnedAttribute(AttributeSet);
+        UE_LOG(Mythic, Warning, TEXT("Proficiency: AttributeSet for Attribute %s granted because it wasn't"), *Proficiency.ProgressAttribute.AttributeName)
     }
 
     // Set the maximum value for the attribute.
-
     auto MaxXP = ceil(UProficiencyDefinition::CalcCumulativeXPForLevel(Def->MaxLevel, Def));
-
-    AttributeSet->SetMaximumValue(Proficiency.ProgressAttribute.AttributeName, MaxXP);
+    ASC->SetNumericAttributeBase(Proficiency.ProgressAttribute, MaxXP);
 
     // Register the attribute change callback
-
     ASC->GetGameplayAttributeValueChangeDelegate(Proficiency.ProgressAttribute).AddUObject(this, &UProficiencyComponent::OnAttributeChanged);
     UE_LOG(Mythic, Log, TEXT("Proficiency: Proficiency Bound to %s (Max XP: %f)"), *Proficiency.ProgressAttribute.AttributeName, MaxXP);
 }

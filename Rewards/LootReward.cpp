@@ -3,12 +3,14 @@
 
 #include "LootReward.h"
 
+#include "AbilitySystemGlobals.h"
 #include "Mythic.h"
+#include "MythicDevSettings.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Proficiencies.h"
 #include "GameModes/Attributes/WorldAttributes.h"
 #include "GameModes/GameState/MythicGameState.h"
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
-#include "Player/Proficiency/ProficiencyDefinition.h"
 
 bool ULootReward::Give(FRewardContext &Context) const {
     // Cast the context to the correct type
@@ -18,6 +20,10 @@ bool ULootReward::Give(FRewardContext &Context) const {
     // Get the player controller
     auto PlayerController = LootContext->PlayerController;
     checkf(PlayerController, TEXT("LootReward::Give - PlayerController is null"));
+
+    // Check if the context is an ability system component
+    auto ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Context.PlayerController);
+    checkf(ASC, TEXT("AbilitySystemComponent is null"));
 
     // Get the MythicLootManager Subsystem
     auto MythicLootManager = PlayerController->GetGameInstance()->GetSubsystem<UMythicLootManagerSubsystem>();
@@ -31,7 +37,13 @@ bool ULootReward::Give(FRewardContext &Context) const {
     auto WorldTierAttributes = GameState->WorldTierAttributes;
     checkf(GameState->WorldTierAttributes, TEXT("LootReward::Give - WorldTierAttributes is null"));
 
-    auto PlayerLevel = LootContext->CurrentPlayerLvl;
+    auto LevelFound = false;
+    auto PlayerLevel = UMythicAttributeSet_Proficiencies::GetLevel(ASC, LevelFound);
+    if (!LevelFound) {
+        UE_LOG(Mythic, Error, TEXT("LootReward::Give - Failed to get player level - Using Level 1"));
+        PlayerLevel = 1;
+    }
+
     UE_LOG(Mythic, Warning, TEXT("LootReward::Give - Current Player Level: %d"), PlayerLevel);
 
     // Get the loot rates for the player
@@ -56,10 +68,23 @@ bool ULootReward::Give(FRewardContext &Context) const {
         return true;
     }
 
+    // Settings
+    auto MythicSettings = UMythicDevSettings::Get();
+    if (!MythicSettings) {
+        UE_LOG(Mythic, Error, TEXT("LootReward::Give - Mythic Settings not found"));
+        return false;
+    }
+
+    auto LootTable = MythicSettings->GlobalLootTable.Get();
+    if (!LootTable) {
+        UE_LOG(Mythic, Error, TEXT("LootReward::Give - Global loot table not found"));
+        return false;
+    }
+
     // If we made it here, we didn't skip the global loot source, so we should use it
     UE_LOG(Mythic, Log, TEXT("LootReward::Give - Using global loot source"));
     RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, ExoticRate, PlayerController, LootContext->ItemLevel,
-                          LootContext->GlobalLootTable, LootContext->PutInInventory, OverridenLootSource.IsPrivate, LootContext->SpawnLocation,
+                          LootTable, LootContext->PutInInventory, OverridenLootSource.IsPrivate, LootContext->SpawnLocation,
                           MythicLootManager);
 
     return true;
@@ -83,7 +108,8 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
     }
 
     // Store rarity weights
-    float WeightsByRarity[5] = {
+    constexpr int32 NumRarities = 5;
+    const float WeightsByRarity[NumRarities] = {
         CommonRate,
         RareRate,
         EpicRate,
@@ -97,18 +123,19 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
 
     // First, build array of valid entries that pass the drop chance check
     static TArray<int32> ValidIndices;
-    ValidIndices.Reset(LootTable->Entries.Num());
+    ValidIndices.Reserve(LootTable->Entries.Num());
 
     UE_LOG(Mythic, Log, TEXT("LootReward::RequestLootFromSource - Checking drop chances for items in table %s"), *LootTable->GetName());
 
     for (int32 i = 0; i < LootTable->Entries.Num(); ++i) {
         const auto &Entry = LootTable->Entries[i];
-        if (!Entry.Item)
+        if (!Entry.Item) [[unlikely]]
             continue;
 
-        float DropChance = Entry.OverrideDropChance > 0 ? Entry.OverrideDropChance : WeightsByRarity[static_cast<int32>(Entry.Item->Rarity)];
+        const int32 RarityIndex = static_cast<int32>(Entry.Item->Rarity);
+        float DropChance = Entry.OverrideDropChance > 0 ? Entry.OverrideDropChance : WeightsByRarity[RarityIndex];
 
-        float RollResult = FMath::FRand();
+        const float RollResult = FMath::FRand();
 
         if (RollResult <= DropChance) {
             ValidIndices.Add(i);

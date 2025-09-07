@@ -38,9 +38,9 @@ UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API UItemReward : public URewardBase {
     GENERATED_BODY()
 
-    virtual bool Give(FRewardContext &Context) const override;
-
 public:
+    virtual bool Give(FRewardContext &Context) const override;
+    
     // The quantity of the item to give.
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
     int32 Quantity = 1;

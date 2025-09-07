@@ -1,6 +1,4 @@
-﻿// 
-
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
@@ -64,4 +62,8 @@ struct FRewardsToGive {
     // Attribute Reward
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rewards")
     TObjectPtr<UAttributeReward> AttributeReward;
+
+    // Default helper to give reward to player. Uses default for each reward's context.
+    // Returns false if any error occured.
+    bool Give(APlayerController *PlayerController) const;
 };

@@ -40,13 +40,14 @@ UCLASS(Abstract)
 class MYTHIC_API UMythicAttributeSet : public UAttributeSet {
     GENERATED_BODY()
 
-    // Returns all the attributes for this attribute set.
-    UFUNCTION(BlueprintCallable, Category = "AttributeSet")
-    void GetAttributes(TArray<FGameplayAttribute> &OutAttributes) const;
-
+public:
     // On ANY Attribute Changed event
     UPROPERTY(BlueprintAssignable, Category = "AttributeSet")
     FMythicAttributeUpdateEvent OnAttributeChanged;
+
+    // Returns all the attributes for this attribute set.
+    UFUNCTION(BlueprintCallable, Category = "AttributeSet")
+    void GetAttributes(TArray<FGameplayAttribute> &OutAttributes) const;
 
     virtual void PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) override;
 };

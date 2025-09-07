@@ -221,13 +221,13 @@ public:
 
     // Add a resource to the tracked list
     UFUNCTION(BlueprintCallable, Category = "Resource", BlueprintAuthorityOnly)
-    void AddOrUpdateResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount);
+    void AddOrUpdateResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount, APlayerController* PlayerController);
 
 private:
     // Helper functions
-    void ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount);
-    void AddNewResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount);
-    void AddToDestroyedResources(FTrackedDestructibleData DestroyedResource);
+    void ApplyDamageToResource(FTrackedDestructibleData& Resource, int32 DamageAmount, APlayerController* PlayerController);
+    void AddNewResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount, APlayerController* PlayerController);
+    void AddToDestroyedResources(FTrackedDestructibleData DestroyedResource, APlayerController* PlayerController);
 
 protected:
     // Called when the game starts

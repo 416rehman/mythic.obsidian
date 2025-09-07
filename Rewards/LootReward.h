@@ -78,14 +78,6 @@ USTRUCT(BlueprintType, Blueprintable)
 struct FLootRewardContext : public FRewardContext {
     GENERATED_BODY()
 
-    // The player's current experience. This will be used to determine the quality/rarity of the loot
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loot Reward Context")
-    int32 CurrentPlayerLvl = 0;
-
-    // The global loot table to use
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loot Reward Context")
-    UMythicLootTable *GlobalLootTable = nullptr;
-
     // The inventory in which to place the item. If not specified, the item will be dropped in the drop location instead.
     // If the inventory is full, the item will drop at the inventory owner's location.
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess=true))
@@ -110,8 +102,6 @@ UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API ULootReward : public URewardBase {
     GENERATED_BODY()
 
-    virtual bool Give(FRewardContext &Context) const override;
-
     static void RequestLootFromSource(float CommonRate, float RareRate, float EpicRate, float LegendaryRate, float ExoticRate,
                                       APlayerController *PlayerController,
                                       int32 DropLevel, UMythicLootTable *LootTable, UMythicInventoryComponent *Inventory, bool isPrivate, FVector SpawnLocation,
@@ -119,6 +109,8 @@ class MYTHIC_API ULootReward : public URewardBase {
                                       MythicLootManager);
 
 public:
+    virtual bool Give(FRewardContext &Context) const override;
+
     // The loot table to use
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loot Reward Context")
     FLootTableOverride OverridenLootSource;
