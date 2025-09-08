@@ -60,18 +60,6 @@ public:
         return DestroyedInstances.Contains(InstanceIndex);
     }
 
-    // Get all destroyed instance indices
-    UFUNCTION(BlueprintCallable)
-    TArray<int32> GetDestroyedInstances() const {
-        return DestroyedInstances.Array();
-    }
-
-    // Clear destroyed tracking (useful for respawning all)
-    UFUNCTION(BlueprintCallable)
-    void ClearDestroyedTracking() {
-        DestroyedInstances.Empty();
-    }
-
 public:
     // BeginPlay
     virtual void BeginPlay() override;
@@ -98,8 +86,8 @@ public:
 
     // Destroy Instance - Hides and disables collision
     UFUNCTION()
-    void DestroyResource(int32 InstanceId, FTransform Transform, bool UpdateRender);
+    void DestroyResource(int32 InstanceId);
 
     UFUNCTION()
-    void RestoreResource(int32 InstanceIndex, FTransform OriginalTransform, bool ShouldUpdateRender);
+    void RestoreResource(int32 InstanceIndex, FTransform OriginalTransform, bool MarkRenderStateDirty);
 };

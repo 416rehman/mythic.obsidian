@@ -46,18 +46,6 @@ void FTrackedDestructibleDataArray::PostReplicatedAdd(const TArrayView<int32> &A
         }
     }
 
-    auto Owner = this->GetOwnerComponent();
-    if (!Owner) {
-        UE_LOG(Mythic, Error, TEXT("FTrackedDestructibleData::PostReplicatedAdd: OwningObject is null"));
-        return;
-    }
-
-    auto World = Owner->GetWorld();
-    if (!World) {
-        UE_LOG(Mythic, Error, TEXT("FTrackedDestructibleData::PostReplicatedAdd: World is null"));
-        return;
-    }
-
     UMythicResourceManagerComponent::HandleResourceDestruction(itemsToSync);
 }
 
@@ -76,19 +64,7 @@ void FTrackedDestructibleDataArray::PostReplicatedChange(const TArrayView<int32>
             itemsToSync.Add(Items[index]);
         }
     }
-
-    auto Owner = this->GetOwnerComponent();
-    if (!Owner) {
-        UE_LOG(Mythic, Error, TEXT("FTrackedDestructibleData::PostReplicatedChange: OwningObject is null"));
-        return;
-    }
-
-    auto World = Owner->GetWorld();
-    if (!World) {
-        UE_LOG(Mythic, Error, TEXT("FTrackedDestructibleData::PostReplicatedChange: World is null"));
-        return;
-    }
-
+    
     UMythicResourceManagerComponent::HandleResourceDestruction(itemsToSync);
 }
 
@@ -115,16 +91,10 @@ void UMythicResourceManagerComponent::ProcessBatchRespawn() {
     if (indicesToRemove.Num() <= 0) {
         return;
     }
-
+    
     DestroyedResources.RemoveItems(indicesToRemove);
 
     UE_LOG(Mythic, Log, TEXT("UMythicResourceManagerComponent::ProcessBatchRespawn: Removed %d resources from destroyed list"), indicesToRemove.Num());
-
-    // If we removed any items, mark the array dirty
-    if (indicesToRemove.Num() > 0) {
-        DestroyedResources.MarkArrayDirty();
-        UE_LOG(Mythic, Log, TEXT("UMythicResourceManagerComponent::ProcessBatchRespawn: Marked DestroyedResources array dirty"));
-    }
 }
 
 void UMythicResourceManagerComponent::OnRep_DestroyedResources() {
@@ -158,8 +128,8 @@ UMythicResourceManagerComponent::UMythicResourceManagerComponent() {
 }
 
 // Authority Only - Transform is only used for restoring purposes
-void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount,
-                                                          APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32 index) {
+void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, int32 DamageAmount, APlayerController *PlayerController,
+                                                          UMythicResourceISM *ResourceISM, int32 index) {
     // Early return for non-authority
     if (!GetOwner()->HasAuthority()) {
         UE_LOG(Mythic, Error, TEXT("UMythicResourceManagerComponent::AddOrUpdateResource called on non-authority"));
@@ -184,7 +154,7 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
 
     // Try to find existing resource
     FTrackedDestructibleData *ExistingResource = TrackedResources.FindByPredicate([&](const FTrackedDestructibleData &TrackedResource) {
-        return TrackedResource.ResourceISM == ResourceISM && TrackedResource.Transform.GetLocation().Equals(Transform.GetLocation(), 1.0f);
+        return TrackedResource.ResourceISM == ResourceISM && TrackedResource.InstanceId == ResourceISM->InstanceIndexToId(index).Id;
         // return TrackedResource.ResourceISMCClass == ISMClass && TrackedResource.Transform.GetLocation().Equals(Transform.GetLocation(), 1.0f);
     });
 
@@ -192,7 +162,7 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
         ApplyDamageToResource(*ExistingResource, DamageAmount, PlayerController);
     }
     else {
-        AddNewResource(Transform, ISMClass, DamageAmount, PlayerController, ResourceISM, index);
+        AddNewResource(Transform, DamageAmount, PlayerController, ResourceISM, index);
     }
 }
 
@@ -222,7 +192,7 @@ void UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructible
     }
 }
 
-void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount,
+void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, int32 DamageAmount,
                                                      APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32 Index) {
     FTrackedDestructibleData NewResource = FTrackedDestructibleData();
     NewResource.ResourceISM = ResourceISM;
@@ -233,7 +203,7 @@ void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, TSubc
     // auto ISMComponent = NewResource.GetISMComponent(World);
     auto ISMComponent = NewResource.ResourceISM;
     if (!ISMComponent) {
-        UE_LOG(Mythic, Error, TEXT("UMythicResourceManagerComponent::AddNewResource: Could not find ISM component for class %s"), *ISMClass->GetName());
+        UE_LOG(Mythic, Error, TEXT("UMythicResourceManagerComponent::AddNewResource: Could not find ISM component for class %s"), *ISMComponent->GetName());
         return;
     }
 
@@ -320,6 +290,9 @@ TArray<FTrackedDestructibleData> UMythicResourceManagerComponent::GetTrackedDest
 void UMythicResourceManagerComponent::HandleResourceDestruction(const TArray<FTrackedDestructibleData> &DestroyedResources) {
     UE_LOG(Mythic, Log, TEXT("HandleResourceDestruction: Syncing destruction of %d resources"), DestroyedResources.Num());
 
+    // All ISM Components that need to be dirtied once after processing
+    TSet<UMythicResourceISM*> ISMsToDirty;
+    
     auto length = DestroyedResources.Num();
     for (int i = 0; i < length; i++) {
         auto Resource = DestroyedResources[i];
@@ -336,8 +309,17 @@ void UMythicResourceManagerComponent::HandleResourceDestruction(const TArray<FTr
                Resource.InstanceId);
 
         // Destroy / Hide resource
-        bool ShouldUpdateRender = i == length - 1; // Only update on the last one to save performance
-        ResourceComponent->DestroyResource(Resource.InstanceId, Resource.Transform, ShouldUpdateRender);
+        ResourceComponent->DestroyResource(Resource.InstanceId);
+
+        // Track ISM to dirty once after batch to reduce render updates
+        ISMsToDirty.Add(ResourceComponent);
+    }
+
+    // Dirty render state once per ISM after processing all instances
+    for (UMythicResourceISM* ISM : ISMsToDirty) {
+        if (ISM) {
+           ISM->MarkRenderStateDirty();
+        }
     }
 }
 

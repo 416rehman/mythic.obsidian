@@ -141,12 +141,12 @@ public:
 
     // Add a resource to the tracked list
     UFUNCTION(BlueprintCallable, Category = "Resource", BlueprintAuthorityOnly)
-    void AddOrUpdateResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount, APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32 index);
+    void AddOrUpdateResource(FTransform Transform, int32 DamageAmount, APlayerController* PlayerController, UMythicResourceISM* ResourceISM, int32 index);
 
 private:
     // Helper functions
     void ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount, APlayerController *PlayerController);
-    void AddNewResource(FTransform Transform, TSubclassOf<UMythicResourceISM> ISMClass, int32 DamageAmount, APlayerController* PlayerController, UMythicResourceISM* ResourceISM, int32
+    void AddNewResource(FTransform Transform, int32 DamageAmount, APlayerController* PlayerController, UMythicResourceISM* ResourceISM, int32
                         Index);
     void AddToDestroyedResources(FTrackedDestructibleData DestroyedResource, APlayerController *PlayerController);
 
