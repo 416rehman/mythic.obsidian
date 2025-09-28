@@ -27,18 +27,18 @@ void UMythicInteractionComponent::UpdateUILayerRootWidget(ACommonPlayerControlle
     auto UI_Layer = RootLayout->GetLayerWidget(this->GameUILayerName);
     auto widget_list = UI_Layer->GetWidgetList();
     if (widget_list.Num() < 1) {
-        UE_LOG(Mythic, Error, TEXT("UMythicInteractionComponent::UpdateUILayerRootWidget: UI_Layer %s has no widgets"), *this->GameUILayerName.ToString());
+        UE_LOG(Myth, Error, TEXT("UMythicInteractionComponent::UpdateUILayerRootWidget: UI_Layer %s has no widgets"), *this->GameUILayerName.ToString());
         return;
     }
 
     if (auto widget = Cast<UMythicActivatableWidget>(widget_list[0])) {
         this->UI_LayerRootWidget = widget;
-        UE_LOG(Mythic, Warning, TEXT("UMythicInteractionComponent::UpdateUILayerRootWidget: Using Widget %s in Layer %s for input handling"),
+        UE_LOG(Myth, Warning, TEXT("UMythicInteractionComponent::UpdateUILayerRootWidget: Using Widget %s in Layer %s for input handling"),
                *this->UI_LayerRootWidget->GetName(),
                *this->GameUILayerName.ToString());
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("UMythicInteractionComponent::UpdateUILayerRootWidget: Widget %s in Layer %s is not a MythicActivatableWidget"),
+        UE_LOG(Myth, Error, TEXT("UMythicInteractionComponent::UpdateUILayerRootWidget: Widget %s in Layer %s is not a MythicActivatableWidget"),
                *widget_list[0]->GetName(),
                *this->GameUILayerName.ToString());
     }
@@ -50,7 +50,7 @@ void UMythicInteractionComponent::BeginPlay() {
 
     this->OwningController = Cast<ACommonPlayerController>(GetOwner());
     if (!this->OwningController) {
-        UE_LOG(Mythic, Error, TEXT("InteractionComponent should only be attached to a CommonPlayerController"));
+        UE_LOG(Myth, Error, TEXT("InteractionComponent should only be attached to a CommonPlayerController"));
         return;
     }
 
@@ -62,7 +62,7 @@ void UMythicInteractionComponent::BeginPlay() {
     if (InteractionPromptWidgetClass) {
         this->InteractionPromptWidget = CreateWidget<UMythicInteractionPromptWidget>(GetWorld(), InteractionPromptWidgetClass);
         if (!this->InteractionPromptWidget) {
-            UE_LOG(Mythic, Error, TEXT("Failed to create InteractionPromptWidget"));
+            UE_LOG(Myth, Error, TEXT("Failed to create InteractionPromptWidget"));
             return;
         }
     }
@@ -169,12 +169,12 @@ void UMythicInteractionComponent::ScanForInteractableActors() {
 void UMythicInteractionComponent::PauseInteractions(bool bPause) {
     if (bPause) {
         this->InteractionScanTimerHandle.Invalidate();
-        UE_LOG(Mythic, Warning, TEXT("Paused Interaction Scans"));
+        UE_LOG(Myth, Warning, TEXT("Paused Interaction Scans"));
         return;
     }
 
     if (!this->InteractionScanTimerHandle.IsValid()) {
-        UE_LOG(Mythic, Warning, TEXT("Started Interaction Scans"));
+        UE_LOG(Myth, Warning, TEXT("Started Interaction Scans"));
         GetWorld()->GetTimerManager().SetTimer(this->InteractionScanTimerHandle, this, &UMythicInteractionComponent::ScanForInteractableActors,
                                                InteractionScanRate, true);
     }
@@ -188,13 +188,13 @@ void UMythicInteractionComponent::InitializeInteraction(AActor *NewFocusedActor)
 
         // If the actor is not ready for interaction, then return
         if (!this->IsCurrentActorReadyForInteraction) {
-            UE_LOG(Mythic, Error, TEXT("Interaction Error: Actor %s's is not ready for interaction"), *NewFocusedActor->GetName());
+            UE_LOG(Myth, Error, TEXT("Interaction Error: Actor %s's is not ready for interaction"), *NewFocusedActor->GetName());
             return;
         }
 
         // If the InputActionDataTable is not set, then return
         if (!InteractionData.InputActionDataTable) {
-            UE_LOG(Mythic, Error, TEXT("Interaction Error: Actor %s's InputActionDataTable is nullptr"), *NewFocusedActor->GetName());
+            UE_LOG(Myth, Error, TEXT("Interaction Error: Actor %s's InputActionDataTable is nullptr"), *NewFocusedActor->GetName());
             return;
         }
 
@@ -209,7 +209,7 @@ void UMythicInteractionComponent::InitializeInteraction(AActor *NewFocusedActor)
                 this->InteractionPromptWidget = CreateWidget<UMythicInteractionPromptWidget>(GetWorld(), InteractionPromptWidgetClass);
             }
             else {
-                UE_LOG(Mythic, Error, TEXT("Interaction Error: InteractionPromptWidget and InteractionPromptWidgetClass are nullptr"));
+                UE_LOG(Myth, Error, TEXT("Interaction Error: InteractionPromptWidget and InteractionPromptWidgetClass are nullptr"));
                 return;
             }
         }
@@ -231,12 +231,12 @@ void UMythicInteractionComponent::InitializeInteraction(AActor *NewFocusedActor)
         IMythicInteractable::Execute_OnFocused(NewFocusedActor, this->OwningController);
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("Interaction Error: Actor %s's GetWidgetAttachmentComponent() returned nullptr"), *NewFocusedActor->GetName());
+        UE_LOG(Myth, Error, TEXT("Interaction Error: Actor %s's GetWidgetAttachmentComponent() returned nullptr"), *NewFocusedActor->GetName());
     }
 }
 
 void UMythicInteractionComponent::EndInteraction(AActor *OldFocusedActor) {
-    UE_LOG(Mythic, Warning, TEXT("Ending Interaction with %s"), *OldFocusedActor->GetName());
+    UE_LOG(Myth, Warning, TEXT("Ending Interaction with %s"), *OldFocusedActor->GetName());
 
     // Look for a UI widget on the old focused actor with the tag "InteractionWidget" and remove it
     if (auto UIWidget = OldFocusedActor->FindComponentByTag(UWidgetComponent::StaticClass(), FName("InteractionWidget"))) {

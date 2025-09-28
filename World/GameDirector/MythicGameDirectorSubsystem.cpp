@@ -8,11 +8,11 @@ bool UMythicGameDirectorSubsystem::ShouldCreateSubsystem(UObject *Outer) const {
     // Should only create the subsystem on the server
     UWorld *World = Outer->GetWorld();
     if (World->WorldType != EWorldType::None && World->GetNetMode() < NM_Client) {
-        UE_LOG(Mythic, Warning, TEXT("GameDirector created on server"));
+        UE_LOG(Myth, Warning, TEXT("GameDirector created on server"));
         return true;
     }
 
-    UE_LOG(Mythic, Warning, TEXT("GameDirector will not be created on client"));
+    UE_LOG(Myth, Warning, TEXT("GameDirector will not be created on client"));
     return false;
 }
 

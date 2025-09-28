@@ -14,7 +14,7 @@ bool UAttributeReward::Give(FRewardContext &Context) const {
     
     // Check if the attribute is valid
     if (!Attribute.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("Attribute is not valid"));
+        UE_LOG(Myth, Error, TEXT("Attribute is not valid"));
         return false;
     }
 
@@ -22,12 +22,12 @@ bool UAttributeReward::Give(FRewardContext &Context) const {
     if (!ASC->HasAttributeSetForAttribute(Attribute)) {
         auto AttributeSet = Attribute.GetAttributeSetClass()->GetDefaultObject<UAttributeSet>();
         ASC->AddSpawnedAttribute(AttributeSet);
-        UE_LOG(Mythic, Log, TEXT("Added attribute set for attribute %s"), *Attribute.GetName());
+        UE_LOG(Myth, Log, TEXT("Added attribute set for attribute %s"), *Attribute.GetName());
     }
 
     // Apply the attribute change to the ASC
     ASC->ApplyModToAttribute(Attribute, Modifier, Magnitude);
-    UE_LOG(Mythic, Log, TEXT("Applied %s modifier of %f to attribute %s"), *UEnum::GetValueAsString(Modifier), Magnitude, *Attribute.GetName());
+    UE_LOG(Myth, Log, TEXT("Applied %s modifier of %f to attribute %s"), *UEnum::GetValueAsString(Modifier), Magnitude, *Attribute.GetName());
 
     return true;
 }

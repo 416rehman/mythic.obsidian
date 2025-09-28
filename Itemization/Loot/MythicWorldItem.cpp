@@ -35,7 +35,7 @@ AMythicWorldItem::AMythicWorldItem() {
 void AMythicWorldItem::EndPlay(const EEndPlayReason::Type EndPlayReason) {
     Super::EndPlay(EndPlayReason);
 
-    UE_LOG(Mythic, Warning, TEXT("AMythicWorldItem::EndPlay: %s"), *GetName());
+    UE_LOG(Myth, Warning, TEXT("AMythicWorldItem::EndPlay: %s"), *GetName());
 
     // If the item was not picked up, add it to the player's unclaimed items
     if (ItemInstance) {
@@ -56,7 +56,7 @@ void AMythicWorldItem::AddToUnclaimed() {
 void AMythicWorldItem::SetItemInstance(UMythicItemInstance *ItemInst) {
     checkf(HasAuthority(), TEXT("AMythicWorldItem::SetItemInstance: Only call this on the server"));
     if (!ItemInst) {
-        UE_LOG(Mythic, Warning, TEXT("AMythicWorldItem::SetItemInstance: ItemInstance is null"));
+        UE_LOG(Myth, Warning, TEXT("AMythicWorldItem::SetItemInstance: ItemInstance is null"));
         return;
     }
 
@@ -67,7 +67,7 @@ void AMythicWorldItem::SetItemInstance(UMythicItemInstance *ItemInst) {
 }
 
 void AMythicWorldItem::OnRep_ItemInstance() {
-    UE_LOG(Mythic, Warning, TEXT("AMythicWorldItem::OnRep_ItemInstance: %s"), *GetName());
+    UE_LOG(Myth, Warning, TEXT("AMythicWorldItem::OnRep_ItemInstance: %s"), *GetName());
     OnItemInstanceUpdated();
 }
 
@@ -76,7 +76,7 @@ void AMythicWorldItem::OnHit(UPrimitiveComponent *HitComponent, AActor *OtherAct
     const FHitResult &Hit) {
     // If the hit is under the item, stop simulating physics, and allow overlaps only
     if (Hit.ImpactPoint.Z < GetActorLocation().Z || Hit.Normal.Z > 0.5f) {
-        UE_LOG(Mythic, Warning, TEXT("AMythicWorldItem::OnHit: %s"), *GetName());
+        UE_LOG(Myth, Warning, TEXT("AMythicWorldItem::OnHit: %s"), *GetName());
         StaticMesh->SetSimulatePhysics(false);
         StaticMesh->SetEnableGravity(false);
         StaticMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
@@ -90,7 +90,7 @@ void AMythicWorldItem::EmulateDropPhysics(const FVector &location, float radius)
     FNavLocation RandomizedLocation;
     UNavigationSystemV1 *NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
     if (NavSys && NavSys->GetRandomPointInNavigableRadius(location, radius, RandomizedLocation, nullptr)) {
-        UE_LOG(Mythic, Warning, TEXT("Randomized location in %f radius from %s to %s"), radius, *location.ToString(), *RandomizedLocation.Location.ToString());
+        UE_LOG(Myth, Warning, TEXT("Randomized location in %f radius from %s to %s"), radius, *location.ToString(), *RandomizedLocation.Location.ToString());
     }
 
     FVector SuggestedVelocity;
@@ -125,7 +125,7 @@ void AMythicWorldItem::OnRep_TargetRecipient() {
         // Get owner player controller
         APlayerController *OwnerPlayerController = Cast<APlayerController>(GetOwner());
         if (!OwnerPlayerController) {
-            UE_LOG(Mythic, Warning, TEXT("AMythicWorldItem::OnRep_ForAll: Owner is not a player controller"));
+            UE_LOG(Myth, Warning, TEXT("AMythicWorldItem::OnRep_ForAll: Owner is not a player controller"));
             return;
         }
 

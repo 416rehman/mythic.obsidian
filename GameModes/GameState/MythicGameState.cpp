@@ -67,10 +67,10 @@ void AMythicGameState::SetWorldTier(uint8 NewWorldTier) {
     FGameplayEffectSpecHandle SpecHandle = AbilitySystemComponent->MakeOutgoingSpec(WorldTierAttributesInitializationEffect, NewWorldTier, EffectContext);
     if (SpecHandle.IsValid()) {
         ActiveWorldTierInitEffectHandle = AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-        UE_LOG(Mythic, Log, TEXT("Initialized World Tier Attributes for World Tier %d"), NewWorldTier);
+        UE_LOG(Myth, Log, TEXT("Initialized World Tier Attributes for World Tier %d"), NewWorldTier);
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("Failed to create SpecHandle for WorldTierAttributesInitializationEffect in Game State"));
+        UE_LOG(Myth, Error, TEXT("Failed to create SpecHandle for WorldTierAttributesInitializationEffect in Game State"));
     }
 }
 

@@ -65,7 +65,7 @@ struct FAffixesBuildData {
 
     // Affixes from this pool will be applied to this item when it is instanced.
     // The amount of affixes on the final item is determined by the "Rarity" of the item.
-    // Common = 1; Rare = 2; Epic = 3; Legendary = 4; Exotic = 5;
+    // Common = 1; Rare = 2; Epic = 3; Legendary = 4; Mythic = 5;
     UPROPERTY(EditDefaultsOnly)
     TMap<FGameplayAttribute, FRollDefinition> AffixPoolMap = TMap<FGameplayAttribute, FRollDefinition>();
 };
@@ -75,7 +75,7 @@ struct FAffixesBuildData {
  * AffixesFragment can be used to modify attributes without any additional logic.
  * It can be used to add core stats to an item, or to add random affixes to an item.
  */
-UCLASS(Blueprintable, BlueprintType)
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
 class MYTHIC_API UAffixesFragment : public UItemFragment {
     GENERATED_BODY()
 

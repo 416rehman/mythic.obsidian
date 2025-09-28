@@ -14,7 +14,7 @@ bool UAbilityReward::Give(FRewardContext& Context) const {
 
     // Check if the ability is valid
     if (!Ability) {
-        UE_LOG(Mythic, Error, TEXT("Ability is not valid"));
+        UE_LOG(Myth, Error, TEXT("Ability is not valid"));
         return false;
     }
 
@@ -26,15 +26,15 @@ bool UAbilityReward::Give(FRewardContext& Context) const {
     auto AbilitySpec = ASC->BuildAbilitySpecFromClass(AbilityClass);
     auto AbilitySpecHandle = ASC->GiveAbility(AbilitySpec);
 
-    UE_LOG(Mythic, Log, TEXT("Gave ability %s"), *AbilityClass->GetName());
+    UE_LOG(Myth, Log, TEXT("Gave ability %s"), *AbilityClass->GetName());
 
     // If the ability should be activated, activate it
     if (this->Activate) {
         if (ASC->TryActivateAbility(AbilitySpecHandle)) {
-            UE_LOG(Mythic, Log, TEXT("Activated ability %s"), *AbilityClass->GetName());
+            UE_LOG(Myth, Log, TEXT("Activated ability %s"), *AbilityClass->GetName());
         }
         else {
-            UE_LOG(Mythic, Error, TEXT("Failed to activate ability %s"), *AbilityClass->GetName());
+            UE_LOG(Myth, Error, TEXT("Failed to activate ability %s"), *AbilityClass->GetName());
         }
     }
 

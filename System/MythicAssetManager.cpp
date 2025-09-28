@@ -20,7 +20,7 @@ UMythicAssetManager &UMythicAssetManager::Get() {
         return *This;
     }
     else {
-        UE_LOG(Mythic, Fatal, TEXT("Invalid AssetManager in DefaultEngine.ini, must be MythicAssetManager!"));
+        UE_LOG(Myth, Fatal, TEXT("Invalid AssetManager in DefaultEngine.ini, must be MythicAssetManager!"));
         return *NewObject<UMythicAssetManager>(); // never calls this
     }
 }
@@ -31,7 +31,7 @@ UItemDefinition *UMythicAssetManager::ForceLoadItemDefinition(const FPrimaryAsse
     UItemDefinition *LoadedItemDef = Cast<UItemDefinition>(ItemPath.TryLoad());
 
     if (bLogWarning && LoadedItemDef == nullptr) {
-        UE_LOG(Mythic, Warning, TEXT("Failed to load item for identifier %s!"), *PrimaryAssetId.ToString());
+        UE_LOG(Myth, Warning, TEXT("Failed to load item for identifier %s!"), *PrimaryAssetId.ToString());
     }
 
     return LoadedItemDef;

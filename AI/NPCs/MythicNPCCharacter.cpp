@@ -78,13 +78,13 @@ void AMythicNPCCharacter::BeginPlay() {
     // if (this->HasAuthority()) {
     // AMythicGameState *GameState = GetWorld()->GetGameState<AMythicGameState>();
     // if (!GameState) {
-    //     UE_LOG(Mythic, Error, TEXT("GameState not found"));
+    //     UE_LOG(Myth, Error, TEXT("GameState not found"));
     //     return;
     // }
     //
     // UMythicAbilitySystemComponent *MythicASC = GameState->GetMythicAbilitySystemComponent();
     // if (!MythicASC) {
-    //     UE_LOG(Mythic, Error, TEXT("MythicASC not found"));
+    //     UE_LOG(Myth, Error, TEXT("MythicASC not found"));
     //     return;
     // }
     //
@@ -96,7 +96,7 @@ void AMythicNPCCharacter::BeginPlay() {
     // auto MaxHealth = GameState->HealthMaxCurveRowHandle.Eval(LevelF, "");
     // auto Health = FMath::RandRange(MinHealth, MaxHealth) * MythicASC->GetNumericAttribute(
     //     GameState->WorldTierAttributes->GetEnemyHealthMultiplierAttribute());
-    // UE_LOG(Mythic, Log, TEXT("Attribute Initialized. Health: %f"), Health);
+    // UE_LOG(Myth, Log, TEXT("Attribute Initialized. Health: %f"), Health);
     // LifeAttributes->SetMaxHealth(Health);
     // LifeAttributes->SetHealth(Health);
     //
@@ -105,7 +105,7 @@ void AMythicNPCCharacter::BeginPlay() {
     // auto MaxDamage = GameState->DamageMaxCurveRowHandle.Eval(LevelF, "");
     // auto Damage = FMath::RandRange(MinDamage, MaxDamage) * MythicASC->GetNumericAttribute(
     //     GameState->WorldTierAttributes->GetEnemyDamageMultiplierAttribute());
-    // UE_LOG(Mythic, Log, TEXT("Attribute Initialized. Damage: %f"), Damage);
+    // UE_LOG(Myth, Log, TEXT("Attribute Initialized. Damage: %f"), Damage);
     // CombatAttributes->SetDamage(Damage);
     // }
 }

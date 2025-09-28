@@ -49,7 +49,7 @@ public:
 
         // Skip if already owned by this actor
         if (OwningActor == NewOwner) {
-            UE_LOG(Mythic, Verbose, TEXT("SetOwner: Object already owned by %s"), *NewOwner->GetName());
+            UE_LOG(Myth, Verbose, TEXT("SetOwner: Object already owned by %s"), *NewOwner->GetName());
             return;
         }
 
@@ -86,7 +86,7 @@ public:
 
         // Skip if already owned by this component's actor
         if (OwningActor == NewComponentOwner && OwningComponent == NewComponent) {
-            UE_LOG(Mythic, Verbose, TEXT("SetOwner: Object already owned by component %s"),
+            UE_LOG(Myth, Verbose, TEXT("SetOwner: Object already owned by component %s"),
                    *NewComponent->GetName());
             return;
         }
@@ -110,7 +110,7 @@ private:
                 }
 
                 if (ChildObject->GetOwningActor() != OwningActor) {
-                    UE_LOG(Mythic, Warning,
+                    UE_LOG(Myth, Warning,
                            TEXT("SetOwner: Skipping %s due to different owning actor"),
                            *ChildObject->GetName());
                     continue;
@@ -177,18 +177,26 @@ private:
 public:
     // Marks the object as garbage so it will be destroyed and removes it from owning actor's replicated subobject list
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly)
-    void Destroy() {
-        if (!IsValid(this)) {
-            checkf(GetOwningActor()->HasAuthority() == true, TEXT("Destroy:: Object does not have authority to destroy itself!"));
-
-            OnDestroyed();
-            MarkAsGarbage(); // Mark the object as garbage so it will be destroyed
-
-            auto owner = GetOwningActor();
-            if (IsValid(owner) && owner->IsReplicatedSubObjectRegistered(this)) {
-                owner->RemoveReplicatedSubObject(this);
-            }
+    virtual void Destroy() {
+        // if (!IsValid(this)) {
+        auto owner = GetOwningActor();
+        if (!IsValid(owner)) {
+            UE_LOG(Myth, Warning, TEXT("Destroy: Object is already invalid and has no valid owner"));
+            return;
         }
+
+        checkf(owner->HasAuthority() == true, TEXT("Destroy:: Object does not have authority to destroy itself!"));
+        auto world = owner->GetWorld();
+        if (world) {
+            OnDestroyed();
+        }
+
+        MarkAsGarbage(); // Mark the object as garbage so it will be destroyed
+
+        if (IsValid(owner) && owner->IsReplicatedSubObjectRegistered(this)) {
+            owner->RemoveReplicatedSubObject(this);
+        }
+        // }
     }
 
     virtual int32 GetFunctionCallspace(UFunction *Function, FFrame *Stack) override {

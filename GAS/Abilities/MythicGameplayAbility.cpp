@@ -40,7 +40,7 @@ FMythicDamageContainerSpec UMythicGameplayAbility::MakeDamageContainerSpec(const
         ReturnSpec.DamageCalculationEffectSpec = DamageCalculationSpecHandle;
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("UMythicGameplayAbility::MakeDamageContainerSpec: Container.DamageCalculationEffect is null"));
+        UE_LOG(Myth, Error, TEXT("UMythicGameplayAbility::MakeDamageContainerSpec: Container.DamageCalculationEffect is null"));
     }
 
     // Add the damage application effect
@@ -50,7 +50,7 @@ FMythicDamageContainerSpec UMythicGameplayAbility::MakeDamageContainerSpec(const
         ReturnSpec.DamageApplicationEffectSpec = DamageApplicationSpecHandle;
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("UMythicGameplayAbility::MakeDamageContainerSpec: Container.DamageApplicationEffect is null"));
+        UE_LOG(Myth, Error, TEXT("UMythicGameplayAbility::MakeDamageContainerSpec: Container.DamageApplicationEffect is null"));
     }
 
     return ReturnSpec;
@@ -64,7 +64,7 @@ void UMythicGameplayAbility::SendEvent(FGameplayAbilityTargetDataHandle TargetDa
     EventData.TargetData = TargetData;
     EventData.ContextHandle = EffectContextHandle;
     auto activations = SourceASC->HandleGameplayEvent(EventTag, &EventData);
-    UE_LOG(Mythic, Warning, TEXT("BeforeDamage event sent to source %d abilities"), activations);
+    UE_LOG(Myth, Warning, TEXT("BeforeDamage event sent to source %d abilities"), activations);
 }
 
 TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainerSpec(const FMythicDamageContainerSpec &ContainerSpec) {    
@@ -72,7 +72,7 @@ TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainer
 
     // 1. CREATE DAMAGE CONTEXT - This stage only sets the context like isCritical, isBlocked, etc. No damage is calculated yet.
     if (!ContainerSpec.DamageCalculationEffectSpec.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("UMythicGameplayAbility::ApplyDamageContainerSpec: ContainerSpec.DamageCalculationEffectSpec is null"));
+        UE_LOG(Myth, Error, TEXT("UMythicGameplayAbility::ApplyDamageContainerSpec: ContainerSpec.DamageCalculationEffectSpec is null"));
     }
     auto CalculationEffectHandle = K2_ApplyGameplayEffectSpecToOwner(ContainerSpec.DamageCalculationEffectSpec);
     AllEffects.Push(CalculationEffectHandle);
@@ -87,7 +87,7 @@ TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainer
 
         // 3. APPLY DAMAGE - This stage calculates the damage and applies it to the targets
         if (!ContainerSpec.DamageApplicationEffectSpec.IsValid()) {
-            UE_LOG(Mythic, Error, TEXT("UMythicGameplayAbility::ApplyDamageContainerSpec: ContainerSpec.DamageApplicationEffectSpec is null"));
+            UE_LOG(Myth, Error, TEXT("UMythicGameplayAbility::ApplyDamageContainerSpec: ContainerSpec.DamageApplicationEffectSpec is null"));
         }
         auto ApplicationEffectHandle = K2_ApplyGameplayEffectSpecToTarget(ContainerSpec.DamageApplicationEffectSpec, ContainerSpec.TargetsHandle);
         AllEffects.Append(ApplicationEffectHandle);
@@ -107,7 +107,7 @@ TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainer
                                                                                  int32 OverrideGameplayLevel) {
     // If no HitResults or TargetActors, gtfo
     if (TargetActors.IsEmpty() || HitResults.IsEmpty()) {
-        UE_LOG(Mythic, Warning, TEXT("No Targets"));
+        UE_LOG(Myth, Warning, TEXT("No Targets"));
     }
 
     FMythicDamageContainerSpec Spec = MakeDamageContainerSpec(Container, OverrideGameplayLevel);

@@ -57,13 +57,13 @@ void UAffixesFragment::RollCoreAffixes(int ItemLevel) {
     auto CoreAffixes = this->AffixesBuildData.CoreAffixes;
 
     if (CoreAffixes.Num() == 0) {
-        UE_LOG(Mythic, Warning, TEXT("AffixesInstFragment::OnInstanced: No core stats to roll."));
+        UE_LOG(Myth, Warning, TEXT("AffixesInstFragment::OnInstanced: No core stats to roll."));
         return;
     }
     // Roll core stats
     for (auto &CoreStat : CoreAffixes) {
         if (!CoreStat.Key.IsValid()) {
-            UE_LOG(Mythic, Error, TEXT("AffixesInstFragment::OnInstanced: Invalid core stat attribute."));
+            UE_LOG(Myth, Error, TEXT("AffixesInstFragment::OnInstanced: Invalid core stat attribute."));
             continue;
         }
 
@@ -128,13 +128,13 @@ void UAffixesFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
 
     auto Owner = ItemInstance->GetInventoryOwner();
     if (!Owner) {
-        UE_LOG(Mythic, Error, TEXT("AffixesInstFragment::OnActiveItem: Invalid owner."));
+        UE_LOG(Myth, Error, TEXT("AffixesInstFragment::OnActiveItem: Invalid owner."));
         return;
     }
     auto ASC = &this->AffixesRuntimeReplicatedData.ASC;
     *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Owner);
     if (!ASC) {
-        UE_LOG(Mythic, Error, TEXT("AffixesInstFragment::OnActiveItem: Invalid ASC."));
+        UE_LOG(Myth, Error, TEXT("AffixesInstFragment::OnActiveItem: Invalid ASC."));
         return;
     }
 
@@ -146,7 +146,7 @@ void UAffixesFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
     Super::OnItemDeactivated(ItemInstance);
     auto ASC = this->AffixesRuntimeReplicatedData.ASC;
     if (!ASC) {
-        UE_LOG(Mythic, Error, TEXT("AffixesInstFragment::DeactivateAffixes: Invalid ASC."));
+        UE_LOG(Myth, Error, TEXT("AffixesInstFragment::DeactivateAffixes: Invalid ASC."));
         return;
     }
 
@@ -202,12 +202,12 @@ bool UAffixesFragment::CanBeStackedWith(const UItemFragment *Other) const {
 void UAffixesFragment::ApplyAffixes(UAbilitySystemComponent *ASC, TArray<FRolledAffix> &InRolledAffixes) {
     for (auto &Roll : InRolledAffixes) {
         if (!Roll.Attribute.IsValid()) {
-            UE_LOG(Mythic, Error, TEXT("AffixesInstFragment::ApplyAffixes: Invalid affix attribute."));
+            UE_LOG(Myth, Error, TEXT("AffixesInstFragment::ApplyAffixes: Invalid affix attribute."));
             continue;
         }
 
         if (Roll.bIsApplied) {
-            UE_LOG(Mythic, Warning, TEXT("AffixesInstFragment::ApplyAffixes: Affix %s already active."), *Roll.Attribute.GetName());
+            UE_LOG(Myth, Warning, TEXT("AffixesInstFragment::ApplyAffixes: Affix %s already active."), *Roll.Attribute.GetName());
             continue;
         }
 
@@ -220,12 +220,12 @@ void UAffixesFragment::ApplyAffixes(UAbilitySystemComponent *ASC, TArray<FRolled
 void UAffixesFragment::RemoveAffixes(UAbilitySystemComponent *ASC, TArray<FRolledAffix> &InRolledAffixes) {
     for (auto &Roll : InRolledAffixes) {
         if (!Roll.Attribute.IsValid()) {
-            UE_LOG(Mythic, Error, TEXT("AffixesInstFragment::RemoveAffixes: Invalid affix attribute."));
+            UE_LOG(Myth, Error, TEXT("AffixesInstFragment::RemoveAffixes: Invalid affix attribute."));
             continue;
         }
 
         if (!Roll.bIsApplied) {
-            UE_LOG(Mythic, Warning, TEXT("AffixesInstFragment::RemoveAffixes: Affix %s not active."), *Roll.Attribute.GetName());
+            UE_LOG(Myth, Warning, TEXT("AffixesInstFragment::RemoveAffixes: Affix %s not active."), *Roll.Attribute.GetName());
             continue;
         }
 
@@ -242,7 +242,7 @@ void UAffixesFragment::RemoveAffixes(UAbilitySystemComponent *ASC, TArray<FRolle
         }
         else {
             // Override is not supported
-            UE_LOG(Mythic, Error, TEXT("AffixesInstFragment::RemoveAffixes: Invalid modifier."));
+            UE_LOG(Myth, Error, TEXT("AffixesInstFragment::RemoveAffixes: Invalid modifier."));
         }
 
         ASC->ApplyModToAttribute(Roll.Attribute, modifier, ReversedValue);

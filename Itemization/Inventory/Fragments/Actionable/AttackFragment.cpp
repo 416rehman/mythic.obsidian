@@ -50,7 +50,7 @@ void UAttackFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
 
     this->AttackRuntimeReplicatedData.ASC = this->GetOwningAbilitySystemComponent();
     if (!this->AttackRuntimeReplicatedData.ASC) {
-        UE_LOG(Mythic, Error, TEXT("UAttackFragment::OnItemActivated: ASC is null"));
+        UE_LOG(Myth, Error, TEXT("UAttackFragment::OnItemActivated: ASC is null"));
         return;
     }
 

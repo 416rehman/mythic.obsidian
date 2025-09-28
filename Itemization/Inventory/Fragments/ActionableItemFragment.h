@@ -29,7 +29,7 @@
  * The fragment only implements client-side input binding/unbinding.
  * Game logic should be implemented in OnClientActionBegin/OnClientActionEnd.
  */
-UCLASS(BlueprintType, Abstract, Blueprintable, EditInlineNew, meta=(ShowOnlyInnerProperties))
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced, Abstract, meta=(ShowOnlyInnerProperties))
 class MYTHIC_API UActionableItemFragment : public UItemFragment {
     GENERATED_BODY()
 

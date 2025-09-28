@@ -5,8 +5,8 @@
 #include "CoreMinimal.h"
 #include "AbilitySystemInterface.h"
 #include "CommonPlayerController.h"
-#include "Mythic.h"
-#include "Itemization/Inventory/ItemDefinition.h"
+#include "Itemization/InventoryProviderInterface.h"
+#include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "MythicPlayerController.generated.h"
 
 struct FTrackedDestructibleData;
@@ -14,7 +14,8 @@ class UMythicItemInstance;
 class UItemDefinition;
 
 UCLASS()
-class AMythicPlayerController : public ACommonPlayerController, public IAbilitySystemInterface {
+class AMythicPlayerController : public ACommonPlayerController, public IAbilitySystemInterface, public IInventoryProviderInterface {
+private:
     GENERATED_BODY()
 
 protected:
@@ -22,18 +23,49 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Proficiency")
     class UProficiencyComponent *ProficiencyComponent;
 
-    // Inventory Component - Backpack
+    // Inventory Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
-    class UMythicInventoryComponent *Backpack;
+    class UMythicInventoryComponent *EquipmentInventory;
 
-    // Inventory Component - Hotbar
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
-    class UMythicInventoryComponent *Hotbar;
+    class UMythicInventoryComponent *ConsumablesInventory;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+    class UMythicInventoryComponent *FarmingInventory;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+    class UMythicInventoryComponent *MiningInventory;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+    class UMythicInventoryComponent *LearningInventory;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+    class UMythicInventoryComponent *PlacableInventory;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+    class UMythicInventoryComponent *ExplorationInventory;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+    class UMythicInventoryComponent *MiscInventory;
+
+    // Crafting Component
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crafting")
+    class UCraftingComponent *CraftingComponent;
 
 public:
     AMythicPlayerController();
 
     virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override;
+
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    virtual TArray<UMythicInventoryComponent *> GetAllInventoryComponents() const override;
+
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    virtual UAbilitySystemComponent *GetSchematicsASC() const override;
+
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    virtual UMythicInventoryComponent *GetInventoryForItemType(const FGameplayTag &ItemType) const override;
+
     virtual void OnPossess(APawn *InPawn) override;
     virtual void OnRep_PlayerState() override;
 
@@ -58,29 +90,4 @@ protected:
 public:
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     const UProficiencyComponent *GetProficiencyComponent() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Proficiency")
-    const UMythicInventoryComponent *GetBackpack() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Inventory")
-    const UMythicInventoryComponent *GetHotbar() const;
-
-    // Event - Called when the player crafts an item
-    UFUNCTION(BlueprintImplementableEvent, Category = "Crafting")
-    void OnCraftItem(UItemDefinition *ItemDef, int32 Quantity);
-
-    void OnCraftItem_Implementation(UItemDefinition *ItemDef, int32 Quantity) {
-        UE_LOG(Mythic, Log, TEXT("Crafting: %s"), *ItemDef->Name.ToString());
-    }
-
-    // CraftingStation should be able to access Hotbar and Backpack
-    friend class ACraftingStation;
-
-    /// Resource Sync with Server
-    // UFUNCTION(BlueprintCallable, Category = "Resource Sync", Server, Reliable)
-    // void Server_RequestDestructiblesState();
-    //
-    // // Sync resources to owner
-    // UFUNCTION(BlueprintCallable, Category = "Resource Sync", Client, Reliable)
-    // void Client_RecvDestructiblesState(const TArray<FTrackedDestructibleData> &DestructibleData);
 };

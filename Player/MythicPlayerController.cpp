@@ -8,9 +8,9 @@
 #include "OnlineSubsystemUtils.h"
 #include "GameModes/GameState/MythicGameState.h"
 #include "Interfaces/OnlineIdentityInterface.h"
+#include "Itemization/Crafting/CraftingComponent.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Proficiency/ProficiencyComponent.h"
-#include "Resources/MythicResourceISM.h"
 
 AMythicPlayerController::AMythicPlayerController() {
     bShowMouseCursor = true;
@@ -21,18 +21,60 @@ AMythicPlayerController::AMythicPlayerController() {
     ProficiencyComponent = CreateDefaultSubobject<UProficiencyComponent>(TEXT("ProficiencyComponent"));
     ProficiencyComponent->SetIsReplicated(true);
 
-    // Create the Backpack Inventory Component
-    Backpack = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("Backpack"));
-    Backpack->SetIsReplicated(true);
+    // Create the Inventory Components
+    EquipmentInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("EquipmentInventory"));
+    EquipmentInventory->SetIsReplicated(true);
 
-    // Create the Hotbar Inventory Component
-    Hotbar = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("Hotbar"));
-    Hotbar->SetIsReplicated(true);
+    ConsumablesInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("ConsumablesInventory"));
+    ConsumablesInventory->SetIsReplicated(true);
+
+    FarmingInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("FarmingInventory"));
+    FarmingInventory->SetIsReplicated(true);
+
+    MiningInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("MiningInventory"));
+    MiningInventory->SetIsReplicated(true);
+
+    LearningInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("LearningInventory"));
+    LearningInventory->SetIsReplicated(true);
+
+    PlacableInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("PlacableInventory"));
+    PlacableInventory->SetIsReplicated(true);
+
+    ExplorationInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("ExplorationInventory"));
+    ExplorationInventory->SetIsReplicated(true);
+
+    MiscInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("MiscInventory"));
+    MiscInventory->SetIsReplicated(true);
+
+    // Create the Crafting Component
+    CraftingComponent = CreateDefaultSubobject<UCraftingComponent>(TEXT("CraftingComponent"));
+    CraftingComponent->SetIsReplicated(true);
 }
 
 UAbilitySystemComponent *AMythicPlayerController::GetAbilitySystemComponent() const {
     auto PS = GetPlayerState<AMythicPlayerState>();
     return PS ? PS->GetAbilitySystemComponent() : nullptr;
+}
+
+TArray<UMythicInventoryComponent *> AMythicPlayerController::GetAllInventoryComponents() const {
+    return {
+        EquipmentInventory,
+        ConsumablesInventory,
+        FarmingInventory,
+        MiningInventory,
+        LearningInventory,
+        PlacableInventory,
+        ExplorationInventory,
+        MiscInventory
+    };
+}
+
+UAbilitySystemComponent *AMythicPlayerController::GetSchematicsASC() const {
+    return this->GetAbilitySystemComponent();
+}
+
+UMythicInventoryComponent *AMythicPlayerController::GetInventoryForItemType(const FGameplayTag &ItemType) const {
+    return IInventoryProviderInterface::GetInventoryForItemType(ItemType);
 }
 
 void AMythicPlayerController::OnPossess(APawn *InPawn) {
@@ -67,7 +109,7 @@ void AMythicPlayerController::BeginPlay() {
 
 void AMythicPlayerController::Login(int32 LocalUserNum) {
     // TODO: Could call an event dispatcher here to notify the UI that connection to Online Services is being established.
-    UE_LOG(Mythic, Log, TEXT("EOS: Connecting to Online Services"));
+    UE_LOG(Myth, Log, TEXT("EOS: Connecting to Online Services"));
 
     // Get the OSS identity interface
     IOnlineSubsystem *OSS = Online::GetSubsystem(GetWorld());
@@ -86,7 +128,7 @@ void AMythicPlayerController::Login(int32 LocalUserNum) {
         AddOnLoginCompleteDelegate_Handle(LocalUserNum, FOnLoginCompleteDelegate::CreateUObject(this, &ThisClass::CB_LoginResponse));
 
     // Print the name of the OSS we are using.
-    UE_LOG(Mythic, Log, TEXT("EOS: Using Online Subsystem: %s"), *OSS->GetSubsystemName().ToString());
+    UE_LOG(Myth, Log, TEXT("EOS: Using Online Subsystem: %s"), *OSS->GetSubsystemName().ToString());
 
     // Grab command line arguments. Presence of these indicates, using previously saved credentials to auto-login.
     // Even though, this parameter is not used here explicity, the AutoLogin function will use it internally.
@@ -98,7 +140,7 @@ void AMythicPlayerController::Login(int32 LocalUserNum) {
         // AutoLogin is async, return value indicates if the call was started. Actual result is in the delegate.
         if (!Identity->AutoLogin(LocalUserNum)) {
             // If we failed to start the login call, remove the delegate.
-            UE_LOG(Mythic, Error, TEXT("EOS: Failed to start AutoLogin"));
+            UE_LOG(Myth, Error, TEXT("EOS: Failed to start AutoLogin"));
 
             // Tell the identity interface to stop calling our delegate.
             Identity->ClearOnLoginCompleteDelegate_Handle(LocalUserNum, LoginDelegateHandle);
@@ -118,12 +160,12 @@ void AMythicPlayerController::Login(int32 LocalUserNum) {
         // "AccountPortal" will use the built-in onboarding flow provided by the SDK.
         FOnlineAccountCredentials Credentials("AccountPortal", "", "");
 
-        UE_LOG(Mythic, Log, TEXT("EOS: Logging in to Online service"));
+        UE_LOG(Myth, Log, TEXT("EOS: Logging in to Online service"));
 
         // Login is async, return value indicates if the call was started. Actual result is in the delegate.
         if (!Identity->Login(LocalUserNum, Credentials)) {
             // If we failed to start the login call, remove the delegate.
-            UE_LOG(Mythic, Error, TEXT("EOS: Failed to start Login"));
+            UE_LOG(Myth, Error, TEXT("EOS: Failed to start Login"));
 
             // Tell the identity interface to stop calling our delegate.
             Identity->ClearOnLoginCompleteDelegate_Handle(LocalUserNum, LoginDelegateHandle);
@@ -142,12 +184,12 @@ This function will remove the delegate that was bound in the Login() function.
 
     // TODO: Could call an event dispatcher here to notify the UI that connection to Online Services failed or succeeded.
     if (bWasSuccessful) {
-        UE_LOG(Mythic, Log, TEXT("EOS: Login successful - %s"), *UserId.ToString());
+        UE_LOG(Myth, Log, TEXT("EOS: Login successful - %s"), *UserId.ToString());
     }
     else {
         // If online only, do not allow the player to continue.
         // Otherwise, you can display a message to the user and allow them to continue in offline mode.
-        UE_LOG(Mythic, Error, TEXT("EOS: Login failed: %s"), *Error);
+        UE_LOG(Myth, Error, TEXT("EOS: Login failed: %s"), *Error);
     }
 
     // Clear the delegate handle.
@@ -161,31 +203,6 @@ This function will remove the delegate that was bound in the Login() function.
 const UProficiencyComponent *AMythicPlayerController::GetProficiencyComponent() const {
     return ProficiencyComponent;
 }
-
-const UMythicInventoryComponent *AMythicPlayerController::GetBackpack() const {
-    return Backpack;
-}
-
-const UMythicInventoryComponent *AMythicPlayerController::GetHotbar() const {
-    return Hotbar;
-}
-
-// void AMythicPlayerController::Client_RecvDestructiblesState_Implementation(const TArray<FTrackedDestructibleData> &DestructibleData) {
-//     // Clear the timer
-//     UE_LOG(Mythic, Log, TEXT("Destructibles State Received for %d Items"), DestructibleData.Num());
-//     HandleResourceDestruction(DestructibleData);
-// }
-//
-// void AMythicPlayerController::Server_RequestDestructiblesState_Implementation() {
-//     // Get Mythic Game State
-//     auto GameState = this->GetWorld()->GetGameStateChecked<AMythicGameState>();
-//     checkf(GameState, TEXT("GameState is invalid"))
-//
-//     // Send to owning client
-//     auto Data = GameState->GetTrackedDestructibles();
-//     Client_RecvDestructiblesState(Data);
-//     UE_LOG(Mythic, Log, TEXT("Destructibles State Sent for %d Items"), Data.Num());
-// }
 
 void AMythicPlayerController::SetupInputComponent() {
     // set up gameplay key bindings

@@ -7,6 +7,8 @@
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "ItemReward.generated.h"
 
+class IInventoryProviderInterface;
+
 USTRUCT(BlueprintType, Blueprintable)
 struct FItemRewardContext : public FRewardContext {
     GENERATED_BODY()
@@ -22,7 +24,7 @@ struct FItemRewardContext : public FRewardContext {
     // The inventory in which to place the item. If not specified, the item will be dropped in the drop location instead.
     // If the inventory is full, the item will drop at the inventory owner's location.
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess=true))
-    TObjectPtr<UMythicInventoryComponent> PutInInventory = nullptr;
+    TScriptInterface<IInventoryProviderInterface> InventoryProvider = nullptr;
 
     // The item will be spawned here. If not specified, the item will be spawned at the player's location.
     // Defaults to the player's location.
@@ -40,7 +42,7 @@ class MYTHIC_API UItemReward : public URewardBase {
 
 public:
     virtual bool Give(FRewardContext &Context) const override;
-    
+
     // The quantity of the item to give.
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
     int32 Quantity = 1;

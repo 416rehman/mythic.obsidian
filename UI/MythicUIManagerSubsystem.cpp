@@ -58,19 +58,19 @@ void UMythicUIManagerSubsystem::SetModalAffectsOtherLayers(bool bInModalAffectsO
 void UMythicUIManagerSubsystem::AddWidgetInstanceToLayer(FGameplayTag LayerName, const APlayerController *Controller, UCommonActivatableWidget *Widget) {
     const UGameUIPolicy *Policy = GetCurrentUIPolicy();
     if (!Policy) {
-        UE_LOG(Mythic, Warning, TEXT("No policy found"));
+        UE_LOG(Myth, Warning, TEXT("No policy found"));
         return;
     }
 
     UPrimaryGameLayout *RootLayout = Policy->GetRootLayout(PrimaryLocalPlayer);
     if (!RootLayout) {
-        UE_LOG(Mythic, Warning, TEXT("No root layout found"));
+        UE_LOG(Myth, Warning, TEXT("No root layout found"));
         return;
     }
 
     auto Layer = RootLayout->GetLayerWidget(LayerName);
     if (!Layer) {
-        UE_LOG(Mythic, Warning, TEXT("No layer found"));
+        UE_LOG(Myth, Warning, TEXT("No layer found"));
         return;
     }
 
@@ -80,19 +80,19 @@ void UMythicUIManagerSubsystem::AddWidgetInstanceToLayer(FGameplayTag LayerName,
 void UMythicUIManagerSubsystem::RemoveWidgetInstanceFromLayer(FGameplayTag LayerName, const APlayerController *Controller, UCommonActivatableWidget *Widget) {
     const UGameUIPolicy *Policy = GetCurrentUIPolicy();
     if (!Policy) {
-        UE_LOG(Mythic, Warning, TEXT("No policy found"));
+        UE_LOG(Myth, Warning, TEXT("No policy found"));
         return;
     }
 
     UPrimaryGameLayout *RootLayout = Policy->GetRootLayout(PrimaryLocalPlayer);
     if (!RootLayout) {
-        UE_LOG(Mythic, Warning, TEXT("No root layout found"));
+        UE_LOG(Myth, Warning, TEXT("No root layout found"));
         return;
     }
 
     auto Layer = RootLayout->GetLayerWidget(LayerName);
     if (!Layer) {
-        UE_LOG(Mythic, Warning, TEXT("No layer found"));
+        UE_LOG(Myth, Warning, TEXT("No layer found"));
         return;
     }
 

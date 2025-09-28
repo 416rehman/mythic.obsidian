@@ -65,7 +65,7 @@ struct FConsumableActionBuildData {
  * Assign Tags
  * Remove Tags
 * */
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
 class MYTHIC_API UConsumableActionFragment : public UActionableItemFragment {
     GENERATED_BODY()
 
@@ -102,7 +102,7 @@ public:
     virtual void OnInstanced(UMythicItemInstance *ItemInstance) override;
     virtual void OnItemActivated(UMythicItemInstance *ItemInstance) override;
     virtual void OnItemDeactivated(UMythicItemInstance *ItemInstance) override;
-    virtual void OnInventorySlotChanged(UMythicInventorySlot *Slot) override;
+    virtual void OnInventorySlotChanged(UMythicInventoryComponent* Inventory, int32 SlotIndex) override;
 
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
     //~

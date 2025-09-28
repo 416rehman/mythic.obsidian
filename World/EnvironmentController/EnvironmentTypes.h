@@ -229,8 +229,8 @@ struct FWeatherCycleInfo {
         this->FogDensity = FMath::RandRange(SelectedWeather->FogDensity.X, SelectedWeather->FogDensity.Y);
 
         // Print the computed weather cycle values
-        UE_LOG(Mythic_Environment, Warning, TEXT("Computed Fog Density: %f"), this->FogDensity);
-        UE_LOG(Mythic_Environment, Warning, TEXT("Computed Fog Height Falloff: %f"), this->FogHeightFalloff);
+        UE_LOG(Myth_Environment, Warning, TEXT("Computed Fog Density: %f"), this->FogDensity);
+        UE_LOG(Myth_Environment, Warning, TEXT("Computed Fog Height Falloff: %f"), this->FogHeightFalloff);
 
         bSetInstantly = SetInstantly;
     }

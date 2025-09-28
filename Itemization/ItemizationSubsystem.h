@@ -3,10 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Inventory/ItemDefinition.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "ItemizationSubsystem.generated.h"
-
-class UItemDefinition;
 /**
  * focused on managing the static data (item definitions) that describe what items are, their properties, and how they might be used (such as for crafting)
  */
@@ -16,7 +15,7 @@ class MYTHIC_API UItemizationSubsystem : public UGameInstanceSubsystem {
 
     // Array of loaded item defs Ids - can be used to get the actual item defs
     UPROPERTY()
-    TArray<FPrimaryAssetId> LoadedItemDefIds;
+    TArray<FPrimaryAssetId> AllItemDefIds;
 
     // Array of all Item Definitions
     UPROPERTY()
@@ -26,8 +25,18 @@ class MYTHIC_API UItemizationSubsystem : public UGameInstanceSubsystem {
     UPROPERTY()
     TSet<FPrimaryAssetId> CraftingIngredientsIds;
 
+protected:
+    // Cached list of all craftable items
+    UPROPERTY()
+    TArray<UItemDefinition *> CachedCraftableItems;
+
+    // Cached map of craftable items by ItemType
+    TMap<FGameplayTag, TArray<UItemDefinition *>> CachedCraftableItemsByType;
+
     virtual void Initialize(FSubsystemCollectionBase &Collection) override;
-    void OnAssetsLoaded();
+    void OnAllItemDefsLoaded();
+    void OnCraftingRequirementsLoaded();
+    void ProcessCraftingRequirements();
     virtual void Deinitialize() override;
 
 public:
@@ -35,11 +44,19 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Itemization")
     const TArray<UItemDefinition *> &GetItemDefinitions() const { return CachedItemDefs; }
 
-    // Check if an item is a crafting item
+    // Check if an item is used as a crafting ingredient for crafting other items
     UFUNCTION(BlueprintCallable, Category = "Itemization")
     bool IsCraftingIngredient(UItemDefinition *Item) const;
 
     // Get an item definition by its ID
     UFUNCTION(BlueprintCallable, Category = "Itemization")
     UItemDefinition *GetItemDefinition(FPrimaryAssetId ItemId) const;
+
+    // Get all craftable items
+    UFUNCTION(BlueprintCallable, Category = "Itemization")
+    const TArray<UItemDefinition *> &GetAllCraftableItems() const { return CachedCraftableItems; }
+
+    // Get craftable items by ItemType
+    UFUNCTION(BlueprintCallable, Category = "Itemization")
+    void GetCraftableItemsByType(FGameplayTag ItemType, TArray<UItemDefinition *> &OutItems) const;
 };

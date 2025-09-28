@@ -28,9 +28,9 @@ protected:
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_LegendaryDropRateMultiplier)
     FGameplayAttributeData LegendaryDropRateMultiplier;
 
-    // Exotic drop rate multiplier
+    // Mythic drop rate multiplier
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_MythicDropRateMultiplier)
-    FGameplayAttributeData ExoticDropRateMultiplier;
+    FGameplayAttributeData MythicDropRateMultiplier;
 
     // Enemy health multiplier
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_EnemyHealthMultiplier)
@@ -44,7 +44,7 @@ public:
     ATTRIBUTE_ACCESSORS(UWorldTierAttributes, GoldDropRateMultiplier);
     ATTRIBUTE_ACCESSORS(UWorldTierAttributes, ExperienceGainMultiplier);
     ATTRIBUTE_ACCESSORS(UWorldTierAttributes, LegendaryDropRateMultiplier);
-    ATTRIBUTE_ACCESSORS(UWorldTierAttributes, ExoticDropRateMultiplier);
+    ATTRIBUTE_ACCESSORS(UWorldTierAttributes, MythicDropRateMultiplier);
     ATTRIBUTE_ACCESSORS(UWorldTierAttributes, EnemyHealthMultiplier);
     ATTRIBUTE_ACCESSORS(UWorldTierAttributes, EnemyDamageMultiplier);
 

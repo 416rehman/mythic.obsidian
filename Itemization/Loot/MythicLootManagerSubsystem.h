@@ -4,6 +4,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "MythicLootManagerSubsystem.generated.h"
 
+class IInventoryProviderInterface;
 class UMythicItemInstance;
 class UMythicInventoryComponent;
 class UItemDefinition;
@@ -36,8 +37,8 @@ public:
     // Should be used when giving items to players.
     // If the TargetRecipient is set, they will become owner and only that player will see the item. Otherwise, GameState will be the owner and all players will see the item.
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Loot")
-    AMythicWorldItem *CreateAndGive(UItemDefinition *item_def, int32 quantity_if_stackable, UMythicInventoryComponent *inventory,
-                                    AController *TargetRecipient, int32 level = 0);
+    AMythicWorldItem *CreateAndGive(UItemDefinition* ItemDef, int32 QtyIfStackable,
+                                    TScriptInterface<IInventoryProviderInterface> InventoryProvider, AController* TargetRecipient, int32 Lvl = 0);
 
     // SERVER-ONLY: Spawns a loot item at a given location.
     // If the TargetRecipient is set, they will become owner and only that player will see the item. Otherwise, GameState will be the owner and all players will see the item.

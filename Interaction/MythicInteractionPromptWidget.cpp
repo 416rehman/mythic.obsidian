@@ -14,13 +14,13 @@ void UMythicInteractionPromptWidget::SetInteractionData(FMythicInteractionData I
 
     // Bind the primary input action
     if (InInteractionData.PrimaryInteractionName.IsNone() || InInteractionData.PrimaryInteractionName == FName("")) {
-        UE_LOG(Mythic, Error, TEXT("Interaction Warning: Actor %s's PrimaryInteractionName is None"), *InInteractableActor->GetName());
+        UE_LOG(Myth, Error, TEXT("Interaction Warning: Actor %s's PrimaryInteractionName is None"), *InInteractableActor->GetName());
     }
     else {
         FDataTableRowHandle rowhandle;
         rowhandle.DataTable = Cast<UDataTable>(InInteractionData.InputActionDataTable);
         if (!rowhandle.DataTable) {
-            UE_LOG(Mythic, Error, TEXT("Interaction Error: DataTable is not valid"));
+            UE_LOG(Myth, Error, TEXT("Interaction Error: DataTable is not valid"));
             return;
         }
         rowhandle.RowName = InInteractionData.PrimaryInteractionName;
@@ -32,7 +32,7 @@ void UMythicInteractionPromptWidget::SetInteractionData(FMythicInteractionData I
         }));
         
         if (!UI_LayerRootWidget) {
-            UE_LOG(Mythic, Error, TEXT("Interaction Error: UI_LayerRootWidget is nullptr"));
+            UE_LOG(Myth, Error, TEXT("Interaction Error: UI_LayerRootWidget is nullptr"));
             return;
         }
 
@@ -45,21 +45,21 @@ void UMythicInteractionPromptWidget::SetInteractionData(FMythicInteractionData I
                     ActionButtonInterface->SetRepresentedAction(this->PrimaryInteractionHandle);
                 }
                 else {
-                    UE_LOG(Mythic, Error, TEXT("Interaction Error: PrimaryActionBtn does not implement ICommonBoundActionButtonInterface"));
+                    UE_LOG(Myth, Error, TEXT("Interaction Error: PrimaryActionBtn does not implement ICommonBoundActionButtonInterface"));
                 }
 
                 this->VerticalBox->AddChild(PrimaryActionBtn);
             }
         }
         else {
-            UE_LOG(Mythic, Error, TEXT("Interaction Error: PrimaryInteractionHandle is not valid"));
+            UE_LOG(Myth, Error, TEXT("Interaction Error: PrimaryInteractionHandle is not valid"));
         }
     }
 
     // Bind the Secondary input action
     if (InInteractionData.SecondaryInteractionName.IsNone() || InInteractionData.SecondaryInteractionName ==
         FName("")) {
-        UE_LOG(Mythic, Error, TEXT("Interaction Warning: Actor %s's SecondaryInteractionName is None"), *InInteractableActor->GetName());
+        UE_LOG(Myth, Error, TEXT("Interaction Warning: Actor %s's SecondaryInteractionName is None"), *InInteractableActor->GetName());
     }
     else {
         FDataTableRowHandle rowhandle;
@@ -83,14 +83,14 @@ void UMythicInteractionPromptWidget::SetInteractionData(FMythicInteractionData I
                     ActionButtonInterface->SetRepresentedAction(this->SecondaryInteractionHandle);
                 }
                 else {
-                    UE_LOG(Mythic, Error, TEXT("Interaction Error: SecondaryActionBtn does not implement ICommonBoundActionButtonInterface"));
+                    UE_LOG(Myth, Error, TEXT("Interaction Error: SecondaryActionBtn does not implement ICommonBoundActionButtonInterface"));
                 }
 
                 this->VerticalBox->AddChild(SecondaryActionBtn);
             }
         }
         else {
-            UE_LOG(Mythic, Error, TEXT("Interaction Error: SecondaryInteractionHandle is not valid"));
+            UE_LOG(Myth, Error, TEXT("Interaction Error: SecondaryInteractionHandle is not valid"));
         }
     }
 
@@ -102,5 +102,5 @@ void UMythicInteractionPromptWidget::Clear() {
     this->SecondaryInteractionHandle.Unregister();
     this->VerticalBox->ClearChildren();
 
-    UE_LOG(Mythic, Log, TEXT("Interaction Prompt Cleared"));
+    UE_LOG(Myth, Log, TEXT("Interaction Prompt Cleared"));
 }

@@ -11,12 +11,12 @@ void UEnvironmentComponent::BeginPlay() {
     // Get the game instance
     UGameInstance *GameInstance = GetWorld()->GetGameInstance();
     if (!GameInstance) {
-        UE_LOG(Mythic, Error, TEXT("UEnvironmentComponent::BeginPlay: GameInstance is null"));
+        UE_LOG(Myth, Error, TEXT("UEnvironmentComponent::BeginPlay: GameInstance is null"));
     }
     // Get the Environment subsystem
     UMythicEnvironmentSubsystem *EnvironmentSubsystem = GameInstance->GetSubsystem<UMythicEnvironmentSubsystem>();
     if (!EnvironmentSubsystem) {
-        UE_LOG(Mythic, Error, TEXT("UEnvironmentComponent::BeginPlay: EnvironmentSubsystem is null"));
+        UE_LOG(Myth, Error, TEXT("UEnvironmentComponent::BeginPlay: EnvironmentSubsystem is null"));
         return;
     }
     // Listen for the environment controller to be set in the environment subsystem then do the following
@@ -29,7 +29,7 @@ void UEnvironmentComponent::BeginPlay() {
 
 void UEnvironmentComponent::OnEnvironmentControllerRegistered(AMythicEnvironmentController *EnvironmentController) {
     if (!EnvironmentController) {
-        UE_LOG(Mythic, Error, TEXT("UEnvironmentComponent::OnEnvironmentControllerRegistered: EnvironmentController is null"));
+        UE_LOG(Myth, Error, TEXT("UEnvironmentComponent::OnEnvironmentControllerRegistered: EnvironmentController is null"));
         return;
     }
     

@@ -75,7 +75,7 @@ struct FAttackBuildData {
 /**
  * 
  */
-UCLASS()
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
 class MYTHIC_API UAttackFragment : public UActionableItemFragment {
     GENERATED_BODY()
 

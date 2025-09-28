@@ -23,7 +23,7 @@ void UMythicActivatableWidget::NativeDestruct() {
 void UMythicActivatableWidget::RegisterInputBinding(FGameplayTag InputTag, EInputEvent InputType, const FInputActionExecutedDelegate &Callback, bool ShowInActionBar,
                                                     FInputActionBindingHandle &BindingHandle) {
     if (!InputTag.IsValid()) {
-        UE_LOG(Mythic, Warning, TEXT("RegisterInputBinding called with invalid tag"));
+        UE_LOG(Myth, Warning, TEXT("RegisterInputBinding called with invalid tag"));
         return;
     }
     auto arg = FBindUIActionArgs(FUIActionTag::ConvertChecked(InputTag), ShowInActionBar, FSimpleDelegate::CreateLambda(

@@ -8,10 +8,11 @@
 #include "XPReward.h"
 #include "AbilityReward.h"
 #include "AttributeReward.h"
+#include "Mythic.h"
 
 bool FRewardsToGive::Give(APlayerController *PlayerController, bool IsPrivateItem, int32 ItemLevel) const {
     if (!PlayerController) {
-        UE_LOG(Mythic, Error, TEXT("FRewardsToGive::Give PlayerController is null"));
+        UE_LOG(Myth, Error, TEXT("FRewardsToGive::Give PlayerController is null"));
         return false;
     }
 
@@ -20,7 +21,7 @@ bool FRewardsToGive::Give(APlayerController *PlayerController, bool IsPrivateIte
     if (this->XPReward) {
         auto Context = FXPRewardContext(PlayerController);
         retval = this->XPReward->Give(Context) && retval;
-        UE_LOG(Mythic, Log, TEXT("FRewardsToGive::Give Gave XP Reward"))
+        UE_LOG(Myth, Log, TEXT("FRewardsToGive::Give Gave XP Reward"))
     }
 
     if (this->ItemReward) {
@@ -28,26 +29,26 @@ bool FRewardsToGive::Give(APlayerController *PlayerController, bool IsPrivateIte
         Context.bIsPrivate = IsPrivateItem;
         Context.ItemLevel = ItemLevel;
         retval = this->ItemReward->Give(Context) && retval;
-        UE_LOG(Mythic, Log, TEXT("FRewardsToGive::Give Gave Item Reward"))
+        UE_LOG(Myth, Log, TEXT("FRewardsToGive::Give Gave Item Reward"))
     }
 
     if (this->LootReward) {
         auto Context = FLootRewardContext(PlayerController);
         Context.ItemLevel = ItemLevel;
         retval = this->LootReward->Give(Context) && retval;
-        UE_LOG(Mythic, Log, TEXT("FRewardsToGive::Give Gave Loot Reward"))
+        UE_LOG(Myth, Log, TEXT("FRewardsToGive::Give Gave Loot Reward"))
     }
 
     if (this->AbilityReward) {
         auto Context = FRewardContext(PlayerController);
         retval = this->AbilityReward->Give(Context) && retval;
-        UE_LOG(Mythic, Log, TEXT("FRewardsToGive::Give Gave Ability Reward"))
+        UE_LOG(Myth, Log, TEXT("FRewardsToGive::Give Gave Ability Reward"))
     }
 
     if (this->AttributeReward) {
         auto Context = FRewardContext(PlayerController);       
         retval = this->AttributeReward->Give(Context) && retval;
-        UE_LOG(Mythic, Log, TEXT("FRewardsToGive::Give Gave Attribute Reward"));
+        UE_LOG(Myth, Log, TEXT("FRewardsToGive::Give Gave Attribute Reward"));
     }
 
     return retval;

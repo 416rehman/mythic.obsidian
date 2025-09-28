@@ -13,7 +13,7 @@ void UMythicResourceISM::BeginPlay() {
 
     auto IsStablyNamed = this->IsNameStableForNetworking();
     auto IsStablyNamedFull = this->IsFullNameStableForNetworking();
-    UE_LOG(Mythic, Log, TEXT("UMythicResourceISM::BeginPlay: IsNameStableForNetworking=%d, IsFullNameStableForNetworking=%d"),
+    UE_LOG(Myth, Log, TEXT("UMythicResourceISM::BeginPlay: IsNameStableForNetworking=%d, IsFullNameStableForNetworking=%d"),
            IsStablyNamed, IsStablyNamedFull);
 
     auto Owner = GetOwner();
@@ -21,12 +21,12 @@ void UMythicResourceISM::BeginPlay() {
     auto OwnerIsStablyNamed = Owner->IsNameStableForNetworking();
     auto OwnerIsStablyNamedFull = Owner->IsFullNameStableForNetworking();
 
-    UE_LOG(Mythic, Log, TEXT("UMythicResourceISM::BeginPlay: Owner=%s, OwnerIsNameStableForNetworking=%d, OwnerIsFullNameStableForNetworking=%d"),
+    UE_LOG(Myth, Log, TEXT("UMythicResourceISM::BeginPlay: Owner=%s, OwnerIsNameStableForNetworking=%d, OwnerIsFullNameStableForNetworking=%d"),
            OwnerName, OwnerIsStablyNamed, OwnerIsStablyNamedFull);
 
     // If the tag is not set, log a warning
     if (!HealthConfig.HealthPerZUnit || HealthConfig.MinHealth < 0 || HealthConfig.MaxHealth < 0) {
-        UE_LOG(Mythic, Error,
+        UE_LOG(Myth, Error,
                TEXT(
                    "UMythicResourceISM::BeginPlay: HealthConfig is not set properly on %s. Please set HealthPerZUnit, MinHealth, and MaxHealth."
                ),
@@ -35,7 +35,7 @@ void UMythicResourceISM::BeginPlay() {
 
     // Show an in-editor error dialogue if resourcetype is not set.
     if (!ResourceType.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("UMythicResourceISM::BeginPlay: ResourceType is not set on %s. Please set a valid GameplayTag."),
+        UE_LOG(Myth, Error, TEXT("UMythicResourceISM::BeginPlay: ResourceType is not set on %s. Please set a valid GameplayTag."),
                *GetName());
 
         // In editor, show a message box
@@ -51,19 +51,19 @@ void UMythicResourceISM::BeginPlay() {
 
 // Updated MythicResourceISM.cpp implementation
 void UMythicResourceISM::DestroyResource(int32 InstanceId) {
-    UE_LOG(Mythic, Log, TEXT("DestroyResource: InstanceId=%d, Component=%s, Owner=%s"),
+    UE_LOG(Myth, Log, TEXT("DestroyResource: InstanceId=%d, Component=%s, Owner=%s"),
            InstanceId, *GetName(), *GetOwner()->GetName());
 
     // Convert InstanceId to InstanceIndex
     int32 InstanceIndex = GetInstanceIndexForId(FPrimitiveInstanceId(InstanceId));
     if (InstanceIndex < 0) {
-        UE_LOG(Mythic, Warning, TEXT("DestroyResource: Invalid InstanceId %d"), InstanceId);
+        UE_LOG(Myth, Warning, TEXT("DestroyResource: Invalid InstanceId %d"), InstanceId);
         return;
     }
 
     // Check if already destroyed
     if (IsInstanceDestroyed(InstanceIndex)) {
-        UE_LOG(Mythic, Warning, TEXT("DestroyResource: Instance %d (InstanceId=%d) is already destroyed"),
+        UE_LOG(Myth, Warning, TEXT("DestroyResource: Instance %d (InstanceId=%d) is already destroyed"),
                InstanceIndex, InstanceId);
         return;
     }
@@ -84,7 +84,7 @@ void UMythicResourceISM::DestroyResource(int32 InstanceId) {
     // Mark as destroyed in our tracking
     DestroyedInstances.Add(InstanceIndex);
 
-    UE_LOG(Mythic, Log, TEXT("DestroyResource: Successfully destroyed InstanceIndex %d. Total destroyed: %d"),
+    UE_LOG(Myth, Log, TEXT("DestroyResource: Successfully destroyed InstanceIndex %d. Total destroyed: %d"),
            InstanceIndex, DestroyedInstances.Num());
 }
 
@@ -94,11 +94,11 @@ void UMythicResourceISM::RestoreResource(int32 InstanceIndex, FTransform Origina
 
     // Remove from destroyed tracking
     if (DestroyedInstances.Remove(InstanceIndex)) {
-        UE_LOG(Mythic, Log, TEXT("RestoreResource: Restored InstanceIndex %d. Total destroyed: %d"),
+        UE_LOG(Myth, Log, TEXT("RestoreResource: Restored InstanceIndex %d. Total destroyed: %d"),
                InstanceIndex, DestroyedInstances.Num());
     }
     else {
-        UE_LOG(Mythic, Warning, TEXT("RestoreResource: InstanceIndex %d was not in destroyed tracking"), InstanceIndex);
+        UE_LOG(Myth, Warning, TEXT("RestoreResource: InstanceIndex %d was not in destroyed tracking"), InstanceIndex);
     }
 }
 
@@ -113,10 +113,10 @@ int32 UMythicResourceISM::CalculateHealthFromTransform(const FTransform &Transfo
     // Cap at type-specific maximum health
     if (HealthConfig.MaxHealth > 0) {
         CalculatedHealth = FMath::Min(CalculatedHealth, HealthConfig.MaxHealth);
-        UE_LOG(Mythic, Log, TEXT("Capping health to MaxHealth=%d"), HealthConfig.MaxHealth);
+        UE_LOG(Myth, Log, TEXT("Capping health to MaxHealth=%d"), HealthConfig.MaxHealth);
     }
 
-    UE_LOG(Mythic, Log, TEXT("UMythicDestructiblesManagerComponent::CalculateHealthFromTransform: Z=%.2f, HealthPerZ=%.2f, calculated health=%d"), ZValue,
+    UE_LOG(Myth, Log, TEXT("UMythicDestructiblesManagerComponent::CalculateHealthFromTransform: Z=%.2f, HealthPerZ=%.2f, calculated health=%d"), ZValue,
            HealthConfig.HealthPerZUnit, CalculatedHealth);
 
     return CalculatedHealth;

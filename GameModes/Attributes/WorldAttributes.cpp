@@ -20,7 +20,7 @@ void UWorldTierAttributes::OnRep_LegendaryDropRateMultiplier(const FGameplayAttr
 }
 
 void UWorldTierAttributes::OnRep_MythicDropRateMultiplier(const FGameplayAttributeData &OldMythicDropRate) {
-    GAMEPLAYATTRIBUTE_REPNOTIFY(UWorldTierAttributes, ExoticDropRateMultiplier, OldMythicDropRate);
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UWorldTierAttributes, MythicDropRateMultiplier, OldMythicDropRate);
 }
 
 void UWorldTierAttributes::OnRep_EnemyHealthMultiplier(const FGameplayAttributeData &OldEnemyHealth) {
@@ -37,7 +37,7 @@ void UWorldTierAttributes::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> 
     DOREPLIFETIME_CONDITION_NOTIFY(UWorldTierAttributes, GoldDropRateMultiplier, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UWorldTierAttributes, ExperienceGainMultiplier, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UWorldTierAttributes, LegendaryDropRateMultiplier, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UWorldTierAttributes, ExoticDropRateMultiplier, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UWorldTierAttributes, MythicDropRateMultiplier, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UWorldTierAttributes, EnemyHealthMultiplier, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UWorldTierAttributes, EnemyDamageMultiplier, COND_None, REPNOTIFY_Always);
 }

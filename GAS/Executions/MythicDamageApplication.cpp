@@ -70,7 +70,7 @@ UMythicDamageApplication::UMythicDamageApplication() {
 void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCustomExecutionParameters &ExecutionParams,
                                                       FGameplayEffectCustomExecutionOutput &OutExecutionOutput) const {
     Super::Execute_Implementation(ExecutionParams, OutExecutionOutput);
-    UE_LOG(Mythic, Warning, TEXT("DamageApplication:: Applying damage"));
+    UE_LOG(Myth, Warning, TEXT("DamageApplication:: Applying damage"));
 
     FGameplayEffectSpec *Spec = ExecutionParams.GetOwningSpecForPreExecuteMod();
     FGameplayEffectContext *Context = Spec->GetContext().Get();
@@ -113,13 +113,13 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
                                                                BonusDamageToSuperiorEnemies);
 
     auto FinalDamage = FMath::Max(1.0f, Power) * FMath::RandRange(DmgPerHit, DmgPerHit * 1.5f);
-    UE_LOG(Mythic, Log, TEXT("DamageApplication:: Damage %f = DmgPerHit (%f - %f) * Power (%f)"), FinalDamage, DmgPerHit, DmgPerHit * 1.5f, Power);
+    UE_LOG(Myth, Log, TEXT("DamageApplication:: Damage %f = DmgPerHit (%f - %f) * Power (%f)"), FinalDamage, DmgPerHit, DmgPerHit * 1.5f, Power);
     if (MythicContext->IsCriticalHit()) {
         FinalDamage += FinalDamage * CriticalHitDamage;
-        UE_LOG(Mythic, Warning, TEXT("DamageApplication:: Critical hit! Damage increased by %f Percent"), CriticalHitDamage/100.0f);
+        UE_LOG(Myth, Warning, TEXT("DamageApplication:: Critical hit! Damage increased by %f Percent"), CriticalHitDamage/100.0f);
     }
 
-    UE_LOG(Mythic, Warning, TEXT("DamageApplication:: Final damage: %f"), FinalDamage);
+    UE_LOG(Myth, Warning, TEXT("DamageApplication:: Final damage: %f"), FinalDamage);
 
     // TODO: Apply status effects to the target
     // TODO: Modify damage based on IncreasedDamageToEnemiesUnderStatusEffects, BonusDamageToSuperiorEnemies, WeaponType, etc.
@@ -138,5 +138,5 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     // EventData.ContextHandle = Spec->GetContext();
     //
     // auto activations = SourceASC->HandleGameplayEvent(HitTag, &EventData);
-    // UE_LOG(Mythic, Warning, TEXT("Hit event sent to source %d abilities"), activations);
+    // UE_LOG(Myth, Warning, TEXT("Hit event sent to source %d abilities"), activations);
 }

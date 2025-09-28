@@ -118,7 +118,7 @@ bool UFamilyDefinition::SetFamilyForUniqueMember(const TSoftObjectPtr<UNPCDefini
     UniqueMembers.Add(NPC, &bIsAlreadyInSet);
 
     if (bIsAlreadyInSet && NewFam) {
-        UE_LOG(Mythic, Error, TEXT("Duplicate NPC '%s' found in FamilyDef %s."), *NPC->NPCId.ToString(), *StaticClass()->GetName());
+        UE_LOG(Myth, Error, TEXT("Duplicate NPC '%s' found in FamilyDef %s."), *NPC->NPCId.ToString(), *StaticClass()->GetName());
     }
     else {
         SetFamilyForNPCDef(NPCSoft, NewFam);

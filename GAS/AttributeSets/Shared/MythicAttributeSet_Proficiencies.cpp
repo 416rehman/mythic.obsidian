@@ -225,19 +225,19 @@ int32 UMythicAttributeSet_Proficiencies::GetLevel(const UAbilitySystemComponent 
     found = false;
     auto CurrentXp = ASC->GetGameplayAttributeValue(GetOverallXpAttribute(), found);
     if (!found) {
-        UE_LOG(Mythic, Error, TEXT("Unable to find OverallXp attribute in ASC"));
+        UE_LOG(Myth, Error, TEXT("Unable to find OverallXp attribute in ASC"));
         return 0;
     }
 
     auto MaxXp = ASC->GetGameplayAttributeValue(GetOverallXpMaxAttribute(), found);
     if (!found) {
-        UE_LOG(Mythic, Error, TEXT("Unable to find OverallXpMax attribute in ASC"));
+        UE_LOG(Myth, Error, TEXT("Unable to find OverallXpMax attribute in ASC"));
         return 0;
     }
 
     auto Settings = UMythicDevSettings::Get();
     if (!Settings) {
-        UE_LOG(Mythic, Error, TEXT("Unable to find MythicDevSettings"));
+        UE_LOG(Myth, Error, TEXT("Unable to find MythicDevSettings"));
         return 0;
     }
 

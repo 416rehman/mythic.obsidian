@@ -8,14 +8,14 @@
 void UMythicEnvironmentSubsystem::SetEnvironmentController(AMythicEnvironmentController *Controller) {
     this->EnvironmentController = Controller;
     if (this->EnvironmentController) {
-        UE_LOG(Mythic_Environment, Log, TEXT("EnvironmentController set to %s"), *Controller->GetName());
+        UE_LOG(Myth_Environment, Log, TEXT("EnvironmentController set to %s"), *Controller->GetName());
         this->OnEnvironmentControllerRegisterDelegate.Broadcast(Controller);
 
         // After the broadcast, clear the delegate
         this->OnEnvironmentControllerRegisterDelegate.Clear();
     }
     else {
-        UE_LOG(Mythic_Environment, Log, TEXT("EnvironmentController set to nullptr"));
+        UE_LOG(Myth_Environment, Log, TEXT("EnvironmentController set to nullptr"));
     }
 }
 
@@ -25,7 +25,7 @@ AMythicEnvironmentController *UMythicEnvironmentSubsystem::GetEnvironmentControl
 
 FDateTime UMythicEnvironmentSubsystem::GetCurrentTime() const {
     if (!this->EnvironmentController) {
-        UE_LOG(Mythic_Environment, Error, TEXT("EnvironmentController is not set!"));
+        UE_LOG(Myth_Environment, Error, TEXT("EnvironmentController is not set!"));
         return FDateTime::Now();
     }
 
@@ -39,7 +39,7 @@ FGameplayTag UMythicEnvironmentSubsystem::GetWeather() const {
         }
     }
 
-    UE_LOG(Mythic_Environment, Error, TEXT("EnvironmentController is not set!"));
+    UE_LOG(Myth_Environment, Error, TEXT("EnvironmentController is not set!"));
     return FGameplayTag::EmptyTag;
 }
 
@@ -48,13 +48,13 @@ ESeason UMythicEnvironmentSubsystem::GetSeason() const {
         auto Month = GetMonthOfYear(this->EnvironmentController->GetTimespan());
         return MonthAsSeason(Month);
     }
-    UE_LOG(Mythic_Environment, Error, TEXT("EnvironmentController is not set!"));
+    UE_LOG(Myth_Environment, Error, TEXT("EnvironmentController is not set!"));
     return ESeason::Winter;
 }
 
 EDayTime UMythicEnvironmentSubsystem::GetDayTime() const {
     if (!this->EnvironmentController) {
-        UE_LOG(Mythic_Environment, Error, TEXT("EnvironmentController is not set!"));
+        UE_LOG(Myth_Environment, Error, TEXT("EnvironmentController is not set!"));
         return EDayTime::Night;
     }
 
@@ -63,7 +63,7 @@ EDayTime UMythicEnvironmentSubsystem::GetDayTime() const {
 
 UWeatherType *UMythicEnvironmentSubsystem::GetWeatherTypeByTag(FGameplayTag Tag) {
     if (!this->EnvironmentController) {
-        UE_LOG(Mythic_Environment, Error, TEXT("EnvironmentController is not set!"));
+        UE_LOG(Myth_Environment, Error, TEXT("EnvironmentController is not set!"));
         return nullptr;
     }
 
@@ -72,7 +72,7 @@ UWeatherType *UMythicEnvironmentSubsystem::GetWeatherTypeByTag(FGameplayTag Tag)
 
 bool UMythicEnvironmentSubsystem::IsWeatherPaused() {
     if (!this->EnvironmentController) {
-        UE_LOG(Mythic_Environment, Error, TEXT("EnvironmentController is not set!"));
+        UE_LOG(Myth_Environment, Error, TEXT("EnvironmentController is not set!"));
         return false;
     }
 
@@ -81,7 +81,7 @@ bool UMythicEnvironmentSubsystem::IsWeatherPaused() {
 
 void UMythicEnvironmentSubsystem::SetTargetWeather(FGameplayTag TargetWeather) {
     if (!this->EnvironmentController) {
-        UE_LOG(Mythic_Environment, Error, TEXT("EnvironmentController is not set!"));
+        UE_LOG(Myth_Environment, Error, TEXT("EnvironmentController is not set!"));
         return;
     }
 
@@ -90,7 +90,7 @@ void UMythicEnvironmentSubsystem::SetTargetWeather(FGameplayTag TargetWeather) {
 
 void UMythicEnvironmentSubsystem::SetWeatherInstantly(FGameplayTag Weather) {
     if (!this->EnvironmentController) {
-        UE_LOG(Mythic_Environment, Error, TEXT("EnvironmentController is not set!"));
+        UE_LOG(Myth_Environment, Error, TEXT("EnvironmentController is not set!"));
         return;
     }
 
@@ -100,7 +100,7 @@ void UMythicEnvironmentSubsystem::SetWeatherInstantly(FGameplayTag Weather) {
     });
 
     if (!TargetWeather) {
-        UE_LOG(Mythic_Environment, Error, TEXT("The EnvironmentController does not have a weather type with the tag %s"), *Weather.ToString());
+        UE_LOG(Myth_Environment, Error, TEXT("The EnvironmentController does not have a weather type with the tag %s"), *Weather.ToString());
         return;
     }
 
@@ -112,7 +112,7 @@ void UMythicEnvironmentSubsystem::SetWeatherInstantly(FGameplayTag Weather) {
 
 void UMythicEnvironmentSubsystem::PauseWeather() {
     if (!this->EnvironmentController) {
-        UE_LOG(Mythic_Environment, Error, TEXT("EnvironmentController is not set!"));
+        UE_LOG(Myth_Environment, Error, TEXT("EnvironmentController is not set!"));
         return;
     }
 
@@ -121,7 +121,7 @@ void UMythicEnvironmentSubsystem::PauseWeather() {
 
 void UMythicEnvironmentSubsystem::ResumeWeather() {
     if (!this->EnvironmentController) {
-        UE_LOG(Mythic_Environment, Error, TEXT("EnvironmentController is not set!"));
+        UE_LOG(Myth_Environment, Error, TEXT("EnvironmentController is not set!"));
         return;
     }
 

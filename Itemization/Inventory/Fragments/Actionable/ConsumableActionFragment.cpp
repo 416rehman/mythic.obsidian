@@ -15,11 +15,11 @@ void UConsumableActionFragment::OnItemDeactivated(UMythicItemInstance *ItemInsta
     Super::OnItemDeactivated(ItemInstance);
 }
 
-void UConsumableActionFragment::OnInventorySlotChanged(UMythicInventorySlot *Slot) {
-    Super::OnInventorySlotChanged(Slot);
+void UConsumableActionFragment::OnInventorySlotChanged(UMythicInventoryComponent *Inventory, int32 SlotIndex) {
+    Super::OnInventorySlotChanged(Inventory, SlotIndex);
     auto CachedASC = &this->ConsumableActionRuntimeReplicatedData.ASC;
-    if (Slot) {
-        *CachedASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Slot->GetInventory()->GetOwner());
+    if (Inventory) {
+        *CachedASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Inventory->GetOwner());
     }
     else {
         *CachedASC = nullptr;
@@ -36,7 +36,7 @@ void UConsumableActionFragment::OnClientActionEnd(UMythicItemInstance *ItemInsta
     // ASC is cached by the server and replicated
     auto ASC = this->ConsumableActionRuntimeReplicatedData.ASC;
     if (!ASC) {
-        UE_LOG(Mythic, Error, TEXT("UConsumableActionFragment::OnClientActionEnd: Invalid ASC."));
+        UE_LOG(Myth, Error, TEXT("UConsumableActionFragment::OnClientActionEnd: Invalid ASC."));
         return;
     }
     // 1. Loose tags
@@ -62,10 +62,10 @@ void UConsumableActionFragment::OnClientActionEnd(UMythicItemInstance *ItemInsta
         Payload.OptionalObject = this;
 
         auto TriggeredAbilities = ASC->HandleGameplayEvent(ConsumableActionConfig.EventTag, &Payload);
-        UE_LOG(Mythic, Warning, TEXT("UConsumableFragment: Triggered %d abilities"), TriggeredAbilities);
+        UE_LOG(Myth, Warning, TEXT("UConsumableFragment: Triggered %d abilities"), TriggeredAbilities);
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("UConsumableFragment::Action: GameplayEvent is invalid"));
+        UE_LOG(Myth, Error, TEXT("UConsumableFragment::Action: GameplayEvent is invalid"));
     }
 
     // FINALLY. Consume the item
@@ -82,7 +82,7 @@ void UConsumableActionFragment::ServerHandleGrantAbility_Implementation(UMythicI
     ConsumableActionRuntimeReplicatedData.ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(ItemInstance->GetInventoryOwner());
     auto ASC = ConsumableActionRuntimeReplicatedData.ASC;
     if (!ASC) {
-        UE_LOG(Mythic, Error, TEXT("UConsumableFragment::ServerGrantAbility_Implementation: OwningASC is null"));
+        UE_LOG(Myth, Error, TEXT("UConsumableFragment::ServerGrantAbility_Implementation: OwningASC is null"));
         return;
     }
 
@@ -91,26 +91,26 @@ void UConsumableActionFragment::ServerHandleGrantAbility_Implementation(UMythicI
     auto AbilityHandle = ASC->GiveAbility(AbilitySpec);
 
     if (AbilityHandle.IsValid()) {
-        UE_LOG(Mythic, Warning, TEXT("UConsumableFragment::ServerGrantAbility_Implementation: Granted Ability"));
+        UE_LOG(Myth, Warning, TEXT("UConsumableFragment::ServerGrantAbility_Implementation: Granted Ability"));
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("UConsumableFragment::ServerGrantAbility_Implementation: Failed to grant ability"));
+        UE_LOG(Myth, Error, TEXT("UConsumableFragment::ServerGrantAbility_Implementation: Failed to grant ability"));
     }
 }
 
 void UConsumableActionFragment::ServerHandleInHandRemoveAbility_Implementation(UMythicItemInstance *ItemInstance) {
     auto ASC = ConsumableActionRuntimeReplicatedData.ASC;
     if (!ASC) {
-        UE_LOG(Mythic, Error, TEXT("UConsumableFragment::ServerRemoveAbility_Implementation: OwningASC is null"));
+        UE_LOG(Myth, Error, TEXT("UConsumableFragment::ServerRemoveAbility_Implementation: OwningASC is null"));
     }
 
     auto Spec = ASC->FindAbilitySpecFromClass(this->ConsumableActionConfig.GameplayAbility.LoadSynchronous());
     if (Spec->Handle.IsValid()) {
         ASC->ClearAbility(Spec->Handle);
-        UE_LOG(Mythic, Warning, TEXT("UConsumableFragment::OnInactiveItem: Removed Granted Ability"));
+        UE_LOG(Myth, Warning, TEXT("UConsumableFragment::OnInactiveItem: Removed Granted Ability"));
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("UConsumableFragment::OnInactiveItem: Failed to remove Granted Ability"));
+        UE_LOG(Myth, Error, TEXT("UConsumableFragment::OnInactiveItem: Failed to remove Granted Ability"));
     }
 }
 
@@ -119,14 +119,14 @@ void UConsumableActionFragment::ServerHandleTags_Implementation(UMythicItemInsta
     auto InventoryOwner = ItemInstance->GetInventoryOwner();
     // Check authority
     if (InventoryOwner->GetLocalRole() != ROLE_Authority) {
-        UE_LOG(Mythic, Error, TEXT("UConsumableFragment::HandleTags: Not authority"));
+        UE_LOG(Myth, Error, TEXT("UConsumableFragment::HandleTags: Not authority"));
         return;
     }
 
     auto ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(InventoryOwner);
     if (ASC) {
         if (ConsumableActionConfig.TagsToAdd.IsValid()) {
-            UE_LOG(Mythic, Warning, TEXT("UConsumableFragment::HandleTags: Adding Tag %s to ASC %s"), *ConsumableActionConfig.TagsToAdd.ToString(),
+            UE_LOG(Myth, Warning, TEXT("UConsumableFragment::HandleTags: Adding Tag %s to ASC %s"), *ConsumableActionConfig.TagsToAdd.ToString(),
                    *ASC->GetName());
             ASC->AddLooseGameplayTags(ConsumableActionConfig.TagsToAdd);
             ASC->AddReplicatedLooseGameplayTags(ConsumableActionConfig.TagsToAdd);
@@ -138,7 +138,7 @@ void UConsumableActionFragment::ServerHandleTags_Implementation(UMythicItemInsta
         }
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("UConsumableFragment::HandleTags: OwningASC is null"));
+        UE_LOG(Myth, Error, TEXT("UConsumableFragment::HandleTags: OwningASC is null"));
     }
 }
 

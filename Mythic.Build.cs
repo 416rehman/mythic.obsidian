@@ -50,6 +50,7 @@ public class Mythic : ModuleRules
 			"OnlineSubsystemUtils",
 			"OnlineSubsystemEOS",
 			"NavigationSystem",
+			"DataConfigCore"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
@@ -80,7 +81,7 @@ public class Mythic : ModuleRules
 			"EngineSettings",
 			"DTLSHandlerComponent",
 			"CommonLoadingScreen",
-			"ModelViewViewModel"
+			"ModelViewViewModel",
 		});
 
 		DynamicallyLoadedModuleNames.AddRange(

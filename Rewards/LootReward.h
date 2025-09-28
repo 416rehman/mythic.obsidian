@@ -6,6 +6,7 @@
 #include "RewardBase.h"
 #include "LootReward.generated.h"
 
+class IInventoryProviderInterface;
 class UMythicLootManagerSubsystem;
 class UMythicInventoryComponent;
 class UItemDefinition;
@@ -102,9 +103,9 @@ UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API ULootReward : public URewardBase {
     GENERATED_BODY()
 
-    static void RequestLootFromSource(float CommonRate, float RareRate, float EpicRate, float LegendaryRate, float ExoticRate,
+    static void RequestLootFromSource(float CommonRate, float RareRate, float EpicRate, float LegendaryRate, float MythicRate,
                                       APlayerController *PlayerController,
-                                      int32 DropLevel, UMythicLootTable *LootTable, UMythicInventoryComponent *Inventory, bool isPrivate, FVector SpawnLocation,
+                                      int32 DropLevel, UMythicLootTable *LootTable, TScriptInterface<IInventoryProviderInterface> InventoryProvider, bool isPrivate, FVector SpawnLocation,
                                       UMythicLootManagerSubsystem *
                                       MythicLootManager);
 

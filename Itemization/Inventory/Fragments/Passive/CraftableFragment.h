@@ -32,7 +32,7 @@ struct FCraftingRequirement {
 /**
  * This fragment allows this item to be crafted or dismantled at a crafting station
  */
-UCLASS(Blueprintable, BlueprintType)
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
 class MYTHIC_API UCraftableFragment : public UItemFragment {
     GENERATED_BODY()
 
@@ -46,8 +46,16 @@ public:
     TArray<FCraftingRequirement> CraftingRequirements;
 
     // The tag that is required to be on the player to craft this item. I.e this tag could be granted by reading a "schematic" item
-    UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, meta=(DisplayName="RequiredTag", Categories="Itemization.Crafting"))
+    UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, meta=(DisplayName="RequiredTag", Categories="Itemization.Schematic"))
     FGameplayTag RequiredTag;
+
+    // The tag that is required to be on the crafting station to craft this item (e.g., forge, alchemy table)
+    UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, meta=(DisplayName="RequiredStationTag", Categories="Itemization.Station"))
+    FGameplayTag RequiredStationTag;
+
+    // The time in seconds it takes to craft this item
+    UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, meta=(ClampMin="0.0", UIMin="0.0"))
+    float TimeNeeded = 3.0f;
 };
 
 inline bool UCraftableFragment::CanBeStackedWith(const UItemFragment *Other) const {

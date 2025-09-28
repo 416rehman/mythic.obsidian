@@ -76,7 +76,7 @@ DOREPLIFETIME_CONDITION(ThisClass, Name##Config, COND_InitialOrOwner);
 /// Deactivation pipeline (SERVER: slot -> item -> fragment -> deactivate)
 ///
 /// By default, properties of the ItemFragment are on the SERVER only. However, if the client is interested, REPLICATED properties can be accessed.
-UCLASS(BlueprintType, Blueprintable, EditInlineNew, Abstract)
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced, Abstract)
 class MYTHIC_API UItemFragment : public UMythicReplicatedObject {
     GENERATED_BODY()
 
@@ -136,7 +136,7 @@ public:
 
     // This is called when the inventory slot is changed. If null, the item has been dropped
     // Use case: Optionally caching the owning inventory component or other "player" related data
-    virtual void OnInventorySlotChanged(UMythicInventorySlot *Slot) {}
+    virtual void OnInventorySlotChanged(UMythicInventoryComponent *NewInventory, int32 NewSlot) {}
 
     // replicate
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {
@@ -198,7 +198,7 @@ public:
 inline UMythicInventoryComponent *UItemFragment::GetOwningInventoryComponent() const {
     auto owningItemInstance = GetOwningItemInstance();
     if (!owningItemInstance) {
-        UE_LOG(Mythic, Error, TEXT("UItemFragment::GetOwningInventoryComponent: Fragment has no owning item instance."));
+        UE_LOG(Myth, Error, TEXT("UItemFragment::GetOwningInventoryComponent: Fragment has no owning item instance."));
         return nullptr;
     }
 
@@ -208,7 +208,7 @@ inline UMythicInventoryComponent *UItemFragment::GetOwningInventoryComponent() c
 inline UAbilitySystemComponent *UItemFragment::GetOwningAbilitySystemComponent() const {
     auto owningInventoryComponent = GetOwningInventoryComponent();
     if (!owningInventoryComponent) {
-        UE_LOG(Mythic, Error, TEXT("UItemFragment::GetOwningAbilitySystemComponent: Fragment has no owning inventory component."));
+        UE_LOG(Myth, Error, TEXT("UItemFragment::GetOwningAbilitySystemComponent: Fragment has no owning inventory component."));
         return nullptr;
     }
 

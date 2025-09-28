@@ -80,7 +80,7 @@ struct FTalentBuildData {
 
     // TalentDefs from this pool will be randomly chosen and applied to the item.
     // Amount of TalentDefs picked depends on Item Rarity.
-    // Common, Rare, Epic = 0; Legendary = 1; Exotic = 2;
+    // Common, Rare, Epic = 0; Legendary = 1; Mythic = 2;
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(ShowOnlyInnerProperties))
     TSoftObjectPtr<UTalentPool> TalentPool;
 };
@@ -88,7 +88,7 @@ struct FTalentBuildData {
 /**
  * TALENT: Grants an ability when the item becomes active and removed when the item becomes inactive
  */
-UCLASS(Blueprintable, BlueprintType)
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
 class MYTHIC_API UTalentFragment : public UItemFragment {
     GENERATED_BODY()
 

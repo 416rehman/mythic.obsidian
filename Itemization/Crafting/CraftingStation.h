@@ -3,15 +3,22 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CraftingComponent.h"
 #include "GameFramework/Actor.h"
 #include "Interaction/IMythicInteractable.h"
 #include "Player/MythicPlayerController.h"
 #include "CraftingStation.generated.h"
 
 class UCraftableFragment;
+class UCraftingComponent;
 
 UCLASS()
-class MYTHIC_API ACraftingStation : public AActor, public IMythicInteractable {
+class MYTHIC_API ACraftingStation : public AActor, public IMythicInteractable, public IInventoryProviderInterface {
+public:
+    virtual TArray<UMythicInventoryComponent *> GetAllInventoryComponents() const override;
+    virtual UAbilitySystemComponent * GetSchematicsASC() const override;
+
+private:
     GENERATED_BODY()
 
 public:
@@ -19,14 +26,25 @@ public:
     ACraftingStation();
 
 protected:
+    // Crafting Component
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crafting")
+    UCraftingComponent *CraftingComponent;
+
+    // Inventory component to store crafted items
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+    UMythicInventoryComponent *InventoryComponent;
+
+    UFUNCTION()
+    void OnItemCrafted(FCraftingQueueEntry Item);
+
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;
 
     /// Server Only - Craft an item. Checks the player's inventory for the required items and removes them if they have them.
-    /// @param Item The item to craft
-    /// @param Amount The amount of the item to craft
-    /// @param Player The player crafting
+    /// @param ItemDefinition The item to craft
+    /// @param Quantity The amount of the item to craft
+    /// @param RequestingActor The actor requesting the craft, must implement IInventoryProviderInterface
     /// 
-    UFUNCTION(Server, Reliable)
-    void ServerCraftItem(UItemDefinition *Item, AMythicPlayerController *Player, int32 Amount = 1);
+    UFUNCTION(Blueprintable, BlueprintCallable, Server, Reliable)
+    void ServerCraftItem(UItemDefinition *ItemDefinition, int32 Quantity = 1, const AActor* RequestingActor = nullptr);
 };

@@ -65,7 +65,7 @@ UMythicDamageCalculation::UMythicDamageCalculation() {
 void UMythicDamageCalculation::Execute_Implementation(const FGameplayEffectCustomExecutionParameters &ExecutionParams,
                                                       FGameplayEffectCustomExecutionOutput &OutExecutionOutput) const {
     Super::Execute_Implementation(ExecutionParams, OutExecutionOutput);
-    UE_LOG(Mythic, Warning, TEXT("Calculating damage"));
+    UE_LOG(Myth, Warning, TEXT("Calculating damage"));
 
     auto Spec = ExecutionParams.GetOwningSpecForPreExecuteMod();
     auto ContextHandle = Spec->GetContext().Get();
@@ -82,7 +82,7 @@ void UMythicDamageCalculation::Execute_Implementation(const FGameplayEffectCusto
     float Power = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageCalcStatics().Power, EvaluateParameters, Power);
     if (Power <= 0.0f) {
-        UE_LOG(Mythic, Error, TEXT("UMythicDamageCalculation::Execute_Implementation: Power is <= 0.0f - Overriding to 1.0f"));
+        UE_LOG(Myth, Error, TEXT("UMythicDamageCalculation::Execute_Implementation: Power is <= 0.0f - Overriding to 1.0f"));
         Power = 1.0f;
     }
     float DamagePerHit = 0.0f;

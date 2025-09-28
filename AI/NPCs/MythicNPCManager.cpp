@@ -9,7 +9,7 @@
 void UMythicNPCManager::Initialize(FSubsystemCollectionBase &Collection) {
     // Server Only Subsystem
     if (GetWorld()->GetNetMode() >= NM_Client) {
-        UE_LOG(Mythic, Log, TEXT("Skipping NPC Manager initialization on client"));
+        UE_LOG(Myth, Log, TEXT("Skipping NPC Manager initialization on client"));
         return;
     }
 
@@ -18,27 +18,27 @@ void UMythicNPCManager::Initialize(FSubsystemCollectionBase &Collection) {
 
 AMythicNPCCharacter *UMythicNPCManager::GetFromPool(FGameplayTag NPCType) {
     if (!NPCType.IsValid()) {
-        UE_LOG(Mythic, Warning, TEXT("UMythicNPCManager::GetFromPool: NPCType is invalid."));
+        UE_LOG(Myth, Warning, TEXT("UMythicNPCManager::GetFromPool: NPCType is invalid."));
         return nullptr;
     }
 
 
     if (NPCCharacterPool.Num() > 0) {
         if (AMythicNPCCharacter *PooledNPC = NPCCharacterPool.Pop()) {
-            UE_LOG(Mythic, Log, TEXT("Reusing NPC %s from pool for type %s."), *PooledNPC->GetName(), *NPCType.ToString());
+            UE_LOG(Myth, Log, TEXT("Reusing NPC %s from pool for type %s."), *PooledNPC->GetName(), *NPCType.ToString());
             return PooledNPC;
         }
 
         // If the popped NPC is invalid, that means pool has nulls. Remove them.
         NPCCharacterPool.Remove(nullptr);
-        UE_LOG(Mythic, Warning, TEXT("Found and removed nullptr from NPC pool for type %s."), *NPCType.ToString());
+        UE_LOG(Myth, Warning, TEXT("Found and removed nullptr from NPC pool for type %s."), *NPCType.ToString());
     }
     return nullptr;
 }
 
 void UMythicNPCManager::ReturnToPool(AMythicNPCCharacter *NPC, bool bShouldCache) {
     if (!NPC) {
-        UE_LOG(Mythic, Error, TEXT("UMythicNPCManager::ReturnToPool: Attempted to return a null NPC."));
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::ReturnToPool: Attempted to return a null NPC."));
         return;
     }
 
@@ -47,20 +47,20 @@ void UMythicNPCManager::ReturnToPool(AMythicNPCCharacter *NPC, bool bShouldCache
     auto NPCTypeAsStr = NPC->GetNPCType().ToString();
 
     if (bShouldCache) {
-        UE_LOG(Mythic, Log, TEXT("Caching NPC (ID: %s, Type: %s) for later use."), *NPCIdAsStr, *NPCTypeAsStr);
+        UE_LOG(Myth, Log, TEXT("Caching NPC (ID: %s, Type: %s) for later use."), *NPCIdAsStr, *NPCTypeAsStr);
 
         auto NPCData = NPC->GetNPCData();
         CacheNPC(NPCData);
     }
 
-    UE_LOG(Mythic, Log, TEXT("Returning NPC (ID: %s, Type: %s) to pool."), *NPCIdAsStr, *NPCTypeAsStr);
+    UE_LOG(Myth, Log, TEXT("Returning NPC (ID: %s, Type: %s) to pool."), *NPCIdAsStr, *NPCTypeAsStr);
     NPC->OnReturnedToPool(); // After this, the NPCData will not be valid.
 
     ActiveNPCs.Remove(NPCId);
-    UE_LOG(Mythic, Log, TEXT("Removed NPC (ID: %s, Type: %s) from active list."), *NPCIdAsStr, *NPCTypeAsStr);
+    UE_LOG(Myth, Log, TEXT("Removed NPC (ID: %s, Type: %s) from active list."), *NPCIdAsStr, *NPCTypeAsStr);
 
     NPCCharacterPool.Add(NPC);
-    UE_LOG(Mythic, Log, TEXT("Returned NPC (ID: %s, Type: %s) to pool."), *NPCIdAsStr, *NPCTypeAsStr);
+    UE_LOG(Myth, Log, TEXT("Returned NPC (ID: %s, Type: %s) to pool."), *NPCIdAsStr, *NPCTypeAsStr);
 }
 
 AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDef, FVector SpawnLocation, FRotator SpawnRotation) {
@@ -68,21 +68,21 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDe
         return nullptr; // Basic safety check
     }
     if (!NPCDef) {
-        UE_LOG(Mythic, Error, TEXT("UMythicNPCManager::SpawnPredefinedNPC: NPCDefinitionAsset is null."));
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnPredefinedNPC: NPCDefinitionAsset is null."));
         return nullptr;
     }
     if (!NPCDef->NPCId.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("UMythicNPCManager::SpawnPredefinedNPC: NPCDefinitionAsset has an invalid NPCId. Asset: %s"), *NPCDef->GetName());
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnPredefinedNPC: NPCDefinitionAsset has an invalid NPCId. Asset: %s"), *NPCDef->GetName());
         return nullptr;
     }
     if (!NPCDef->NPCType.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("UMythicNPCManager::SpawnPredefinedNPC: NPCDefinitionAsset has an invalid NPCType. Asset: %s"), *NPCDef->GetName());
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnPredefinedNPC: NPCDefinitionAsset has an invalid NPCType. Asset: %s"), *NPCDef->GetName());
         return nullptr;
     }
 
     // If the NPC is already cached, redirect to SpawnCachedNPC
     if (CachedNPCs.Contains(NPCDef->NPCId)) {
-        UE_LOG(Mythic, Log, TEXT("SpawnPredefinedNPC: NPC ID %s found in cache, redirecting to SpawnCachedNPC."), *NPCDef->NPCId.ToString());
+        UE_LOG(Myth, Log, TEXT("SpawnPredefinedNPC: NPC ID %s found in cache, redirecting to SpawnCachedNPC."), *NPCDef->NPCId.ToString());
         return SpawnCachedNPC(NPCDef->NPCId, SpawnLocation, SpawnRotation);
     }
 
@@ -100,11 +100,11 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDe
 
         SpawnedNPC = GetWorld()->SpawnActor<AMythicNPCCharacter>(NPCClassToSpawn, SpawnLocation, SpawnRotation, SpawnInfo);
         if (!SpawnedNPC) {
-            UE_LOG(Mythic, Error, TEXT("UMythicNPCManager::SpawnPredefinedNPC: Failed to spawn new actor for NPC ID %s, Type %s."), *NPCDef->NPCId.ToString(),
+            UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnPredefinedNPC: Failed to spawn new actor for NPC ID %s, Type %s."), *NPCDef->NPCId.ToString(),
                    *NPCDef->NPCType.ToString());
             return nullptr;
         }
-        UE_LOG(Mythic, Log, TEXT("Spawned new NPC %s for Predefined ID %s, Type %s."), *SpawnedNPC->GetName(), *NPCDef->NPCId.ToString(),
+        UE_LOG(Myth, Log, TEXT("Spawned new NPC %s for Predefined ID %s, Type %s."), *SpawnedNPC->GetName(), *NPCDef->NPCId.ToString(),
                *NPCDef->NPCType.ToString());
     }
 
@@ -120,7 +120,7 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnRandomNPC(FGameplayTag NPCType, FVe
         return nullptr;
     }
     if (!NPCType.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("UMythicNPCManager::SpawnRandomNPC: NPCType is invalid."));
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnRandomNPC: NPCType is invalid."));
         return nullptr;
     }
 
@@ -129,7 +129,7 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnRandomNPC(FGameplayTag NPCType, FVe
     // // which would then generate the NPCData for the NPC.
     // auto NPCTypeDef = NPCTypeDataTable.FindRow<UNPCTypeDefinition>(NPCType);
     // if (!NPCTypeDef) {
-    //     UE_LOG(Mythic, Error, TEXT("UMythicNPCManager::SpawnRandomNPC: NPCType %s not found in NPCTypeDataTable."), *NPCType.ToString());
+    //     UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnRandomNPC: NPCType %s not found in NPCTypeDataTable."), *NPCType.ToString());
     //     return nullptr;
     // }
     // auto NPCTypeDefinition = NPCTypeDef->NPCTypeDefinition;
@@ -148,18 +148,18 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnRandomNPC(FGameplayTag NPCType, FVe
 
         SpawnedNPC = GetWorld()->SpawnActor<AMythicNPCCharacter>(NPCClassToSpawn, SpawnLocation, SpawnRotation, SpawnInfo);
         if (!SpawnedNPC) {
-            UE_LOG(Mythic, Error, TEXT("UMythicNPCManager::SpawnRandomNPC: Failed to spawn new actor for NPCType %s."), *NPCType.ToString());
+            UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnRandomNPC: Failed to spawn new actor for NPCType %s."), *NPCType.ToString());
             return nullptr;
         }
 
-        UE_LOG(Mythic, Log, TEXT("Spawned new NPC %s for Random Type %s."), *SpawnedNPC->GetName(), *NPCType.ToString());
+        UE_LOG(Myth, Log, TEXT("Spawned new NPC %s for Random Type %s."), *SpawnedNPC->GetName(), *NPCType.ToString());
     }
 
     // if (IPoolableNPC *PoolableNPC = Cast<IPoolableNPC>(SpawnedNPC)) {
     // PoolableNPC->OnSpawnedFromPool(NPCData);
     // }
     // else {
-    // UE_LOG(Mythic, Error, TEXT("NPC %s (ID: %s) does not implement IPoolableNPC. Cannot call OnSpawnedFromPool."), *SpawnedNPC->GetName(), *NPCData.NPCId.ToString());
+    // UE_LOG(Myth, Error, TEXT("NPC %s (ID: %s) does not implement IPoolableNPC. Cannot call OnSpawnedFromPool."), *SpawnedNPC->GetName(), *NPCData.NPCId.ToString());
     // }
 
     // ActiveNPCs.Add(SpawnedNPC->GetNPCDataRef()->NPCId, SpawnedNPC);
@@ -173,20 +173,20 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnCachedNPC(FGuid NPCId, FVector Spaw
     }
 
     if (!NPCId.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("UMythicNPCManager::SpawnCachedNPC: NPCId is invalid."));
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnCachedNPC: NPCId is invalid."));
         return nullptr;
     }
 
     const FMythicCachedNPCData *CachedData = CachedNPCs.Find(NPCId);
     if (!CachedData) {
-        UE_LOG(Mythic, Error, TEXT("UMythicNPCManager::SpawnCachedNPC: No cached data found for NPC ID %s."), *NPCId.ToString());
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnCachedNPC: No cached data found for NPC ID %s."), *NPCId.ToString());
         return nullptr;
     }
 
     // Get NPCType from cached data
     FGameplayTag NPCType = CachedData->NPCData.NPCType;
     if (!NPCType.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("UMythicNPCManager::SpawnCachedNPC: NPCType in cached data for ID %s is invalid. Cannot determine pool category."),
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnCachedNPC: NPCType in cached data for ID %s is invalid. Cannot determine pool category."),
                *NPCId.ToString());
         return nullptr;
     }
@@ -205,11 +205,11 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnCachedNPC(FGuid NPCId, FVector Spaw
 
         SpawnedNPC = GetWorld()->SpawnActor<AMythicNPCCharacter>(NPCClassToSpawn, SpawnLocation, SpawnRotation, SpawnInfo);
         if (!SpawnedNPC) {
-            UE_LOG(Mythic, Error, TEXT("UMythicNPCManager::SpawnCachedNPC: Failed to spawn new actor for NPC ID %s, Type %s."), *NPCId.ToString(),
+            UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnCachedNPC: Failed to spawn new actor for NPC ID %s, Type %s."), *NPCId.ToString(),
                    *NPCType.ToString());
             return nullptr;
         }
-        UE_LOG(Mythic, Log, TEXT("Spawned new NPC %s for Cached ID %s, Type %s."), *SpawnedNPC->GetName(), *NPCId.ToString(), *NPCType.ToString());
+        UE_LOG(Myth, Log, TEXT("Spawned new NPC %s for Cached ID %s, Type %s."), *SpawnedNPC->GetName(), *NPCId.ToString(), *NPCType.ToString());
     }
 
     // After this OnSpawnedFromPool, the NPC's data should be set.
@@ -279,14 +279,14 @@ void UMythicNPCManager::RemoveCachedNPC(FGuid NPCId) {
                 auto FatherData = CachedNPCs.FindRef(FamilySpec.FatherId);
                 if (FatherData.NPCData.NPCId.IsValid() && FatherData.NPCData.NPCId != NPCId) {
                     AllFamilyMembersUncached = false;
-                    UE_LOG(Mythic, Log, TEXT("Removed NPC %s from family but family will remain cached because Father is still cached."), *NPCId.ToString());
+                    UE_LOG(Myth, Log, TEXT("Removed NPC %s from family but family will remain cached because Father is still cached."), *NPCId.ToString());
                 }
             }
             else if (FamilySpec.MotherId.IsValid()) {
                 auto MotherData = CachedNPCs.FindRef(FamilySpec.MotherId);
                 if (MotherData.NPCData.NPCId.IsValid() && MotherData.NPCData.NPCId != NPCId) {
                     AllFamilyMembersUncached = false;
-                    UE_LOG(Mythic, Log, TEXT("Removed NPC %s from family but family will remain cached because Mother is still cached."), *NPCId.ToString());
+                    UE_LOG(Myth, Log, TEXT("Removed NPC %s from family but family will remain cached because Mother is still cached."), *NPCId.ToString());
                 }
             }
             else if (FamilySpec.ChildrenIds.Num() > 0) {
@@ -294,7 +294,7 @@ void UMythicNPCManager::RemoveCachedNPC(FGuid NPCId) {
                     auto ChildData = CachedNPCs.FindRef(ChildId);
                     if (ChildData.NPCData.NPCId.IsValid() && ChildData.NPCData.NPCId != NPCId) {
                         AllFamilyMembersUncached = false;
-                        UE_LOG(Mythic, Log, TEXT("Removed NPC %s from family but family will remain cached because Child is still cached."), *NPCId.ToString());
+                        UE_LOG(Myth, Log, TEXT("Removed NPC %s from family but family will remain cached because Child is still cached."), *NPCId.ToString());
                         break;
                     }
                 }
@@ -302,11 +302,11 @@ void UMythicNPCManager::RemoveCachedNPC(FGuid NPCId) {
 
             if (AllFamilyMembersUncached) {
                 CachedFamilies.Remove(FamilySpec.FamilyId);
-                UE_LOG(Mythic, Log, TEXT("NPC %s was the last member of family %s, removing family."), *NPCId.ToString(), *FamilySpec.FamilyId.ToString());
+                UE_LOG(Myth, Log, TEXT("NPC %s was the last member of family %s, removing family."), *NPCId.ToString(), *FamilySpec.FamilyId.ToString());
             }
         }
     }
 
     CachedNPCs.Remove(NPCId);
-    UE_LOG(Mythic, Log, TEXT("Removed NPC: %s"), *NPCId.ToString());
+    UE_LOG(Myth, Log, TEXT("Removed NPC: %s"), *NPCId.ToString());
 }

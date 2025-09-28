@@ -12,7 +12,7 @@ UProficiencyDefinition::UProficiencyDefinition() {}
 
 float UProficiencyDefinition::CalcXPCostForLevelUp(int32 Level, const UProficiencyDefinition *Def) {
     if (!Def) {
-        UE_LOG(Mythic, Error, TEXT("ProficiencyDefinition::CalcCumulativeXPForLevel: Def is null."));
+        UE_LOG(Myth, Error, TEXT("ProficiencyDefinition::CalcCumulativeXPForLevel: Def is null."));
         return 0.0f;
     }
     if (Level < 1) {
@@ -23,7 +23,7 @@ float UProficiencyDefinition::CalcXPCostForLevelUp(int32 Level, const UProficien
 
 float UProficiencyDefinition::CalcCumulativeXPForLevel(int32 Level, const UProficiencyDefinition *Def) {
     if (!Def) {
-        UE_LOG(Mythic, Error, TEXT("ProficiencyDefinition::CalcCumulativeXPForLevel: Def is null."));
+        UE_LOG(Myth, Error, TEXT("ProficiencyDefinition::CalcCumulativeXPForLevel: Def is null."));
         return 0.0f;
     }
     if (Level <= 1) {
@@ -37,7 +37,7 @@ float UProficiencyDefinition::CalcCumulativeXPForLevel(int32 Level, const UProfi
 
 int32 UProficiencyDefinition::CalcLevelAtXP(float XP, const UProficiencyDefinition *Def) {
     if (!Def) {
-        UE_LOG(Mythic, Error, TEXT("ProficiencyDefinition::CalcLevelAtXP: Def is null."));
+        UE_LOG(Myth, Error, TEXT("ProficiencyDefinition::CalcLevelAtXP: Def is null."));
         return 1;
     }
     if (XP < 0.0f) {
@@ -67,7 +67,7 @@ float UProficiencyDefinition::CalcXPRemainingForLevel(float CurrentXP, int32 Tar
 FString UProficiencyDefinition::GetProgressionBreakdown() const {
     // Warn on high growth rates.
     if (GrowthRate > 1.4f) {
-        UE_LOG(Mythic, Warning, TEXT("High growth rate of %.2f may result in very high XP requirements for later levels."), GrowthRate);
+        UE_LOG(Myth, Warning, TEXT("High growth rate of %.2f may result in very high XP requirements for later levels."), GrowthRate);
     }
 
     FString Breakdown;
@@ -155,7 +155,7 @@ FString UProficiencyDefinition::GetTimeToMaxLevelEstimate(float ActionsPerMinute
 
 void UProficiencyDefinition::PostEditChangeProperty(FPropertyChangedEvent &PropertyChangedEvent) {
     Super::PostEditChangeProperty(PropertyChangedEvent);
-    UE_LOG(Mythic, Log, TEXT("%s"), *GetProgressionBreakdown());
+    UE_LOG(Myth, Log, TEXT("%s"), *GetProgressionBreakdown());
 }
 
 #endif

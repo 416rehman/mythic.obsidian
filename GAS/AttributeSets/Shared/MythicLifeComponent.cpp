@@ -30,20 +30,20 @@ void UMythicLifeComponent::InitializeWithAbilitySystem(UAbilitySystemComponent *
     check(Owner);
 
     if (AbilitySystemComponent) {
-        UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: Health component for owner [%s] has already been initialized with an ability system."),
+        UE_LOG(Myth, Error, TEXT("MythicHealthComponent: Health component for owner [%s] has already been initialized with an ability system."),
                *GetNameSafe(Owner));
         return;
     }
 
     AbilitySystemComponent = InASC;
     if (!AbilitySystemComponent) {
-        UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: Cannot initialize health component for owner [%s] with NULL ability system."), *GetNameSafe(Owner));
+        UE_LOG(Myth, Error, TEXT("MythicHealthComponent: Cannot initialize health component for owner [%s] with NULL ability system."), *GetNameSafe(Owner));
         return;
     }
 
     LifeSet = AbilitySystemComponent->GetSet<UMythicAttributeSet_Life>();
     if (!LifeSet) {
-        UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: Cannot initialize health component for owner [%s] with NULL health set on the ability system."),
+        UE_LOG(Myth, Error, TEXT("MythicHealthComponent: Cannot initialize health component for owner [%s] with NULL health set on the ability system."),
                *GetNameSafe(Owner));
         return;
     }
@@ -117,13 +117,13 @@ float UMythicLifeComponent::GetHealthNormalized() const {
 void UMythicLifeComponent::TriggerGameplayEvent_DeliveredHit(AActor *DamageInstigator, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude,
                                                              float OldValue, float NewValue) const {
     if (!OnDeliveredHitGameplayEventTag.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("Skipping TriggerGameplayEvent_DeliveredHit: OnDeliveredHitGameplayEventTag is not set."));
+        UE_LOG(Myth, Error, TEXT("Skipping TriggerGameplayEvent_DeliveredHit: OnDeliveredHitGameplayEventTag is not set."));
         return;
     }
 
     if (auto SourceASC = DamageEffectSpec->GetEffectContext().GetOriginalInstigatorAbilitySystemComponent()) {
         if (!AbilitySystemComponent) {
-            UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_DeliveredHit: AbilitySystemComponent is NULL."));
+            UE_LOG(Myth, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_DeliveredHit: AbilitySystemComponent is NULL."));
             return;
         }
 
@@ -149,20 +149,20 @@ void UMythicLifeComponent::TriggerGameplayEvent_DeliveredHit(AActor *DamageInsti
         SourceASC->HandleGameplayEvent(OnDeliveredHitGameplayEventTag, &Payload);
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_DeliveredHit: Source ASC is NULL."));
+        UE_LOG(Myth, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_DeliveredHit: Source ASC is NULL."));
     }
 }
 
 void UMythicLifeComponent::TriggerGameplayEvent_ReceivedHit(AActor *DamageInstigator, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude,
                                                             float OldValue, float NewValue) const {
     if (!OnReceivedHitGameplayEventTag.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("Skipping TriggerGameplayEvent_ReceivedHit: OnReceivedHitGameplayEventTag is not set."));
+        UE_LOG(Myth, Error, TEXT("Skipping TriggerGameplayEvent_ReceivedHit: OnReceivedHitGameplayEventTag is not set."));
         return;
     }
 
     if (auto SourceASC = DamageEffectSpec->GetEffectContext().GetOriginalInstigatorAbilitySystemComponent()) {
         if (!AbilitySystemComponent) {
-            UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_ReceivedHit: AbilitySystemComponent is NULL."));
+            UE_LOG(Myth, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_ReceivedHit: AbilitySystemComponent is NULL."));
             return;
         }
 
@@ -188,20 +188,20 @@ void UMythicLifeComponent::TriggerGameplayEvent_ReceivedHit(AActor *DamageInstig
         AbilitySystemComponent->HandleGameplayEvent(OnReceivedHitGameplayEventTag, &Payload);
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_ReceivedHit: Source ASC is NULL."));
+        UE_LOG(Myth, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_ReceivedHit: Source ASC is NULL."));
     }
 }
 
 void UMythicLifeComponent::TriggerGameplayEvent_DeliveredHeal(AActor *DamageInstigator, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude,
                                                               float OldValue, float NewValue) {
     if (!OnDeliveredHealGameplayEventTag.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("Skipping TriggerGameplayEvent_DeliveredHeal: OnDeliveredHealGameplayEventTag is not set."));
+        UE_LOG(Myth, Error, TEXT("Skipping TriggerGameplayEvent_DeliveredHeal: OnDeliveredHealGameplayEventTag is not set."));
         return;
     }
 
     if (auto SourceASC = DamageEffectSpec->GetEffectContext().GetOriginalInstigatorAbilitySystemComponent()) {
         if (!AbilitySystemComponent) {
-            UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_DeliveredHeal: AbilitySystemComponent is NULL."));
+            UE_LOG(Myth, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_DeliveredHeal: AbilitySystemComponent is NULL."));
             return;
         }
 
@@ -226,25 +226,25 @@ void UMythicLifeComponent::TriggerGameplayEvent_DeliveredHeal(AActor *DamageInst
         SourceASC->HandleGameplayEvent(OnDeliveredHealGameplayEventTag, &Payload);
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_DeliveredHeal: Source ASC is NULL."));
+        UE_LOG(Myth, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_DeliveredHeal: Source ASC is NULL."));
     }
 }
 
 void UMythicLifeComponent::TriggerGameplayEvent_ReceivedHeal(AActor *DamageInstigator, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude,
                                                              float OldValue, float NewValue) {
     if (!OnHealReceivedGameplayEventTag.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("Skipping TriggerGameplayEvent_ReceivedHeal: OnHealReceivedGameplayEventTag is not set."));
+        UE_LOG(Myth, Error, TEXT("Skipping TriggerGameplayEvent_ReceivedHeal: OnHealReceivedGameplayEventTag is not set."));
         return;
     }
 
     if (!AbilitySystemComponent) {
-        UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_ReceivedHeal: AbilitySystemComponent is NULL."));
+        UE_LOG(Myth, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_ReceivedHeal: AbilitySystemComponent is NULL."));
         return;
     }
 
     auto SourceASC = DamageEffectSpec->GetEffectContext().GetOriginalInstigatorAbilitySystemComponent();
     if (!SourceASC) {
-        UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_ReceivedHeal: Source ASC is NULL."));
+        UE_LOG(Myth, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_ReceivedHeal: Source ASC is NULL."));
         return;
     }
 
@@ -272,17 +272,17 @@ void UMythicLifeComponent::TriggerGameplayEvent_ReceivedHeal(AActor *DamageInsti
 void UMythicLifeComponent::TriggerGameplayEvent_Death(AActor *DamageInstigator, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude,
                                                       float OldValue, float NewValue) {
     if (!OnDeathGameplayEventTag.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("Skipping TriggerGameplayEvent_Death: OnDeathGameplayEventTag is not set."));
+        UE_LOG(Myth, Error, TEXT("Skipping TriggerGameplayEvent_Death: OnDeathGameplayEventTag is not set."));
         return;
     }
     if (!AbilitySystemComponent) {
-        UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_Death: AbilitySystemComponent is NULL."));
+        UE_LOG(Myth, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_Death: AbilitySystemComponent is NULL."));
         return;
     }
 
     auto SourceASC = DamageEffectSpec->GetEffectContext().GetOriginalInstigatorAbilitySystemComponent();
     if (!SourceASC) {
-        UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_Death: Source ASC is NULL."));
+        UE_LOG(Myth, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_Death: Source ASC is NULL."));
         return;
     }
 
@@ -309,17 +309,17 @@ void UMythicLifeComponent::TriggerGameplayEvent_Death(AActor *DamageInstigator, 
 void UMythicLifeComponent::TriggerGameplayEvent_Kill(AActor *DamageInstigator, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude,
                                                      float OldValue, float NewValue) {
     if (!OnDeathGameplayEventTag.IsValid()) {
-        UE_LOG(Mythic, Error, TEXT("Skipping TriggerGameplayEvent_Kill: OnKillGameplayEventTag is not set."));
+        UE_LOG(Myth, Error, TEXT("Skipping TriggerGameplayEvent_Kill: OnKillGameplayEventTag is not set."));
         return;
     }
     if (!AbilitySystemComponent) {
-        UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_Kill: AbilitySystemComponent is NULL."));
+        UE_LOG(Myth, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_Kill: AbilitySystemComponent is NULL."));
         return;
     }
 
     auto SourceASC = DamageEffectSpec->GetEffectContext().GetOriginalInstigatorAbilitySystemComponent();
     if (!SourceASC) {
-        UE_LOG(Mythic, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_Kill: Source ASC is NULL."));
+        UE_LOG(Myth, Error, TEXT("MythicHealthComponent: TriggerGameplayEvent_Kill: Source ASC is NULL."));
         return;
     }
 

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Itemization/MythicTags_Inventory.h"
 #include "ItemDefinition.generated.h"
 
 UENUM(BlueprintType, Blueprintable)
@@ -10,7 +11,7 @@ enum EItemRarity {
     Rare = 1,
     Epic = 2,
     Legendary = 3,
-    Exotic = 4,
+    Mythic = 4,
 };
 
 class UItemFragment;
@@ -30,7 +31,7 @@ public:
 
     /** The type of the item, stored in gameplay tag Itemization.Type */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(Categories="Itemization.Type", DisplayName="ItemType"))
-    FGameplayTag ItemType = FGameplayTag::RequestGameplayTag("Itemization.Type.Other");
+    FGameplayTag ItemType = ITEMIZATION_TYPE_MISC;
 
     /** Rarity of the item, stored in gameplay tag Itemization.Rarity */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(Categories="Itemization.Rarity", DisplayName="Rarity"))
@@ -69,5 +70,28 @@ public:
     virtual void PostLoad() override;
     virtual void PreSave(FObjectPreSaveContext SaveContext) override;
     virtual EDataValidationResult IsDataValid(class FDataValidationContext &Context) const override;
+
+    // Export to JSON
+    void ExportAsJSONString(FString &OutJsonString) const;
+    UFUNCTION(CallInEditor, Category="ItemDefinition")
+    void ExportToJSON() const;
+    UFUNCTION(CallInEditor, Category="ItemDefinition")
+    void CopyJSONToClipboard() const;
+
+    // Import from JSON
+    UFUNCTION(CallInEditor, Category="ItemDefinition")
+    void ImportFromJSON();
+#endif
+};
+
+UCLASS(BlueprintType)
+class MYTHIC_API UItemDefinitionJSONImportLibrary : public UBlueprintFunctionLibrary {
+    GENERATED_BODY()
+
+public:
+#if WITH_EDITOR
+    // Call in Editor only
+    UFUNCTION(Blueprintable, BlueprintCallable, CallInEditor, Category="Mythic|Editor")
+    static void ImportItemDefinitionsFromFolder();
 #endif
 };

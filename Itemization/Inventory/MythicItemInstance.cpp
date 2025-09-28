@@ -1,9 +1,7 @@
 #include "MythicItemInstance.h"
 
 #include "MythicInventoryComponent.h"
-#include "MythicInventorySlot.h"
 #include "Fragments/ItemFragment.h"
-#include "Misc/UObjectToken.h"
 #include "Mythic/Mythic.h"
 
 void UMythicItemInstance::SetStackSize(const int32 newQuantity) {
@@ -16,15 +14,24 @@ void UMythicItemInstance::SetStackSize(const int32 newQuantity) {
         Quantity = newQty;
 
         // If the item is in an inventory
-        if (this->CurrentSlot && this->CurrentSlot->GetInventory()) {
+        auto inventory = this->GetInventoryComponent();
+        if (!inventory) {
+            UE_LOG(Myth, Warning, TEXT("SetStackSize: ItemInstance %s is not in an inventory"), *GetName());
+            return;
+        }
+        auto slot = inventory->GetItem(this->SlotIndex);
+        if (!slot) {
+            UE_LOG(Myth, Warning, TEXT("SetStackSize: ItemInstance %s is not in a valid slot"), *GetName());
+            return;
+        }
+
+        if (auto Inventory = this->GetInventoryComponent()) {
             if (Quantity <= 0) {
                 // Remove the item from the slot if the stack is 0
                 // NOTE: Item->Destroy() should be called by the caller of this function by checking if stack size <= 0
-                this->GetSlot()->SetItemInstance(nullptr);
+                Inventory->SetItemInSlot(this->SlotIndex, nullptr);
             }
-            if (auto InventoryComponent = this->CurrentSlot->GetInventory()) {
-                InventoryComponent->ClientOnSlotUpdatedDelegate(this->CurrentSlot);
-            }
+            Inventory->ClientOnSlotUpdatedDelegate(this->SlotIndex);
         }
     }
 }
@@ -37,13 +44,13 @@ void UMythicItemInstance::Initialize(UItemDefinition *ItemDef, const int32 quant
     this->randomSeed = FMath::Rand();
     this->ItemLevel = level;
     this->Quantity = ItemDef->StackSizeMax > 1 ? quantityIfStackable : 1;
-    UE_LOG(Mythic, Warning, TEXT("Level %d item %s has random seed %d"), level, *GetName(), this->randomSeed);
+    UE_LOG(Myth, Warning, TEXT("Level %d item %s has random seed %d"), level, *GetName(), this->randomSeed);
 
     // Create fragments for this item from the item definition
     for (int i = 0; i < ItemDef->Fragments.Num(); i++) {
         auto Fragment = ItemDef->Fragments[i];
         if (!Fragment) {
-            UE_LOG(Mythic, Error, TEXT("ItemInstance %s has a null fragment at index %d"), *GetName(), i);
+            UE_LOG(Myth, Error, TEXT("ItemInstance %s has a null fragment at index %d"), *GetName(), i);
             continue;
         }
 
@@ -80,7 +87,7 @@ void UMythicItemInstance::OnActiveItem() {
         if (ItemFragments[i] == nullptr) { continue; }
         ItemFragments[i]->OnItemActivated(this);
     }
-    UE_LOG(Mythic, Warning, TEXT("ItemInstance %s has random seed %d"), *GetName(), this->randomSeed);
+    UE_LOG(Myth, Warning, TEXT("ItemInstance %s has random seed %d"), *GetName(), this->randomSeed);
 }
 
 void UMythicItemInstance::OnInactiveItem() {
@@ -126,26 +133,20 @@ void UMythicItemInstance::OnClientInactiveItem() {
     }
 }
 
-void UMythicItemInstance::SetSlot(TObjectPtr<UMythicInventorySlot> NewSlot) {
-    this->CurrentSlot = NewSlot;
+void UMythicItemInstance::SetInventory(UMythicInventoryComponent *NewInventory, int32 NewSlotIndex) {
+    this->OwningInventory = NewInventory;
+    this->SlotIndex = NewSlotIndex;
     for (TObjectPtr ItemFragment : this->ItemFragments) {
-        ItemFragment->OnInventorySlotChanged(NewSlot);
+        ItemFragment->OnInventorySlotChanged(NewInventory, NewSlotIndex);
     }
 }
 
-TObjectPtr<UMythicInventorySlot> UMythicItemInstance::GetSlot() const {
-    return this->CurrentSlot;
+int32 UMythicItemInstance::GetSlot() const {
+    return this->SlotIndex;
 }
 
 UMythicInventoryComponent *UMythicItemInstance::GetInventoryComponent() const {
-    // Get slot
-    auto Slot = this->GetSlot();
-    if (!Slot) {
-        return nullptr;
-    }
-
-    // Get inventory
-    return Slot->GetInventory();
+    return this->OwningInventory;
 }
 
 AActor *UMythicItemInstance::GetInventoryOwner() const {
@@ -191,4 +192,21 @@ bool UMythicItemInstance::isStackableWith(const UMythicItemInstance *Other) cons
     }
 
     return true;
+}
+
+void UMythicItemInstance::OnDestroyed() {
+    if (IsValid(this)) {
+        auto inventory = this->GetInventoryComponent();
+        if (IsValid(inventory)) {
+            inventory->SetItemInSlot(this->GetSlot(), nullptr);
+        }
+        
+        for (auto Fragment : ItemFragments) {
+            if (IsValid(Fragment)) {
+                Fragment->MarkAsGarbage();
+            }
+        }
+        
+        ItemFragments.Empty();
+    }
 }

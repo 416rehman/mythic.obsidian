@@ -25,7 +25,7 @@ void UMythicAttributeSet_Exp::PostGameplayEffectExecute(const FGameplayEffectMod
     
 	// if the attribute is XP, then we need to check if we leveled up
 	if (Data.EvaluatedData.Attribute == GetXPAttribute()) {
-		UE_LOG(Mythic, Warning, TEXT("Added XP: %f"), Data.EvaluatedData.Magnitude);
+		UE_LOG(Myth, Warning, TEXT("Added XP: %f"), Data.EvaluatedData.Magnitude);
 	    // Get game state
 	    AMythicGameState* GameState = GetWorld()->GetGameState<AMythicGameState>();
 	    
@@ -37,19 +37,19 @@ void UMythicAttributeSet_Exp::PostGameplayEffectExecute(const FGameplayEffectMod
 			int32 CurrentLevel = GetLevel();
 			int maxLevel = XPRequiredCurve->GetNumKeys();
 			float currentXP = GetXP();
-			UE_LOG(Mythic, Warning, TEXT("Current level: %d"), CurrentLevel);
-			UE_LOG(Mythic, Warning, TEXT("Max level: %d"), maxLevel);
-			UE_LOG(Mythic, Warning, TEXT("Current XP: %f"), currentXP);
+			UE_LOG(Myth, Warning, TEXT("Current level: %d"), CurrentLevel);
+			UE_LOG(Myth, Warning, TEXT("Max level: %d"), maxLevel);
+			UE_LOG(Myth, Warning, TEXT("Current XP: %f"), currentXP);
 	
 			// check if the current level is the max level, if it is, then we don't need to do anything
 			if (CurrentLevel >= XPRequiredCurve->GetNumKeys()) {
-				UE_LOG(Mythic, Warning, TEXT("Current level is max level"));
+				UE_LOG(Myth, Warning, TEXT("Current level is max level"));
 				SetXP(XPRequiredCurve->Eval(CurrentLevel));
 			}
 			else {
 				// get the XP required to level up
 				float xpRequired = XPRequiredCurve->Eval(CurrentLevel);
-				UE_LOG(Mythic, Warning, TEXT("xpRequiredToLevelUp from level %d to level %d: %f"),CurrentLevel, CurrentLevel + 1, xpRequired);
+				UE_LOG(Myth, Warning, TEXT("xpRequiredToLevelUp from level %d to level %d: %f"),CurrentLevel, CurrentLevel + 1, xpRequired);
 	
 				// if the current XP is greater than or equal to the XP required to level up, then we need to level up
 				if (GetXP() >= xpRequired) {
@@ -70,8 +70,8 @@ void UMythicAttributeSet_Exp::PostGameplayEffectExecute(const FGameplayEffectMod
 					SetXP(currentXP);
 				}
 			}
-			UE_LOG(Mythic, Warning, TEXT("Final Level: %d"), (int)GetLevel());
-			UE_LOG(Mythic, Warning, TEXT("Final XP: %f"), GetXP());
+			UE_LOG(Myth, Warning, TEXT("Final Level: %d"), (int)GetLevel());
+			UE_LOG(Myth, Warning, TEXT("Final XP: %f"), GetXP());
 		}
 	}
 }

@@ -44,7 +44,7 @@ void UMythicNavigationComponent::BeginPlay() {
 		OwnerController->OnPossessedPawnChanged.AddDynamic(this, &UMythicNavigationComponent::OnPossessedPawnChanged);
 		CacheAndPrepareCharacter(OwnerController->GetPawn());
 	} else {
-		UE_LOG(Mythic, Warning, TEXT("MythicNavigationComponent is not attached to a PlayerController. Please attach it to a PlayerController to enable navigation."));
+		UE_LOG(Myth, Warning, TEXT("MythicNavigationComponent is not attached to a PlayerController. Please attach it to a PlayerController to enable navigation."));
 	}
 }
 
@@ -74,7 +74,7 @@ void UMythicNavigationComponent::CachePlayerInteractionSphere() {
 		RefreshInteractionEvents();	// disable interaction events until the player starts moving
 	}
 	else {
-		UE_LOG(Mythic, Warning, TEXT("No Sphere Component with tag 'InteractionSphere' found on the character. Please add a sphere component with the tag 'InteractionSphere' to the character to enable interaction."));
+		UE_LOG(Myth, Warning, TEXT("No Sphere Component with tag 'InteractionSphere' found on the character. Please add a sphere component with the tag 'InteractionSphere' to the character to enable interaction."));
 	}
 }
 
@@ -83,11 +83,11 @@ void UMythicNavigationComponent::CachePlayerObstacleCapsule() {
 	this->CachedPlayerObstacleCapsule = Cast<UCapsuleComponent>(CapsuleComponents[0]);
 
 	if (this->CachedPlayerObstacleCapsule) {
-		UE_LOG(Mythic, Warning, TEXT("NavigationCapsule found"));
+		UE_LOG(Myth, Warning, TEXT("NavigationCapsule found"));
 		this->CachedPlayerObstacleCapsule->OnComponentBeginOverlap.AddDynamic(this, &UMythicNavigationComponent::OnObstacleOverlapped);
 	}
 	else {
-		UE_LOG(Mythic, Warning, TEXT("No Capsule Component with tag 'NavigationCapsule' found on the character. Adding a capsule component with the tag 'NavigationCapsule' to the character to enable collision avoidance."));
+		UE_LOG(Myth, Warning, TEXT("No Capsule Component with tag 'NavigationCapsule' found on the character. Adding a capsule component with the tag 'NavigationCapsule' to the character to enable collision avoidance."));
 		AddNavigationCapsuleToChar();
 	}
 	this->CachedPlayerObstacleCapsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -143,7 +143,7 @@ void UMythicNavigationComponent::OnInteractionOverlapped(UPrimitiveComponent* Pr
 		this->targetActor = nullptr;
 		
 		if (HandleInteraction(Actor)) {
-			UE_LOG(Mythic, Warning, TEXT("Interaction Handled"));
+			UE_LOG(Myth, Warning, TEXT("Interaction Handled"));
 		} else {
 			// Attack handling here
 		}
@@ -203,7 +203,7 @@ void UMythicNavigationComponent::OnObstacleOverlapped(UPrimitiveComponent* Primi
 	}
 	// if the actor is not the character
 	if (Actor != CachedPlayerCharacter) {
-		UE_LOG(Mythic, Warning, TEXT("Obstacle %s"), *Actor->GetName());
+		UE_LOG(Myth, Warning, TEXT("Obstacle %s"), *Actor->GetName());
 		// We stop the movement
 		this->OwnerController->StopMovement();
 		// Use AI to move around the obstacle
@@ -262,7 +262,7 @@ void UMythicNavigationComponent::OnSetDestinationTriggered() {
 
 	// If target actor is set, we don't need to do anything, as the inputStarted already handled the movement
 	if (this->targetActor) {
-		UE_LOG(Mythic, Warning, TEXT("Skipping Set Destination Triggered. Target Actor: %s"), *this->targetActor->GetName());
+		UE_LOG(Myth, Warning, TEXT("Skipping Set Destination Triggered. Target Actor: %s"), *this->targetActor->GetName());
 		return;
 	}
 
@@ -272,13 +272,13 @@ void UMythicNavigationComponent::OnSetDestinationTriggered() {
 		if (this->AvoidingObstacleSince > 0.f) {
 			// If we have been avoiding for more than 0.5 seconds
 			if (this->GetWorld()->TimeSeconds - this->AvoidingObstacleSince > 0.50f) {
-				UE_LOG(Mythic, Warning, TEXT("Resetting Avoiding Obstacle Since"));
+				UE_LOG(Myth, Warning, TEXT("Resetting Avoiding Obstacle Since"));
 				this->AvoidingObstacleSince = 0.0f;
 				this->OwnerController->StopMovement();
 			}
 			// If we have been avoiding for less than 0.5 seconds we do nothing
 			else {
-				UE_LOG(Mythic, Warning, TEXT("Avoiding Obstacle"));
+				UE_LOG(Myth, Warning, TEXT("Avoiding Obstacle"));
 				return;
 			}
 		}		
@@ -349,7 +349,7 @@ bool UMythicNavigationComponent::HandleMoveToDestinationActor() {
 		this->CachedDestination = Hit.ImpactPoint;
 		// We move the character to the destination
 		UAIBlueprintHelperLibrary::SimpleMoveToLocation(this->OwnerController, this->CachedDestination);
-		UE_LOG(Mythic, Warning, TEXT("Target Actor: %s"), *this->targetActor->GetName());
+		UE_LOG(Myth, Warning, TEXT("Target Actor: %s"), *this->targetActor->GetName());
 		success = true;
 	}
 	// Refresh interaction events

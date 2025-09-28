@@ -1,6 +1,7 @@
 // 
 #include "ItemReward.h"
 
+#include "Mythic.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
 
 bool UItemReward::Give(FRewardContext &Context) const {
@@ -22,11 +23,11 @@ bool UItemReward::Give(FRewardContext &Context) const {
     APlayerController *TargetPlayer = ItemContext->bIsPrivate ? ItemContext->PlayerController : nullptr;
 
     ///////////////// GIVE TO INVENTORY /////////////////////
-    if (ItemContext->PutInInventory) {
+    if (ItemContext->InventoryProvider) {
         // Create the item instance and give it to the inventory
-        auto WorldItem = MythicLootManager->CreateAndGive(ItemDef, this->Quantity, ItemContext->PutInInventory, TargetPlayer, ItemContext->ItemLevel);
+        auto WorldItem = MythicLootManager->CreateAndGive(ItemDef, this->Quantity, ItemContext->InventoryProvider, TargetPlayer, ItemContext->ItemLevel);
         if (WorldItem) {
-            UE_LOG(Mythic, Error, TEXT("RewardManager::RequestLootFromSource - No room in inventory so spawned the reward as world item instead"));
+            UE_LOG(Myth, Error, TEXT("RewardManager::RequestLootFromSource - No room in inventory so spawned the reward as world item instead"));
         }
         return true;
     }

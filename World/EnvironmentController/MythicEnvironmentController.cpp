@@ -55,14 +55,14 @@ void AMythicEnvironmentController::BeginPlay() {
         FogComponent = Cast<UExponentialHeightFogComponent>(ExponentialHeightFog->GetComponent());
     }
     else {
-        UE_LOG(Mythic_Environment, Error, TEXT("ExponentialHeightFog is not set"));
+        UE_LOG(Myth_Environment, Error, TEXT("ExponentialHeightFog is not set"));
     }
 
     if (SkyAtmosphere) {
         SkyAtmosphereComponent = Cast<USkyAtmosphereComponent>(SkyAtmosphere->GetComponent());
     }
     else {
-        UE_LOG(Mythic_Environment, Error, TEXT("SkyAtmosphere is not set"));
+        UE_LOG(Myth_Environment, Error, TEXT("SkyAtmosphere is not set"));
     }
 
     // Start a timer to update the time of day based on the morning, afternoon, evening, and night lengths
@@ -90,7 +90,7 @@ void AMythicEnvironmentController::BeginPlay() {
         EnvironmentSubsystem->SetEnvironmentController(this);
     }
     else {
-        UE_LOG(Mythic_Environment, Error, TEXT("EnvironmentSubsystem is not set"));
+        UE_LOG(Myth_Environment, Error, TEXT("EnvironmentSubsystem is not set"));
     }
 }
 
@@ -108,7 +108,7 @@ float AMythicEnvironmentController::GetSunPositionForCurrentTime() const {
 bool AMythicEnvironmentController::isCurrentWeatherExpired() const {
     // if current weather exists, and it has exceeded its lifetime, transition to the next weather.
     if (!this->CurrentWeather) {
-        UE_LOG(Mythic_Environment, Warning, TEXT("No current weather"));
+        UE_LOG(Myth_Environment, Warning, TEXT("No current weather"));
         return true;
     }
 
@@ -280,7 +280,7 @@ void AMythicEnvironmentController::MulticastSyncWindTarget_Implementation(const 
 // Called when the game starts or when spawned
 void AMythicEnvironmentController::MulticastSyncGameWorldTimer_Implementation(const FTimespan &NewTimespan, const FTimespan &OldTimespan) {
     this->Time = NewTimespan;
-    UE_LOG(Mythic_Environment, Warning, TEXT("Time of day synced to %s"), *this->Time.ToString());
+    UE_LOG(Myth_Environment, Warning, TEXT("Time of day synced to %s"), *this->Time.ToString());
 
     /// Broadcast Time Events ---------------------------------------------------------------
     // Broadcast Hour and DayTime Change
@@ -353,7 +353,7 @@ void AMythicEnvironmentController::TimeTick() {
 
 void AMythicEnvironmentController::MulticastSyncSkyAtmosphereAbsorption_Implementation(FLinearColor Absorption, float AbsorptionScalar) {
     if (SkyAtmosphereComponent) {
-        UE_LOG(Mythic_Environment, Warning, TEXT("SkyAtmosphere Absorption synced to %s"), *Absorption.ToString());
+        UE_LOG(Myth_Environment, Warning, TEXT("SkyAtmosphere Absorption synced to %s"), *Absorption.ToString());
         SkyAtmosphereComponent->SetOtherAbsorption(Absorption);
         SkyAtmosphereComponent->SetOtherAbsorptionScale(AbsorptionScalar);
     }
@@ -363,12 +363,12 @@ void AMythicEnvironmentController::MulticastSyncSkyAtmosphereAbsorption_Implemen
 void AMythicEnvironmentController::WeatherTick() {
     // If there is a weather transition in progress, update the weather transition
     if (this->WeatherTransition.TransitionToWeather) {
-        UE_LOG(Mythic_Environment, Warning, TEXT("Weather transition in progress to %s"), *this->WeatherTransition.TransitionToWeather->GetName());
+        UE_LOG(Myth_Environment, Warning, TEXT("Weather transition in progress to %s"), *this->WeatherTransition.TransitionToWeather->GetName());
         HandleWeatherTransition();
     }
     // SERVER-ONLY: Weather is cycled only through the server - which then modifies the weather cycle and syncs it to all clients
     else if (GetLocalRole() == ROLE_Authority && isCurrentWeatherExpired()) {
-        UE_LOG(Mythic_Environment, Warning, TEXT("No weather transition in progress"));
+        UE_LOG(Myth_Environment, Warning, TEXT("No weather transition in progress"));
         CycleWeather();
     }
 }
@@ -380,13 +380,13 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
     auto TransitionProgress = 1.0f;
 
     if (this->WeatherTransition.bSetInstantly) {
-        UE_LOG(Mythic_Environment, Warning, TEXT("Weather transition is instant"));
+        UE_LOG(Myth_Environment, Warning, TEXT("Weather transition is instant"));
     }
     else {
         const auto TransitionTime = this->Time - this->TransitionStartedAt;
         TransitionProgress = TransitionTime.GetTotalMinutes() / TransitionDurationInMins;
 
-        UE_LOG(Mythic_Environment, Warning, TEXT("EnvironmentController: Transition Time: %s, Transition Progress: %f"), *TransitionTime.ToString(),
+        UE_LOG(Myth_Environment, Warning, TEXT("EnvironmentController: Transition Time: %s, Transition Progress: %f"), *TransitionTime.ToString(),
                TransitionProgress);
     }
 
@@ -396,7 +396,7 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
         auto TargetValue = this->WeatherTransition.TransitionToScalarValues[i];
         auto LerpValue = FMath::Lerp(MPC_Value.DefaultValue, TargetValue.DefaultValue, TransitionProgress);
 
-        UE_LOG(Mythic_Environment, Log,
+        UE_LOG(Myth_Environment, Log,
                TEXT("EnvironmentController: Transitioning Lerp Vector Parameter %s. Current: %f, Target: %f, Progress: %f (Value at Progress: %f)"),
                *MPC_Value.ParameterName.ToString(),
                MPC_Value.DefaultValue,
@@ -413,7 +413,7 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
         auto TargetValue = this->WeatherTransition.TransitionToVectorValues[i];
         auto LerpValue = FMath::Lerp(MPC_Value.DefaultValue, TargetValue.DefaultValue, TransitionProgress);
 
-        UE_LOG(Mythic_Environment, Log,
+        UE_LOG(Myth_Environment, Log,
                TEXT("EnvironmentController: Transitioning Lerp Vector Parameter %s. Current: %s, Target: %s, Progress: %f (Value at Progress: %s)"),
                *MPC_Value.ParameterName.ToString(),
                *MPC_Value.DefaultValue.ToString(),
@@ -425,14 +425,14 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
 
     // Lerp the fog density
     if (FogComponent) {
-        UE_LOG(Mythic_Environment, Warning, TEXT("EnvironmentController: Transitioning Lerp Fog Density. Current: %f, Target: %f, Progress: %f"),
+        UE_LOG(Myth_Environment, Warning, TEXT("EnvironmentController: Transitioning Lerp Fog Density. Current: %f, Target: %f, Progress: %f"),
                this->CachedFogDensity,
                this->WeatherTransition.FogDensity, TransitionProgress);
         auto LerpFogDensity = FMath::Lerp(this->CachedFogDensity, this->WeatherTransition.FogDensity, TransitionProgress);
         FogComponent->SetFogDensity(LerpFogDensity);
 
         // Lerp the fog height falloff
-        UE_LOG(Mythic_Environment, Warning, TEXT("EnvironmentController: Transitioning Lerp Fog Height Falloff. Current: %f, Target: %f, Progress: %f"),
+        UE_LOG(Myth_Environment, Warning, TEXT("EnvironmentController: Transitioning Lerp Fog Height Falloff. Current: %f, Target: %f, Progress: %f"),
                this->CachedFogHeightFalloff,
                this->WeatherTransition.FogHeightFalloff, TransitionProgress);
         auto LerpFogHeightFalloff = FMath::Lerp(this->CachedFogHeightFalloff, this->WeatherTransition.FogHeightFalloff, TransitionProgress);
@@ -455,7 +455,7 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
 
         // Broadcast the weather change event
         this->WeatherChangeDelegate.Broadcast(NewWeatherTag, OldWeatherTag);
-        UE_LOG(Mythic_Environment, Warning, TEXT("EnvironmentController: Transition complete. New weather: %s"), *this->CurrentWeather->GetName());
+        UE_LOG(Myth_Environment, Warning, TEXT("EnvironmentController: Transition complete. New weather: %s"), *this->CurrentWeather->GetName());
     }
 }
 
@@ -480,7 +480,7 @@ void AMythicEnvironmentController::CycleWeather() {
     }
 
     if (!SelectedWeather) {
-        UE_LOG(Mythic_Environment, Warning, TEXT("No weather type selected"));
+        UE_LOG(Myth_Environment, Warning, TEXT("No weather type selected"));
         return;
     }
 
@@ -515,7 +515,7 @@ void AMythicEnvironmentController::SetWeatherTransition(const FWeatherCycleInfo 
 }
 
 void AMythicEnvironmentController::MulticastSyncWeather_Implementation(const FWeatherCycleInfo &NewWeatherCycle) {
-    UE_LOG(Mythic_Environment, Warning, TEXT("Weather cycle synced"));
+    UE_LOG(Myth_Environment, Warning, TEXT("Weather cycle synced"));
 
     // Get the WeatherType for the TransitionToWeatherTag
     const auto WeatherType = NewWeatherCycle.TransitionToWeather;
@@ -580,7 +580,7 @@ void AMythicEnvironmentController::SetWindTargetPosition(const FLinearColor &Tar
     checkf(GetLocalRole() == ROLE_Authority, TEXT("Only the server can set the wind target position"));
 
     if (!WeatherMPC) {
-        UE_LOG(Mythic_Environment, Error, TEXT("Cannot set wind TargetPosition without a WeatherMPC"));
+        UE_LOG(Myth_Environment, Error, TEXT("Cannot set wind TargetPosition without a WeatherMPC"));
         return;
     }
 

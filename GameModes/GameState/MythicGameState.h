@@ -79,9 +79,9 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Loot")
     FCurveTableRowHandle LegendaryLootChanceCurveRowHandle;
 
-    // Exotic Loot Chance Curve Row Handle - Used for determining the chance of mythic loot drops at a given level
+    // Mythic Loot Chance Curve Row Handle - Used for determining the chance of mythic loot drops at a given level
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Loot")
-    FCurveTableRowHandle ExoticLootChanceCurveRowHandle;
+    FCurveTableRowHandle MythicLootChanceCurveRowHandle;
 
     // World tier attributes
     UPROPERTY(BlueprintReadOnly)

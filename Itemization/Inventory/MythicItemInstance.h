@@ -31,7 +31,10 @@ protected:
     int randomSeed;
 
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
-    TObjectPtr<UMythicInventorySlot> CurrentSlot; // Reference to the slot this item is in, if any
+    TObjectPtr<UMythicInventoryComponent> OwningInventory;
+
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
+    int32 SlotIndex = -1;
 
     // The level of the item
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
@@ -46,7 +49,8 @@ public:
         Super::GetLifetimeReplicatedProps(OutLifetimeProps);
         DOREPLIFETIME(UMythicItemInstance, ItemDefinition);
         DOREPLIFETIME(UMythicItemInstance, Quantity);
-        DOREPLIFETIME(UMythicItemInstance, CurrentSlot);
+        DOREPLIFETIME(UMythicItemInstance, OwningInventory);
+        DOREPLIFETIME(UMythicItemInstance, SlotIndex);
         DOREPLIFETIME(UMythicItemInstance, ItemFragments);
         DOREPLIFETIME(UMythicItemInstance, randomSeed);
         DOREPLIFETIME(UMythicItemInstance, ItemLevel);
@@ -84,10 +88,10 @@ public:
     // Client-side activation methods
     void OnClientActiveItem();
     void OnClientInactiveItem();
+    void SetInventory(UMythicInventoryComponent *NewInventory, int32 NewSlotIndex);
 
     // Set Slot
-    void SetSlot(TObjectPtr<UMythicInventorySlot> NewSlot);
-    TObjectPtr<UMythicInventorySlot> GetSlot() const;
+    int32 GetSlot() const;
 
     // Get Inventory Component, can be null if the item is not in an inventory
     UFUNCTION(BlueprintCallable, Category = "Item")
@@ -119,4 +123,7 @@ public:
 
         return nullptr;
     }
+
+    /// on destroy, do proper chain of destruction
+    virtual void OnDestroyed() override;
 };

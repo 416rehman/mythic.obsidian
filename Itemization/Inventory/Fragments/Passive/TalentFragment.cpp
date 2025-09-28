@@ -47,13 +47,13 @@ void UTalentFragment::RollTalents(UTalentPool *TalentPool, int NumTalentsToRoll)
     for (auto RandIdx : RandomIndexes) {
         auto TalentAtIdx = TalentPool->TalentDefs[RandIdx];
         if (!TalentAtIdx) {
-            UE_LOG(Mythic, Error, TEXT("UTalentFragment::OnInstanced: Invalid talent definition."));
+            UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInstanced: Invalid talent definition."));
             continue;
         }
 
         auto Ability = TalentAtIdx->AbilityDef.Ability;
         if (!Ability) {
-            UE_LOG(Mythic, Error, TEXT("UTalentFragment::OnInstanced: Invalid ability definition."));
+            UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInstanced: Invalid ability definition."));
             continue;
         }
 
@@ -68,19 +68,19 @@ void UTalentFragment::OnInstanced(UMythicItemInstance *ItemInstance) {
     // ItemInstance->GetInventoryOwner() might be invalid this early
     auto Owner = ItemInstance->GetOwningActor();
     if (!Owner) {
-        UE_LOG(Mythic, Error, TEXT("UTalentFragment::OnInstanced: Invalid owner."));
+        UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInstanced: Invalid owner."));
         return;
     }
 
     auto TalentPool = this->TalentBuildData.TalentPool.LoadSynchronous();
     if (!TalentPool) {
-        UE_LOG(Mythic, Error, TEXT("UTalentFragment::OnInstanced: Invalid talent pool."));
+        UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInstanced: Invalid talent pool."));
         return;
     }
 
     auto Rarity = ItemInstance->GetItemDefinition()->Rarity;
-    // Legendary = 1 Talent, Exotic = 2 Talents
-    auto NumTalentsToRoll = Rarity == Legendary ? 1 : Rarity == Exotic ? 2 : 0;
+    // Legendary = 1 Talent, Mythic = 2 Talents
+    auto NumTalentsToRoll = Rarity == Legendary ? 1 : Rarity == Mythic ? 2 : 0;
 
     RollTalents(TalentPool, NumTalentsToRoll);
 }
@@ -89,7 +89,7 @@ void UTalentFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
     Super::OnItemActivated(ItemInstance);
 
     if (!ItemInstance) {
-        UE_LOG(Mythic, Error, TEXT("UTalentFragment::OnActiveItem: Invalid item instance."));
+        UE_LOG(Myth, Error, TEXT("UTalentFragment::OnActiveItem: Invalid item instance."));
         return;
     }
 
@@ -101,7 +101,7 @@ void UTalentFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
     Super::OnItemDeactivated(ItemInstance);
 
     if (!ItemInstance) {
-        UE_LOG(Mythic, Error, TEXT("UTalentFragment::OnInactiveItem: Invalid item instance."));
+        UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInactiveItem: Invalid item instance."));
         return;
     }
 
@@ -117,23 +117,23 @@ bool UTalentFragment::CanBeStackedWith(const UItemFragment *Other) const {
 void UTalentFragment::ServerRemoveAbility_Implementation() {
     for (auto &TalentSpec : this->TalentRuntimeReplicatedData.RolledTalents) {
         if (!TalentSpec.AbilitySpec.Handle.IsValid()) {
-            UE_LOG(Mythic, Warning, TEXT("UTalentFragment::ServerHandleInHandRemoveAbility_Implementation: No ability to remove."));
+            UE_LOG(Myth, Warning, TEXT("UTalentFragment::ServerHandleInHandRemoveAbility_Implementation: No ability to remove."));
             return;
         }
 
         if (!this->ParentItemInstance) {
-            UE_LOG(Mythic, Error, TEXT("UTalentFragment::ServerHandleInHandRemoveAbility_Implementation: Invalid item instance."));
+            UE_LOG(Myth, Error, TEXT("UTalentFragment::ServerHandleInHandRemoveAbility_Implementation: Invalid item instance."));
             return;
         }
 
         auto ASC = this->GetOwningAbilitySystemComponent();
         if (!ASC) {
-            UE_LOG(Mythic, Error, TEXT("UTalentFragment::ServerHandleInHandRemoveAbility_Implementation: Invalid ASC."));
+            UE_LOG(Myth, Error, TEXT("UTalentFragment::ServerHandleInHandRemoveAbility_Implementation: Invalid ASC."));
             return;
         }
 
         ASC->ClearAbility(TalentSpec.AbilitySpec.Handle);
-        UE_LOG(Mythic, Warning, TEXT("UGameplayAbilityFragment::OnInactiveItem: Canceled Ability"));
+        UE_LOG(Myth, Warning, TEXT("UGameplayAbilityFragment::OnInactiveItem: Canceled Ability"));
 
         // Clear the ability
         TalentSpec.AbilitySpec = FGameplayAbilitySpec();
@@ -143,44 +143,44 @@ void UTalentFragment::ServerRemoveAbility_Implementation() {
 void UTalentFragment::ServerHandleGrantAbility_Implementation() {
     auto ItemInstance = this->ParentItemInstance;
     if (!ItemInstance) {
-        UE_LOG(Mythic, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Invalid item instance."));
+        UE_LOG(Myth, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Invalid item instance."));
         return;
     }
 
     auto ASC = this->GetOwningAbilitySystemComponent();
     if (!ASC) {
-        UE_LOG(Mythic, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Invalid ASC."));
+        UE_LOG(Myth, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Invalid ASC."));
         return;
     }
 
     for (auto &TalentSpec : this->TalentRuntimeReplicatedData.RolledTalents) {
         if (TalentSpec.AbilitySpec.Handle.IsValid()) {
-            UE_LOG(Mythic, Warning, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Already granted ability."));
+            UE_LOG(Myth, Warning, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Already granted ability."));
             continue;
         }
 
         auto TalentDefinition = TalentSpec.TalentDef;
         if (!TalentDefinition) {
-            UE_LOG(Mythic, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Invalid talent definition."));
+            UE_LOG(Myth, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Invalid talent definition."));
             continue;
         }
 
         auto AbilityDef = TalentDefinition->AbilityDef;
         if (!AbilityDef.Ability) {
-            UE_LOG(Mythic, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Invalid ability definition."));
+            UE_LOG(Myth, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Invalid ability definition."));
             continue;
         }
 
         auto Ability = AbilityDef.Ability;
         if (!Ability) {
-            UE_LOG(Mythic, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Invalid ability."));
+            UE_LOG(Myth, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Invalid ability."));
             continue;
         }
 
         auto AbilitySpec = FGameplayAbilitySpec(Ability, 1, INDEX_NONE, this);
         auto NewAbilityHandle = ASC->GiveAbility(AbilitySpec);
         if (!NewAbilityHandle.IsValid()) {
-            UE_LOG(Mythic, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Failed to grant ability."));
+            UE_LOG(Myth, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Failed to grant ability."));
             return;
         }
 

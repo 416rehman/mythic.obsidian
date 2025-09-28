@@ -53,7 +53,7 @@ bool AMythicResource::TakePlaceOfISM() {
                     this->ReplacementMeshComponent->SetStaticMesh(mesh);
                 }
                 else {
-                    UE_LOG(Mythic, Warning, TEXT("AMythicResource::TakePlaceOfISM: ISM has no mesh."));
+                    UE_LOG(Myth, Warning, TEXT("AMythicResource::TakePlaceOfISM: ISM has no mesh."));
                 }
 
                 return true;
@@ -84,7 +84,7 @@ void AMythicResource::BeginPlay() {
     this->HitsTillDestruction = CalculateHitsTillDestruction();
 
     if (TakePlaceOfISM()) {
-        UE_LOG(Mythic, Warning, TEXT("AMythicResource::BeginPlay: Successfully replaced ISM"));
+        UE_LOG(Myth, Warning, TEXT("AMythicResource::BeginPlay: Successfully replaced ISM"));
         // If server, initialize default abilities and effects
         if (GetLocalRole() == ROLE_Authority) {
             for (TSubclassOf<UGameplayEffect> Effect : DefaultGameplayEffects) {
@@ -92,14 +92,14 @@ void AMythicResource::BeginPlay() {
                     FGameplayEffectContextHandle EffectContext = this->AbilitySystemComponent->MakeEffectContext();
                     FGameplayEffectSpecHandle SpecHandle = this->AbilitySystemComponent->MakeOutgoingSpec(Effect, 1, EffectContext);
                     if (this->AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get()).IsValid()) {
-                        UE_LOG(Mythic, Warning, TEXT("Applied default gameplay effect %s to %s"), *Effect->GetName(), *GetOwner()->GetName());
+                        UE_LOG(Myth, Warning, TEXT("Applied default gameplay effect %s to %s"), *Effect->GetName(), *GetOwner()->GetName());
                     }
                     else {
-                        UE_LOG(Mythic, Warning, TEXT("Failed to apply default gameplay effect"));
+                        UE_LOG(Myth, Warning, TEXT("Failed to apply default gameplay effect"));
                     }
                 }
                 else {
-                    UE_LOG(Mythic, Warning, TEXT("Default gameplay effect is null"));
+                    UE_LOG(Myth, Warning, TEXT("Default gameplay effect is null"));
                 }
             }
 
@@ -126,7 +126,7 @@ void AMythicResource::BeginPlay() {
         }
     }
     else {
-        UE_LOG(Mythic, Error, TEXT("AMythicResource::BeginPlay: Failed to find an ISM to replace. Destroying."));
+        UE_LOG(Myth, Error, TEXT("AMythicResource::BeginPlay: Failed to find an ISM to replace. Destroying."));
         Destroy();
     }
 }

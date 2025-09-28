@@ -9,6 +9,7 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Proficiencies.h"
 #include "GameModes/Attributes/WorldAttributes.h"
 #include "GameModes/GameState/MythicGameState.h"
+#include "Itemization/InventoryProviderInterface.h"
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
 
@@ -40,11 +41,11 @@ bool ULootReward::Give(FRewardContext &Context) const {
     auto LevelFound = false;
     auto PlayerLevel = UMythicAttributeSet_Proficiencies::GetLevel(ASC, LevelFound);
     if (!LevelFound) {
-        UE_LOG(Mythic, Error, TEXT("LootReward::Give - Failed to get player level - Using Level 1"));
+        UE_LOG(Myth, Error, TEXT("LootReward::Give - Failed to get player level - Using Level 1"));
         PlayerLevel = 1;
     }
 
-    UE_LOG(Mythic, Warning, TEXT("LootReward::Give - Current Player Level: %d"), PlayerLevel);
+    UE_LOG(Myth, Warning, TEXT("LootReward::Give - Current Player Level: %d"), PlayerLevel);
 
     // Get the loot rates for the player
     // Calculate drop rates once for this request
@@ -52,57 +53,58 @@ bool ULootReward::Give(FRewardContext &Context) const {
     const float RareRate = GameState->RareLootChanceCurveRowHandle.Eval(PlayerLevel, "");
     const float EpicRate = GameState->EpicLootChanceCurveRowHandle.Eval(PlayerLevel, "");
     const float LegendaryRate = GameState->LegendaryLootChanceCurveRowHandle.Eval(PlayerLevel, "") * WorldTierAttributes->GetLegendaryDropRateMultiplier();
-    const float ExoticRate = GameState->ExoticLootChanceCurveRowHandle.Eval(PlayerLevel, "") * WorldTierAttributes->GetExoticDropRateMultiplier();
+    const float MythicRate = GameState->MythicLootChanceCurveRowHandle.Eval(PlayerLevel, "") * WorldTierAttributes->GetMythicDropRateMultiplier();
 
-    UE_LOG(Mythic, Log, TEXT("LootReward::Give - Rarities for Level %d = Common: %f, Rare: %f, Epic: %f, Legendary: %f, Exotic: %f"), PlayerLevel, CommonRate,
-           RareRate, EpicRate, LegendaryRate, ExoticRate);
+    UE_LOG(Myth, Log, TEXT("LootReward::Give - Rarities for Level %d = Common: %f, Rare: %f, Epic: %f, Legendary: %f, Mythic: %f"), PlayerLevel, CommonRate,
+           RareRate, EpicRate, LegendaryRate, MythicRate);
 
     // Check if we have a loot source
     for (auto LootTable : OverridenLootSource.LootTables) {
-        UE_LOG(Mythic, Log, TEXT("LootReward::Give - Using loot source %s"), *LootTable->GetName());
-        RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, ExoticRate, PlayerController, LootContext->ItemLevel, LootTable,
+        UE_LOG(Myth, Log, TEXT("LootReward::Give - Using loot source %s"), *LootTable->GetName());
+        RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, MythicRate, PlayerController, LootContext->ItemLevel, LootTable,
                               LootContext->PutInInventory, OverridenLootSource.IsPrivate, LootContext->SpawnLocation, MythicLootManager);
     }
     if (OverridenLootSource.bSkipGlobal) {
-        UE_LOG(Mythic, Log, TEXT("LootReward::Give - Skipping global loot source"));
+        UE_LOG(Myth, Log, TEXT("LootReward::Give - Skipping global loot source"));
         return true;
     }
 
     // Settings
     auto MythicSettings = UMythicDevSettings::Get();
     if (!MythicSettings) {
-        UE_LOG(Mythic, Error, TEXT("LootReward::Give - Mythic Settings not found"));
+        UE_LOG(Myth, Error, TEXT("LootReward::Give - Mythic Settings not found"));
         return false;
     }
 
     auto LootTable = MythicSettings->GlobalLootTable.Get();
     if (!LootTable) {
-        UE_LOG(Mythic, Error, TEXT("LootReward::Give - Global loot table not found"));
+        UE_LOG(Myth, Error, TEXT("LootReward::Give - Global loot table not found"));
         return false;
     }
 
     // If we made it here, we didn't skip the global loot source, so we should use it
-    UE_LOG(Mythic, Log, TEXT("LootReward::Give - Using global loot source"));
-    RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, ExoticRate, PlayerController, LootContext->ItemLevel,
+    UE_LOG(Myth, Log, TEXT("LootReward::Give - Using global loot source"));
+    RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, MythicRate, PlayerController, LootContext->ItemLevel,
                           LootTable, LootContext->PutInInventory, OverridenLootSource.IsPrivate, LootContext->SpawnLocation,
                           MythicLootManager);
 
     return true;
 }
 
-void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float EpicRate, float LegendaryRate, float ExoticRate,
+void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float EpicRate, float LegendaryRate, float MythicRate,
                                         APlayerController *PlayerController, int32 DropLevel,
-                                        UMythicLootTable *LootTable, UMythicInventoryComponent *Inventory, bool isPrivate, FVector SpawnLocation,
+                                        UMythicLootTable *LootTable, TScriptInterface<IInventoryProviderInterface> InventoryProvider, bool isPrivate,
+                                        FVector SpawnLocation,
                                         UMythicLootManagerSubsystem *MythicLootManager) {
     if (!LootTable || LootTable->Entries.Num() == 0) {
-        UE_LOG(Mythic, Error, TEXT("LootReward::RequestLootFromSource - Loot table is empty or invalid"));
+        UE_LOG(Myth, Error, TEXT("LootReward::RequestLootFromSource - Loot table is empty or invalid"));
         return;
     }
 
     // Table proc check
     float procRoll = FMath::FRand();
     if (procRoll > LootTable->DropChance) {
-        UE_LOG(Mythic, Log, TEXT("LootReward::RequestLootFromSource - Table failed to proc - Required: %.2f, Rolled: %.2f"),
+        UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Table failed to proc - Required: %.2f, Rolled: %.2f"),
                LootTable->DropChance, procRoll);
         return;
     }
@@ -114,7 +116,7 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
         RareRate,
         EpicRate,
         LegendaryRate,
-        ExoticRate
+        MythicRate
     };
 
     // Setup recipient and location
@@ -125,7 +127,7 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
     static TArray<int32> ValidIndices;
     ValidIndices.Reserve(LootTable->Entries.Num());
 
-    UE_LOG(Mythic, Log, TEXT("LootReward::RequestLootFromSource - Checking drop chances for items in table %s"), *LootTable->GetName());
+    UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Checking drop chances for items in table %s"), *LootTable->GetName());
 
     for (int32 i = 0; i < LootTable->Entries.Num(); ++i) {
         const auto &Entry = LootTable->Entries[i];
@@ -139,23 +141,23 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
 
         if (RollResult <= DropChance) {
             ValidIndices.Add(i);
-            UE_LOG(Mythic, Log, TEXT("LootReward::RequestLootFromSource - Item %s passed drop check - Required: %.2f, Rolled: %.2f"),
+            UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Item %s passed drop check - Required: %.2f, Rolled: %.2f"),
                    *Entry.Item->GetName(), DropChance, RollResult);
         }
         else {
-            UE_LOG(Mythic, Verbose, TEXT("LootReward::RequestLootFromSource - Item %s failed drop check - Required: %.2f, Rolled: %.2f"),
+            UE_LOG(Myth, Verbose, TEXT("LootReward::RequestLootFromSource - Item %s failed drop check - Required: %.2f, Rolled: %.2f"),
                    *Entry.Item->GetName(), DropChance, RollResult);
         }
     }
 
     if (ValidIndices.Num() == 0) {
-        UE_LOG(Mythic, Log, TEXT("LootReward::RequestLootFromSource - No items passed the drop chance check"));
+        UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - No items passed the drop chance check"));
         return;
     }
 
     // Determine how many items we'll actually drop
     const int32 NumItemsToDrop = FMath::RandRange(1, FMath::Min(LootTable->MaxItems, ValidIndices.Num()));
-    UE_LOG(Mythic, Log, TEXT("LootReward::RequestLootFromSource - Will drop %d items from %d eligible items"),
+    UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Will drop %d items from %d eligible items"),
            NumItemsToDrop, ValidIndices.Num());
 
     // Track used indices
@@ -166,7 +168,7 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
     for (int32 DropCount = 0; DropCount < NumItemsToDrop; ++DropCount) {
         // Reset used tracking if we've used all items
         if (UsedIndices.CountSetBits() == ValidIndices.Num()) {
-            UE_LOG(Mythic, Log, TEXT("LootReward::RequestLootFromSource - Reset used items tracking - all items have been used"));
+            UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Reset used items tracking - all items have been used"));
             UsedIndices.Init(false, ValidIndices.Num());
         }
 
@@ -187,7 +189,7 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
         }
 
         if (SelectedIndex == -1) {
-            UE_LOG(Mythic, Warning, TEXT("LootReward::RequestLootFromSource - Failed to find unused item after %d attempts"), CurrentAttempt);
+            UE_LOG(Myth, Warning, TEXT("LootReward::RequestLootFromSource - Failed to find unused item after %d attempts"), CurrentAttempt);
             continue;
         }
 
@@ -196,38 +198,38 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
         // Calculate stack size
         int32 StackSize = SelectedEntry.Item->StackSizeMax > 1 ? FMath::RandRange(SelectedEntry.StackRange.Min, SelectedEntry.StackRange.Max) : 1;
 
-        UE_LOG(Mythic, Log, TEXT("LootReward::RequestLootFromSource - Selected item: %s (Rarity: %d) with stack size: %d"),
+        UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Selected item: %s (Rarity: %d) with stack size: %d"),
                *SelectedEntry.Item->GetName(),
                static_cast<int32>(SelectedEntry.Item->Rarity),
                StackSize);
 
         // Spawn the item
-        if (Inventory) {
+        if (InventoryProvider) {
             MythicLootManager->CreateAndGive(
                 SelectedEntry.Item,
                 StackSize,
-                Inventory,
+                InventoryProvider,
                 TargetRecipient,
                 DropLevel
                 );
 
             // The item is either in the inventory or in the world, so we're done
-            UE_LOG(Mythic, Log, TEXT("LootReward::RequestLootFromSource - Item %s spawned in inventory"), *SelectedEntry.Item->GetName());
+            UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Item %s spawned in inventory"), *SelectedEntry.Item->GetName());
         }
         else {
             FVector Offset(FMath::RandRange(-50.0f, 50.0f), FMath::RandRange(-50.0f, 50.0f), 0.0f);
             if (!MythicLootManager->CreateAndSpawn(SelectedEntry.Item, SpawnLoc + Offset, TargetRecipient, DropLevel, StackSize, 100)) {
-                UE_LOG(Mythic, Warning, TEXT("LootReward::RequestLootFromSource - Failed to spawn item %s"), *SelectedEntry.Item->GetName());
+                UE_LOG(Myth, Warning, TEXT("LootReward::RequestLootFromSource - Failed to spawn item %s"), *SelectedEntry.Item->GetName());
                 continue;
             }
 
-            UE_LOG(Mythic, Log, TEXT("LootReward::RequestLootFromSource - Item %s spawned in world"), *SelectedEntry.Item->GetName());
+            UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Item %s spawned in world"), *SelectedEntry.Item->GetName());
         }
 
         SuccessfulDrops++;
     }
 
-    UE_LOG(Mythic, Log, TEXT("LootReward::RequestLootFromSource - Loot generation complete. Successfully dropped %d/%d items from table %s"),
+    UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Loot generation complete. Successfully dropped %d/%d items from table %s"),
            SuccessfulDrops, NumItemsToDrop, *LootTable->GetName());
 }
 

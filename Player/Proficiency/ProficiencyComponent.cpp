@@ -16,7 +16,7 @@ void FProficiency::GenerateTrack() {
 
     // Ensure there are milestones, goals, and max level defined
     if (NumGoals <= 0 || NumKeyMilestones <= 0 || MaxLevel <= 0) {
-        UE_LOG(Mythic, Error, TEXT("Proficiency: Missing required data"));
+        UE_LOG(Myth, Error, TEXT("Proficiency: Missing required data"));
         return;
     }
 
@@ -61,7 +61,7 @@ void FProficiency::GenerateTrack() {
 
 void FProficiency::Instantiate() {
     if (!this->Definition) {
-        UE_LOG(Mythic, Error, TEXT("Proficiency: Missing Definition"));
+        UE_LOG(Myth, Error, TEXT("Proficiency: Missing Definition"));
         return;
     }
 
@@ -78,7 +78,7 @@ void UProficiencyComponent::OnAttributeChanged(const FOnAttributeChangeData &OnA
         return Proficiency.ProgressAttribute == OnAttributeChangeData.Attribute;
     });
     if (!Proficiency) {
-        UE_LOG(Mythic, Error, TEXT("Proficiency: Missing Proficiency"));
+        UE_LOG(Myth, Error, TEXT("Proficiency: Missing Proficiency"));
         return;
     }
 
@@ -88,16 +88,16 @@ void UProficiencyComponent::OnAttributeChanged(const FOnAttributeChangeData &OnA
 
     auto LevelsGained = NewLevel - OldLevel;
     if (LevelsGained <= 0) {
-        UE_LOG(Mythic, Log, TEXT("Proficiency: No level gained"));
+        UE_LOG(Myth, Log, TEXT("Proficiency: No level gained"));
         return;
     }
 
-    UE_LOG(Mythic, Log, TEXT("%s Proficiency: Leveled up %d levels"), *Proficiency->Definition->Name.ToString(), LevelsGained);
+    UE_LOG(Myth, Log, TEXT("%s Proficiency: Leveled up %d levels"), *Proficiency->Definition->Name.ToString(), LevelsGained);
 
     // If the new level is greater than the current level, give rewards
     APlayerController *Owner = Cast<APlayerController>(this->GetOwner());
     if (!Owner) {
-        UE_LOG(Mythic, Error, TEXT("Proficiency: Missing Owner"));
+        UE_LOG(Myth, Error, TEXT("Proficiency: Missing Owner"));
         return;
     }
 
@@ -105,13 +105,13 @@ void UProficiencyComponent::OnAttributeChanged(const FOnAttributeChangeData &OnA
     for (int i = 0; i < LevelsGained; ++i) {
         auto Level = OldLevel + i;
         auto Milestone = Proficiency->Track[Level];
-        UE_LOG(Mythic, Log, TEXT("%s Proficiency Reward: Level %d: %s"), *Proficiency->Definition->Name.ToString(), Level + 1, *Milestone.Name.ToString());
+        UE_LOG(Myth, Log, TEXT("%s Proficiency Reward: Level %d: %s"), *Proficiency->Definition->Name.ToString(), Level + 1, *Milestone.Name.ToString());
         for (auto Reward : Milestone.Rewards) {
             Reward->Give(context);
         }
     }
 
-    UE_LOG(Mythic, Log, TEXT("%s Proficiency: Old XP: %f (Level %d) --(%f)--> New XP: %f (Level %d)"), *Proficiency->Definition->Name.ToString(), OldValue,
+    UE_LOG(Myth, Log, TEXT("%s Proficiency: Old XP: %f (Level %d) --(%f)--> New XP: %f (Level %d)"), *Proficiency->Definition->Name.ToString(), OldValue,
            OldLevel, AddedValue, NewValue, NewLevel);
 }
 
@@ -129,7 +129,7 @@ void UProficiencyComponent::ConfigureProgressionAttribute(FProficiency &Proficie
     if (!HasAttribute) {
         auto AttributeSet = Proficiency.ProgressAttribute.GetAttributeSetClass()->GetDefaultObject<UAttributeSet>();
         ASC->AddSpawnedAttribute(AttributeSet);
-        UE_LOG(Mythic, Warning, TEXT("Proficiency: AttributeSet for Attribute %s granted because it wasn't"), *Proficiency.ProgressAttribute.AttributeName)
+        UE_LOG(Myth, Warning, TEXT("Proficiency: AttributeSet for Attribute %s granted because it wasn't"), *Proficiency.ProgressAttribute.AttributeName)
     }
 
     // Set the maximum value for the attribute.
@@ -138,7 +138,7 @@ void UProficiencyComponent::ConfigureProgressionAttribute(FProficiency &Proficie
 
     // Register the attribute change callback
     ASC->GetGameplayAttributeValueChangeDelegate(Proficiency.ProgressAttribute).AddUObject(this, &UProficiencyComponent::OnAttributeChanged);
-    UE_LOG(Mythic, Log, TEXT("Proficiency: Proficiency Bound to %s (Max XP: %f)"), *Proficiency.ProgressAttribute.AttributeName, MaxXP);
+    UE_LOG(Myth, Log, TEXT("Proficiency: Proficiency Bound to %s (Max XP: %f)"), *Proficiency.ProgressAttribute.AttributeName, MaxXP);
 }
 
 // Called when the game starts

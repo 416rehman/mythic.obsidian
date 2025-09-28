@@ -61,7 +61,7 @@ static ESeason MonthAsSeason(int32 Month) {
     }
 
     if (Month < 1 || Month > 12) {
-        UE_LOG(Mythic, Error, TEXT("Invalid month - %d"), Month);
+        UE_LOG(Myth, Error, TEXT("Invalid month - %d"), Month);
     }
 
     // Winter: December, January, February
