@@ -16,23 +16,23 @@ void UMythicItemInstance::SetStackSize(const int32 newQuantity) {
         // If the item is in an inventory
         auto inventory = this->GetInventoryComponent();
         if (!inventory) {
-            UE_LOG(Myth, Warning, TEXT("SetStackSize: ItemInstance %s is not in an inventory"), *GetName());
+            UE_LOG(Myth, Verbose, TEXT("SetStackSize: ItemInstance %s is not in an inventory"), *GetName());
             return;
         }
         auto slot = inventory->GetItem(this->SlotIndex);
         if (!slot) {
-            UE_LOG(Myth, Warning, TEXT("SetStackSize: ItemInstance %s is not in a valid slot"), *GetName());
+            UE_LOG(Myth, Verbose, TEXT("SetStackSize: ItemInstance %s is not in a valid slot"), *GetName());
             return;
         }
 
-        if (auto Inventory = this->GetInventoryComponent()) {
-            if (Quantity <= 0) {
-                // Remove the item from the slot if the stack is 0
-                // NOTE: Item->Destroy() should be called by the caller of this function by checking if stack size <= 0
-                Inventory->SetItemInSlot(this->SlotIndex, nullptr);
-            }
-            Inventory->ClientOnSlotUpdatedDelegate(this->SlotIndex);
+        if (Quantity <= 0) {
+            // Remove the item from the slot if the stack is 0
+            // NOTE: Item->Destroy() should be called by the caller if full removal is intended
+            inventory->SetItemInSlot(this->SlotIndex, nullptr);
         }
+
+        // Update local (server or owning client for listen-server)
+        inventory->NotifyItemInstanceUpdated(this->SlotIndex);
     }
 }
 
@@ -44,7 +44,7 @@ void UMythicItemInstance::Initialize(UItemDefinition *ItemDef, const int32 quant
     this->randomSeed = FMath::Rand();
     this->ItemLevel = level;
     this->Quantity = ItemDef->StackSizeMax > 1 ? quantityIfStackable : 1;
-    UE_LOG(Myth, Warning, TEXT("Level %d item %s has random seed %d"), level, *GetName(), this->randomSeed);
+    UE_LOG(Myth, Verbose, TEXT("Level %d item %s has random seed %d"), level, *GetName(), this->randomSeed);
 
     // Create fragments for this item from the item definition
     for (int i = 0; i < ItemDef->Fragments.Num(); i++) {
@@ -87,7 +87,7 @@ void UMythicItemInstance::OnActiveItem() {
         if (ItemFragments[i] == nullptr) { continue; }
         ItemFragments[i]->OnItemActivated(this);
     }
-    UE_LOG(Myth, Warning, TEXT("ItemInstance %s has random seed %d"), *GetName(), this->randomSeed);
+    UE_LOG(Myth, Verbose, TEXT("ItemInstance %s has random seed %d"), *GetName(), this->randomSeed);
 }
 
 void UMythicItemInstance::OnInactiveItem() {
@@ -208,5 +208,29 @@ void UMythicItemInstance::OnDestroyed() {
         }
         
         ItemFragments.Empty();
+    }
+}
+
+void UMythicItemInstance::OnRep_Quantity() {
+    if (OwningInventory) {
+        OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
+    }
+}
+
+void UMythicItemInstance::OnRep_ItemDefinition() {
+    if (OwningInventory) {
+        OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
+    }
+}
+
+void UMythicItemInstance::OnRep_OwningInventory() {
+    if (OwningInventory && SlotIndex != INDEX_NONE) {
+        OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
+    }
+}
+
+void UMythicItemInstance::OnRep_SlotIndex() {
+    if (OwningInventory && SlotIndex != INDEX_NONE) {
+        OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
     }
 }

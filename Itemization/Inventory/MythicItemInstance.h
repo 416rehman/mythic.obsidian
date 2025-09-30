@@ -8,6 +8,7 @@
 
 class UItemFragment;
 class UMythicInventorySlot;
+class UMythicInventoryComponent;
 
 // Call Initialize after spawning to set the item definition and quantity
 UCLASS(Blueprintable, BlueprintType)
@@ -16,7 +17,7 @@ class MYTHIC_API UMythicItemInstance : public UMythicReplicatedObject {
 
 protected:
     // object pointer to the item definition data asset
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
+    UPROPERTY(ReplicatedUsing=OnRep_ItemDefinition, BlueprintReadOnly, Category = "Item")
     UItemDefinition *ItemDefinition;
 
     // Item Fragments copied from the item definition
@@ -24,16 +25,16 @@ protected:
     TArray<TObjectPtr<UItemFragment>> ItemFragments;
 
     // Quantity of item (Current size of stack), with a setter to make sure its never over the max stack size
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item", meta = (ClampMin = "1"))
+    UPROPERTY(ReplicatedUsing=OnRep_Quantity, BlueprintReadOnly, Category = "Item", meta = (ClampMin = "1"))
     int32 Quantity = 1;
 
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
     int randomSeed;
 
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
+    UPROPERTY(ReplicatedUsing=OnRep_OwningInventory, BlueprintReadOnly, Category = "Item")
     TObjectPtr<UMythicInventoryComponent> OwningInventory;
 
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
+    UPROPERTY(ReplicatedUsing=OnRep_SlotIndex, BlueprintReadOnly, Category = "Item")
     int32 SlotIndex = -1;
 
     // The level of the item
@@ -43,6 +44,18 @@ protected:
     // Tags assigned to the item - these are dynamic and can be changed at runtime
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
     FGameplayTagContainer ItemTags;
+
+    UFUNCTION()
+    void OnRep_Quantity();
+
+    UFUNCTION()
+    void OnRep_ItemDefinition();
+
+    UFUNCTION()
+    void OnRep_OwningInventory();
+
+    UFUNCTION()
+    void OnRep_SlotIndex();
 
 public:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {

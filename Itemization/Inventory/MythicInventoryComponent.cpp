@@ -2,17 +2,19 @@
 
 
 #include "MythicInventoryComponent.h"
-#include "MVVMGameSubsystem.h"
-#include "MVVMSubsystem.h"
 #include "MythicItemInstance.h"
 #include "Mythic/Mythic.h"
 #include "Mythic/Itemization/Loot/MythicLootManagerSubsystem.h"
+#include "ViewModels/InventoryVM.h"
 
 UMythicInventoryComponent::UMythicInventoryComponent(const FObjectInitializer &OI) :
     Super(OI) {
     SetIsReplicatedByDefault(true);
     SetIsReplicated(true);
     this->bReplicateUsingRegisteredSubObjectList = true;
+
+    // Set owner on the FastArray for client-side callbacks
+    Slots.SetOwningInventory(this);
 }
 
 void FMythicInventorySlotEntry::ActivateSlot() {
@@ -56,33 +58,41 @@ void FMythicInventorySlotEntry::Clear() {
     }
 }
 
-void FMythicInventoryFastArray::PostReplicatedAdd(const TArrayView<int32> &AddedIndices, int32 FinalSize) {}
-void FMythicInventoryFastArray::PostReplicatedChange(const TArrayView<int32> &ChangedIndices, int32 FinalSize) {}
-void FMythicInventoryFastArray::PreReplicatedRemove(const TArrayView<int32> &RemovedIndices, int32 FinalSize) {}
+// FastArray replication callbacks
+void FMythicInventoryFastArray::PostReplicatedAdd(const TArrayView<int32> &AddedIndices, int32 FinalSize) {
+    if (Owner) {
+        Owner->HandleSlotsAdded(AddedIndices, FinalSize);
+    }
+}
 
-void UMythicInventoryComponent::ClientSetupViewModel_Implementation() {
-    if (this->ViewModelIdentifier.IsNone()) {
-        UE_LOG(Myth, Error, TEXT("Inventory Component Begin Play:: ViewModelIdentifier is empty"));
+void FMythicInventoryFastArray::PostReplicatedChange(const TArrayView<int32> &ChangedIndices, int32 FinalSize) {
+    if (Owner) {
+        Owner->HandleSlotsChanged(ChangedIndices, FinalSize);
+    }
+}
+
+void FMythicInventoryFastArray::PreReplicatedRemove(const TArrayView<int32> &RemovedIndices, int32 FinalSize) {
+    if (Owner) {
+        Owner->HandleSlotsRemoved(RemovedIndices, FinalSize);
+    }
+}
+
+void UMythicInventoryComponent::SetupLocalViewModel() {
+    // Only create VMs where they can be used (not on dedicated server)
+    if (GetWorld() && GetWorld()->GetNetMode() == NM_DedicatedServer) {
         return;
     }
 
-    // Add the view model to the view model subsystem
-    auto ViewModelSubsystem = GetOwner()->GetGameInstance()->GetSubsystem<UMVVMGameSubsystem>();
-    auto collection = ViewModelSubsystem->GetViewModelCollection();
-
-    // Create the view model
-    // this->ViewModel = NewObject<UInventoryVM>(GetOwner());
-    // this->ViewModel->Initialize(SlotConfigurations, Slots);
-    // FMVVMViewModelContext ViewModelContext;
-    // ViewModelContext.ContextClass = this->ViewModel->GetClass();
-    // ViewModelContext.ContextName = this->ViewModelIdentifier;
-
-    // if (collection->AddViewModelInstance(ViewModelContext, this->ViewModel)) {
-    //     UE_LOG(Myth, Warning, TEXT("Inventory Component Begin Play:: Added ViewModel %s to ViewModelCollection on Role: %s"),
-    //            *this->ViewModelIdentifier.ToString(), *FString::FromInt(GetOwnerRole()));
-    //
-    //     OnViewModelCreated.Broadcast();
-    // }
+    const bool bWasNull = (ViewModel == nullptr);
+    if (!IsValid(ViewModel)) {
+        ViewModel = NewObject<UInventoryVM>(this);
+    }
+    if (IsValid(ViewModel)) {
+        ViewModel->InitializeFromInventory(this);
+        if (bWasNull) {
+            OnViewModelCreated.Broadcast();
+        }
+    }
 }
 
 void UMythicInventoryComponent::BeginPlay() {
@@ -90,11 +100,12 @@ void UMythicInventoryComponent::BeginPlay() {
 
     // Use the resize function to create the initial slots
     if (GetOwner()->HasAuthority()) {
-        UE_LOG(Myth, Warning, TEXT("Inventory Component Begin Play:: Has Authority"));
+        UE_LOG(Myth, Verbose, TEXT("Inventory Component BeginPlay: Has Authority"));
         InitializeSlots();
     }
-    // We need to setup the view model for both client and server
-    ClientSetupViewModel();
+
+    // Setup or refresh the local view model; subsequent updates are driven by FastArray callbacks
+    SetupLocalViewModel();
 }
 
 void UMythicInventoryComponent::InitializeSlots() {
@@ -110,19 +121,19 @@ void UMythicInventoryComponent::InitializeSlots() {
     // Create new slots based on the configurations
     for (const FInventorySlotConfiguration &Config : SlotConfigurations) {
         if (Config.SlotTypeRow.IsNull()) {
-            UE_LOG(Myth, Error, TEXT("Inventory Component InitializeSlots:: SlotTypeRow is null in a configuration for owner %s"), *GetOwner()->GetName());
+            UE_LOG(Myth, Error, TEXT("Inventory InitializeSlots:: SlotTypeRow is null for owner %s"), *GetOwner()->GetName());
             continue;
         }
 
         const FSlotType *SlotTypeData = Config.SlotTypeRow.GetRow<FSlotType>(FString());
         if (!SlotTypeData) {
-            UE_LOG(Myth, Error, TEXT("Inventory Component InitializeSlots:: Failed to find SlotType for row %s in owner %s"),
+            UE_LOG(Myth, Error, TEXT("Inventory InitializeSlots:: Failed to find SlotType row %s for owner %s"),
                    *Config.SlotTypeRow.RowName.ToString(), *GetOwner()->GetName());
             continue;
         }
 
         for (int32 i = 0; i < Config.NumSlots; ++i) {
-            auto SlotEntry = FMythicInventorySlotEntry();
+            FMythicInventorySlotEntry SlotEntry;
             SlotEntry.SlotType = SlotTypeData->SlotType;
             SlotEntry.ItemTypeWhitelist = SlotTypeData->WhitelistedItemTypes;
             SlotEntry.bIsActive = Config.bIsEquipable;
@@ -133,19 +144,22 @@ void UMythicInventoryComponent::InitializeSlots() {
     }
 
     const int32 NewSlotsSize = Slots.Num();
-    UE_LOG(Myth, Warning, TEXT("Initialized Inventory from %d to %d slots"), OldSlotsSize, NewSlotsSize);
+    UE_LOG(Myth, Verbose, TEXT("Initialized Inventory from %d to %d slots"), OldSlotsSize, NewSlotsSize);
 
     if (OldSlotsSize != NewSlotsSize) {
-        ClientOnInventorySizeChangedDelegate(NewSlotsSize, OldSlotsSize);
-    }
-    else {
-        // If the size is the same, we still need to update the view model with the new slot instances
-        ClientUpdateViewModelSlots();
+        // Server-side local update for any UI (listen server)
+        // SetupLocalViewModel();
+        OnInventorySizeChanged.Broadcast(NewSlotsSize, OldSlotsSize);
+    } else {
+        // If the size is the same, update the view model items
+        if (IsValid(ViewModel)) {
+            ViewModel->RefreshAllItemsFromInventory(this);
+        }
     }
 }
 
 bool UMythicInventoryComponent::CanAcceptItemType(const FGameplayTag &ItemType) const {
-    for (auto Slot : Slots.Items) {
+    for (const auto& Slot : Slots.Items) {
         // If a slot has an empty whitelist, it accepts all types.
         // Otherwise, check if the item type matches the whitelist.
         if (Slot.ItemTypeWhitelist.Num() == 0 || ItemType.MatchesAny(Slot.ItemTypeWhitelist)) {
@@ -157,11 +171,7 @@ bool UMythicInventoryComponent::CanAcceptItemType(const FGameplayTag &ItemType) 
 }
 
 UMythicItemInstance *UMythicInventoryComponent::GetItem(int32 SlotIndex) {
-    if (Slots.IsValidIndex(SlotIndex)) {
-        return Slots.Items[SlotIndex].SlottedItemInstance;
-    }
-
-    return nullptr;
+    return Slots.GetItemInSlot(SlotIndex);
 }
 
 bool UMythicInventoryComponent::TryTransferToSlot(UMythicItemInstance *ItemInstance, int32 TargetSlotIndex) {
@@ -176,9 +186,9 @@ bool UMythicInventoryComponent::TryTransferToSlot(UMythicItemInstance *ItemInsta
         return true;
     }
 
-    if (OldItemSlot) {
+    if (OldItemSlot != INDEX_NONE && OldInventory) {
         // if we failed to add the item to the new slot, put it back in the old one
-        UE_LOG(Myth, Warning, TEXT("Failed to add item to slot, putting it back in the old one"));
+        UE_LOG(Myth, Verbose, TEXT("Failed to add item to slot, reverting to previous"));
         OldInventory->SetItemInSlot(OldItemSlot, ItemInstance);
     }
 
@@ -198,7 +208,7 @@ bool UMythicInventoryComponent::SetItemInSlot(int32 SlotIndex, UMythicItemInstan
             SlotData.Clear();
         });
 
-        this->ClientOnSlotUpdatedDelegate(SlotIndex);
+        NotifyItemInstanceUpdated(SlotIndex);
         return true;
     }
 
@@ -218,22 +228,21 @@ bool UMythicInventoryComponent::SetItemInSlot(int32 SlotIndex, UMythicItemInstan
         }
     }
 
-    // Update the data in the replicated struct
-    Slot.SlottedItemInstance = NewItemInstance;
-    Slot.SlottedItemInstance->SetOwner(this);
-    Slot.SlottedItemInstance->SetInventory(this, SlotIndex);
+    // Update the data in the replicated struct and mark dirty
+    Slots.ModifySlotAtIndex(SlotIndex, [this, NewItemInstance, SlotIndex](FMythicInventorySlotEntry &Slot){
+        Slot.SlottedItemInstance = NewItemInstance;
+        if (IsValid(Slot.SlottedItemInstance)) {
+            Slot.SlottedItemInstance->SetOwner(this);
+            Slot.SlottedItemInstance->SetInventory(this, SlotIndex);
+        }
+        if (Slot.bIsActive) {
+            Slot.ActivateSlot();
+        }
+    });
 
-    // If the slot is equipable, handle activation logic
-    if (Slot.bIsActive) {
-        Slot.ActivateSlot();
-    }
+    NotifyItemInstanceUpdated(SlotIndex);
 
-    // Mark this specific item in the array as dirty to replicate the change
-    Slots.MarkItemDirty(Slot);
-
-    this->ClientOnSlotUpdatedDelegate(SlotIndex);
-
-    UE_LOG(Myth, Warning, TEXT("Item added to slot successfully"));
+    UE_LOG(Myth, Verbose, TEXT("Item added to slot %d successfully"), SlotIndex);
     return true;
 }
 
@@ -299,7 +308,7 @@ int32 UMythicInventoryComponent::AddToAnySlot(UMythicItemInstance *ItemInstance)
 
 int32 UMythicInventoryComponent::AddToSlot(UMythicItemInstance *ItemInstance, int32 SlotIndex) {
     if (!ItemInstance) {
-        UE_LOG(Myth, Warning, TEXT("AddToSlot: ItemInstance is null"));
+        UE_LOG(Myth, Verbose, TEXT("AddToSlot: ItemInstance is null"));
         return 0;
     }
     const int32 OriginalQty = ItemInstance->GetStacks();
@@ -375,7 +384,10 @@ bool UMythicInventoryComponent::DropItem(int32 SlotIndex, const FVector &locatio
     checkf(lOwner->HasAuthority(), TEXT("AddToAnySlot:: Called without Authority!"));
 
     auto item_instance = Slots.GetItemInSlot(SlotIndex);
-    checkf(item_instance != nullptr, TEXT("DropItem:: Invalid ItemInstance!"));
+    if (item_instance == nullptr) {
+        UE_LOG(Myth, Verbose, TEXT("DropItem:: No item in slot %d"), SlotIndex);
+        return false;
+    }
 
     // Get LootManager
     UMythicLootManagerSubsystem *loot_manager = lOwner->GetGameInstance()->GetSubsystem<UMythicLootManagerSubsystem>();
@@ -410,7 +422,7 @@ void UMythicInventoryComponent::PickupItem_Implementation(AMythicWorldItem *worl
     // Make sure we are the TargetRecipient if one is set
     auto Recipient = world_item->GetTargetRecipient();
     if (Recipient && Recipient != lOwner) {
-        UE_LOG(Myth, Warning, TEXT("PickupItem:: Not the TargetRecipient!"));
+        UE_LOG(Myth, Verbose, TEXT("PickupItem:: Not the TargetRecipient!"));
         return;
     }
 
@@ -445,28 +457,49 @@ void UMythicInventoryComponent::PickupItem_Implementation(AMythicWorldItem *worl
     }
 }
 
-void UMythicInventoryComponent::ClientUpdateViewModelSlots_Implementation() {
-    // if (this->ViewModel) {
-        // this->ViewModel->Initialize(SlotConfigurations, Slots);
-    // }
+// FastArray -> Component handlers
+void UMythicInventoryComponent::HandleSlotsAdded(const TArrayView<int32>& AddedIndices, int32 FinalSize) {
+    const int32 NumAdded = AddedIndices.Num();
+    const int32 OldSize = FinalSize - NumAdded;
+
+    // Structural change: rebuild VM once, then refresh changed slots (no-cost if rebuild already covers)
+    SetupLocalViewModel();
+
+    if (NumAdded > 0) {
+        OnInventorySizeChanged.Broadcast(FinalSize, OldSize);
+    }
+
+    for (int32 idx : AddedIndices) {
+        OnSlotUpdated.Broadcast(idx);
+        if (IsValid(ViewModel)) {
+            ViewModel->RefreshSlotFromInventory(this, idx);
+        }
+    }
 }
 
-void UMythicInventoryComponent::ClientOnSlotUpdatedDelegate_Implementation(int32 SlotIndex) {
-    ClientUpdateViewModelSlots();
-
-    this->OnSlotUpdated.Broadcast(SlotIndex);
+void UMythicInventoryComponent::HandleSlotsChanged(const TArrayView<int32>& ChangedIndices, int32 /*FinalSize*/) {
+    for (int32 idx : ChangedIndices) {
+        OnSlotUpdated.Broadcast(idx);
+        if (IsValid(ViewModel)) {
+            ViewModel->RefreshSlotFromInventory(this, idx);
+        }
+    }
 }
 
-void UMythicInventoryComponent::ClientUpdateViewModeInventorySize_Implementation(int32 NewSize) {
-    // if (this->ViewModel) {
-        // this->ViewModel->SetSlots(this->Slots);
-    // }
+void UMythicInventoryComponent::HandleSlotsRemoved(const TArrayView<int32>& RemovedIndices, int32 FinalSize) {
+    const int32 NumRemoved = RemovedIndices.Num();
+    const int32 OldSize = FinalSize + NumRemoved;
+
+    // Structural change: rebuild VM
+    SetupLocalViewModel();
+
+    if (NumRemoved > 0) {
+        OnInventorySizeChanged.Broadcast(FinalSize, OldSize);
+    }
 }
 
-void UMythicInventoryComponent::ClientOnInventorySizeChangedDelegate_Implementation(int32 NewSize, int32 OldSize) {
-    ClientUpdateViewModeInventorySize(NewSize);
-
-    this->OnInventorySizeChanged.Broadcast(NewSize, OldSize);
+UInventoryVM* UMythicInventoryComponent::GetViewModel() const {
+    return ViewModel;
 }
 
 int32 UMythicInventoryComponent::GetItemCount(UItemDefinition *RequiredItem) const {
@@ -474,7 +507,7 @@ int32 UMythicInventoryComponent::GetItemCount(UItemDefinition *RequiredItem) con
         return 0; // Early return for null definition
     }
 
-    auto count = 0;
+    int32 count = 0;
     for (const FMythicInventorySlotEntry &Slot : Slots.Items) {
         if (Slot.SlottedItemInstance && Slot.SlottedItemInstance->GetItemDefinition() == RequiredItem) {
             count += Slot.SlottedItemInstance->GetStacks();
@@ -498,7 +531,7 @@ void UMythicInventoryComponent::ServerRemoveItem_Implementation(UMythicItemInsta
         return;
     }
 
-    auto count = 0;
+    int32 count = 0;
 
     if (ItemInstance->GetStacks() <= Amount) {
         count += ItemInstance->GetStacks();
@@ -509,7 +542,7 @@ void UMythicInventoryComponent::ServerRemoveItem_Implementation(UMythicItemInsta
         count += Amount;
     }
 
-    UE_LOG(Myth, Warning, TEXT("Removed %d items from inventory"), count);
+    UE_LOG(Myth, Verbose, TEXT("Removed %d items from inventory"), count);
 }
 
 void UMythicInventoryComponent::ServerRemoveItemByDefinition_Implementation(UItemDefinition *ItemDef, int32 Amount) {
@@ -520,18 +553,17 @@ void UMythicInventoryComponent::ServerRemoveItemByDefinition_Implementation(UIte
     checkf(ItemDef != nullptr, TEXT("RemoveItem:: Invalid ItemDef!"));
     checkf(Amount > 0, TEXT("RemoveItem:: Invalid Amount!"));
 
-    auto RemovedSoFar = 0;
-    for (const FMythicInventorySlotEntry &Slot : Slots.Items) {
-        auto item = Slot.SlottedItemInstance;
+    int32 RemovedSoFar = 0;
+    for (int32 i = 0; i < Slots.Items.Num(); ++i) {
+        FMythicInventorySlotEntry &Slot = Slots.Items[i];
+        UMythicItemInstance* item = Slot.SlottedItemInstance;
         if (!item) {
-
             continue;
         }
 
-        auto item_def = item->GetItemDefinition();
-        if (item && item_def == ItemDef) {
-            auto ItemStacks = item->GetStacks();
-            auto RemainingToRemove = Amount - RemovedSoFar;
+        if (item->GetItemDefinition() == ItemDef) {
+            const int32 ItemStacks = item->GetStacks();
+            const int32 RemainingToRemove = Amount - RemovedSoFar;
 
             if (ItemStacks <= RemainingToRemove) {
                 RemovedSoFar += ItemStacks;
@@ -548,7 +580,7 @@ void UMythicInventoryComponent::ServerRemoveItemByDefinition_Implementation(UIte
         }
     }
 
-    UE_LOG(Myth, Warning, TEXT("Removed %d items from inventory"), RemovedSoFar);
+    UE_LOG(Myth, Verbose, TEXT("Removed %d items from inventory"), RemovedSoFar);
 }
 
 bool UMythicInventoryComponent::DestroySlot(int32 SlotIndex) {
@@ -560,13 +592,14 @@ bool UMythicInventoryComponent::DestroySlot(int32 SlotIndex) {
         return false; // Invalid index
     }
 
-    auto InSlot = Slots.Items[SlotIndex];
+    FMythicInventorySlotEntry &InSlot = Slots.Items[SlotIndex];
     InSlot.DeactivateSlot();
 
-    Slots.Items.RemoveAt(SlotIndex);
     if (InSlot.SlottedItemInstance) {
         InSlot.SlottedItemInstance->Destroy();
     }
+
+    Slots.RemoveSlotAt(SlotIndex);
 
     return true;
 }
@@ -575,7 +608,8 @@ void UMythicInventoryComponent::DestroyAllSlots() {
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("DestroySlot:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("DestroySlot:: Called without Authority!"));
-    for (int i = 0; i < Slots.Num(); ++i) {
+
+    for (int32 i = Slots.Num() - 1; i >= 0; --i) {
         DestroySlot(i);
     }
 
@@ -589,4 +623,19 @@ void UMythicInventoryComponent::OnUnregister() {
     }
 
     Super::OnUnregister();
+}
+
+bool UMythicInventoryComponent::GetSlotEntry(int32 Index, FMythicInventorySlotEntry &OutEntry) const {
+    if (Slots.IsValidIndex(Index)) {
+        OutEntry = Slots.Items[Index];
+        return true;
+    }
+    return false;
+}
+
+void UMythicInventoryComponent::NotifyItemInstanceUpdated(int32 SlotIndex) {
+    if (IsValid(ViewModel)) {
+        ViewModel->RefreshSlotFromInventory(this, SlotIndex);
+    }
+    OnSlotUpdated.Broadcast(SlotIndex);
 }
