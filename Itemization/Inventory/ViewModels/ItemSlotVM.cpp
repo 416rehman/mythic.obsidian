@@ -3,9 +3,11 @@
 
 #include "ItemSlotVM.h"
 
+#include "InventoryVM.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "Itemization/Inventory/MythicInventoryComponent.h"
 
 void UItemSlotVM::SetIcon(UTexture2D *InIcon) {
     if (UE_MVVM_SET_PROPERTY_VALUE(Icon, InIcon)) {
@@ -87,7 +89,18 @@ void UItemSlotVM::SetSlotTypeTag(FGameplayTag InSlotTypeTag) {
 
 FGameplayTag UItemSlotVM::GetSlotTypeTag() const { return SlotTypeTag; }
 
-void UItemSlotVM::SetFromItemInstance(UMythicItemInstance *InItemInstance) {
+void UItemSlotVM::SetParentInventoryVM(UInventoryVM *InParentInventoryVM) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(ParentInventoryVM, InParentInventoryVM)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(ParentInventoryVM);
+    }
+}
+
+UInventoryVM *UItemSlotVM::GetParentInventoryVM() const {
+    return ParentInventoryVM;
+}
+
+void UItemSlotVM::InitializeFromItemInstance(UMythicItemInstance *InItemInstance, UInventoryVM *InParentVM) {
+    SetParentInventoryVM(InParentVM);
     if (InItemInstance == nullptr) {
         SetIcon(nullptr);
         SetIsJunk(false);
@@ -108,40 +121,55 @@ void UItemSlotVM::SetFromItemInstance(UMythicItemInstance *InItemInstance) {
         SetIcon(ItemDef->Icon2d.Get());
         SetIsJunk(/*InItemInstance->bIsJunk*/ false);
         switch (ItemDef->Rarity) {
-        case EItemRarity::Common:
-            {
-                auto Gray = FColor::FromHex("#808080");
-                SetBackgroundColor(FLinearColor::FromSRGBColor(Gray));
-            }
-            break;
-        case EItemRarity::Rare:
-            {
-                auto Blue = FColor::FromHex("#15c965");
-                SetBackgroundColor(FLinearColor::FromSRGBColor(Blue));
-            }
-            break;
-        case EItemRarity::Epic:
-            {
-                auto Purple = FColor::FromHex("#732BD2FF");
-                SetBackgroundColor(FLinearColor::FromSRGBColor(Purple));
-            }
-            break;
-        case EItemRarity::Legendary:
-            {
-                auto Orange = FColor::FromHex("#BE6009FF");
-                SetBackgroundColor(FLinearColor::FromSRGBColor(Orange));
-            }
-            break;
-        case EItemRarity::Mythic:
-            {
-                auto Gold = FColor::FromHex("#FF3F36FF");
-                SetBackgroundColor(FLinearColor::FromSRGBColor(Gold));
-            }
-            break;
+        case EItemRarity::Common: {
+            auto Gray = FColor::FromHex("#808080");
+            SetBackgroundColor(FLinearColor::FromSRGBColor(Gray));
+        }
+        break;
+        case EItemRarity::Rare: {
+            auto Blue = FColor::FromHex("#15c965");
+            SetBackgroundColor(FLinearColor::FromSRGBColor(Blue));
+        }
+        break;
+        case EItemRarity::Epic: {
+            auto Purple = FColor::FromHex("#732BD2FF");
+            SetBackgroundColor(FLinearColor::FromSRGBColor(Purple));
+        }
+        break;
+        case EItemRarity::Legendary: {
+            auto Orange = FColor::FromHex("#BE6009FF");
+            SetBackgroundColor(FLinearColor::FromSRGBColor(Orange));
+        }
+        break;
+        case EItemRarity::Mythic: {
+            auto Gold = FColor::FromHex("#FF3F36FF");
+            SetBackgroundColor(FLinearColor::FromSRGBColor(Gold));
+        }
+        break;
         default:
             SetBackgroundColor(FLinearColor::Black);
             break;
         }
         SetQuantity(InItemInstance->GetStacks());
     }
+}
+
+UMythicInventoryComponent *UItemSlotVM::TryGetOwningInventoryComponent() const {
+    if (ParentInventoryVM) {
+        return ParentInventoryVM->GetOwningInventoryComponent();
+    }
+    return nullptr;
+}
+
+UMythicItemInstance *UItemSlotVM::TryGetItemInstance() const {
+    if (ParentInventoryVM == nullptr)
+        return nullptr;
+    UMythicInventoryComponent *InvComp = ParentInventoryVM->GetOwningInventoryComponent();
+    if (InvComp == nullptr)
+        return nullptr;
+    FMythicInventorySlotEntry Entry;
+    if (!InvComp->GetSlotEntry(AbsoluteIndex, Entry)) {
+        return nullptr;
+    }
+    return Entry.SlottedItemInstance;
 }

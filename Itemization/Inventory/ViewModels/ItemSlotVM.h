@@ -8,6 +8,8 @@
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "ItemSlotVM.generated.h"
 
+class UInventoryVM;
+class UInventoryTabVM;
 struct FTimerHandle;
 
 /**
@@ -54,6 +56,10 @@ public:
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     FGameplayTag SlotTypeTag;
 
+    // Owning InventoryVM
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    UInventoryVM *ParentInventoryVM;
+
 public:
     void SetIcon(UTexture2D *InIcon);
     UTexture2D *GetIcon() const;
@@ -76,6 +82,19 @@ public:
     void SetSlotTypeTag(FGameplayTag InSlotTypeTag);
     FGameplayTag GetSlotTypeTag() const;
 
+    void SetParentInventoryVM(UInventoryVM *InParentInventoryVM);
+    UInventoryVM *GetParentInventoryVM() const;
+
     // Initialize view model fields from an item instance (icon, quantity, rarity color, etc.)
-    void SetFromItemInstance(UMythicItemInstance *InItemInstance);
+    void InitializeFromItemInstance(UMythicItemInstance* InItemInstance, UInventoryVM* InParentVM);
+
+    /** Helpers **/
+    // Get owning inventory component from ParentInventoryVM - ONE SHOT
+    UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
+    UMythicInventoryComponent* TryGetOwningInventoryComponent() const;
+
+    // Try getting the item instance currently in this slot - ONE SHOT
+    // Checks ParentInventoryVM and its OwningInventoryComponent and queries for the item in this slot index
+    UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
+    UMythicItemInstance* TryGetItemInstance() const;
 };

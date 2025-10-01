@@ -88,7 +88,7 @@ void UMythicInventoryComponent::SetupLocalViewModel() {
         ViewModel = NewObject<UInventoryVM>(this);
     }
     if (IsValid(ViewModel)) {
-        ViewModel->InitializeFromInventory(this);
+        ViewModel->InitializeFromInventoryComponent(this);
         if (bWasNull) {
             OnViewModelCreated.Broadcast();
         }

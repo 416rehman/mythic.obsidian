@@ -28,7 +28,7 @@ public:
     // Selected slot index
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess=true))
     int32 SelectedSlotIndex;
-    
+
     void SetTabName(FText InTabName);
     FText GetTabName() const;
     void SetTabIcon(UTexture2D *InTabIcon);
@@ -53,29 +53,35 @@ public:
 
     // Tabs VMs
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
-    TArray<TObjectPtr<UInventoryTabVM>> Tabs; // Should be UInventoryTabVM
+    TArray<TObjectPtr<UInventoryTabVM>> Tabs;
 
-    // Build from an inventory component (manual VM policy)
-    UFUNCTION(BlueprintCallable, Category="Mythic|Inventory|VM")
-    void InitializeFromInventory(class UMythicInventoryComponent* InInventoryComponent);
+    // The owning inventory component (not serialized, just for convenience)
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    TObjectPtr<UMythicInventoryComponent> OwningInventoryComponent;
 
     // Helpers to translate indices
     UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
-    bool AbsoluteIndexToTabSlot(int32 AbsoluteIndex, int32& OutTabIndex, int32& OutSlotIndex) const;
+    bool AbsoluteIndexToTabSlot(int32 AbsoluteIndex, int32 &OutTabIndex, int32 &OutSlotIndex) const;
 
     UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
     int32 TabSlotToAbsoluteIndex(int32 TabIndex, int32 SlotIndex) const;
-
+    
+    void InitializeFromInventoryComponent(UMythicInventoryComponent *InInventoryComponent);
 protected:
     void SetSelectedTabIndex(int32 InSelectedTabIndex);
     int32 GetSelectedTabIndex() const;
     void SetTabs(TArray<TObjectPtr<UInventoryTabVM>> InTabs);
     TArray<TObjectPtr<UInventoryTabVM>> GetTabs() const;
+    // Prefer using InitializeFromInventory() to set this
+    void SetOwningInventoryComponent(UMythicInventoryComponent *InOwningInventoryComponent);
+
 
     void Clear();
-    void SetFromInventory(class UMythicInventoryComponent *InInventoryComponent);
 
 public:
+    UFUNCTION(BlueprintCallable, Category="Mythic|Inventory|VM")
+    UMythicInventoryComponent *GetOwningInventoryComponent() const;
+    
     // Slot state helpers by absolute index
     UFUNCTION(BlueprintCallable, Category="Mythic|Inventory|VM")
     bool SetSlotLockedByAbsoluteIndex(int32 AbsoluteIndex, bool bLocked);
@@ -88,10 +94,10 @@ public:
 
     // Refresh methods for manual updates
     UFUNCTION(BlueprintCallable, Category="Mythic|Inventory|VM")
-    void RefreshSlotFromInventory(class UMythicInventoryComponent* Inventory, int32 AbsoluteIndex);
+    void RefreshSlotFromInventory(class UMythicInventoryComponent *Inventory, int32 AbsoluteIndex);
 
     UFUNCTION(BlueprintCallable, Category="Mythic|Inventory|VM")
-    void RefreshAllItemsFromInventory(class UMythicInventoryComponent* Inventory);
+    void RefreshAllItemsFromInventory(class UMythicInventoryComponent *Inventory);
 
 private:
     // Cumulative offsets per tab to compute absolute <-> (tab,slot)

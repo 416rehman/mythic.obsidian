@@ -67,6 +67,16 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::GetTabs() const {
     return Tabs;
 }
 
+void UInventoryVM::SetOwningInventoryComponent(UMythicInventoryComponent *InOwningInventoryComponent) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(OwningInventoryComponent, InOwningInventoryComponent)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(OwningInventoryComponent);
+    }
+}
+
+UMythicInventoryComponent *UInventoryVM::GetOwningInventoryComponent() const {
+    return OwningInventoryComponent;
+}
+
 void UInventoryVM::Clear() {
     SetSelectedTabIndex(0);
     SetTabs(TArray<TObjectPtr<UInventoryTabVM>>());
@@ -78,12 +88,9 @@ void UInventoryVM::Clear() {
     AbsoluteIndexToSlotVM.Reset();
 }
 
-void UInventoryVM::InitializeFromInventory(UMythicInventoryComponent *InInventoryComponent) {
-    SetFromInventory(InInventoryComponent);
-}
-
 // Internal builder from inventory
-void UInventoryVM::SetFromInventory(UMythicInventoryComponent *InInventoryComponent) {
+void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *InInventoryComponent) {
+    SetOwningInventoryComponent(InInventoryComponent);
     if (InInventoryComponent == nullptr) {
         Clear();
         return;
@@ -194,7 +201,7 @@ void UInventoryVM::SetFromInventory(UMythicInventoryComponent *InInventoryCompon
             SlotVM->SetSlotTypeTag(Entry.SlotType);
 
             // Initialize from item instance (icon/qty/rarity color)
-            SlotVM->SetFromItemInstance(Entry.SlottedItemInstance);
+            SlotVM->InitializeFromItemInstance(Entry.SlottedItemInstance, this);
 
             // Clear runtime flags default
             SlotVM->SetIsLocked(false);
@@ -298,7 +305,7 @@ void UInventoryVM::RefreshSlotFromInventory(UMythicInventoryComponent *Inventory
 
     // Update slot VM from current inventory data
     SlotVM->SetSlotTypeTag(Entry.SlotType);
-    SlotVM->SetFromItemInstance(Entry.SlottedItemInstance);
+    SlotVM->InitializeFromItemInstance(Entry.SlottedItemInstance, this);
 }
 
 void UInventoryVM::RefreshAllItemsFromInventory(UMythicInventoryComponent *Inventory) {
