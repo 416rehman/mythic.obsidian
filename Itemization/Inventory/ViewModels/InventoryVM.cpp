@@ -9,6 +9,7 @@
 void UInventoryTabVM::SetTabName(FText InTabName) {
     if (UE_MVVM_SET_PROPERTY_VALUE(TabName, InTabName)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(TabName);
+        UE_LOG(Myth, Verbose, TEXT("Tab name set to: %s"), *InTabName.ToString());
     }
 }
 
@@ -19,6 +20,7 @@ FText UInventoryTabVM::GetTabName() const {
 void UInventoryTabVM::SetTabIcon(UTexture2D *InTabIcon) {
     if (UE_MVVM_SET_PROPERTY_VALUE(TabIcon, InTabIcon)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(TabIcon);
+        UE_LOG(Myth, Verbose, TEXT("Tab icon set: %s"), InTabIcon ? *InTabIcon->GetName() : TEXT("None"));
     }
 }
 
@@ -29,6 +31,7 @@ UTexture2D *UInventoryTabVM::GetTabIcon() const {
 void UInventoryTabVM::SetSlots(TArray<TObjectPtr<UItemSlotVM>> InSlots) {
     if (UE_MVVM_SET_PROPERTY_VALUE(Slots, InSlots)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Slots);
+        UE_LOG(Myth, Verbose, TEXT("Tab slots updated. Slot count: %d"), InSlots.Num());
     }
 }
 
@@ -39,6 +42,7 @@ TArray<TObjectPtr<UItemSlotVM>> UInventoryTabVM::GetSlots() const {
 void UInventoryTabVM::SetSelectedSlotIndex(int32 InSelectedSlotIndex) {
     if (UE_MVVM_SET_PROPERTY_VALUE(SelectedSlotIndex, InSelectedSlotIndex)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedSlotIndex);
+        UE_LOG(Myth, Verbose, TEXT("Selected slot index set to: %d"), InSelectedSlotIndex);
     }
 }
 
@@ -46,10 +50,18 @@ int32 UInventoryTabVM::GetSelectedSlotIndex() const {
     return SelectedSlotIndex;
 }
 
+void UInventoryTabVM::Initialize(FText InTabName, UTexture2D *InTabIcon, TArray<TObjectPtr<UItemSlotVM>> InSlots, int32 InSelectedSlotIndex) {
+    SetTabName(InTabName);
+    SetTabIcon(InTabIcon);
+    SetSlots(InSlots);
+    SetSelectedSlotIndex(InSelectedSlotIndex);
+}
+
 // ---------------- UInventoryVM -----------------
 void UInventoryVM::SetSelectedTabIndex(int32 InSelectedTabIndex) {
     if (UE_MVVM_SET_PROPERTY_VALUE(SelectedTabIndex, InSelectedTabIndex)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedTabIndex);
+        UE_LOG(Myth, Verbose, TEXT("Selected tab index set to: %d"), InSelectedTabIndex);
     }
 }
 
@@ -57,19 +69,32 @@ int32 UInventoryVM::GetSelectedTabIndex() const {
     return SelectedTabIndex;
 }
 
-void UInventoryVM::SetTabs(TArray<TObjectPtr<UInventoryTabVM>> InTabs) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(Tabs, InTabs)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Tabs);
+void UInventoryVM::SetInventoryTabs(TArray<TObjectPtr<UInventoryTabVM>> InTabs) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(InventoryTabs, InTabs)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(InventoryTabs);
+        UE_LOG(Myth, Verbose, TEXT("Inventory tabs updated. Tab count: %d"), InTabs.Num());
     }
 }
 
-TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::GetTabs() const {
-    return Tabs;
+TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::GetInventoryTabs() const {
+    return InventoryTabs;
+}
+
+void UInventoryVM::SetEquipmentTabs(TArray<TObjectPtr<UInventoryTabVM>> InTabs) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(EquipmentTabs, InTabs)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(EquipmentTabs);
+        UE_LOG(Myth, Verbose, TEXT("Equipment tabs updated. Tab count: %d"), InTabs.Num());
+    }
+}
+
+TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::GetEquipmentTabs() const {
+    return EquipmentTabs;
 }
 
 void UInventoryVM::SetOwningInventoryComponent(UMythicInventoryComponent *InOwningInventoryComponent) {
     if (UE_MVVM_SET_PROPERTY_VALUE(OwningInventoryComponent, InOwningInventoryComponent)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(OwningInventoryComponent);
+        UE_LOG(Myth, Verbose, TEXT("Owning inventory component set: %s"), InOwningInventoryComponent ? *InOwningInventoryComponent->GetName() : TEXT("None"));
     }
 }
 
@@ -79,215 +104,84 @@ UMythicInventoryComponent *UInventoryVM::GetOwningInventoryComponent() const {
 
 void UInventoryVM::Clear() {
     SetSelectedTabIndex(0);
-    SetTabs(TArray<TObjectPtr<UInventoryTabVM>>());
-    TabStartOffsets.Reset();
-    TabSlotCounts.Reset();
-    TabAbsoluteIndices.Reset();
-    AbsoluteToTabIndex.Reset();
-    AbsoluteToSlotIndex.Reset();
     AbsoluteIndexToSlotVM.Reset();
+    EquipmentTabs.Reset();
+    InventoryTabs.Reset();
+    UE_LOG(Myth, Log, TEXT("InventoryVM cleared."));
+}
+
+TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythicInventorySlotEntry> &allSlots, TSet<int32> InventoryIndices) {
+
+    auto TypeToTabMap = TMap<FGameplayTag, TObjectPtr<UInventoryTabVM>>();
+
+    auto AsArray = InventoryIndices.Array();
+    for (int32 i = 0; i < AsArray.Num(); ++i) {
+        auto AbsIndex = AsArray[i];
+        const FMythicInventorySlotEntry &Entry = allSlots[AbsIndex];
+        auto type = Entry.SlotType;
+
+        // Get the tab for this type, or create it if it doesn't exist
+        TObjectPtr<UInventoryTabVM> *FoundTab = TypeToTabMap.Find(type);
+        if (FoundTab == nullptr) {
+            // Create new tab
+            auto NewTabVM = NewObject<UInventoryTabVM>(this);
+            // Get the name and icon from the slot type row
+            const FSlotType *SlotTypeData = Entry.SlotTypeRow.GetRow<FSlotType>(FString());
+            if (!SlotTypeData) {
+                UE_LOG(Myth, Warning, TEXT("SlotTypeRow %s is invalid or not found in data table."), *Entry.SlotTypeRow.RowName.ToString());
+                continue;
+            }
+            NewTabVM->Initialize(FText::FromName(Entry.SlotTypeRow.RowName), SlotTypeData->Icon, TArray<TObjectPtr<UItemSlotVM>>(), 0);
+            TypeToTabMap.Add(type, NewTabVM);
+            FoundTab = TypeToTabMap.Find(type);
+        }
+
+        // Add to tab
+        if (FoundTab && *FoundTab) {
+            auto NewSlotVM = NewObject<UItemSlotVM>(this);
+            NewSlotVM->Initialize(Entry.SlottedItemInstance, this, Entry.SlotType, Entry.ItemTypeWhitelist, AbsIndex);
+            (*FoundTab)->Slots.Add(NewSlotVM);
+
+            // Ensure the map is large enough
+            if (AbsoluteIndexToSlotVM.Num() <= AbsIndex) {
+                AbsoluteIndexToSlotVM.SetNum(AbsIndex + 1);
+            }
+            AbsoluteIndexToSlotVM[AbsIndex] = NewSlotVM;
+        }
+    }
+
+    auto TabsArray = TArray<TObjectPtr<UInventoryTabVM>>();
+    TypeToTabMap.GenerateValueArray(TabsArray);
+    return TabsArray;
 }
 
 // Internal builder from inventory
 void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *InInventoryComponent) {
+    Clear();
     SetOwningInventoryComponent(InInventoryComponent);
+
     if (InInventoryComponent == nullptr) {
-        Clear();
         return;
     }
 
-    const int32 TotalSlots = InInventoryComponent->GetNumSlots();
+    const auto AllSlots = InInventoryComponent->GetAllSlots();
 
-    // Prepare working arrays
-    struct FTabKey {
-        FGameplayTag SlotType;
-        int32 TabIndex;
-    };
-
-    TArray<FTabKey> TabKeys;
-    TabKeys.Reserve(8);
-    TArray<TArray<int32>> PerTabAbsoluteIndices;
-    PerTabAbsoluteIndices.Reserve(8);
-    TArray<TObjectPtr<UInventoryTabVM>> NewTabs;
-
-    // First pass: discover tabs in first-seen order and gather absolute indices per tab
-    for (int32 AbsIdx = 0; AbsIdx < TotalSlots; ++AbsIdx) {
-        FMythicInventorySlotEntry Entry;
-        if (!InInventoryComponent->GetSlotEntry(AbsIdx, Entry)) {
-            continue;
-        }
-
-        const FGameplayTag SlotType = Entry.SlotType;
-
-        int32 FoundTabIdx = INDEX_NONE;
-        for (int32 i = 0; i < TabKeys.Num(); ++i) {
-            if (TabKeys[i].SlotType == SlotType) {
-                FoundTabIdx = TabKeys[i].TabIndex;
-                break;
+    auto InventoryIndices = TSet<int32>();
+    auto SetOfEquipableSlots = TSet<int32>();
+    for (int32 SlotIdx = 0; SlotIdx < AllSlots.Num(); ++SlotIdx) {
+        const FMythicInventorySlotEntry &Entry = AllSlots[SlotIdx];
+        if (Entry.SlotType.IsValid()) {
+            if (Entry.bIsActive) {
+                SetOfEquipableSlots.Add(SlotIdx);
+            }
+            else {
+                InventoryIndices.Add(SlotIdx);
             }
         }
-        if (FoundTabIdx == INDEX_NONE) {
-            FoundTabIdx = NewTabs.Num();
-            FTabKey NewKey;
-            NewKey.SlotType = SlotType;
-            NewKey.TabIndex = FoundTabIdx;
-            TabKeys.Add(NewKey);
-
-            // Create tab VM now, fill metadata
-            UInventoryTabVM *TabVM = NewObject<UInventoryTabVM>(this);
-
-            // Tab name from SlotTypeRow.RowName if valid, otherwise from tag
-            FText TabDisplayName = FText();
-            UTexture2D *TabIcon = nullptr;
-            if (Entry.SlotTypeRow.IsNull() == false) {
-                const FSlotType *SlotTypeData = Entry.SlotTypeRow.GetRow<FSlotType>(FString());
-                if (SlotTypeData) {
-                    TabIcon = SlotTypeData->Icon;
-                }
-                TabDisplayName = FText::FromName(Entry.SlotTypeRow.RowName);
-            }
-            if (TabDisplayName.IsEmpty()) {
-                TabDisplayName = FText::FromString(SlotType.ToString());
-            }
-            TabVM->SetTabName(TabDisplayName);
-            TabVM->SetTabIcon(TabIcon);
-            TabVM->SetSelectedSlotIndex(0);
-
-            NewTabs.Add(TabVM);
-            PerTabAbsoluteIndices.AddDefaulted();
-            PerTabAbsoluteIndices[FoundTabIdx].Reserve(16);
-        }
-
-        PerTabAbsoluteIndices[FoundTabIdx].Add(AbsIdx);
     }
 
-    // Second pass: build slot VMs and mappings
-    TArray<int32> NewTabStartOffsets;
-    NewTabStartOffsets.Reserve(NewTabs.Num());
-    TArray<int32> NewTabSlotCounts;
-    NewTabSlotCounts.Reserve(NewTabs.Num());
-    TArray<TArray<int32>> NewTabAbsoluteIndices = PerTabAbsoluteIndices; // copy
-
-    // Allocate reverse lookup arrays
-    TArray<int32> NewAbsToTab;
-    NewAbsToTab.Init(INDEX_NONE, TotalSlots);
-    TArray<int32> NewAbsToSlot;
-    NewAbsToSlot.Init(INDEX_NONE, TotalSlots);
-    TArray<TObjectPtr<UItemSlotVM>> NewAbsToSlotVM;
-    NewAbsToSlotVM.Init(nullptr, TotalSlots);
-
-    int32 RunningOffset = 0;
-    for (int32 TabIdx = 0; TabIdx < NewTabs.Num(); ++TabIdx) {
-        UInventoryTabVM *TabVM = NewTabs[TabIdx];
-
-        const TArray<int32> &AbsList = NewTabAbsoluteIndices[TabIdx];
-        NewTabStartOffsets.Add(RunningOffset);
-        NewTabSlotCounts.Add(AbsList.Num());
-        RunningOffset += AbsList.Num();
-
-        // Create slot VMs for this tab
-        TArray<TObjectPtr<UItemSlotVM>> SlotVMs;
-        SlotVMs.Reserve(AbsList.Num());
-        for (int32 LocalSlotIdx = 0; LocalSlotIdx < AbsList.Num(); ++LocalSlotIdx) {
-            const int32 AbsIdx = AbsList[LocalSlotIdx];
-
-            FMythicInventorySlotEntry Entry;
-            if (!InInventoryComponent->GetSlotEntry(AbsIdx, Entry)) {
-                continue;
-            }
-
-            UItemSlotVM *SlotVM = NewObject<UItemSlotVM>(this);
-            SlotVM->SetAbsoluteIndex(AbsIdx);
-            SlotVM->SetSlotTypeTag(Entry.SlotType);
-
-            // Initialize from item instance (icon/qty/rarity color)
-            SlotVM->InitializeFromItemInstance(Entry.SlottedItemInstance, this);
-
-            // Clear runtime flags default
-            SlotVM->SetIsLocked(false);
-            SlotVM->SetIsDisabled(false);
-            SlotVM->SetIsInUse(false);
-            SlotVM->SetIsJunk(false);
-
-            SlotVMs.Add(SlotVM);
-
-            // Reverse lookups
-            NewAbsToTab[AbsIdx] = TabIdx;
-            NewAbsToSlot[AbsIdx] = LocalSlotIdx;
-            NewAbsToSlotVM[AbsIdx] = SlotVM;
-        }
-
-        TabVM->SetSlots(SlotVMs);
-    }
-
-    // Publish
-    SetTabs(NewTabs);
-    SetSelectedTabIndex(0);
-
-    // Store mappings
-    TabStartOffsets = MoveTemp(NewTabStartOffsets);
-    TabSlotCounts = MoveTemp(NewTabSlotCounts);
-    TabAbsoluteIndices = MoveTemp(NewTabAbsoluteIndices);
-    AbsoluteToTabIndex = MoveTemp(NewAbsToTab);
-    AbsoluteToSlotIndex = MoveTemp(NewAbsToSlot);
-    AbsoluteIndexToSlotVM = MoveTemp(NewAbsToSlotVM);
-}
-
-bool UInventoryVM::AbsoluteIndexToTabSlot(int32 AbsoluteIndex, int32 &OutTabIndex, int32 &OutSlotIndex) const {
-    if (!AbsoluteToTabIndex.IsValidIndex(AbsoluteIndex)) {
-        OutTabIndex = INDEX_NONE;
-        OutSlotIndex = INDEX_NONE;
-        return false;
-    }
-    const int32 TabIdx = AbsoluteToTabIndex[AbsoluteIndex];
-    const int32 SlotIdx = AbsoluteToSlotIndex.IsValidIndex(AbsoluteIndex) ? AbsoluteToSlotIndex[AbsoluteIndex] : INDEX_NONE;
-    if (TabIdx == INDEX_NONE || SlotIdx == INDEX_NONE) {
-        OutTabIndex = INDEX_NONE;
-        OutSlotIndex = INDEX_NONE;
-        return false;
-    }
-    OutTabIndex = TabIdx;
-    OutSlotIndex = SlotIdx;
-    return true;
-}
-
-int32 UInventoryVM::TabSlotToAbsoluteIndex(int32 TabIndex, int32 SlotIndex) const {
-    if (!TabAbsoluteIndices.IsValidIndex(TabIndex))
-        return INDEX_NONE;
-    const TArray<int32> &AbsList = TabAbsoluteIndices[TabIndex];
-    if (!AbsList.IsValidIndex(SlotIndex))
-        return INDEX_NONE;
-    return AbsList[SlotIndex];
-}
-
-bool UInventoryVM::SetSlotLockedByAbsoluteIndex(int32 AbsoluteIndex, bool bLocked) {
-    if (!AbsoluteIndexToSlotVM.IsValidIndex(AbsoluteIndex))
-        return false;
-    UItemSlotVM *SlotVM = AbsoluteIndexToSlotVM[AbsoluteIndex];
-    if (!IsValid(SlotVM))
-        return false;
-    SlotVM->SetIsLocked(bLocked);
-    return true;
-}
-
-bool UInventoryVM::SetSlotInUseByAbsoluteIndex(int32 AbsoluteIndex, bool bInUse) {
-    if (!AbsoluteIndexToSlotVM.IsValidIndex(AbsoluteIndex))
-        return false;
-    UItemSlotVM *SlotVM = AbsoluteIndexToSlotVM[AbsoluteIndex];
-    if (!IsValid(SlotVM))
-        return false;
-    SlotVM->SetIsInUse(bInUse);
-    return true;
-}
-
-bool UInventoryVM::SetSlotDisabledByAbsoluteIndex(int32 AbsoluteIndex, bool bDisabled) {
-    if (!AbsoluteIndexToSlotVM.IsValidIndex(AbsoluteIndex))
-        return false;
-    UItemSlotVM *SlotVM = AbsoluteIndexToSlotVM[AbsoluteIndex];
-    if (!IsValid(SlotVM))
-        return false;
-    SlotVM->SetIsDisabled(bDisabled);
-    return true;
+    SetInventoryTabs(CreateVMs(AllSlots, InventoryIndices));
+    SetEquipmentTabs(CreateVMs(AllSlots, SetOfEquipableSlots));
 }
 
 void UInventoryVM::RefreshSlotFromInventory(UMythicInventoryComponent *Inventory, int32 AbsoluteIndex) {
@@ -304,8 +198,8 @@ void UInventoryVM::RefreshSlotFromInventory(UMythicInventoryComponent *Inventory
         return;
 
     // Update slot VM from current inventory data
-    SlotVM->SetSlotTypeTag(Entry.SlotType);
-    SlotVM->InitializeFromItemInstance(Entry.SlottedItemInstance, this);
+    SlotVM->Initialize(Entry.SlottedItemInstance, this, Entry.SlotType, Entry.ItemTypeWhitelist, AbsoluteIndex);
+    UE_LOG(Myth, Verbose, TEXT("Slot %d refreshed from inventory."), AbsoluteIndex);
 }
 
 void UInventoryVM::RefreshAllItemsFromInventory(UMythicInventoryComponent *Inventory) {
@@ -317,4 +211,5 @@ void UInventoryVM::RefreshAllItemsFromInventory(UMythicInventoryComponent *Inven
             RefreshSlotFromInventory(Inventory, AbsIdx);
         }
     }
+    UE_LOG(Myth, Log, TEXT("All inventory slots refreshed from inventory."));
 }

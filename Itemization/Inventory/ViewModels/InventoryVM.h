@@ -37,6 +37,8 @@ public:
     TArray<TObjectPtr<UItemSlotVM>> GetSlots() const;
     void SetSelectedSlotIndex(int32 InSelectedSlotIndex);
     int32 GetSelectedSlotIndex() const;
+
+    void Initialize(FText InTabName, UTexture2D *InTabIcon, TArray<TObjectPtr<UItemSlotVM>> InSlots, int32 InSelectedSlotIndex = 0);
 };
 
 /**
@@ -51,27 +53,27 @@ public:
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     int32 SelectedTabIndex;
 
-    // Tabs VMs
-    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
-    TArray<TObjectPtr<UInventoryTabVM>> Tabs;
-
     // The owning inventory component (not serialized, just for convenience)
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     TObjectPtr<UMythicInventoryComponent> OwningInventoryComponent;
 
-    // Helpers to translate indices
-    UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
-    bool AbsoluteIndexToTabSlot(int32 AbsoluteIndex, int32 &OutTabIndex, int32 &OutSlotIndex) const;
+    // Equipment tabs: tabs with at least one equipable or auto-activate slot
+    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category="Mythic|Inventory|VM")
+    TArray<TObjectPtr<UInventoryTabVM>> EquipmentTabs;
 
-    UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
-    int32 TabSlotToAbsoluteIndex(int32 TabIndex, int32 SlotIndex) const;
-    
+    // Inventory tabs: tabs with only non-equipable slots
+    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category="Mythic|Inventory|VM")
+    TArray<TObjectPtr<UInventoryTabVM>> InventoryTabs;
+
     void InitializeFromInventoryComponent(UMythicInventoryComponent *InInventoryComponent);
+
 protected:
     void SetSelectedTabIndex(int32 InSelectedTabIndex);
     int32 GetSelectedTabIndex() const;
-    void SetTabs(TArray<TObjectPtr<UInventoryTabVM>> InTabs);
-    TArray<TObjectPtr<UInventoryTabVM>> GetTabs() const;
+    void SetInventoryTabs(TArray<TObjectPtr<UInventoryTabVM>> InTabs);
+    TArray<TObjectPtr<UInventoryTabVM>> GetInventoryTabs() const;
+    void SetEquipmentTabs(TArray<TObjectPtr<UInventoryTabVM>> InTabs);
+    TArray<TObjectPtr<UInventoryTabVM>> GetEquipmentTabs() const;
     // Prefer using InitializeFromInventory() to set this
     void SetOwningInventoryComponent(UMythicInventoryComponent *InOwningInventoryComponent);
 
@@ -81,16 +83,6 @@ protected:
 public:
     UFUNCTION(BlueprintCallable, Category="Mythic|Inventory|VM")
     UMythicInventoryComponent *GetOwningInventoryComponent() const;
-    
-    // Slot state helpers by absolute index
-    UFUNCTION(BlueprintCallable, Category="Mythic|Inventory|VM")
-    bool SetSlotLockedByAbsoluteIndex(int32 AbsoluteIndex, bool bLocked);
-
-    UFUNCTION(BlueprintCallable, Category="Mythic|Inventory|VM")
-    bool SetSlotInUseByAbsoluteIndex(int32 AbsoluteIndex, bool bInUse);
-
-    UFUNCTION(BlueprintCallable, Category="Mythic|Inventory|VM")
-    bool SetSlotDisabledByAbsoluteIndex(int32 AbsoluteIndex, bool bDisabled);
 
     // Refresh methods for manual updates
     UFUNCTION(BlueprintCallable, Category="Mythic|Inventory|VM")
@@ -98,16 +90,11 @@ public:
 
     UFUNCTION(BlueprintCallable, Category="Mythic|Inventory|VM")
     void RefreshAllItemsFromInventory(class UMythicInventoryComponent *Inventory);
+    
+    // Maps absolute slot indices to their SlotVM instances for fast lookup
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<UItemSlotVM>> AbsoluteIndexToSlotVM;
 
 private:
-    // Cumulative offsets per tab to compute absolute <-> (tab,slot)
-    TArray<int32> TabStartOffsets;
-    TArray<int32> TabSlotCounts;
-    // Explicit mapping: per-tab list of absolute indices backing each displayed slot
-    TArray<TArray<int32>> TabAbsoluteIndices;
-    // Fast reverse lookup: for a given absolute index, find owning tab and slot
-    TArray<int32> AbsoluteToTabIndex;
-    TArray<int32> AbsoluteToSlotIndex;
-    // Direct pointer map to slot view models by absolute index
-    TArray<TObjectPtr<UItemSlotVM>> AbsoluteIndexToSlotVM;
+    TArray<TObjectPtr<UInventoryTabVM>> CreateVMs(const TArray<FMythicInventorySlotEntry>& allSlots, TSet<int32> InventoryIndices);
 };

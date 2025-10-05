@@ -25,28 +25,7 @@ protected:
 
     // Inventory Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
-    class UMythicInventoryComponent *EquipmentInventory;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
-    class UMythicInventoryComponent *ConsumablesInventory;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
-    class UMythicInventoryComponent *FarmingInventory;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
-    class UMythicInventoryComponent *MiningInventory;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
-    class UMythicInventoryComponent *LearningInventory;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
-    class UMythicInventoryComponent *PlacableInventory;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
-    class UMythicInventoryComponent *ExplorationInventory;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
-    class UMythicInventoryComponent *MiscInventory;
+    class UMythicInventoryComponent *InventoryComponent;
 
     // Crafting Component
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crafting")

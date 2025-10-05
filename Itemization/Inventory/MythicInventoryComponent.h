@@ -130,7 +130,7 @@ public:
     void PreReplicatedRemove(const TArrayView<int32> &RemovedIndices, int32 FinalSize);
 
     // Helper to set owner for callbacks
-    FORCEINLINE void SetOwningInventory(UMythicInventoryComponent* InOwner) {
+    FORCEINLINE void SetOwningInventory(UMythicInventoryComponent *InOwner) {
         Owner = InOwner;
     }
 
@@ -165,10 +165,6 @@ public:
 protected:
     GENERATED_BODY()
 
-    // Configuration for the inventory slots
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slots")
-    TArray<FInventorySlotConfiguration> SlotConfigurations;
-
     /*
     * Fast array serializer for inventory slots
     */
@@ -180,9 +176,16 @@ protected:
     TArray<bool> LastKnownActive;
 
 public:
+    // Configuration for the inventory slots
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slots")
+    TArray<FInventorySlotConfiguration> SlotConfigurations;
+
     // Lightweight read-only accessors for UI/ViewModel code
     FORCEINLINE int32 GetNumSlots() const { return Slots.Num(); }
     bool GetSlotEntry(int32 Index, FMythicInventorySlotEntry &OutEntry) const;
+
+    // Get all slots
+    const TArray<FMythicInventorySlotEntry> &GetAllSlots() const { return Slots.GetItems(); }
 
 public:
     UMythicInventoryComponent(const FObjectInitializer &OI);
@@ -274,9 +277,9 @@ protected:
     virtual void OnUnregister() override;
 
     // FastArray replication callbacks forwarded from Slots
-    void HandleSlotsAdded(const TArrayView<int32>& AddedIndices, int32 FinalSize);
-    void HandleSlotsChanged(const TArrayView<int32>& ChangedIndices, int32 FinalSize);
-    void HandleSlotsRemoved(const TArrayView<int32>& RemovedIndices, int32 FinalSize);
+    void HandleSlotsAdded(const TArrayView<int32> &AddedIndices, int32 FinalSize);
+    void HandleSlotsChanged(const TArrayView<int32> &ChangedIndices, int32 FinalSize);
+    void HandleSlotsRemoved(const TArrayView<int32> &RemovedIndices, int32 FinalSize);
 
     // friend the fast array struct to allow it to call our callbacks
     friend struct FMythicInventoryFastArray;
