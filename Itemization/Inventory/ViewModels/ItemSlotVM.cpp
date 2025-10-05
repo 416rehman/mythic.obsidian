@@ -89,6 +89,16 @@ void UItemSlotVM::SetSlotTypeTag(FGameplayTag InSlotTypeTag) {
 
 FGameplayTag UItemSlotVM::GetSlotTypeTag() const { return SlotTypeTag; }
 
+void UItemSlotVM::SetAcceptedItemTypes(FGameplayTagContainer InAcceptedItemTypes) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(AcceptedItemTypes, InAcceptedItemTypes)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(AcceptedItemTypes);
+    }
+}
+
+FGameplayTagContainer UItemSlotVM::GetAcceptedItemTypes() const {
+    return AcceptedItemTypes;
+}
+
 void UItemSlotVM::SetParentInventoryVM(UInventoryVM *InParentInventoryVM) {
     if (UE_MVVM_SET_PROPERTY_VALUE(ParentInventoryVM, InParentInventoryVM)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(ParentInventoryVM);
@@ -99,7 +109,10 @@ UInventoryVM *UItemSlotVM::GetParentInventoryVM() const {
     return ParentInventoryVM;
 }
 
-void UItemSlotVM::InitializeFromItemInstance(UMythicItemInstance *InItemInstance, UInventoryVM *InParentVM) {
+void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *InParentVM, FGameplayTag InSlotType, FGameplayTagContainer AcceptTypes, int32 InAbsoluteIndex) {
+    SetAbsoluteIndex(InAbsoluteIndex);
+    SetSlotTypeTag(InSlotType);
+    SetAcceptedItemTypes(AcceptTypes);
     SetParentInventoryVM(InParentVM);
     if (InItemInstance == nullptr) {
         SetIcon(nullptr);

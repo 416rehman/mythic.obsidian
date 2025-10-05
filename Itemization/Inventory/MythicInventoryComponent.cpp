@@ -635,7 +635,7 @@ bool UMythicInventoryComponent::GetSlotEntry(int32 Index, FMythicInventorySlotEn
 
 void UMythicInventoryComponent::NotifyItemInstanceUpdated(int32 SlotIndex) {
     if (IsValid(ViewModel)) {
-        ViewModel->RefreshSlotFromInventory(this, SlotIndex);
+            ViewModel->RefreshSlotFromInventory(this, SlotIndex);
     }
     OnSlotUpdated.Broadcast(SlotIndex);
 }

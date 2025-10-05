@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "MVVMViewModelBase.h"
+#include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "ItemSlotVM.generated.h"
 
@@ -34,7 +35,7 @@ public:
 
     // Quantity of items in this slot
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
-    int32 Quantity;
+    int32 Quantity = 0;
 
     // Slot is locked (not yet unlocked by player) - locked slots are not interactive
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
@@ -55,6 +56,12 @@ public:
     // Gameplay slot type (e.g., Inventory.Slot.Weapon)
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     FGameplayTag SlotTypeTag;
+
+    // Accepts only items with this tag (e.g., Inventory.SlotType.Weapon)
+    // Not strictly necessary, as the owning InventoryVM and InventoryComponent will enforce this
+    // But can be useful for UI filtering and validation
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    FGameplayTagContainer AcceptedItemTypes;
 
     // Owning InventoryVM
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
@@ -81,13 +88,14 @@ public:
     int32 GetAbsoluteIndex() const;
     void SetSlotTypeTag(FGameplayTag InSlotTypeTag);
     FGameplayTag GetSlotTypeTag() const;
+    void SetAcceptedItemTypes(FGameplayTagContainer InAcceptedItemTypes);
+    FGameplayTagContainer GetAcceptedItemTypes() const;
 
     void SetParentInventoryVM(UInventoryVM *InParentInventoryVM);
     UInventoryVM *GetParentInventoryVM() const;
 
-    // Initialize view model fields from an item instance (icon, quantity, rarity color, etc.)
-    void InitializeFromItemInstance(UMythicItemInstance* InItemInstance, UInventoryVM* InParentVM);
-
+    void Initialize(UMythicItemInstance* InItemInstance, UInventoryVM* InParentVM, FGameplayTag InSlotType, FGameplayTagContainer AcceptTypes, int32 InAbsoluteIndex);
+    
     /** Helpers **/
     // Get owning inventory component from ParentInventoryVM - ONE SHOT
     UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
@@ -98,3 +106,4 @@ public:
     UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
     UMythicItemInstance* TryGetItemInstance() const;
 };
+

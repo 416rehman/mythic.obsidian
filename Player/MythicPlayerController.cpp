@@ -22,29 +22,8 @@ AMythicPlayerController::AMythicPlayerController() {
     ProficiencyComponent->SetIsReplicated(true);
 
     // Create the Inventory Components
-    EquipmentInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("EquipmentInventory"));
-    EquipmentInventory->SetIsReplicated(true);
-
-    ConsumablesInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("ConsumablesInventory"));
-    ConsumablesInventory->SetIsReplicated(true);
-
-    FarmingInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("FarmingInventory"));
-    FarmingInventory->SetIsReplicated(true);
-
-    MiningInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("MiningInventory"));
-    MiningInventory->SetIsReplicated(true);
-
-    LearningInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("LearningInventory"));
-    LearningInventory->SetIsReplicated(true);
-
-    PlacableInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("PlacableInventory"));
-    PlacableInventory->SetIsReplicated(true);
-
-    ExplorationInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("ExplorationInventory"));
-    ExplorationInventory->SetIsReplicated(true);
-
-    MiscInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("MiscInventory"));
-    MiscInventory->SetIsReplicated(true);
+    InventoryComponent = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("EquipmentInventory"));
+    InventoryComponent->SetIsReplicated(true);
 
     // Create the Crafting Component
     CraftingComponent = CreateDefaultSubobject<UCraftingComponent>(TEXT("CraftingComponent"));
@@ -58,14 +37,7 @@ UAbilitySystemComponent *AMythicPlayerController::GetAbilitySystemComponent() co
 
 TArray<UMythicInventoryComponent *> AMythicPlayerController::GetAllInventoryComponents() const {
     return {
-        EquipmentInventory,
-        ConsumablesInventory,
-        FarmingInventory,
-        MiningInventory,
-        LearningInventory,
-        PlacableInventory,
-        ExplorationInventory,
-        MiscInventory
+        InventoryComponent
     };
 }
 
