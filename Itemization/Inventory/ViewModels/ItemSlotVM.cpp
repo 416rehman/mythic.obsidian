@@ -29,13 +29,13 @@ bool UItemSlotVM::GetIsJunk() const {
     return IsJunk;
 }
 
-void UItemSlotVM::SetBackgroundColor(FLinearColor InBackgroundColor) {
+void UItemSlotVM::SetBackgroundColor(FSlateColor InBackgroundColor) {
     if (UE_MVVM_SET_PROPERTY_VALUE(BackgroundColor, InBackgroundColor)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(BackgroundColor);
     }
 }
 
-FLinearColor UItemSlotVM::GetBackgroundColor() const {
+FSlateColor UItemSlotVM::GetBackgroundColor() const {
     return BackgroundColor;
 }
 

@@ -6,7 +6,6 @@
 #include "GameplayTagContainer.h"
 #include "MVVMViewModelBase.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
-#include "Itemization/Inventory/MythicItemInstance.h"
 #include "ItemSlotVM.generated.h"
 
 class UInventoryVM;
@@ -31,7 +30,7 @@ public:
 
     // Background color for this item slot - can be used to indicate rarity or other states
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
-    FLinearColor BackgroundColor;
+    FSlateColor BackgroundColor;
 
     // Quantity of items in this slot
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
@@ -72,8 +71,8 @@ public:
     UTexture2D *GetIcon() const;
     void SetIsJunk(bool bInIsJunk);
     bool GetIsJunk() const;
-    void SetBackgroundColor(FLinearColor InBackgroundColor);
-    FLinearColor GetBackgroundColor() const;
+    void SetBackgroundColor(FSlateColor InBackgroundColor);
+    FSlateColor GetBackgroundColor() const;
     void SetQuantity(int32 InQuantity);
     int32 GetQuantity() const;
 

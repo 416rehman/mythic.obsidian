@@ -2,6 +2,8 @@
 
 
 #include "InventoryVM.h"
+
+#include "Mythic.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Engine/Texture2D.h"
 
@@ -39,36 +41,13 @@ TArray<TObjectPtr<UItemSlotVM>> UInventoryTabVM::GetSlots() const {
     return Slots;
 }
 
-void UInventoryTabVM::SetSelectedSlotIndex(int32 InSelectedSlotIndex) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(SelectedSlotIndex, InSelectedSlotIndex)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedSlotIndex);
-        UE_LOG(Myth, Verbose, TEXT("Selected slot index set to: %d"), InSelectedSlotIndex);
-    }
-}
-
-int32 UInventoryTabVM::GetSelectedSlotIndex() const {
-    return SelectedSlotIndex;
-}
-
 void UInventoryTabVM::Initialize(FText InTabName, UTexture2D *InTabIcon, TArray<TObjectPtr<UItemSlotVM>> InSlots, int32 InSelectedSlotIndex) {
     SetTabName(InTabName);
     SetTabIcon(InTabIcon);
     SetSlots(InSlots);
-    SetSelectedSlotIndex(InSelectedSlotIndex);
 }
 
 // ---------------- UInventoryVM -----------------
-void UInventoryVM::SetSelectedTabIndex(int32 InSelectedTabIndex) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(SelectedTabIndex, InSelectedTabIndex)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedTabIndex);
-        UE_LOG(Myth, Verbose, TEXT("Selected tab index set to: %d"), InSelectedTabIndex);
-    }
-}
-
-int32 UInventoryVM::GetSelectedTabIndex() const {
-    return SelectedTabIndex;
-}
-
 void UInventoryVM::SetInventoryTabs(TArray<TObjectPtr<UInventoryTabVM>> InTabs) {
     if (UE_MVVM_SET_PROPERTY_VALUE(InventoryTabs, InTabs)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(InventoryTabs);
@@ -91,6 +70,17 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::GetEquipmentTabs() const {
     return EquipmentTabs;
 }
 
+void UInventoryVM::SetSelectionVM(UInventorySelectionVM *InSelectionVM) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(SelectionVM, InSelectionVM)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectionVM);
+        UE_LOG(Myth, Verbose, TEXT("Selection VM set: %s"), InSelectionVM ? *InSelectionVM->GetName() : TEXT("None"));
+    }
+}
+
+UInventorySelectionVM *UInventoryVM::GetSelectionVM() const {
+    return SelectionVM;
+}
+
 void UInventoryVM::SetOwningInventoryComponent(UMythicInventoryComponent *InOwningInventoryComponent) {
     if (UE_MVVM_SET_PROPERTY_VALUE(OwningInventoryComponent, InOwningInventoryComponent)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(OwningInventoryComponent);
@@ -103,7 +93,10 @@ UMythicInventoryComponent *UInventoryVM::GetOwningInventoryComponent() const {
 }
 
 void UInventoryVM::Clear() {
-    SetSelectedTabIndex(0);
+    if (SelectionVM != nullptr) {
+        SelectionVM->ClearSelection();
+    }
+
     AbsoluteIndexToSlotVM.Reset();
     EquipmentTabs.Reset();
     InventoryTabs.Reset();
@@ -111,7 +104,6 @@ void UInventoryVM::Clear() {
 }
 
 TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythicInventorySlotEntry> &allSlots, TSet<int32> InventoryIndices) {
-
     auto TypeToTabMap = TMap<FGameplayTag, TObjectPtr<UInventoryTabVM>>();
 
     auto AsArray = InventoryIndices.Array();
@@ -182,6 +174,18 @@ void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *I
 
     SetInventoryTabs(CreateVMs(AllSlots, InventoryIndices));
     SetEquipmentTabs(CreateVMs(AllSlots, SetOfEquipableSlots));
+
+    // Initialize selection VM
+    if (!SelectionVM) {
+        SelectionVM = NewObject<UInventorySelectionVM>(this);
+    }
+    UE_LOG(Myth, Log, TEXT("InventoryVM initialized from inventory component: %s"), *InInventoryComponent->GetName());
+    if (EquipmentTabs.Num() > 0) {
+        SelectionVM->SetSelectedTabVM(EquipmentTabs[0]);
+        if (EquipmentTabs[0]->Slots.Num() > 0) {
+            SelectionVM->SetSelectedSlotVM(EquipmentTabs[0]->Slots[0]);
+        }
+    }
 }
 
 void UInventoryVM::RefreshSlotFromInventory(UMythicInventoryComponent *Inventory, int32 AbsoluteIndex) {
@@ -212,4 +216,31 @@ void UInventoryVM::RefreshAllItemsFromInventory(UMythicInventoryComponent *Inven
         }
     }
     UE_LOG(Myth, Log, TEXT("All inventory slots refreshed from inventory."));
+}
+
+// ---------------- UInventorySelectionVM -----------------
+// tab
+void UInventorySelectionVM::SetSelectedTabVM(UInventoryTabVM *InSelectedTabVM) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(SelectedTabVM, InSelectedTabVM)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedTabVM);
+        UE_LOG(Myth, Verbose, TEXT("InventorySelectionVM: Selected tab VM set to: %s"),
+               InSelectedTabVM ? *InSelectedTabVM->GetTabName().ToString() : TEXT("None"));
+    }
+}
+
+UInventoryTabVM *UInventorySelectionVM::GetSelectedTabVM() const {
+    return SelectedTabVM;
+}
+
+// slot vm
+void UInventorySelectionVM::SetSelectedSlotVM(UItemSlotVM *InSelectedSlotVM) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(SelectedSlotVM, InSelectedSlotVM)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedSlotVM);
+        UE_LOG(Myth, Verbose, TEXT("InventorySelectionVM: Selected slot VM set to index: %d"),
+               InSelectedSlotVM ? InSelectedSlotVM->GetAbsoluteIndex() : -1);
+    }
+}
+
+UItemSlotVM *UInventorySelectionVM::GetSelectedSlotVM() const {
+    return SelectedSlotVM;
 }
