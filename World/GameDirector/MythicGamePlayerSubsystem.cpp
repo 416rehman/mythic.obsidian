@@ -10,7 +10,7 @@ bool UMythicGamePlayerSubsystem::ShouldCreateSubsystem(UObject *Outer) const {
     // Should only create the subsystem on the server
     UWorld *World = Outer->GetWorld();
     if (World->WorldType != EWorldType::None && World->GetNetMode() < NM_Client) {
-        UE_LOG(Myth, Warning, TEXT("GameDirector created on server"));
+        UE_LOG(Myth, Log, TEXT("GameDirector created on server"));
         return true;
     }
 
@@ -32,14 +32,14 @@ void UMythicGamePlayerSubsystem::Deinitialize() {
 
 void UMythicGamePlayerSubsystem::OnLevelBeginMakingVisible(UWorld *World, const ULevelStreaming *LevelStreaming, ULevel *Level) {
     ELevelStreamingState State = LevelStreaming->GetLevelStreamingState();
-    UE_LOG(Myth, Warning, TEXT("Level %s is being made visible. Level Streaming State: %d"), *LevelStreaming->GetFNameForStatID().ToString(), State);
+    UE_LOG(Myth, Log, TEXT("Level %s is being made visible. Level Streaming State: %d"), *LevelStreaming->GetFNameForStatID().ToString(), State);
 
-    UE_LOG(Myth, Warning, TEXT("List of all the actors in the level:"));
+    UE_LOG(Myth, Log, TEXT("List of all the actors in the level:"));
     for (AActor *Actor : Level->Actors) {
         if (!Actor) {
             continue;
         }
-        UE_LOG(Myth, Warning, TEXT("Actor: %s"), *Actor->GetName());
+        UE_LOG(Myth, Log, TEXT("Actor: %s"), *Actor->GetName());
     }
 
     // The location of our player
@@ -56,14 +56,14 @@ void UMythicGamePlayerSubsystem::OnLevelBeginMakingVisible(UWorld *World, const 
             return;
         }
         auto player_location = pawn->GetActorLocation();
-        UE_LOG(Myth, Warning, TEXT("Player location: %s"), *player_location.ToString());
+        UE_LOG(Myth, Log, TEXT("Player location: %s"), *player_location.ToString());
 
         // Check if the player is in the level
         auto LevelTransform = LevelStreaming->LevelTransform;
-        UE_LOG(Myth, Warning, TEXT("Level transform: %s"), *LevelTransform.ToString());
-        UE_LOG(Myth, Warning, TEXT("Level location: %s"), *LevelTransform.GetLocation().ToString());
-        UE_LOG(Myth, Warning, TEXT("Level rotation: %s"), *LevelTransform.GetRotation().ToString());
-        UE_LOG(Myth, Warning, TEXT("Level scale: %s"), *LevelTransform.GetScale3D().ToString());
+        UE_LOG(Myth, Log, TEXT("Level transform: %s"), *LevelTransform.ToString());
+        UE_LOG(Myth, Log, TEXT("Level location: %s"), *LevelTransform.GetLocation().ToString());
+        UE_LOG(Myth, Log, TEXT("Level rotation: %s"), *LevelTransform.GetRotation().ToString());
+        UE_LOG(Myth, Log, TEXT("Level scale: %s"), *LevelTransform.GetScale3D().ToString());
 
         auto isPlayerInLevel = LevelTransform.GetLocation().Equals(player_location, 50);
     }
@@ -71,14 +71,14 @@ void UMythicGamePlayerSubsystem::OnLevelBeginMakingVisible(UWorld *World, const 
 
 
 void UMythicGamePlayerSubsystem::OnLevelBeginMakingInvisible(UWorld *World, const ULevelStreaming *LevelStreaming, ULevel *Level) {
-    UE_LOG(Myth, Warning, TEXT("Level %s is being made invisible. Level Streaming State: %d"), *Level->GetName(), LevelStreaming->GetLevelStreamingState());
+    UE_LOG(Myth, Log, TEXT("Level %s is being made invisible. Level Streaming State: %d"), *Level->GetName(), LevelStreaming->GetLevelStreamingState());
 
-    UE_LOG(Myth, Warning, TEXT("List of all the actors in the level:"));
+    UE_LOG(Myth, Log, TEXT("List of all the actors in the level:"));
     for (AActor *Actor : Level->Actors) {
         if (!Actor) {
             continue;
         }
-        UE_LOG(Myth, Warning, TEXT("Actor: %s"), Actor == nullptr ? TEXT("Actor is null") : *Actor->GetName());
+        UE_LOG(Myth, Log, TEXT("Actor: %s"), Actor == nullptr ? TEXT("Actor is null") : *Actor->GetName());
     }
 }
 
@@ -86,9 +86,9 @@ void UMythicGamePlayerSubsystem::OnLevelStreamingStateChanged(UWorld *World, con
                                                               ELevelStreamingState LevelStreamingState, ELevelStreamingState LevelStreamingState1) {
     // The level could be null if it is not loaded
     if (Level) {
-        UE_LOG(Myth, Warning, TEXT("Level %s has changed state. Level Streaming State: %d"), *Level->GetName(), static_cast<uint8>(LevelStreamingState));
+        UE_LOG(Myth, Log, TEXT("Level %s has changed state. Level Streaming State: %d"), *Level->GetName(), static_cast<uint8>(LevelStreamingState));
     }
     else {
-        UE_LOG(Myth, Warning, TEXT("Level may not be loaded. Level Streaming State: %d"), static_cast<uint8>(LevelStreamingState));
+        UE_LOG(Myth, Log, TEXT("Level may not be loaded. Level Streaming State: %d"), static_cast<uint8>(LevelStreamingState));
     }
 }

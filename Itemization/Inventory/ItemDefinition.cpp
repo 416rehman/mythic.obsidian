@@ -47,11 +47,20 @@ EDataValidationResult UItemDefinition::IsDataValid(FDataValidationContext &Conte
         }
     }
 
-    return bHasNullFragments ? EDataValidationResult::Invalid : Result;
+    bool bHasValidType = false;
+    // makes sure itemtype is a child of itemization.type
+    if (ItemType.IsValid()) {
+        FGameplayTag ParentTag = FGameplayTag::RequestGameplayTag(FName("Itemization.Type"));
+        if (ItemType.MatchesTag(ParentTag)) {
+            bHasValidType = true;
+        }
+    }
+
+    bool result = bHasValidType && !bHasNullFragments;
+    return result ? EDataValidationResult::Invalid : Result;
 }
 
-void UItemDefinition::CopyJSONToClipboard() const
-{
+void UItemDefinition::CopyJSONToClipboard() const {
     FString OutJsonString;
     ExportAsJSONString(OutJsonString); // See helper below
 
@@ -70,9 +79,8 @@ void UItemDefinition::ExportToJSON() const {
     FString FileName = GetName() + TEXT(".json");
     TArray<FString> OutFiles;
 
-    IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-    if (DesktopPlatform)
-    {
+    IDesktopPlatform *DesktopPlatform = FDesktopPlatformModule::Get();
+    if (DesktopPlatform) {
         bool bSaved = DesktopPlatform->SaveFileDialog(
             nullptr,
             TEXT("Save JSON File"),
@@ -81,25 +89,21 @@ void UItemDefinition::ExportToJSON() const {
             TEXT("JSON Files (*.json)|*.json"),
             EFileDialogFlags::None,
             OutFiles
-        );
+            );
 
-        if (bSaved && OutFiles.Num() > 0)
-        {
+        if (bSaved && OutFiles.Num() > 0) {
             FString SavePath = OutFiles[0];
-            if (FFileHelper::SaveStringToFile(OutJsonString, *SavePath))
-            {
+            if (FFileHelper::SaveStringToFile(OutJsonString, *SavePath)) {
                 UE_LOG(Myth, Log, TEXT("Saved JSON to %s"), *SavePath);
             }
-            else
-            {
+            else {
                 UE_LOG(Myth, Error, TEXT("Failed to save file: %s"), *SavePath);
             }
         }
     }
 }
 
-void UItemDefinition::ExportAsJSONString(FString& OutJsonString) const
-{
+void UItemDefinition::ExportAsJSONString(FString &OutJsonString) const {
     DcStartUp(EDcInitializeAction::Minimal);
 
     FDcPropertyDatum Datum((UObject *)this);
@@ -157,7 +161,7 @@ void UItemDefinition::ImportFromJSON() {
 
     // Reader and writer
     FDcJsonReader Reader(FileContent);
-    FDcPropertyWriter Writer(FDcPropertyDatum((UObject *)this));
+    FDcPropertyWriter Writer(FDcPropertyDatum(this));
 
     // Context
     FDcDeserializeContext Ctx;
@@ -178,18 +182,19 @@ void UItemDefinition::ImportFromJSON() {
 }
 
 void UItemDefinitionJSONImportLibrary::ImportItemDefinitionsFromFolder() {
-    IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-    if (!DesktopPlatform) return;
+    IDesktopPlatform *DesktopPlatform = FDesktopPlatformModule::Get();
+    if (!DesktopPlatform) {
+        return;
+    }
 
     FString FolderPath;
-    const void* ParentWindowHandle = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+    const void *ParentWindowHandle = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
 
     if (!DesktopPlatform->OpenDirectoryDialog(
         ParentWindowHandle,
         TEXT("Select JSON Folder"),
         TEXT(""),
-        FolderPath))
-    {
+        FolderPath)) {
         UE_LOG(Myth, Warning, TEXT("No folder selected"));
         return;
     }
@@ -198,18 +203,15 @@ void UItemDefinitionJSONImportLibrary::ImportItemDefinitionsFromFolder() {
     TArray<FString> Files;
     IFileManager::Get().FindFiles(Files, *FolderPath, TEXT("*.json"));
 
-    if (Files.Num() == 0)
-    {
+    if (Files.Num() == 0) {
         UE_LOG(Myth, Warning, TEXT("No JSON files found in %s"), *FolderPath);
         return;
     }
 
-    for (const FString& FileName : Files)
-    {
+    for (const FString &FileName : Files) {
         FString FilePath = FPaths::Combine(FolderPath, FileName);
         FString FileContent;
-        if (!FFileHelper::LoadFileToString(FileContent, *FilePath))
-        {
+        if (!FFileHelper::LoadFileToString(FileContent, *FilePath)) {
             UE_LOG(Myth, Error, TEXT("Failed to load file: %s"), *FilePath);
             continue;
         }
@@ -217,10 +219,10 @@ void UItemDefinitionJSONImportLibrary::ImportItemDefinitionsFromFolder() {
         // Create new asset name
         FString AssetName = FPaths::GetBaseFilename(FileName);
         FString PackageName = TEXT("/Game/Mythic/Itemization/ItemDefinitions/Weapons/") + AssetName;
-        UPackage* Package = CreatePackage(*PackageName);
+        UPackage *Package = CreatePackage(*PackageName);
 
         // Create the asset
-        UItemDefinition* NewItem = NewObject<UItemDefinition>(Package, *AssetName, RF_Public | RF_Standalone | RF_MarkAsRootSet);
+        UItemDefinition *NewItem = NewObject<UItemDefinition>(Package, *AssetName, RF_Public | RF_Standalone | RF_MarkAsRootSet);
 
         // Deserialize JSON into the new asset
         DcStartUp(EDcInitializeAction::Minimal);
@@ -228,7 +230,7 @@ void UItemDefinitionJSONImportLibrary::ImportItemDefinitionsFromFolder() {
         DcSetupJsonDeserializeHandlers(JSONDeserializer);
 
         FDcJsonReader Reader(FileContent);
-        FDcPropertyWriter Writer(FDcPropertyDatum((UObject*)NewItem));
+        FDcPropertyWriter Writer(FDcPropertyDatum((UObject *)NewItem));
 
         FDcDeserializeContext Ctx;
         Ctx.Reader = &Reader;
@@ -236,16 +238,14 @@ void UItemDefinitionJSONImportLibrary::ImportItemDefinitionsFromFolder() {
         Ctx.Deserializer = &JSONDeserializer;
         Ctx.Objects.Add(NewItem);
 
-        if (Ctx.Prepare().Ok() && Ctx.Deserializer->Deserialize(Ctx).Ok())
-        {
+        if (Ctx.Prepare().Ok() && Ctx.Deserializer->Deserialize(Ctx).Ok()) {
             UE_LOG(Myth, Log, TEXT("Imported %s"), *AssetName);
 
             // Mark asset dirty so UE saves it
             FAssetRegistryModule::AssetCreated(NewItem);
             NewItem->MarkPackageDirty();
         }
-        else
-        {
+        else {
             UE_LOG(Myth, Error, TEXT("Failed to deserialize: %s"), *FileName);
         }
 

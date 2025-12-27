@@ -179,27 +179,35 @@ void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *I
     if (!SelectionVM) {
         SelectionVM = NewObject<UInventorySelectionVM>(this);
     }
+
     UE_LOG(Myth, Log, TEXT("InventoryVM initialized from inventory component: %s"), *InInventoryComponent->GetName());
-    if (EquipmentTabs.Num() > 0) {
-        SelectionVM->SetSelectedTabVM(EquipmentTabs[0]);
-        if (EquipmentTabs[0]->Slots.Num() > 0) {
-            SelectionVM->SetSelectedSlotVM(EquipmentTabs[0]->Slots[0]);
+
+    // default to first inventory tab, first slot
+    if (InventoryTabs.Num() > 0) {
+        auto FirstInvTab = InventoryTabs[0];
+        SelectionVM->SetSelectedTabVM(FirstInvTab);
+        if (FirstInvTab->Slots.Num() > 0) {
+            SelectionVM->SetSelectedSlotVM(FirstInvTab->Slots[0]);
         }
     }
 }
 
 void UInventoryVM::RefreshSlotFromInventory(UMythicInventoryComponent *Inventory, int32 AbsoluteIndex) {
-    if (!Inventory)
+    if (!Inventory) {
         return;
-    if (!AbsoluteIndexToSlotVM.IsValidIndex(AbsoluteIndex))
+    }
+    if (!AbsoluteIndexToSlotVM.IsValidIndex(AbsoluteIndex)) {
         return;
+    }
     UItemSlotVM *SlotVM = AbsoluteIndexToSlotVM[AbsoluteIndex];
-    if (!IsValid(SlotVM))
+    if (!IsValid(SlotVM)) {
         return;
+    }
 
     FMythicInventorySlotEntry Entry;
-    if (!Inventory->GetSlotEntry(AbsoluteIndex, Entry))
+    if (!Inventory->GetSlotEntry(AbsoluteIndex, Entry)) {
         return;
+    }
 
     // Update slot VM from current inventory data
     SlotVM->Initialize(Entry.SlottedItemInstance, this, Entry.SlotType, Entry.ItemTypeWhitelist, AbsoluteIndex);
@@ -207,8 +215,9 @@ void UInventoryVM::RefreshSlotFromInventory(UMythicInventoryComponent *Inventory
 }
 
 void UInventoryVM::RefreshAllItemsFromInventory(UMythicInventoryComponent *Inventory) {
-    if (!Inventory)
+    if (!Inventory) {
         return;
+    }
     const int32 Total = Inventory->GetNumSlots();
     for (int32 AbsIdx = 0; AbsIdx < Total; ++AbsIdx) {
         if (AbsoluteIndexToSlotVM.IsValidIndex(AbsIdx) && AbsoluteIndexToSlotVM[AbsIdx] != nullptr) {
