@@ -26,6 +26,9 @@ public:
     // Gives/activates an ability
     virtual bool Give(FRewardContext &Context) const override;
 
+    // Ability rewards can be safely reapplied - won't duplicate abilities
+    virtual bool CanReapplyOnLoad() const override { return true; }
+
     // Helper function to get the context for the reward
     UFUNCTION(BlueprintCallable)
     static bool GiveAbilityReward(UAbilityReward *Reward, APlayerController *PlayerController) {

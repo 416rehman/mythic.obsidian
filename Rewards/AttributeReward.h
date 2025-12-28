@@ -35,6 +35,9 @@ public:
     // Applies the reward to the attribute
     virtual bool Give(FRewardContext &Context) const override;
 
+    // Attribute rewards are idempotent - safe to reapply on load
+    virtual bool CanReapplyOnLoad() const override { return true; }
+
     // Helper function to get the context for the reward
     UFUNCTION(BlueprintCallable)
     static bool GiveAttributeReward(UAttributeReward *Reward, APlayerController *PlayerController) {

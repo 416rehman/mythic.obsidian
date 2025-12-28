@@ -37,6 +37,17 @@ public:
     virtual bool Give(FRewardContext &Context) const {
         return false;
     };
+
+    /** 
+     * Returns true if this reward can be safely reapplied on character load.
+     * Override in subclasses:
+     * - AttributeReward: true (idempotent, sets attribute values)
+     * - AbilityReward: true (grants ability if not already granted)
+     * - ItemReward: FALSE (items are saved in inventory, would duplicate)
+     * - LootReward: FALSE (already spawned/claimed)
+     * - XPReward: FALSE (would cause progression loops)
+     */
+    virtual bool CanReapplyOnLoad() const { return false; }
 };
 
 USTRUCT(BlueprintType, Blueprintable)
