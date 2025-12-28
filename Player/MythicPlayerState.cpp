@@ -46,6 +46,9 @@ void AMythicPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &O
     DOREPLIFETIME(AMythicPlayerState, ProficiencyAttributes);
 }
 
+
+// --- Save System Interface Removed ---
+
 void AMythicPlayerState::BeginPlay() {
     Super::BeginPlay();
 
@@ -85,4 +88,35 @@ void AMythicPlayerState::BeginPlay() {
     else {
         UE_LOG(LogTemp, Warning, TEXT("Not server, not initializing default abilities and effects"));
     }
+}
+
+// ============================================================================
+// IInventoryProviderInterface - Delegates to PlayerController
+// ============================================================================
+
+TArray<UMythicInventoryComponent *> AMythicPlayerState::GetAllInventoryComponents() const {
+    if (APlayerController *PC = GetPlayerController()) {
+        if (IInventoryProviderInterface *InvProvider = Cast<IInventoryProviderInterface>(PC)) {
+            return InvProvider->GetAllInventoryComponents();
+        }
+    }
+    return TArray<UMythicInventoryComponent *>();
+}
+
+UAbilitySystemComponent *AMythicPlayerState::GetSchematicsASC() const {
+    if (APlayerController *PC = GetPlayerController()) {
+        if (IInventoryProviderInterface *InvProvider = Cast<IInventoryProviderInterface>(PC)) {
+            return InvProvider->GetSchematicsASC();
+        }
+    }
+    return nullptr;
+}
+
+UMythicInventoryComponent *AMythicPlayerState::GetInventoryForItemType(const FGameplayTag &ItemType) const {
+    if (APlayerController *PC = GetPlayerController()) {
+        if (IInventoryProviderInterface *InvProvider = Cast<IInventoryProviderInterface>(PC)) {
+            return InvProvider->GetInventoryForItemType(ItemType);
+        }
+    }
+    return nullptr;
 }

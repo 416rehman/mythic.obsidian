@@ -13,9 +13,10 @@ struct FTrackedDestructibleData;
 class UMythicItemInstance;
 class UItemDefinition;
 
-UCLASS()
+class UMythicCheatManager;
+
+UCLASS(Config=Game)
 class AMythicPlayerController : public ACommonPlayerController, public IAbilitySystemInterface, public IInventoryProviderInterface {
-private:
     GENERATED_BODY()
 
 protected:

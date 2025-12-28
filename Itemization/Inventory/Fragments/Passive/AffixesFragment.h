@@ -24,16 +24,35 @@ struct FRolledAffix : public FRolledAttributeSpec {
     FRolledAffix() : FRolledAttributeSpec() {
         bIsLocked = false;
     }
+
+    // Custom serialization - only for save games
+    bool Serialize(FArchive &Ar) {
+        // For assets, use default serialization (parent handles IsSaveGame check too)
+        if (!Ar.IsSaveGame()) {
+            return false;
+        }
+        FRolledAttributeSpec::Serialize(Ar);
+        Ar << bIsLocked;
+        return true;
+    }
+};
+
+// Enable custom serialization for FRolledAffix
+template <>
+struct TStructOpsTypeTraits<FRolledAffix> : TStructOpsTypeTraitsBase2<FRolledAffix> {
+    enum {
+        WithSerializer = true
+    };
 };
 
 USTRUCT(BlueprintType)
 struct FAffixesRuntimeReplicatedData {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite)
+    UPROPERTY(BlueprintReadWrite, SaveGame)
     TArray<FRolledAffix> RolledCoreAffixes = TArray<FRolledAffix>();
 
-    UPROPERTY(BlueprintReadWrite)
+    UPROPERTY(BlueprintReadWrite, SaveGame)
     TArray<FRolledAffix> RolledAffixes = TArray<FRolledAffix>();
 
     UPROPERTY(BlueprintReadOnly)
@@ -84,7 +103,7 @@ public:
 
     /** Designer friendly configuration data that defines this fragment. */
     /** REPLICATED and fields should be BlueprintReadOnly */
-    UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties))
+    UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties), SaveGame)
     FAffixesConfig AffixesConfig = FAffixesConfig();
 
     /** This is used in the OnInstanced method to calculate/fill the rest of the data. */
@@ -94,7 +113,7 @@ public:
 
     /** Contains the runtime state of the fragment (replicated to client) */
     /** REPLICATED */
-    UPROPERTY(Replicated, BlueprintReadOnly)
+    UPROPERTY(Replicated, BlueprintReadOnly, SaveGame)
     FAffixesRuntimeReplicatedData AffixesRuntimeReplicatedData = FAffixesRuntimeReplicatedData();
 
     /** Contains the runtime client side state of the fragment for use in methods like OnActiveItemClient */

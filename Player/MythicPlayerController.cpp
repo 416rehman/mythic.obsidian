@@ -1,11 +1,10 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
 #include "MythicPlayerController.h"
 
 #include "Mythic.h"
 #include "MythicPlayerState.h"
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
+#include "GameModes/MythicCheatManager.h"
 #include "GameModes/GameState/MythicGameState.h"
 #include "Interfaces/OnlineIdentityInterface.h"
 #include "Itemization/Crafting/CraftingComponent.h"
@@ -16,6 +15,9 @@ AMythicPlayerController::AMythicPlayerController() {
     bShowMouseCursor = true;
     DefaultMouseCursor = EMouseCursor::Default;
     bReplicateUsingRegisteredSubObjectList = true;
+
+    // Set the CheatManager class
+    CheatClass = UMythicCheatManager::StaticClass();
 
     // Create the ProficiencyComponent
     ProficiencyComponent = CreateDefaultSubobject<UProficiencyComponent>(TEXT("ProficiencyComponent"));
@@ -29,6 +31,7 @@ AMythicPlayerController::AMythicPlayerController() {
     CraftingComponent = CreateDefaultSubobject<UCraftingComponent>(TEXT("CraftingComponent"));
     CraftingComponent->SetIsReplicated(true);
 }
+
 
 UAbilitySystemComponent *AMythicPlayerController::GetAbilitySystemComponent() const {
     auto PS = GetPlayerState<AMythicPlayerState>();

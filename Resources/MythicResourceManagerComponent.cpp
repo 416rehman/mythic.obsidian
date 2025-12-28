@@ -64,7 +64,7 @@ void FTrackedDestructibleDataArray::PostReplicatedChange(const TArrayView<int32>
             itemsToSync.Add(Items[index]);
         }
     }
-    
+
     UMythicResourceManagerComponent::HandleResourceDestruction(itemsToSync);
 }
 
@@ -91,7 +91,7 @@ void UMythicResourceManagerComponent::ProcessBatchRespawn() {
     if (indicesToRemove.Num() <= 0) {
         return;
     }
-    
+
     DestroyedResources.RemoveItems(indicesToRemove);
 
     UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent::ProcessBatchRespawn: Removed %d resources from destroyed list"), indicesToRemove.Num());
@@ -148,7 +148,7 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
         auto start = Trans.GetLocation();
         auto end = start + FVector3d(0, 0, 1000);
         const auto color = FColor::Black;
-        const auto thickness = 5.0f;
+        constexpr auto thickness = 5.0f;
         DrawDebugLine(GetWorld(), start, end, color, false, 20, 1, thickness);
     }
 
@@ -163,6 +163,35 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
     }
     else {
         AddNewResource(Transform, DamageAmount, PlayerController, ResourceISM, index);
+    }
+}
+
+void UMythicResourceManagerComponent::LoadDestroyedResource(UMythicResourceISM *ResourceISM, int32 InstanceId, FTransform Transform, double RespawnTime) {
+    if (!GetOwner()->HasAuthority()) {
+        return;
+    }
+
+    if (!ResourceISM) {
+        return;
+    }
+
+    FTrackedDestructibleData NewDestructible;
+    NewDestructible.ResourceISM = ResourceISM;
+    NewDestructible.InstanceId = InstanceId;
+    NewDestructible.Transform = Transform;
+    NewDestructible.RespawnTime = RespawnTime;
+    NewDestructible.HitsTillDestruction = 0; // It's destroyed
+
+    // Check if already in list?
+    bool bExists = DestroyedResources.GetItems()->ContainsByPredicate([&](const FTrackedDestructibleData &Existing) {
+        return Existing.ResourceISM == ResourceISM && Existing.InstanceId == InstanceId;
+    });
+
+    if (!bExists) {
+        DestroyedResources.AddItem(NewDestructible);
+
+        // Also ensure it is visually destroyed immediately on Server
+        ResourceISM->DestroyResource(InstanceId);
     }
 }
 
@@ -291,8 +320,8 @@ void UMythicResourceManagerComponent::HandleResourceDestruction(const TArray<FTr
     UE_LOG(Myth, Log, TEXT("HandleResourceDestruction: Syncing destruction of %d resources"), DestroyedResources.Num());
 
     // All ISM Components that need to be dirtied once after processing
-    TSet<UMythicResourceISM*> ISMsToDirty;
-    
+    TSet<UMythicResourceISM *> ISMsToDirty;
+
     auto length = DestroyedResources.Num();
     for (int i = 0; i < length; i++) {
         auto Resource = DestroyedResources[i];
@@ -316,9 +345,9 @@ void UMythicResourceManagerComponent::HandleResourceDestruction(const TArray<FTr
     }
 
     // Dirty render state once per ISM after processing all instances
-    for (UMythicResourceISM* ISM : ISMsToDirty) {
+    for (UMythicResourceISM *ISM : ISMsToDirty) {
         if (ISM) {
-           ISM->MarkRenderStateDirty();
+            ISM->MarkRenderStateDirty();
         }
     }
 }

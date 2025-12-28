@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Itemization/MythicTags_Inventory.h"
+#include "Itemization/MythicDataAsset.h"
 #include "ItemDefinition.generated.h"
 
 UENUM(BlueprintType, Blueprintable)
@@ -17,7 +18,7 @@ enum EItemRarity {
 class UItemFragment;
 
 UCLASS(Blueprintable, BlueprintType, EditInlineNew)
-class MYTHIC_API UItemDefinition : public UPrimaryDataAsset {
+class MYTHIC_API UItemDefinition : public UMythicDataAsset {
     GENERATED_BODY()
 
 public:
@@ -64,34 +65,9 @@ public:
         return nullptr;
     }
 
-    // Add these to the public section of UItemDefinition
-
 #if WITH_EDITOR
     virtual void PostLoad() override;
     virtual void PreSave(FObjectPreSaveContext SaveContext) override;
     virtual EDataValidationResult IsDataValid(class FDataValidationContext &Context) const override;
-
-    // Export to JSON
-    void ExportAsJSONString(FString &OutJsonString) const;
-    UFUNCTION(CallInEditor, Category="ItemDefinition")
-    void ExportToJSON() const;
-    UFUNCTION(CallInEditor, Category="ItemDefinition")
-    void CopyJSONToClipboard() const;
-
-    // Import from JSON
-    UFUNCTION(CallInEditor, Category="ItemDefinition")
-    void ImportFromJSON();
-#endif
-};
-
-UCLASS(BlueprintType)
-class MYTHIC_API UItemDefinitionJSONImportLibrary : public UBlueprintFunctionLibrary {
-    GENERATED_BODY()
-
-public:
-#if WITH_EDITOR
-    // Call in Editor only
-    UFUNCTION(Blueprintable, BlueprintCallable, CallInEditor, Category="Mythic|Editor")
-    static void ImportItemDefinitionsFromFolder();
 #endif
 };

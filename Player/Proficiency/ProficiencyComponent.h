@@ -15,9 +15,8 @@ class UProficiencyDefinition;
 USTRUCT(BlueprintType, Blueprintable)
 struct FProficiency {
     GENERATED_BODY()
-    
-    void Instantiate();
 
+    void Instantiate();
     void GenerateTrack();
 
     // The definition of the proficiency
@@ -31,6 +30,12 @@ struct FProficiency {
     // The generated proficiency track
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Proficiency")
     TArray<FMilestone> Track = TArray<FMilestone>();
+
+    // XP value loaded from save (staged here until BeginPlay when ASC is ready)
+    float SavedXP = 0.0f;
+
+    // Cache of the max XP for this proficiency (calculated at runtime)
+    float MaxXP = 0.0f;
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -45,11 +50,15 @@ public:
     UAbilitySystemComponent *ASC;
 
 protected:
-    void OnAttributeChanged(const FOnAttributeChangeData &OnAttributeChangeData);
-    void ConfigureProgressionAttribute(FProficiency& Proficiency);
-    // Called when the game starts
-    virtual void BeginPlay() override;
+    // When true, skip normal reward logic in OnAttributeChanged (used during restore)
+    bool bIsRestoring = false;
 
-    // Repication
+    void OnAttributeChanged(const FOnAttributeChangeData &OnAttributeChangeData);
+    void ConfigureProgressionAttribute(FProficiency &Proficiency);
+
+    /** Reapply only CanReapplyOnLoad rewards for levels up to given level */
+    void ReapplyRewardsForLevel(FProficiency &Proficiency, int32 TargetLevel);
+
+    virtual void BeginPlay() override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 };

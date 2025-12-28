@@ -55,6 +55,10 @@ void UAttackFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
     }
 
     auto Roll = &this->AttackRuntimeReplicatedData.RolledDamageSpec;
+    if (Roll->bIsApplied) {
+        return;
+    }
+
     const auto ASC = this->AttackRuntimeReplicatedData.ASC;
     ASC->ApplyModToAttribute(Roll->Attribute, EGameplayModOp::AddBase, Roll->Value);
     Roll->bIsApplied = true;
@@ -79,6 +83,7 @@ void UAttackFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
 
     // Reverse the damage attribute
     ASC->ApplyModToAttribute(Roll->Attribute, EGameplayModOp::AddBase, -Roll->Value);
+    Roll->bIsApplied = false;
 
     // Remove the ability
     auto AbilityHandle = this->AttackRuntimeReplicatedData.AbilityHandle;
@@ -87,7 +92,7 @@ void UAttackFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
     }
 
     // Remove the ability component
-    ASC = nullptr;
+    this->AttackRuntimeReplicatedData.ASC = nullptr;
 }
 
 void UAttackFragment::TriggerAbilityWithEvent(FGameplayTag Tag) {

@@ -81,22 +81,14 @@ void UItemSlotVM::SetAbsoluteIndex(int32 InAbsoluteIndex) {
 
 int32 UItemSlotVM::GetAbsoluteIndex() const { return AbsoluteIndex; }
 
-void UItemSlotVM::SetSlotTypeTag(FGameplayTag InSlotTypeTag) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(SlotTypeTag, InSlotTypeTag)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SlotTypeTag);
+void UItemSlotVM::SetSlotDefinition(UInventorySlotDefinition *InSlotDefinition) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(SlotDefinition, InSlotDefinition)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SlotDefinition);
     }
 }
 
-FGameplayTag UItemSlotVM::GetSlotTypeTag() const { return SlotTypeTag; }
-
-void UItemSlotVM::SetAcceptedItemTypes(FGameplayTagContainer InAcceptedItemTypes) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(AcceptedItemTypes, InAcceptedItemTypes)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(AcceptedItemTypes);
-    }
-}
-
-FGameplayTagContainer UItemSlotVM::GetAcceptedItemTypes() const {
-    return AcceptedItemTypes;
+UInventorySlotDefinition *UItemSlotVM::GetSlotDefinition() const {
+    return SlotDefinition;
 }
 
 void UItemSlotVM::SetParentInventoryVM(UInventoryVM *InParentInventoryVM) {
@@ -109,10 +101,9 @@ UInventoryVM *UItemSlotVM::GetParentInventoryVM() const {
     return ParentInventoryVM;
 }
 
-void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *InParentVM, FGameplayTag InSlotType, FGameplayTagContainer AcceptTypes, int32 InAbsoluteIndex) {
+void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *InParentVM, UInventorySlotDefinition *InSlotDefinition, int32 InAbsoluteIndex) {
     SetAbsoluteIndex(InAbsoluteIndex);
-    SetSlotTypeTag(InSlotType);
-    SetAcceptedItemTypes(AcceptTypes);
+    SetSlotDefinition(InSlotDefinition);
     SetParentInventoryVM(InParentVM);
     if (InItemInstance == nullptr) {
         SetIcon(nullptr);
@@ -134,27 +125,27 @@ void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *
         SetIcon(ItemDef->Icon2d.Get());
         SetIsJunk(/*InItemInstance->bIsJunk*/ false);
         switch (ItemDef->Rarity) {
-        case EItemRarity::Common: {
+        case Common: {
             auto Gray = FColor::FromHex("#808080");
             SetBackgroundColor(FLinearColor::FromSRGBColor(Gray));
         }
         break;
-        case EItemRarity::Rare: {
+        case Rare: {
             auto Blue = FColor::FromHex("#15c965");
             SetBackgroundColor(FLinearColor::FromSRGBColor(Blue));
         }
         break;
-        case EItemRarity::Epic: {
+        case Epic: {
             auto Purple = FColor::FromHex("#732BD2FF");
             SetBackgroundColor(FLinearColor::FromSRGBColor(Purple));
         }
         break;
-        case EItemRarity::Legendary: {
+        case Legendary: {
             auto Orange = FColor::FromHex("#BE6009FF");
             SetBackgroundColor(FLinearColor::FromSRGBColor(Orange));
         }
         break;
-        case EItemRarity::Mythic: {
+        case Mythic: {
             auto Gold = FColor::FromHex("#FF3F36FF");
             SetBackgroundColor(FLinearColor::FromSRGBColor(Gold));
         }
@@ -175,11 +166,13 @@ UMythicInventoryComponent *UItemSlotVM::TryGetOwningInventoryComponent() const {
 }
 
 UMythicItemInstance *UItemSlotVM::TryGetItemInstance() const {
-    if (ParentInventoryVM == nullptr)
+    if (ParentInventoryVM == nullptr) {
         return nullptr;
+    }
     UMythicInventoryComponent *InvComp = ParentInventoryVM->GetOwningInventoryComponent();
-    if (InvComp == nullptr)
+    if (InvComp == nullptr) {
         return nullptr;
+    }
     FMythicInventorySlotEntry Entry;
     if (!InvComp->GetSlotEntry(AbsoluteIndex, Entry)) {
         return nullptr;

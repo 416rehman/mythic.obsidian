@@ -31,7 +31,7 @@ struct FTrackedDestructibleData : public FFastArraySerializerItem {
     // The ISM this resource belongs to
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Resource")
     UMythicResourceISM *ResourceISM;
-    
+
     bool operator==(const FTrackedDestructibleData &other) const {
         return other.ResourceISM == this->ResourceISM && other.InstanceId == this->InstanceId;
     }
@@ -141,12 +141,16 @@ public:
 
     // Add a resource to the tracked list
     UFUNCTION(BlueprintCallable, Category = "Resource", BlueprintAuthorityOnly)
-    void AddOrUpdateResource(FTransform Transform, int32 DamageAmount, APlayerController* PlayerController, UMythicResourceISM* ResourceISM, int32 index);
+    void AddOrUpdateResource(FTransform Transform, int32 DamageAmount, APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32 index);
+
+    // Load destroyed resources from save data
+    UFUNCTION(BlueprintCallable, Category = "Resource", BlueprintAuthorityOnly)
+    void LoadDestroyedResource(UMythicResourceISM *ResourceISM, int32 InstanceId, FTransform Transform, double RespawnTime);
 
 private:
     // Helper functions
     void ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount, APlayerController *PlayerController);
-    void AddNewResource(FTransform Transform, int32 DamageAmount, APlayerController* PlayerController, UMythicResourceISM* ResourceISM, int32
+    void AddNewResource(FTransform Transform, int32 DamageAmount, APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32
                         Index);
     void AddToDestroyedResources(FTrackedDestructibleData DestroyedResource, APlayerController *PlayerController);
 
@@ -160,7 +164,9 @@ public:
 
     TArray<FTrackedDestructibleData> GetTrackedDestructibles() const;
 
+    const TArray<FTrackedDestructibleData> &GetDestroyedItems() const { return *DestroyedResources.GetItems(); }
+
     // Used for handling destruction of resources after they are added to the destroyed resources array
-    static void HandleResourceDestruction(const TArray<FTrackedDestructibleData>& DestroyedResources);
-    static void HandleResourceRespawn(const TArray<FTrackedDestructibleData>& RespawnedResources);
+    static void HandleResourceDestruction(const TArray<FTrackedDestructibleData> &DestroyedResources);
+    static void HandleResourceRespawn(const TArray<FTrackedDestructibleData> &RespawnedResources);
 };

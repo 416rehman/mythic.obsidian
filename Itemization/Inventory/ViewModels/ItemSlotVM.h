@@ -52,21 +52,14 @@ public:
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     int32 AbsoluteIndex;
 
-    // Gameplay slot type (e.g., Inventory.Slot.Weapon)
+    // Slot Definition
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
-    FGameplayTag SlotTypeTag;
-
-    // Accepts only items with this tag (e.g., Inventory.SlotType.Weapon)
-    // Not strictly necessary, as the owning InventoryVM and InventoryComponent will enforce this
-    // But can be useful for UI filtering and validation
-    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
-    FGameplayTagContainer AcceptedItemTypes;
+    TObjectPtr<UInventorySlotDefinition> SlotDefinition;
 
     // Owning InventoryVM
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     UInventoryVM *ParentInventoryVM;
 
-public:
     void SetIcon(UTexture2D *InIcon);
     UTexture2D *GetIcon() const;
     void SetIsJunk(bool bInIsJunk);
@@ -85,24 +78,22 @@ public:
 
     void SetAbsoluteIndex(int32 InAbsoluteIndex);
     int32 GetAbsoluteIndex() const;
-    void SetSlotTypeTag(FGameplayTag InSlotTypeTag);
-    FGameplayTag GetSlotTypeTag() const;
-    void SetAcceptedItemTypes(FGameplayTagContainer InAcceptedItemTypes);
-    FGameplayTagContainer GetAcceptedItemTypes() const;
+
+    void SetSlotDefinition(UInventorySlotDefinition *InSlotDefinition);
+    UInventorySlotDefinition *GetSlotDefinition() const;
 
     void SetParentInventoryVM(UInventoryVM *InParentInventoryVM);
     UInventoryVM *GetParentInventoryVM() const;
 
-    void Initialize(UMythicItemInstance* InItemInstance, UInventoryVM* InParentVM, FGameplayTag InSlotType, FGameplayTagContainer AcceptTypes, int32 InAbsoluteIndex);
-    
+    void Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *InParentVM, UInventorySlotDefinition *InSlotDefinition, int32 InAbsoluteIndex);
+
     /** Helpers **/
     // Get owning inventory component from ParentInventoryVM - ONE SHOT
     UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
-    UMythicInventoryComponent* TryGetOwningInventoryComponent() const;
+    UMythicInventoryComponent *TryGetOwningInventoryComponent() const;
 
     // Try getting the item instance currently in this slot - ONE SHOT
     // Checks ParentInventoryVM and its OwningInventoryComponent and queries for the item in this slot index
     UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
-    UMythicItemInstance* TryGetItemInstance() const;
+    UMythicItemInstance *TryGetItemInstance() const;
 };
-

@@ -7,6 +7,7 @@
 #include "Mythic.h"
 #include "Engine/DirectionalLight.h"
 #include "GameFramework/Actor.h"
+#include "Mythic/Subsystem/SaveSystem/World/MythicSaveableActor.h"
 #include "MythicEnvironmentController.generated.h"
 
 class UExponentialHeightFogComponent;
@@ -116,7 +117,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTargetWeatherReachedSignature, FG
 
 
 UCLASS(Blueprintable, BlueprintType)
-class MYTHIC_API AMythicEnvironmentController : public AActor {
+class MYTHIC_API AMythicEnvironmentController : public AActor, public IMythicSaveableActor {
     GENERATED_BODY()
 
 private:
@@ -171,7 +172,7 @@ protected:
     ADirectionalLight *NighttimeDirectionalLight;
 
     // Timespan of the current time of day - The actual
-    UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Time of Day Controller")
+    UPROPERTY(BlueprintReadOnly, EditAnywhere, SaveGame, Category = "Time of Day Controller")
     FTimespan Time;
 
     // Update frequency of the time. In real time seconds, how often the time will be updated
@@ -219,7 +220,7 @@ private:
     ///~ Current Weather
     // Tag of the current weather type - Set after the transition is complete
     // Flow: CurrentWeather -> Transition -> TargetWeather
-    UPROPERTY()
+    UPROPERTY(SaveGame)
     UWeatherType *CurrentWeather;
 
     // Time the weather changed to the current weather type

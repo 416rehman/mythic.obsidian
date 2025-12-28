@@ -104,34 +104,38 @@ void UInventoryVM::Clear() {
 }
 
 TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythicInventorySlotEntry> &allSlots, TSet<int32> InventoryIndices) {
-    auto TypeToTabMap = TMap<FGameplayTag, TObjectPtr<UInventoryTabVM>>();
+    auto DefToTabMap = TMap<TObjectPtr<UInventorySlotDefinition>, TObjectPtr<UInventoryTabVM>>();
 
     auto AsArray = InventoryIndices.Array();
     for (int32 i = 0; i < AsArray.Num(); ++i) {
         auto AbsIndex = AsArray[i];
         const FMythicInventorySlotEntry &Entry = allSlots[AbsIndex];
-        auto type = Entry.SlotType;
 
-        // Get the tab for this type, or create it if it doesn't exist
-        TObjectPtr<UInventoryTabVM> *FoundTab = TypeToTabMap.Find(type);
+        // Skip if no slot definition
+        if (!Entry.SlotDefinition) {
+            continue;
+        }
+
+        // Get the tab for this definition, or create it if it doesn't exist
+        TObjectPtr<UInventoryTabVM> *FoundTab = DefToTabMap.Find(Entry.SlotDefinition);
         if (FoundTab == nullptr) {
             // Create new tab
             auto NewTabVM = NewObject<UInventoryTabVM>(this);
-            // Get the name and icon from the slot type row
-            const FSlotType *SlotTypeData = Entry.SlotTypeRow.GetRow<FSlotType>(FString());
-            if (!SlotTypeData) {
-                UE_LOG(Myth, Warning, TEXT("SlotTypeRow %s is invalid or not found in data table."), *Entry.SlotTypeRow.RowName.ToString());
-                continue;
+            // Get the name and icon from the slot definition
+            FText Label = Entry.SlotDefinition->DisplayName;
+            if (Label.IsEmpty()) {
+                Label = FText::FromString(Entry.SlotDefinition->GetName());
             }
-            NewTabVM->Initialize(FText::FromName(Entry.SlotTypeRow.RowName), SlotTypeData->Icon, TArray<TObjectPtr<UItemSlotVM>>(), 0);
-            TypeToTabMap.Add(type, NewTabVM);
-            FoundTab = TypeToTabMap.Find(type);
+
+            NewTabVM->Initialize(Label, Entry.SlotDefinition->Icon, TArray<TObjectPtr<UItemSlotVM>>(), 0);
+            DefToTabMap.Add(Entry.SlotDefinition, NewTabVM);
+            FoundTab = DefToTabMap.Find(Entry.SlotDefinition);
         }
 
         // Add to tab
         if (FoundTab && *FoundTab) {
             auto NewSlotVM = NewObject<UItemSlotVM>(this);
-            NewSlotVM->Initialize(Entry.SlottedItemInstance, this, Entry.SlotType, Entry.ItemTypeWhitelist, AbsIndex);
+            NewSlotVM->Initialize(Entry.SlottedItemInstance, this, Entry.SlotDefinition, AbsIndex);
             (*FoundTab)->Slots.Add(NewSlotVM);
 
             // Ensure the map is large enough
@@ -143,7 +147,7 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythic
     }
 
     auto TabsArray = TArray<TObjectPtr<UInventoryTabVM>>();
-    TypeToTabMap.GenerateValueArray(TabsArray);
+    DefToTabMap.GenerateValueArray(TabsArray);
     return TabsArray;
 }
 
@@ -162,7 +166,7 @@ void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *I
     auto SetOfEquipableSlots = TSet<int32>();
     for (int32 SlotIdx = 0; SlotIdx < AllSlots.Num(); ++SlotIdx) {
         const FMythicInventorySlotEntry &Entry = AllSlots[SlotIdx];
-        if (Entry.SlotType.IsValid()) {
+        if (Entry.SlotDefinition) {
             if (Entry.bIsActive) {
                 SetOfEquipableSlots.Add(SlotIdx);
             }
@@ -210,8 +214,16 @@ void UInventoryVM::RefreshSlotFromInventory(UMythicInventoryComponent *Inventory
     }
 
     // Update slot VM from current inventory data
-    SlotVM->Initialize(Entry.SlottedItemInstance, this, Entry.SlotType, Entry.ItemTypeWhitelist, AbsoluteIndex);
-    UE_LOG(Myth, Verbose, TEXT("Slot %d refreshed from inventory."), AbsoluteIndex);
+    if (Entry.SlotDefinition) {
+        SlotVM->Initialize(Entry.SlottedItemInstance, this, Entry.SlotDefinition, AbsoluteIndex);
+        UE_LOG(Myth, Verbose, TEXT("Slot %d refreshed from inventory."), AbsoluteIndex);
+    }
+    else {
+        auto Owner = Inventory->GetOwner();
+        auto OwnerName = Owner ? Owner->GetName() : TEXT("NoOwner");
+        UE_LOG(Myth, Error, TEXT("Slot %d has no definition for %s's inventory"), AbsoluteIndex, *OwnerName);
+        SlotVM->Initialize(Entry.SlottedItemInstance, this, nullptr, AbsoluteIndex);
+    }
 }
 
 void UInventoryVM::RefreshAllItemsFromInventory(UMythicInventoryComponent *Inventory) {

@@ -1,6 +1,5 @@
 ﻿// 
 
-
 #include "MythicWorldItem.h"
 
 #include "Mythic.h"
@@ -25,7 +24,7 @@ AMythicWorldItem::AMythicWorldItem() {
 
     // Set the static mesh component as the root component
     RootComponent = StaticMesh;
-    
+
     // Set collision to overlaps only
     this->SetActorEnableCollision(true);
     StaticMesh->SetSimulatePhysics(false);
@@ -73,7 +72,7 @@ void AMythicWorldItem::OnRep_ItemInstance() {
 
 // If the item hits the ground (the hit is under the item), stop simulating physics
 void AMythicWorldItem::OnHit(UPrimitiveComponent *HitComponent, AActor *OtherActor, UPrimitiveComponent *OtherComp, FVector NormalImpulse,
-    const FHitResult &Hit) {
+                             const FHitResult &Hit) {
     // If the hit is under the item, stop simulating physics, and allow overlaps only
     if (Hit.ImpactPoint.Z < GetActorLocation().Z || Hit.Normal.Z > 0.5f) {
         UE_LOG(Myth, Warning, TEXT("AMythicWorldItem::OnHit: %s"), *GetName());
@@ -107,13 +106,13 @@ void AMythicWorldItem::EmulateDropPhysics(const FVector &location, float radius)
     this->StaticMesh->SetSimulatePhysics(true);
     this->StaticMesh->SetEnableGravity(true);
     this->StaticMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    
+
     // Apply the suggested velocity to the world item
     this->StaticMesh->SetPhysicsLinearVelocity(SuggestedVelocity);
 
     // generate hit events, If the item hits the ground, stop simulating physics
     this->StaticMesh->SetNotifyRigidBodyCollision(true);
-    this->StaticMesh->OnComponentHit.AddDynamic(this, &AMythicWorldItem::OnHit);   
+    this->StaticMesh->OnComponentHit.AddDynamic(this, &AMythicWorldItem::OnHit);
 }
 
 // Cosmetic only.
@@ -154,4 +153,48 @@ void AMythicWorldItem::SetTargetRecipient(AController *NewTargetRecipient) {
 
     this->TargetRecipient = NewTargetRecipient;
     OnRep_TargetRecipient();
+}
+
+// --- IMythicSaveableActor Implementation ---
+
+void AMythicWorldItem::SerializeCustomData(TArray<uint8> &OutCustomData) {
+    if (!ItemInstance) {
+        return; // Nothing to serialize
+    }
+
+    // Serialize the item instance class and data
+    FMemoryWriter MemWriter(OutCustomData);
+    FObjectAndNameAsStringProxyArchive Ar(MemWriter, false);
+    Ar.ArIsSaveGame = true;
+
+    // Save the class path so we can recreate it
+    FSoftClassPath ItemClassPath(ItemInstance->GetClass());
+    Ar << ItemClassPath;
+
+    // Save the item's internal data
+    ItemInstance->Serialize(Ar);
+}
+
+void AMythicWorldItem::DeserializeCustomData(const TArray<uint8> &InCustomData) {
+    if (InCustomData.Num() == 0) {
+        return; // No data to deserialize
+    }
+
+    FMemoryReader MemReader(InCustomData);
+    FObjectAndNameAsStringProxyArchive Ar(MemReader, false);
+    Ar.ArIsSaveGame = true;
+
+    // Load the class path
+    FSoftClassPath ItemClassPath;
+    Ar << ItemClassPath;
+
+    // Create the item instance
+    UClass *ItemClass = ItemClassPath.TryLoadClass<UMythicItemInstance>();
+    if (ItemClass) {
+        ItemInstance = NewObject<UMythicItemInstance>(this, ItemClass);
+        ItemInstance->Serialize(Ar);
+        ItemInstance->SetOwner(this);
+
+        OnRep_ItemInstance();
+    }
 }

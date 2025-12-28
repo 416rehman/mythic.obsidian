@@ -4,6 +4,58 @@
 #include "Fragments/ItemFragment.h"
 #include "Mythic/Mythic.h"
 
+void UMythicItemInstance::Serialize(FArchive &Ar) {
+    Super::Serialize(Ar);
+
+    if (Ar.IsSaveGame()) {
+        if (Ar.IsLoading()) {
+            int32 FragCount = 0;
+            Ar << FragCount;
+
+            ItemFragments.Empty(FragCount);
+
+            TArray<UItemFragment *> UsedTemplates;
+            for (int32 i = 0; i < FragCount; ++i) {
+                FSoftClassPath FragClassPath;
+                Ar << FragClassPath;
+
+                UClass *FragClass = FragClassPath.TryLoadClass<UItemFragment>();
+                if (FragClass) {
+                    UItemFragment *Template = nullptr;
+                    if (ItemDefinition) {
+                        for (UItemFragment *DefFrag : ItemDefinition->Fragments) {
+                            if (DefFrag && DefFrag->GetClass() == FragClass && !UsedTemplates.Contains(DefFrag)) {
+                                Template = DefFrag;
+                                UsedTemplates.Add(DefFrag);
+                                break;
+                            }
+                        }
+                    }
+
+                    UItemFragment *NewFrag = NewObject<UItemFragment>(this, FragClass, NAME_None, RF_NoFlags, Template);
+                    NewFrag->Serialize(Ar);
+                    ItemFragments.Add(NewFrag);
+                }
+                else {
+                    UE_LOG(MythSaveLoad, Error, TEXT("Failed to load fragment class %s during deserialization"), *FragClassPath.ToString());
+                }
+            }
+        }
+        else if (Ar.IsSaving()) {
+            int32 FragCount = ItemFragments.Num();
+            Ar << FragCount;
+
+            for (UItemFragment *Frag : ItemFragments) {
+                if (Frag) {
+                    FSoftClassPath FragClassPath(Frag->GetClass());
+                    Ar << FragClassPath;
+                    Frag->Serialize(Ar);
+                }
+            }
+        }
+    }
+}
+
 void UMythicItemInstance::SetStackSize(const int32 newQuantity) {
     // Authority check
     auto owner = this->GetOwningActor();
@@ -48,13 +100,13 @@ void UMythicItemInstance::Initialize(UItemDefinition *ItemDef, const int32 quant
 
     // Create fragments for this item from the item definition
     for (int i = 0; i < ItemDef->Fragments.Num(); i++) {
-        auto Fragment = ItemDef->Fragments[i];
-        if (!Fragment) {
+        auto FragmentSource = ItemDef->Fragments[i];
+        if (!FragmentSource) {
             UE_LOG(Myth, Error, TEXT("ItemInstance %s has a null fragment at index %d"), *GetName(), i);
             continue;
         }
 
-        AddFragment(Fragment);
+        AddFragment(FragmentSource);
     }
 }
 
@@ -63,7 +115,7 @@ void UMythicItemInstance::AddFragment(TObjectPtr<UItemFragment> FragmentSource) 
     auto owner = this->GetOwningActor();
     checkf(owner->HasAuthority(), TEXT("Only the server can add fragments to an item instance"));
 
-    auto Fragment = NewObject<UItemFragment>(this, FragmentSource.GetClass(), NAME_None, RF_NoFlags, FragmentSource);
+    UItemFragment *Fragment = NewObject<UItemFragment>(this, FragmentSource->GetClass(), NAME_None, RF_NoFlags, FragmentSource);
     Fragment->SetOwner(owner); // this object's owner will be responsible for replicating it
 
     ItemFragments.Add(Fragment);
@@ -200,13 +252,13 @@ void UMythicItemInstance::OnDestroyed() {
         if (IsValid(inventory)) {
             inventory->SetItemInSlot(this->GetSlot(), nullptr);
         }
-        
+
         for (auto Fragment : ItemFragments) {
             if (IsValid(Fragment)) {
                 Fragment->MarkAsGarbage();
             }
         }
-        
+
         ItemFragments.Empty();
     }
 }

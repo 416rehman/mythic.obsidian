@@ -6,16 +6,10 @@
 /**
  * FMythicGameModule
  */
-class FMythicGameModule : public FDefaultGameModuleImpl
-{
-    virtual void StartupModule() override
-    {
-    }
+class FMythicGameModule : public FDefaultGameModuleImpl {
+    virtual void StartupModule() override {}
 
-    virtual void ShutdownModule() override
-    {
-        
-    }
+    virtual void ShutdownModule() override {}
 };
 
 IMPLEMENT_PRIMARY_GAME_MODULE(FMythicGameModule, Mythic, "Mythic");
@@ -23,3 +17,4 @@ IMPLEMENT_PRIMARY_GAME_MODULE(FMythicGameModule, Mythic, "Mythic");
 DEFINE_LOG_CATEGORY(Myth)
 DEFINE_LOG_CATEGORY(Myth_Environment)
 DEFINE_LOG_CATEGORY(Myth_Mods)
+DEFINE_LOG_CATEGORY(MythSaveLoad)

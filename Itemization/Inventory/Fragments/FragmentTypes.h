@@ -34,6 +34,22 @@ struct MYTHIC_API FRollDefinition {
     UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category="Presentation")
     bool bIsPercentage = true;
 
+    // Custom serialization - only for save games
+    bool Serialize(FArchive &Ar) {
+        // For assets, use default serialization
+        if (!Ar.IsSaveGame()) {
+            return false;
+        }
+        // For save games, manually serialize all fields
+        Ar << Min;
+        Ar << Max;
+        Ar << Modifier;
+        Ar << LevelScaling;
+        Ar << bLowerIsBetter;
+        Ar << bIsPercentage;
+        return true;
+    }
+
     // == Operator
     bool operator==(const FRollDefinition &Other) const {
         return Min == Other.Min
@@ -65,17 +81,33 @@ struct MYTHIC_API FRollDefinition {
     }
 };
 
+// Enable custom serialization for FRollDefinition
+template <>
+struct TStructOpsTypeTraits<FRollDefinition> : TStructOpsTypeTraitsBase2<FRollDefinition> {
+    enum {
+        WithSerializer = true
+    };
+};
+
 // This struct holds rolled gameplay attribute instances
 USTRUCT(BlueprintType)
-struct FRolledAttributeSpec {
+struct MYTHIC_API FRolledAttributeSpec {
     GENERATED_BODY()
 
     // The roll definition that was used to roll this attribute
     UPROPERTY(BlueprintReadOnly)
     FRollDefinition Definition;
 
+    // NOTE: FGameplayAttribute uses internal pointers that don't serialize properly.
+    // The Serialize method handles saving/loading via AttributeSetClassName + AttributePropertyName.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     FGameplayAttribute Attribute;
+
+    // For serialization - stores the attribute set class path
+    FString AttributeSetClassName;
+
+    // For serialization - stores the property name  
+    FString AttributePropertyName;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     float Value = 0;
@@ -85,20 +117,31 @@ struct FRolledAttributeSpec {
 
     FRolledAttributeSpec() {}
 
-    FRolledAttributeSpec(FGameplayAttribute Attribute, int ItemLvl, FRollDefinition &RollDef) {
-        this->Attribute = Attribute;
-        this->bIsApplied = false;
+    FRolledAttributeSpec(FGameplayAttribute InAttribute, int ItemLvl, FRollDefinition &RollDef) {
+        Attribute = InAttribute;
+        bIsApplied = false;
+
+        // Store attribute identity for serialization
+        if (Attribute.IsValid()) {
+            if (UStruct *AttrSet = Attribute.GetAttributeSetClass()) {
+                AttributeSetClassName = AttrSet->GetPathName();
+            }
+            AttributePropertyName = Attribute.GetName();
+        }
 
         // Apply level scaling
         auto Min = RollDef.GetScaledMin(ItemLvl);
         auto Max = RollDef.GetScaledMax(ItemLvl);
 
         // Roll the value
-        this->Value = FMath::RandRange(Min, Max);
+        Value = FMath::RandRange(Min, Max);
 
         // Set the roll definition
-        this->Definition = RollDef;
+        Definition = RollDef;
     }
+
+    // Custom serialization - handles FGameplayAttribute which can't serialize directly
+    bool Serialize(FArchive &Ar);
 
     // == Operator
     bool operator==(const FRolledAttributeSpec &Other) const {
@@ -106,19 +149,27 @@ struct FRolledAttributeSpec {
     }
 };
 
+// Enable custom serialization for FRolledAttributeSpec
+template <>
+struct TStructOpsTypeTraits<FRolledAttributeSpec> : TStructOpsTypeTraitsBase2<FRolledAttributeSpec> {
+    enum {
+        WithSerializer = true
+    };
+};
+
 // This struct holds rolled gameplay tag instances
 USTRUCT(BlueprintType)
 struct FRolledTagSpec {
     GENERATED_BODY()
 
-    FRolledTagSpec(): Value(0) {}
+    FRolledTagSpec() : Value(0) {}
 
     // The gameplay tag
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Itemization")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Itemization", SaveGame)
     FGameplayTag Tag;
 
     // The rolled value
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Itemization")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Itemization", SaveGame)
     float Value;
 
     // Constructor
@@ -140,17 +191,17 @@ struct FAbilityDefinition {
     GENERATED_BODY()
 
     // The ability to roll
-    UPROPERTY(BlueprintReadWrite, EditDefaultsOnly)
+    UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, SaveGame)
     TSubclassOf<class UGameplayAbility> Ability;
 
     // Map of the attributes to roll.
-    UPROPERTY(BlueprintReadWrite, EditDefaultsOnly)
+    UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, SaveGame)
     TMap<FGameplayTag, FRollDefinition> ParameterRolls;
 
     // Rich text representation of the ability and its rolled stats. To calculate the rolled value, the following <> tags can be used:
     //
     // Example: "<#GAS.Damage> Damage dealt is returned as health" -> "<RichText>10%</RichText><Optional>[Min-Max]</Optional> Damage is returned as health"
-    UPROPERTY(BlueprintReadWrite, EditDefaultsOnly)
+    UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, SaveGame)
     FText RichText = FText::FromString("???");
 
     bool GetRichText(FText &OutRichText, TArray<FRolledTagSpec> &RolledAttributes) {
@@ -246,11 +297,11 @@ struct FAbilityRollSpec {
     FGameplayAbilitySpec AbilitySpec;
 
     // Attributes used in the ability
-    UPROPERTY(BlueprintReadWrite, EditDefaultsOnly)
+    UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, SaveGame)
     TArray<FRolledTagSpec> RolledAttributes;
 
     // The Rich text for this spec
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, SaveGame)
     FText RichText;
 
     // Constructor to roll the attributes

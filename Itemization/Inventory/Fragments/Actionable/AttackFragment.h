@@ -29,7 +29,7 @@ USTRUCT(Blueprintable, BlueprintType)
 struct FAttackRuntimeReplicatedData {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, SaveGame)
     FRolledAttributeSpec RolledDamageSpec = FRolledAttributeSpec();
 
     UPROPERTY()
@@ -43,19 +43,19 @@ USTRUCT(Blueprintable, BlueprintType)
 struct FAttackConfig {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    UPROPERTY(BlueprintReadWrite, EditAnywhere, SaveGame)
     TSubclassOf<UGameplayAbility> TriggerAbility = nullptr;
 
     // The ability will be trigerred with this tag when the attack is executed
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Attack")
+    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Attack", SaveGame)
     FGameplayTag AttackBeginEventTag = GAS_EVENT_ATTACK_BEGIN;
 
     // The ability will be trigerred with this tag when the attack is finished
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Attack")
+    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Attack", SaveGame)
     FGameplayTag AttackEndEventTag = GAS_EVENT_ATTACK_END;
 
     // The animation montage to play when this attack is executed
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Attack")
+    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Attack", SaveGame)
     UAnimMontage *AttackMontage = nullptr;
 };
 
@@ -84,7 +84,7 @@ public:
 
     /** Designer friendly configuration data that defines this fragment. */
     /** REPLICATED and fields should be BlueprintReadOnly */
-    UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties))
+    UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties), SaveGame)
     FAttackConfig AttackConfig = FAttackConfig();
 
     /** This is used in the OnInstanced method to calculate/fill the rest of the data. */
@@ -94,7 +94,7 @@ public:
 
     /** Contains the runtime state of the fragment (replicated to client) */
     /** REPLICATED */
-    UPROPERTY(Replicated, BlueprintReadOnly)
+    UPROPERTY(Replicated, BlueprintReadOnly, SaveGame)
     FAttackRuntimeReplicatedData AttackRuntimeReplicatedData = FAttackRuntimeReplicatedData();
 
     /** Contains the runtime client side state of the fragment for use in methods like OnActiveItemClient */

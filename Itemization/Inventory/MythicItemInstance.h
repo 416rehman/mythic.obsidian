@@ -17,7 +17,7 @@ class MYTHIC_API UMythicItemInstance : public UMythicReplicatedObject {
 
 protected:
     // object pointer to the item definition data asset
-    UPROPERTY(ReplicatedUsing=OnRep_ItemDefinition, BlueprintReadOnly, Category = "Item")
+    UPROPERTY(ReplicatedUsing=OnRep_ItemDefinition, BlueprintReadOnly, Category = "Item", SaveGame)
     UItemDefinition *ItemDefinition;
 
     // Item Fragments copied from the item definition
@@ -25,10 +25,10 @@ protected:
     TArray<TObjectPtr<UItemFragment>> ItemFragments;
 
     // Quantity of item (Current size of stack), with a setter to make sure its never over the max stack size
-    UPROPERTY(ReplicatedUsing=OnRep_Quantity, BlueprintReadOnly, Category = "Item", meta = (ClampMin = "1"))
+    UPROPERTY(ReplicatedUsing=OnRep_Quantity, BlueprintReadOnly, Category = "Item", meta = (ClampMin = "1"), SaveGame)
     int32 Quantity = 1;
 
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item", SaveGame)
     int randomSeed;
 
     UPROPERTY(ReplicatedUsing=OnRep_OwningInventory, BlueprintReadOnly, Category = "Item")
@@ -38,11 +38,11 @@ protected:
     int32 SlotIndex = -1;
 
     // The level of the item
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item", SaveGame)
     int32 ItemLevel = 1;
 
     // Tags assigned to the item - these are dynamic and can be changed at runtime
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item", SaveGame)
     FGameplayTagContainer ItemTags;
 
     UFUNCTION()
@@ -58,6 +58,8 @@ protected:
     void OnRep_SlotIndex();
 
 public:
+    virtual void Serialize(FArchive &Ar) override;
+
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {
         Super::GetLifetimeReplicatedProps(OutLifetimeProps);
         DOREPLIFETIME(UMythicItemInstance, ItemDefinition);

@@ -34,7 +34,7 @@ class MYTHIC_API UActionableItemFragment : public UItemFragment {
     GENERATED_BODY()
 
 public:
-    UPROPERTY(Replicated, EditAnywhere, meta=(ShowOnlyInnerProperties))
+    UPROPERTY(Replicated, EditAnywhere, meta=(ShowOnlyInnerProperties), SaveGame)
     UInputAction *InputAction;
 
     TArray<uint32> InputBindings;

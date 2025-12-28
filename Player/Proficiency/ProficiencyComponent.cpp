@@ -71,7 +71,6 @@ void FProficiency::Instantiate() {
 void UProficiencyComponent::OnAttributeChanged(const FOnAttributeChangeData &OnAttributeChangeData) {
     auto NewValue = OnAttributeChangeData.NewValue;
     auto OldValue = OnAttributeChangeData.OldValue;
-    auto AddedValue = NewValue - OldValue;
 
     // Get the Proficiency that depends on this progression attribute
     auto Proficiency = this->Proficiencies.FindByPredicate([&OnAttributeChangeData](const FProficiency &Proficiency) {
@@ -82,42 +81,56 @@ void UProficiencyComponent::OnAttributeChanged(const FOnAttributeChangeData &OnA
         return;
     }
 
-    // If the attribute changed to a value greater than the current level
-    auto OldLevel = UProficiencyDefinition::CalcLevelAtXP(OldValue, Proficiency->Definition);
-    auto NewLevel = UProficiencyDefinition::CalcLevelAtXP(NewValue, Proficiency->Definition);
+    // if XP exceeds MaxXP, clamp it and return (the clamp will trigger a new callback with correct value)
+    if (Proficiency->MaxXP > 0.0f && NewValue > Proficiency->MaxXP) {
+        UE_LOG(Myth, Log, TEXT("Proficiency %s: XP %f exceeds MaxXP %f. Clamping."),
+               *Proficiency->Definition->Name.ToString(), NewValue, Proficiency->MaxXP);
 
-    auto LevelsGained = NewLevel - OldLevel;
-    if (LevelsGained <= 0) {
-        UE_LOG(Myth, Log, TEXT("Proficiency: No level gained"));
+        // use the base setter to force the value back down
+        ASC->SetNumericAttributeBase(Proficiency->ProgressAttribute, Proficiency->MaxXP);
         return;
     }
 
-    UE_LOG(Myth, Log, TEXT("%s Proficiency: Leveled up %d levels"), *Proficiency->Definition->Name.ToString(), LevelsGained);
+    // Skip during restore - we handle rewards separately
+    if (bIsRestoring) {
+        return;
+    }
 
-    // If the new level is greater than the current level, give rewards
+    // Calculate levels from XP
+    int32 OldLevel = UProficiencyDefinition::CalcLevelAtXP(OldValue, Proficiency->Definition);
+    int32 NewLevel = UProficiencyDefinition::CalcLevelAtXP(NewValue, Proficiency->Definition);
+
+    // No level change - nothing to do
+    if (NewLevel <= OldLevel) {
+        return;
+    }
+
     APlayerController *Owner = Cast<APlayerController>(this->GetOwner());
     if (!Owner) {
         UE_LOG(Myth, Error, TEXT("Proficiency: Missing Owner"));
         return;
     }
 
-    auto context = FRewardContext(Owner);
-    for (int i = 0; i < LevelsGained; ++i) {
-        auto Level = OldLevel + i;
-        auto Milestone = Proficiency->Track[Level];
-        UE_LOG(Myth, Log, TEXT("%s Proficiency Reward: Level %d: %s"), *Proficiency->Definition->Name.ToString(), Level + 1, *Milestone.Name.ToString());
+    auto Context = FRewardContext(Owner);
+
+    // Give rewards for NEW levels only (OldLevel to NewLevel-1)
+    for (int32 Level = OldLevel; Level < NewLevel && Level < Proficiency->Track.Num(); ++Level) {
+        auto &Milestone = Proficiency->Track[Level];
+        UE_LOG(Myth, Log, TEXT("%s Proficiency Reward: Level %d: %s"),
+               *Proficiency->Definition->Name.ToString(), Level + 1, *Milestone.Name.ToString());
+
         for (auto Reward : Milestone.Rewards) {
-            Reward->Give(context);
+            if (Reward) {
+                Reward->Give(Context);
+            }
         }
     }
 
-    UE_LOG(Myth, Log, TEXT("%s Proficiency: Old XP: %f (Level %d) --(%f)--> New XP: %f (Level %d)"), *Proficiency->Definition->Name.ToString(), OldValue,
-           OldLevel, AddedValue, NewValue, NewLevel);
+    UE_LOG(Myth, Log, TEXT("%s Proficiency: XP: %.0f -> %.0f (Level %d -> %d)"),
+           *Proficiency->Definition->Name.ToString(), OldValue, NewValue, OldLevel, NewLevel);
 }
 
-// Sets the Maximum value for the progression attribute to be the max level's XP.
-// This is done to ensure that the attribute is always at least the max level's XP.
-// Starts listening for changes to the attribute for the proficiency's progression attribute, the listener function then gives rewards when the attribute changes.
+// Ensures the progression attribute set is spawned and binds the change delegate.
 void UProficiencyComponent::ConfigureProgressionAttribute(FProficiency &Proficiency) {
     auto Def = Proficiency.Definition;
     if (!Def) {
@@ -132,13 +145,41 @@ void UProficiencyComponent::ConfigureProgressionAttribute(FProficiency &Proficie
         UE_LOG(Myth, Warning, TEXT("Proficiency: AttributeSet for Attribute %s granted because it wasn't"), *Proficiency.ProgressAttribute.AttributeName)
     }
 
-    // Set the maximum value for the attribute.
-    auto MaxXP = ceil(UProficiencyDefinition::CalcCumulativeXPForLevel(Def->MaxLevel, Def));
-    ASC->SetNumericAttributeBase(Proficiency.ProgressAttribute, MaxXP);
-
     // Register the attribute change callback
     ASC->GetGameplayAttributeValueChangeDelegate(Proficiency.ProgressAttribute).AddUObject(this, &UProficiencyComponent::OnAttributeChanged);
-    UE_LOG(Myth, Log, TEXT("Proficiency: Proficiency Bound to %s (Max XP: %f)"), *Proficiency.ProgressAttribute.AttributeName, MaxXP);
+
+    // Cache the MaxXP for clamping logic
+    Proficiency.MaxXP = ceil(UProficiencyDefinition::CalcCumulativeXPForLevel(Def->MaxLevel, Def));
+
+    UE_LOG(Myth, Log, TEXT("Proficiency: Bound to %s (MaxXP: %.1f)"), *Proficiency.ProgressAttribute.AttributeName, Proficiency.MaxXP);
+}
+
+// Reapply only CanReapplyOnLoad rewards (attributes, abilities) for levels up to given level
+void UProficiencyComponent::ReapplyRewardsForLevel(FProficiency &Proficiency, int32 TargetLevel) {
+    if (!Proficiency.Definition) {
+        return;
+    }
+
+    APlayerController *Owner = Cast<APlayerController>(GetOwner());
+    if (!Owner) {
+        return;
+    }
+
+    auto Context = FRewardContext(Owner);
+    int32 ReappliedCount = 0;
+
+    for (int32 Level = 0; Level < TargetLevel && Level < Proficiency.Track.Num(); ++Level) {
+        auto &Milestone = Proficiency.Track[Level];
+        for (auto Reward : Milestone.Rewards) {
+            if (Reward && Reward->CanReapplyOnLoad()) {
+                Reward->Give(Context);
+                ReappliedCount++;
+            }
+        }
+    }
+
+    UE_LOG(Myth, Log, TEXT("Proficiency %s: Reapplied %d rewards for %d levels"),
+           *Proficiency.Definition->Name.ToString(), ReappliedCount, TargetLevel);
 }
 
 // Called when the game starts
@@ -158,7 +199,36 @@ void UProficiencyComponent::BeginPlay() {
     // For each proficiency, build the proficiency track
     for (auto &Proficiency : this->Proficiencies) {
         Proficiency.Instantiate();
+
+        // If loaded from save, restore XP
+        int32 Level = 0;
+        if (Proficiency.SavedXP > 0.0f) {
+            // Calculate level from saved XP
+            Level = UProficiencyDefinition::CalcLevelAtXP(Proficiency.SavedXP, Proficiency.Definition);
+
+            UE_LOG(Myth, Log, TEXT("Proficiency %s: Restoring XP=%.1f, Level=%d"),
+                   *Proficiency.Definition->Name.ToString(), Proficiency.SavedXP, Level);
+
+            // Set restoring flag to skip OnAttributeChanged rewards
+            bIsRestoring = true;
+        }
+
+        // Configure attribute - may trigger callback but bIsRestoring skips it
         ConfigureProgressionAttribute(Proficiency);
+
+        // Clamp SavedXP if it exceeds MaxXP (e.g. if definitions changed)
+        if (Proficiency.MaxXP > 0.0f && Proficiency.SavedXP > Proficiency.MaxXP) {
+            UE_LOG(Myth, Warning, TEXT("Proficiency %s: SavedXP %.1f exceeds MaxXP %.1f. Clamping."),
+                   *Proficiency.Definition->Name.ToString(), Proficiency.SavedXP, Proficiency.MaxXP);
+            Proficiency.SavedXP = Proficiency.MaxXP;
+        }
+
+        ASC->SetNumericAttributeBase(Proficiency.ProgressAttribute, Proficiency.SavedXP);
+
+        // Reapply only CanReapplyOnLoad rewards (items already in inventory)
+        ReapplyRewardsForLevel(Proficiency, Level);
+
+        bIsRestoring = false;
     }
 }
 

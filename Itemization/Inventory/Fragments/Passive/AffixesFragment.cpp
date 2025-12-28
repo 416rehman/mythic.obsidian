@@ -3,6 +3,7 @@
 #include "Mythic/Itemization/Inventory/MythicItemInstance.h"
 #include "AbilitySystemGlobals.h"
 #include "GameModes/GameState/MythicGameState.h"
+#include "Mythic/Mythic.h"
 
 void UAffixesFragment::RollAffixes(int ItemLevel, int Qty) {
     int AffixesAdded = 0;

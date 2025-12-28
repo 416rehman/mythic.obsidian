@@ -5,10 +5,13 @@
 #include "Components/ActorComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Serialization/FastArraySerializer.h"
+#include "InventoryProfile.h"
+#include "InventorySlotDefinition.h"
 #include "MythicInventoryComponent.generated.h"
 
 class UInventoryVM;
 class AMythicWorldItem;
+
 // delegate for active slot changed
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnActiveSlotChanged, int32, NewIndex, int32, OldIndex);
 
@@ -24,37 +27,6 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnItemDropped, int32, Slot, AMythi
 // delegate for ViewModel created without any parameters
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnViewModelCreated);
 
-USTRUCT(BlueprintType)
-
-struct FSlotType : public FTableRowBase {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slot", meta=(Categories="Inventory.Slot"))
-    FGameplayTag SlotType = INVENTORY_SLOT_DEFAULT;
-
-    // Permit types of items that can be placed in this slot. To permit all items, leave this tag container empty. For example, a weapon slot may only permit items with the "Weapon" tag, while a chest slot may permit items with the "Armor" tag.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slot", meta=(Categories="Itemization.Type"))
-    FGameplayTagContainer WhitelistedItemTypes = FGameplayTagContainer();
-
-    // Icon
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slot")
-    UTexture2D *Icon = nullptr;
-};
-
-// Inventory Slots configuration - defines the slot type and how many slots of that type the inventory should have
-USTRUCT(BlueprintType)
-struct FInventorySlotConfiguration {
-    GENERATED_BODY()
-    UPROPERTY(EditDefaultsOnly, Category = "Slots")
-    FDataTableRowHandle SlotTypeRow;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Slots", meta=(ClampMin="0", UIMin="0"))
-    int32 NumSlots = 0;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Slots")
-    bool bIsEquipable = false; // If true, activates items when placed in this slot
-};
-
 USTRUCT(BlueprintType, Blueprintable)
 struct FMythicInventorySlotEntry : public FFastArraySerializerItem {
     GENERATED_BODY()
@@ -63,17 +35,11 @@ struct FMythicInventorySlotEntry : public FFastArraySerializerItem {
     TObjectPtr<UMythicItemInstance> SlottedItemInstance = nullptr;
 
     UPROPERTY()
-    FGameplayTag SlotType = FGameplayTag::EmptyTag;
-
-    UPROPERTY()
-    FGameplayTagContainer ItemTypeWhitelist = FGameplayTagContainer();
-
-    UPROPERTY()
     bool bIsActive = false;
 
-    // A handle to the data table row for client-side access to display name/icon. Only tables of type SlotType are valid.
-    UPROPERTY(meta=(AllowedTypes="SlotType"))
-    FDataTableRowHandle SlotTypeRow = FDataTableRowHandle();
+    // Definition of the slot (Icon, Whitelists, Tags)
+    UPROPERTY()
+    TObjectPtr<UInventorySlotDefinition> SlotDefinition = nullptr;
 
     void ActivateSlot();
     void DeactivateSlot();
@@ -95,7 +61,6 @@ struct FMythicInventoryFastArray : public FFastArraySerializer {
     UPROPERTY(Transient)
     TObjectPtr<UMythicInventoryComponent> Owner = nullptr;
 
-public:
     const TArray<FMythicInventorySlotEntry> &GetItems() const { return Items; }
     int32 Num() const { return Items.Num(); }
     bool IsValidIndex(int32 Index) const { return Items.IsValidIndex(Index); }
@@ -135,12 +100,12 @@ public:
     }
 
     bool NetDeltaSerialize(FNetDeltaSerializeInfo &DeltaParms) {
-        return FFastArraySerializer::FastArrayDeltaSerialize<FMythicInventorySlotEntry, FMythicInventoryFastArray>(Items, DeltaParms, *this);
+        return FastArrayDeltaSerialize<FMythicInventorySlotEntry, FMythicInventoryFastArray>(Items, DeltaParms, *this);
     }
 };
 
 template <>
-struct TStructOpsTypeTraits<FMythicInventoryFastArray> : public TStructOpsTypeTraitsBase2<FMythicInventoryFastArray> {
+struct TStructOpsTypeTraits<FMythicInventoryFastArray> : TStructOpsTypeTraitsBase2<FMythicInventoryFastArray> {
     enum { WithNetDeltaSerializer = true, };
 };
 
@@ -176,9 +141,9 @@ protected:
     TArray<bool> LastKnownActive;
 
 public:
-    // Configuration for the inventory slots
+    // Inventory Profile to use for initialization
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slots")
-    TArray<FInventorySlotConfiguration> SlotConfigurations;
+    TObjectPtr<UInventoryProfile> InventoryProfile;
 
     // Lightweight read-only accessors for UI/ViewModel code
     FORCEINLINE int32 GetNumSlots() const { return Slots.Num(); }
@@ -186,8 +151,8 @@ public:
 
     // Get all slots
     const TArray<FMythicInventorySlotEntry> &GetAllSlots() const { return Slots.GetItems(); }
+    TArray<FMythicInventorySlotEntry> &GetAllSlotsMutable() { return Slots.Items; }
 
-public:
     UMythicInventoryComponent(const FObjectInitializer &OI);
 
     virtual void BeginPlay() override;
@@ -197,6 +162,8 @@ public:
         Super::GetLifetimeReplicatedProps(OutLifetimeProps);
         DOREPLIFETIME(UMythicInventoryComponent, Slots);
     }
+
+    // --- Save System Interface Removed ---
 
     // Checks if any slot in this inventory can accept an item of the given type.
     UFUNCTION(BlueprintCallable, Category = "Slots")
@@ -211,6 +178,12 @@ public:
     bool TryTransferToSlot(UMythicItemInstance *ItemInstance, int32 TargetSlotIndex);
 
     bool SetItemInSlot(int32 SlotIndex, UMythicItemInstance *ItemInstance);
+
+    /**
+     * Internal version of SetItemInSlot that can be used by systems like Save/Load 
+     * to bypass or customize standard checks.
+     */
+    bool SetItemInSlotInternal(int32 SlotIndex, UMythicItemInstance *ItemInstance);
 
     // Add to inventory. Will stack if possible, otherwise will add to any available slot, and if no room is available, will drop the item to the ground. Returns pointer to the dropped item.
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly)
@@ -240,6 +213,19 @@ public:
     // Picks up a WorldItem. Returns the amount of items (stacks) that were picked up.
     UFUNCTION(BlueprintCallable, Server, Reliable, BlueprintAuthorityOnly, Category = "Slots")
     void PickupItem(AMythicWorldItem *world_item);
+
+    /** DYNAMIC INVENTORY API */
+
+    // Adds new slots of the given definition to the inventory.
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Slots")
+    void AddSlot(UInventorySlotDefinition *SlotDefinition, int32 Count = 1);
+
+    // Removes slots of the given definition from the inventory.
+    // NOTE: This will destroy items in those slots unless bDropItems is true!
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Slots")
+    bool RemoveSlot(UInventorySlotDefinition *SlotDefinition, int32 Count = 1, bool bDropItems = false);
+
+    /** END DYNAMIC INVENTORY API */
 
     /** Delegates */
     UPROPERTY(BlueprintAssignable, Category = "Slots")

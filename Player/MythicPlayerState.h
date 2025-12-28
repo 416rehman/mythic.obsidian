@@ -1,11 +1,10 @@
-
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "AbilitySystemInterface.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GameFramework/PlayerState.h"
+#include "Itemization/InventoryProviderInterface.h"
 #include "MythicPlayerState.generated.h"
 
 class UMythicAttributeSet_Life;
@@ -18,9 +17,8 @@ class UMythicAttributeSet_Defense;
  * 
  */
 UCLASS()
-class MYTHIC_API AMythicPlayerState : public APlayerState, public IAbilitySystemInterface
-{
-	GENERATED_BODY()
+class MYTHIC_API AMythicPlayerState : public APlayerState, public IAbilitySystemInterface, public IInventoryProviderInterface {
+    GENERATED_BODY()
 
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Ability System")
@@ -36,35 +34,40 @@ protected:
 
     // Life attributes
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Ability System", Replicated)
-    UMythicAttributeSet_Life* LifeAttributes;
+    UMythicAttributeSet_Life *LifeAttributes;
 
     // Offense attributes
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Ability System", Replicated)
-    UMythicAttributeSet_Offense* OffenseAttributes;
+    UMythicAttributeSet_Offense *OffenseAttributes;
 
     // Defense attributes
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Ability System", Replicated)
-    UMythicAttributeSet_Defense* DefenseAttributes;
+    UMythicAttributeSet_Defense *DefenseAttributes;
 
     // Utility attributes
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Ability System", Replicated)
-    UMythicAttributeSet_Utility* UtilityAttributes;
+    UMythicAttributeSet_Utility *UtilityAttributes;
 
     // Experience attributes
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Ability System", Replicated)
-    UMythicAttributeSet_Exp* ExperienceAttributes;
+    UMythicAttributeSet_Exp *ExperienceAttributes;
 
     // Proficiency attributes
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Ability System", Replicated)
-    UMythicAttributeSet_Proficiencies* ProficiencyAttributes;
+    UMythicAttributeSet_Proficiencies *ProficiencyAttributes;
 
-	AMythicPlayerState();
+    AMythicPlayerState();
 
 public:
-	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
-	UMythicAbilitySystemComponent* GetMythicAbilitySystemComponent() const;
+    virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override;
+    UMythicAbilitySystemComponent *GetMythicAbilitySystemComponent() const;
 
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
     virtual void BeginPlay() override;
+
+    // IInventoryProviderInterface - delegates to PlayerController
+    virtual TArray<UMythicInventoryComponent *> GetAllInventoryComponents() const override;
+    virtual UAbilitySystemComponent *GetSchematicsASC() const override;
+    virtual UMythicInventoryComponent *GetInventoryForItemType(const FGameplayTag &ItemType) const override;
 };

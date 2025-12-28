@@ -21,11 +21,11 @@ struct FTalentSpec : public FAbilityRollSpec {
     GENERATED_BODY()
 
     // The Talent Definition used to roll this talent spec
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, SaveGame)
     TSoftObjectPtr<UTalentDefinition> TalentDef = nullptr;
 
     // Whether this Talent can be swapped by another;
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "TalentDefs")
+    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "TalentDefs", SaveGame)
     bool bIsLocked = false;
 
     // Constructor
@@ -47,7 +47,7 @@ struct FTalentRuntimeReplicatedData {
     GENERATED_BODY()
 
     // The rolled talents
-    UPROPERTY(BlueprintReadOnly, Blueprintable)
+    UPROPERTY(BlueprintReadOnly, Blueprintable, SaveGame)
     TArray<FTalentSpec> RolledTalents;
 };
 
@@ -67,7 +67,7 @@ struct FTalentRuntimeServerOnlyData {
 
 /// Designer friendly configuration data that defines this fragment. This is accessible from the ItemDefinition Data Asset.
 /// This should be REPLICATED and fields should be BlueprintReadOnly
-USTRUCT(BlueprintType, Blueprintable, meta=(ShowOnlyInnerProperties))
+USTRUCT(Blueprintable, BlueprintType)
 struct FTalentConfig {
     GENERATED_BODY()
 };
@@ -97,7 +97,7 @@ public:
 
     /** Designer friendly configuration data that defines this fragment. */
     /** REPLICATED and fields should be BlueprintReadOnly */
-    UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties))
+    UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties), SaveGame)
     FTalentConfig TalentConfig;
 
     /** This is used in the OnInstanced method to calculate/fill the rest of the data. */
@@ -107,7 +107,7 @@ public:
 
     /** Contains the runtime state of the fragment (replicated to client) */
     /** REPLICATED */
-    UPROPERTY(Replicated, BlueprintReadOnly)
+    UPROPERTY(Replicated, BlueprintReadOnly, SaveGame)
     FTalentRuntimeReplicatedData TalentRuntimeReplicatedData;
 
     /** Contains the runtime client side state of the fragment for use in methods like OnActiveItemClient */
