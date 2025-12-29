@@ -66,12 +66,8 @@ void UMythicCheatManager::SaveCharacter(const FString &SlotName) {
         return;
     }
 
-    if (SaveSys->SaveCharacter(PC->PlayerState, SlotName)) {
-        UE_LOG(MythSaveLoad, Warning, TEXT(">>> Character saved to '%s'"), *SlotName);
-    }
-    else {
-        UE_LOG(MythSaveLoad, Error, TEXT(">>> Failed to save character to '%s'"), *SlotName);
-    }
+    SaveSys->SaveCharacter(PC->PlayerState, SlotName);
+    UE_LOG(MythSaveLoad, Warning, TEXT(">>> Started saving character to '%s'... Check log for result."), *SlotName);
 }
 
 void UMythicCheatManager::LoadCharacter(const FString &SlotName) {
@@ -85,12 +81,8 @@ void UMythicCheatManager::LoadCharacter(const FString &SlotName) {
         return;
     }
 
-    if (SaveSys->LoadCharacter(PC->PlayerState, SlotName)) {
-        UE_LOG(MythSaveLoad, Warning, TEXT(">>> Character loaded from '%s'"), *SlotName);
-    }
-    else {
-        UE_LOG(MythSaveLoad, Error, TEXT(">>> Failed to load character from '%s'"), *SlotName);
-    }
+    SaveSys->LoadCharacter(PC->PlayerState, SlotName);
+    UE_LOG(MythSaveLoad, Warning, TEXT(">>> Started loading character from '%s'... Check log for result."), *SlotName);
 }
 
 void UMythicCheatManager::SaveWorld(const FString &SlotName) {
@@ -104,12 +96,8 @@ void UMythicCheatManager::SaveWorld(const FString &SlotName) {
         return;
     }
 
-    if (SaveSys->SaveWorldState(SlotName)) {
-        UE_LOG(MythSaveLoad, Warning, TEXT(">>> World saved to '%s'"), *SlotName);
-    }
-    else {
-        UE_LOG(MythSaveLoad, Error, TEXT(">>> Failed to save world to '%s'"), *SlotName);
-    }
+    SaveSys->SaveWorld(SlotName);
+    UE_LOG(MythSaveLoad, Warning, TEXT(">>> Started saving world to '%s'... Check log for result."), *SlotName);
 }
 
 void UMythicCheatManager::LoadWorld(const FString &SlotName) {
@@ -123,12 +111,8 @@ void UMythicCheatManager::LoadWorld(const FString &SlotName) {
         return;
     }
 
-    if (SaveSys->LoadWorldState(SlotName)) {
-        UE_LOG(MythSaveLoad, Warning, TEXT(">>> World loaded from '%s'"), *SlotName);
-    }
-    else {
-        UE_LOG(MythSaveLoad, Error, TEXT(">>> Failed to load world from '%s'"), *SlotName);
-    }
+    SaveSys->LoadWorld(SlotName);
+    UE_LOG(MythSaveLoad, Warning, TEXT(">>> Started loading world from '%s'... Check log for result."), *SlotName);
 }
 
 void UMythicCheatManager::ListSaves() {
