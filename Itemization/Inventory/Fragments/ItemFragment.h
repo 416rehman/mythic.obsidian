@@ -88,8 +88,14 @@ public:
     // This is called after the item fragment has been instanced and added to an item instance.
     // Use case: Initial setup of the fragment
     virtual void OnInstanced(UMythicItemInstance *Instance) {
+        SetOwnerItemInstance(Instance);
+    }
+
+    // Helper to restore the parent pointer (e.g. during load) without re-running OnInstanced logic
+    void SetOwnerItemInstance(UMythicItemInstance *Instance) {
         ParentItemInstance = Instance;
     }
+
 
     /*
     * Fragment Activation Flow - Server Side

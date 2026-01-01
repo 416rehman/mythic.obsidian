@@ -34,6 +34,7 @@ void UMythicItemInstance::Serialize(FArchive &Ar) {
 
                     UItemFragment *NewFrag = NewObject<UItemFragment>(this, FragClass, NAME_None, RF_NoFlags, Template);
                     NewFrag->Serialize(Ar);
+                    NewFrag->SetOwnerItemInstance(this);
                     ItemFragments.Add(NewFrag);
                 }
                 else {

@@ -25,10 +25,11 @@ bool FRolledAttributeSpec::Serialize(FArchive &Ar) {
     Ar << AttributeSetClassName;
     Ar << AttributePropertyName;
     Ar << Value;
-    Ar << bIsApplied;
 
     // On load: reconstruct attribute from strings
     if (Ar.IsLoading()) {
+        bIsApplied = false;
+
         if (!AttributeSetClassName.IsEmpty() && !AttributePropertyName.IsEmpty()) {
             UClass *SetClass = LoadClass<UAttributeSet>(nullptr, *AttributeSetClassName);
             if (SetClass) {
