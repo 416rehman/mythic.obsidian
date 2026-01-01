@@ -105,7 +105,7 @@ void UMythicEnvironmentSubsystem::SetWeatherInstantly(FGameplayTag Weather) {
     }
 
     bool bSetInstantly = true;
-    auto WeatherTransition = FWeatherCycleInfo(*TargetWeather, bSetInstantly);
+    auto WeatherTransition = FWeatherCycleInfo(*TargetWeather, this->EnvironmentController->GetTimespan(), bSetInstantly);
 
     this->EnvironmentController->SetWeatherTransition(WeatherTransition);
 }

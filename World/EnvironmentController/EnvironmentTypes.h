@@ -170,47 +170,50 @@ USTRUCT(BlueprintType)
 struct FWeatherCycleInfo {
     GENERATED_BODY()
 
-    // If this is set, a transition is in progress to this weather type
-    // When this is set, compute the TransitioningFromWeatherAttributes and TransitioningToWeatherAttributes
-    // When the transition is complete, set CurrentWeather to TransitionToWeather, and clear TransitionToWeather
-    UPROPERTY(BlueprintReadOnly, Category = "Time of Day Controller | Weather")
-    UWeatherType *TransitionToWeather = nullptr;
+    // If set, a transition is in progress. The controller interpolates values until complete.
+    UPROPERTY(BlueprintReadOnly, SaveGame, Category = "Time of Day Controller | Weather")
+    TSoftObjectPtr<UWeatherType> TransitionToWeather = nullptr;
 
-    // Stores the transition values, this is used by the current transition to interpolate between the current weather and the target weather
-    // Calculated by the server, replicated to clients
-    UPROPERTY()
+    // Stores the transition values, calculated by the server and replicated.
+    // Custom serialization used to bypass SaveGame limitations on inner engine structs.
+    UPROPERTY(SaveGame)
     TArray<FCollectionScalarParameter> TransitionToScalarValues = TArray<FCollectionScalarParameter>();
 
     // Stores the transition values, this is used by the current transition to interpolate between the current weather and the target weather
     // Calculated by the server, replicated to clients
-    UPROPERTY()
+    UPROPERTY(SaveGame)
     TArray<FCollectionVectorParameter> TransitionToVectorValues = TArray<FCollectionVectorParameter>();
 
     // This is how long the weather will last before another transition is triggered
-    UPROPERTY()
+    UPROPERTY(SaveGame)
     float TransitionLength = 15.0f;
 
     // The fog density of the current weather
-    UPROPERTY()
+    UPROPERTY(SaveGame)
     float FogDensity = 0.02f;
 
     // The fog height falloff of the current weather
-    UPROPERTY()
+    UPROPERTY(SaveGame)
     float FogHeightFalloff = 0.2f;
 
     // Set Instantly
-    UPROPERTY()
+    UPROPERTY(SaveGame)
     bool bSetInstantly = false;
 
-    FWeatherCycleInfo(){};
+    // Time the transition started
+    UPROPERTY(SaveGame)
+    FTimespan StartTime;
+
+    FWeatherCycleInfo() {};
 
     // Constructor from a weather type
-    FWeatherCycleInfo(UWeatherType *SelectedWeather, bool SetInstantly = false) {
+    FWeatherCycleInfo(UWeatherType *SelectedWeather, FTimespan InStartTime, bool SetInstantly = false) {
         /// /////////////////////////////////
         /// COMPUTE THE NEW WEATHER CYCLE
         /// /////////////////////////////////
         this->TransitionLength = FMath::RandRange(SelectedWeather->MinDurationInMinutes, SelectedWeather->MaxDurationInMinutes);
         this->TransitionToWeather = SelectedWeather;
+        this->StartTime = InStartTime;
 
         this->TransitionToScalarValues.Empty();
         this->TransitionToVectorValues.Empty();

@@ -20,34 +20,41 @@
 // HELP
 // ============================================================================
 
-void UMythicCheatManager::Help() {
+void UMythicCheatManager::MythHelp() {
     UE_LOG(Myth, Warning, TEXT(""));
     UE_LOG(Myth, Warning, TEXT("=== MYTHIC CHEAT COMMANDS ==="));
     UE_LOG(Myth, Warning, TEXT(""));
     UE_LOG(Myth, Warning, TEXT("--- SAVE SYSTEM ---"));
-    UE_LOG(Myth, Warning, TEXT("  SaveCharacter <SlotName>       - Save character to slot"));
-    UE_LOG(Myth, Warning, TEXT("  LoadCharacter <SlotName>       - Load character from slot"));
-    UE_LOG(Myth, Warning, TEXT("  SaveWorld <SlotName>           - Save world state"));
-    UE_LOG(Myth, Warning, TEXT("  LoadWorld <SlotName>           - Load world state"));
-    UE_LOG(Myth, Warning, TEXT("  ListSaves                      - List all save files"));
+    UE_LOG(Myth, Warning, TEXT("  MythSaveCharacter <SlotName>       - Save character to slot"));
+    UE_LOG(Myth, Warning, TEXT("  MythLoadCharacter <SlotName>       - Load character from slot"));
+    UE_LOG(Myth, Warning, TEXT("  MythSaveWorld <SlotName>           - Save world state"));
+    UE_LOG(Myth, Warning, TEXT("  MythLoadWorld <SlotName>           - Load world state"));
+    UE_LOG(Myth, Warning, TEXT("  MythListSaves                      - List all save files"));
     UE_LOG(Myth, Warning, TEXT(""));
     UE_LOG(Myth, Warning, TEXT("--- WEATHER ---"));
-    UE_LOG(Myth, Warning, TEXT("  ListWeather                    - List available weather types"));
-    UE_LOG(Myth, Warning, TEXT("  SetWeather <Tag>               - Set target weather (transitions)"));
-    UE_LOG(Myth, Warning, TEXT("  SetWeatherInstant <Tag>        - Set weather instantly"));
+    UE_LOG(Myth, Warning, TEXT("  MythListWeather                    - List available weather types"));
+    UE_LOG(Myth, Warning, TEXT("  MythSetWeather <Tag>               - Set target weather (transitions)"));
+    UE_LOG(Myth, Warning, TEXT("  MythSetWeatherInstant <Tag>        - Set weather instantly"));
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("--- TIME OF DAY ---"));
+    UE_LOG(Myth, Warning, TEXT("  MythSetTime <Hour>                 - Set time (0-24)"));
+    UE_LOG(Myth, Warning, TEXT("  MythAddTime <Hours>                - Add hours"));
+    UE_LOG(Myth, Warning, TEXT("  MythPauseTime                      - Pause time"));
+    UE_LOG(Myth, Warning, TEXT("  MythResumeTime                     - Resume time"));
+    UE_LOG(Myth, Warning, TEXT("  MythSetTimeSpeed <Freq>            - Set update speed (Lower=Faster)"));
     UE_LOG(Myth, Warning, TEXT(""));
     UE_LOG(Myth, Warning, TEXT("--- ITEMS ---"));
-    UE_LOG(Myth, Warning, TEXT("  ListItems                      - List all item definitions"));
-    UE_LOG(Myth, Warning, TEXT("  GiveItem <Name> [Count]        - Give item by name (partial match)"));
-    UE_LOG(Myth, Warning, TEXT("  ClearInventory                 - Clear all inventory items"));
+    UE_LOG(Myth, Warning, TEXT("  MythListItems                      - List all item definitions"));
+    UE_LOG(Myth, Warning, TEXT("  MythGiveItem <Name> [Count]        - Give item by name (partial match)"));
+    UE_LOG(Myth, Warning, TEXT("  MythClearInventory                 - Clear all inventory items"));
     UE_LOG(Myth, Warning, TEXT(""));
     UE_LOG(Myth, Warning, TEXT("--- ATTRIBUTES ---"));
-    UE_LOG(Myth, Warning, TEXT("  ListAttributes                 - List all attributes and values"));
-    UE_LOG(Myth, Warning, TEXT("  SetAttribute <Name> <Value>    - Set attribute value"));
+    UE_LOG(Myth, Warning, TEXT("  MythListAttributes                 - List all attributes and values"));
+    UE_LOG(Myth, Warning, TEXT("  MythSetAttribute <Name> <Value>    - Set attribute value"));
     UE_LOG(Myth, Warning, TEXT(""));
     UE_LOG(Myth, Warning, TEXT("--- PROFICIENCIES ---"));
-    UE_LOG(Myth, Warning, TEXT("  ListProficiencies              - List proficiencies and progress"));
-    UE_LOG(Myth, Warning, TEXT("  GiveProficiency <Name> <Amt>   - Give proficiency progress"));
+    UE_LOG(Myth, Warning, TEXT("  MythListProficiencies              - List proficiencies and progress"));
+    UE_LOG(Myth, Warning, TEXT("  MythGiveProficiency <Name> <Amt>   - Give proficiency progress"));
     UE_LOG(Myth, Warning, TEXT(""));
 }
 
@@ -55,7 +62,7 @@ void UMythicCheatManager::Help() {
 // SAVE SYSTEM
 // ============================================================================
 
-void UMythicCheatManager::SaveCharacter(const FString &SlotName) {
+void UMythicCheatManager::MythSaveCharacter(const FString &SlotName) {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -70,7 +77,7 @@ void UMythicCheatManager::SaveCharacter(const FString &SlotName) {
     UE_LOG(MythSaveLoad, Warning, TEXT(">>> Started saving character to '%s'... Check log for result."), *SlotName);
 }
 
-void UMythicCheatManager::LoadCharacter(const FString &SlotName) {
+void UMythicCheatManager::MythLoadCharacter(const FString &SlotName) {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -85,7 +92,7 @@ void UMythicCheatManager::LoadCharacter(const FString &SlotName) {
     UE_LOG(MythSaveLoad, Warning, TEXT(">>> Started loading character from '%s'... Check log for result."), *SlotName);
 }
 
-void UMythicCheatManager::SaveWorld(const FString &SlotName) {
+void UMythicCheatManager::MythSaveWorld(const FString &SlotName) {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -100,7 +107,7 @@ void UMythicCheatManager::SaveWorld(const FString &SlotName) {
     UE_LOG(MythSaveLoad, Warning, TEXT(">>> Started saving world to '%s'... Check log for result."), *SlotName);
 }
 
-void UMythicCheatManager::LoadWorld(const FString &SlotName) {
+void UMythicCheatManager::MythLoadWorld(const FString &SlotName) {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -115,7 +122,7 @@ void UMythicCheatManager::LoadWorld(const FString &SlotName) {
     UE_LOG(MythSaveLoad, Warning, TEXT(">>> Started loading world from '%s'... Check log for result."), *SlotName);
 }
 
-void UMythicCheatManager::ListSaves() {
+void UMythicCheatManager::MythListSaves() {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -141,7 +148,7 @@ void UMythicCheatManager::ListSaves() {
 // WEATHER
 // ============================================================================
 
-void UMythicCheatManager::ListWeather() {
+void UMythicCheatManager::MythListWeather() {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -153,32 +160,24 @@ void UMythicCheatManager::ListWeather() {
         return;
     }
 
+    auto Controller = EnvSys->GetEnvironmentController();
+    if (!Controller) {
+        UE_LOG(Myth, Error, TEXT(">>> No Environment Controller"));
+        return;
+    }
+
     FGameplayTag CurrentWeather = EnvSys->GetWeather();
     UE_LOG(Myth, Warning, TEXT(">>> Current Weather: %s"), *CurrentWeather.ToString());
-    UE_LOG(Myth, Warning, TEXT(">>> Available Weather Types:"));
+    UE_LOG(Myth, Warning, TEXT(">>> Available Weather Types (%d):"), Controller->GetWeatherTypes().Num());
 
-    // Common weather tags
-    TArray<FString> CommonWeatherTags = {
-        TEXT("Weather.Clear"),
-        TEXT("Weather.Cloudy"),
-        TEXT("Weather.Rain"),
-        TEXT("Weather.Storm"),
-        TEXT("Weather.Snow"),
-        TEXT("Weather.Fog")
-    };
-
-    for (const FString &Tag : CommonWeatherTags) {
-        FGameplayTag WeatherTag = FGameplayTag::RequestGameplayTag(FName(*Tag), false);
-        if (WeatherTag.IsValid()) {
-            UWeatherType *Type = EnvSys->GetWeatherTypeByTag(WeatherTag);
-            if (Type) {
-                UE_LOG(Myth, Warning, TEXT("    - %s"), *Tag);
-            }
+    for (const auto &Type : Controller->GetWeatherTypes()) {
+        if (Type) {
+            UE_LOG(Myth, Warning, TEXT("    - %s"), *Type->Tag.ToString());
         }
     }
 }
 
-void UMythicCheatManager::SetWeather(const FString &WeatherTag) {
+void UMythicCheatManager::MythSetWeather(const FString &WeatherTag) {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -200,7 +199,7 @@ void UMythicCheatManager::SetWeather(const FString &WeatherTag) {
     UE_LOG(Myth, Warning, TEXT(">>> Weather target set to '%s'"), *WeatherTag);
 }
 
-void UMythicCheatManager::SetWeatherInstant(const FString &WeatherTag) {
+void UMythicCheatManager::MythSetWeatherInstant(const FString &WeatherTag) {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -223,10 +222,88 @@ void UMythicCheatManager::SetWeatherInstant(const FString &WeatherTag) {
 }
 
 // ============================================================================
+// TIME OF DAY
+// ============================================================================
+
+void UMythicCheatManager::MythSetTime(float Hour) {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UMythicEnvironmentSubsystem *EnvSys = PC->GetGameInstance()->GetSubsystem<UMythicEnvironmentSubsystem>();
+    if (auto Controller = EnvSys ? EnvSys->GetEnvironmentController() : nullptr) {
+        FDateTime Current = Controller->GetDateTime();
+        FDateTime NewTime = FDateTime(Current.GetYear(), Current.GetMonth(), Current.GetDay(), FMath::FloorToInt(Hour),
+                                      FMath::FloorToInt((Hour - FMath::FloorToInt(Hour)) * 60));
+
+        Controller->SetTime(NewTime);
+        UE_LOG(Myth, Warning, TEXT(">>> Time set to %s"), *NewTime.ToString());
+    }
+    else {
+        UE_LOG(Myth, Error, TEXT(">>> No Environment Controller"));
+    }
+}
+
+void UMythicCheatManager::MythAddTime(float Hours) {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UMythicEnvironmentSubsystem *EnvSys = PC->GetGameInstance()->GetSubsystem<UMythicEnvironmentSubsystem>();
+    if (auto Controller = EnvSys ? EnvSys->GetEnvironmentController() : nullptr) {
+        Controller->AddTime(FTimespan::FromHours(Hours));
+        UE_LOG(Myth, Warning, TEXT(">>> Added %.2f hours. New Time: %s"), Hours, *Controller->GetDateTime().ToString());
+    }
+    else {
+        UE_LOG(Myth, Error, TEXT(">>> No Environment Controller"));
+    }
+}
+
+void UMythicCheatManager::MythPauseTime() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UMythicEnvironmentSubsystem *EnvSys = PC->GetGameInstance()->GetSubsystem<UMythicEnvironmentSubsystem>();
+    if (auto Controller = EnvSys ? EnvSys->GetEnvironmentController() : nullptr) {
+        Controller->PauseTime();
+        UE_LOG(Myth, Warning, TEXT(">>> Time Paused"));
+    }
+    else {
+        UE_LOG(Myth, Error, TEXT(">>> No Environment Controller"));
+    }
+}
+
+void UMythicCheatManager::MythResumeTime() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UMythicEnvironmentSubsystem *EnvSys = PC->GetGameInstance()->GetSubsystem<UMythicEnvironmentSubsystem>();
+    if (auto Controller = EnvSys ? EnvSys->GetEnvironmentController() : nullptr) {
+        Controller->ResumeTime();
+        UE_LOG(Myth, Warning, TEXT(">>> Time Resumed"));
+    }
+    else {
+        UE_LOG(Myth, Error, TEXT(">>> No Environment Controller"));
+    }
+}
+
+void UMythicCheatManager::MythSetTimeSpeed(float NewFrequency) {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UMythicEnvironmentSubsystem *EnvSys = PC->GetGameInstance()->GetSubsystem<UMythicEnvironmentSubsystem>();
+    if (auto Controller = EnvSys ? EnvSys->GetEnvironmentController() : nullptr) {
+        Controller->SetTimeUpdateFrequency(NewFrequency);
+        UE_LOG(Myth, Warning, TEXT(">>> Time Update Frequency set to %.4f"), NewFrequency);
+    }
+    else {
+        UE_LOG(Myth, Error, TEXT(">>> No Environment Controller"));
+    }
+}
+
+// ============================================================================
 // ITEMS
 // ============================================================================
 
-void UMythicCheatManager::ListItems() {
+void UMythicCheatManager::MythListItems() {
     UMythicAssetManager &AssetManager = UMythicAssetManager::Get();
 
     TArray<FPrimaryAssetId> ItemAssetIds;
@@ -238,7 +315,7 @@ void UMythicCheatManager::ListItems() {
     }
 }
 
-void UMythicCheatManager::GiveItem(const FString &ItemName, int32 Count) {
+void UMythicCheatManager::MythGiveItem(const FString &ItemName, int32 Count) {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -286,7 +363,7 @@ void UMythicCheatManager::GiveItem(const FString &ItemName, int32 Count) {
     }
 }
 
-void UMythicCheatManager::ClearInventory() {
+void UMythicCheatManager::MythClearInventory() {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -322,7 +399,7 @@ void UMythicCheatManager::ClearInventory() {
 // ATTRIBUTES
 // ============================================================================
 
-void UMythicCheatManager::ListAttributes() {
+void UMythicCheatManager::MythListAttributes() {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -366,7 +443,7 @@ void UMythicCheatManager::ListAttributes() {
     }
 }
 
-void UMythicCheatManager::SetAttribute(const FString &AttributeName, float Value) {
+void UMythicCheatManager::MythSetAttribute(const FString &AttributeName, float Value) {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -414,7 +491,7 @@ void UMythicCheatManager::SetAttribute(const FString &AttributeName, float Value
 // PROFICIENCIES
 // ============================================================================
 
-void UMythicCheatManager::ListProficiencies() {
+void UMythicCheatManager::MythListProficiencies() {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -444,7 +521,7 @@ void UMythicCheatManager::ListProficiencies() {
     }
 }
 
-void UMythicCheatManager::GiveProficiency(const FString &ProficiencyName, float Amount) {
+void UMythicCheatManager::MythGiveProficiency(const FString &ProficiencyName, float Amount) {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;

@@ -147,9 +147,15 @@ public:
 
     virtual void OnConstruction(const FTransform &Transform) override;
 
+    // IMythicSaveableActor Interface
+    virtual void SerializeCustomData(TArray<uint8> &OutCustomData) override;
+    virtual void DeserializeCustomData(const TArray<uint8> &InCustomData) override;
+
 protected:
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;
+
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
     // How long should the day be, or how long it takes in real time seconds from 07:00 to 20:00 in game time
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day Controller", meta = (ClampMin = "2", Units = "Seconds"))
@@ -172,7 +178,7 @@ protected:
     ADirectionalLight *NighttimeDirectionalLight;
 
     // Timespan of the current time of day - The actual
-    UPROPERTY(BlueprintReadOnly, EditAnywhere, SaveGame, Category = "Time of Day Controller")
+    UPROPERTY(BlueprintReadOnly, EditAnywhere, ReplicatedUsing=OnRep_Time, SaveGame, Category = "Time of Day Controller")
     FTimespan Time;
 
     // Update frequency of the time. In real time seconds, how often the time will be updated
@@ -210,20 +216,21 @@ private:
     // Cleared after this weather type is reached
     // Can be set via the function: SetTargetWeather
     // After this goal is reached, the event OnTargetWeatherReached is called
-    UPROPERTY()
+    UPROPERTY(Replicated, SaveGame)
     UWeatherType *GuaranteedTargetWeather;
 
-    UPROPERTY()
+    UPROPERTY(ReplicatedUsing=OnRep_WeatherTransition, SaveGame)
     FWeatherCycleInfo WeatherTransition;
 
     ///
     ///~ Current Weather
     // Tag of the current weather type - Set after the transition is complete
     // Flow: CurrentWeather -> Transition -> TargetWeather
-    UPROPERTY(SaveGame)
+    UPROPERTY(ReplicatedUsing=OnRep_CurrentWeather, SaveGame)
     UWeatherType *CurrentWeather;
 
     // Time the weather changed to the current weather type
+    UPROPERTY(SaveGame)
     FTimespan WeatherChangedAt;
 
     // Transition from these values - Cached values of the MPC when the transition started for interpolation
@@ -251,17 +258,26 @@ private:
     // The parameter name for the Wind Direction in the WeatherMPC
     FName WindTargetParameterName = "WindDirection";
 
+    // Helper to force apply weather visuals to MPC
+    void ApplyWeatherVisuals(const UWeatherType *Weather);
+
 public:
     void UpdateLighting() const;
+
+    // OnRep Functions
+    UFUNCTION()
+    void OnRep_Time();
+
+    UFUNCTION()
+    void OnRep_CurrentWeather(UWeatherType *PreviousWeather);
+
+    UFUNCTION()
+    void OnRep_WeatherTransition();
 
     ///~ RPCs ---------------------------------------------------------------
     // multicast to all clients to sync the time of day
     UFUNCTION(NetMulticast, Unreliable)
     void MulticastSyncGameWorldTimer(const FTimespan &NewTimespan, const FTimespan &OldTimespan);
-
-    // Multi-cast to all clients to sync the weather
-    UFUNCTION(NetMulticast, Reliable)
-    void MulticastSyncWeather(const FWeatherCycleInfo &NewWeatherCycle);
 
     // Multicast to all clients to sync wind direction
     UFUNCTION(NetMulticast, Reliable)
@@ -280,6 +296,8 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Time of Day Controller")
     UWeatherType *GetCurrentWeather() const { return this->CurrentWeather; }
+
+    const TArray<TObjectPtr<UWeatherType>> &GetWeatherTypes() const { return WeatherTypes; }
 
     UWeatherType *GetWeatherTypeByTag(FGameplayTag Tag) const;
 

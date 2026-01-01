@@ -5,23 +5,25 @@
 
 #include "Mythic.h"
 #include "MythicEnvironmentSubsystem.h"
+#include "Net/UnrealNetwork.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/LightComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Kismet/KismetMaterialLibrary.h"
 #include "Materials/MaterialParameterCollection.h"
+#include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 
 // Sets default values
-AMythicEnvironmentController::AMythicEnvironmentController(): FogComponent(nullptr), SkyAtmosphereComponent(nullptr),
-                                                              NightLightIntensity(0),
-                                                              DaytimeDirectionalLight(nullptr),
-                                                              NighttimeDirectionalLight(nullptr), WeatherMPC(nullptr),
-                                                              ExponentialHeightFog(nullptr),
-                                                              SkyAtmosphere(nullptr),
-                                                              GuaranteedTargetWeather(nullptr), WeatherTransition(),
-                                                              CurrentWeather(),
-                                                              CachedFogHeightFalloff(0), CachedFogDensity(0) {
+AMythicEnvironmentController::AMythicEnvironmentController() : FogComponent(nullptr), SkyAtmosphereComponent(nullptr),
+                                                               NightLightIntensity(0),
+                                                               DaytimeDirectionalLight(nullptr),
+                                                               NighttimeDirectionalLight(nullptr), WeatherMPC(nullptr),
+                                                               ExponentialHeightFog(nullptr),
+                                                               SkyAtmosphere(nullptr),
+                                                               GuaranteedTargetWeather(nullptr), WeatherTransition(),
+                                                               CurrentWeather(),
+                                                               CachedFogHeightFalloff(0), CachedFogDensity(0) {
     // Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
     PrimaryActorTick.bCanEverTick = true;
     this->TimeUpdateFrequency = 0.01f;
@@ -44,6 +46,31 @@ void AMythicEnvironmentController::OnConstruction(const FTransform &Transform) {
     // Update the weather
     if (this->WeatherTypes.Num() > 0 && WeatherMPC) {
         WeatherTick();
+    }
+}
+
+void AMythicEnvironmentController::SerializeCustomData(TArray<uint8> &OutCustomData) {
+
+    FMemoryWriter MemWriter(OutCustomData);
+    FObjectAndNameAsStringProxyArchive Ar(MemWriter, true);
+    // Use standard serialization to bypass SaveGame filtering on nested Engine structs
+    FWeatherCycleInfo::StaticStruct()->SerializeItem(Ar, &WeatherTransition, nullptr);
+}
+
+void AMythicEnvironmentController::DeserializeCustomData(const TArray<uint8> &InCustomData) {
+
+    // Load the custom data buffer
+    if (InCustomData.Num() > 0) {
+        FMemoryReader MemReader(InCustomData);
+        FObjectAndNameAsStringProxyArchive Ar(MemReader, true);
+
+        // This overwrites the WeatherTransition that was loaded (imperfectly) by the standard serializer
+        FWeatherCycleInfo::StaticStruct()->SerializeItem(Ar, &WeatherTransition, nullptr);
+    }
+
+    // Restore visuals post-load
+    if (CurrentWeather) {
+        ApplyWeatherVisuals(CurrentWeather);
     }
 }
 
@@ -80,9 +107,17 @@ void AMythicEnvironmentController::BeginPlay() {
 
     UpdateLighting();
 
+    // Apply the current weather visuals immediately (Handles Save/Load case where data exists but MPC is reset)
+    if (CurrentWeather) {
+        ApplyWeatherVisuals(CurrentWeather);
+    }
+
     // if server, initialize the weather cycle. CycleWeather will sync the weather cycle to all clients
     if (GetLocalRole() == ROLE_Authority) {
-        if (this->WeatherTypes.Num() > 0 && WeatherMPC) { CycleWeather(); }
+        if (this->WeatherTypes.Num() > 0 && WeatherMPC && !CurrentWeather) {
+            // Only cycle if we don't already have weather (e.g. New Game)
+            CycleWeather();
+        }
     }
 
     // Register self with the EnvironmentSubsystem
@@ -362,9 +397,13 @@ void AMythicEnvironmentController::MulticastSyncSkyAtmosphereAbsorption_Implemen
 // The brain of the weather system
 void AMythicEnvironmentController::WeatherTick() {
     // If there is a weather transition in progress, update the weather transition
-    if (this->WeatherTransition.TransitionToWeather) {
-        UE_LOG(Myth_Environment, Warning, TEXT("Weather transition in progress to %s"), *this->WeatherTransition.TransitionToWeather->GetName());
-        HandleWeatherTransition();
+    // Check if the soft pointer is valid or points to something
+    if (!this->WeatherTransition.TransitionToWeather.IsNull()) {
+        UWeatherType *TargetWeather = this->WeatherTransition.TransitionToWeather.LoadSynchronous();
+        if (TargetWeather) {
+            UE_LOG(Myth_Environment, Warning, TEXT("Weather transition in progress to %s"), *TargetWeather->GetName());
+            HandleWeatherTransition();
+        }
     }
     // SERVER-ONLY: Weather is cycled only through the server - which then modifies the weather cycle and syncs it to all clients
     else if (GetLocalRole() == ROLE_Authority && isCurrentWeatherExpired()) {
@@ -380,14 +419,11 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
     auto TransitionProgress = 1.0f;
 
     if (this->WeatherTransition.bSetInstantly) {
-        UE_LOG(Myth_Environment, Warning, TEXT("Weather transition is instant"));
+        // Instant
     }
     else {
         const auto TransitionTime = this->Time - this->TransitionStartedAt;
         TransitionProgress = TransitionTime.GetTotalMinutes() / TransitionDurationInMins;
-
-        UE_LOG(Myth_Environment, Warning, TEXT("EnvironmentController: Transition Time: %s, Transition Progress: %f"), *TransitionTime.ToString(),
-               TransitionProgress);
     }
 
     // Lerp the scalar attributes
@@ -395,14 +431,6 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
         auto MPC_Value = TransitionFromScalarValues[i];
         auto TargetValue = this->WeatherTransition.TransitionToScalarValues[i];
         auto LerpValue = FMath::Lerp(MPC_Value.DefaultValue, TargetValue.DefaultValue, TransitionProgress);
-
-        UE_LOG(Myth_Environment, Log,
-               TEXT("EnvironmentController: Transitioning Lerp Vector Parameter %s. Current: %f, Target: %f, Progress: %f (Value at Progress: %f)"),
-               *MPC_Value.ParameterName.ToString(),
-               MPC_Value.DefaultValue,
-               TargetValue.DefaultValue,
-               TransitionProgress,
-               LerpValue);
 
         UKismetMaterialLibrary::SetScalarParameterValue(this, WeatherMPC, TransitionFromScalarValues[i].ParameterName, LerpValue);
     }
@@ -413,38 +441,26 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
         auto TargetValue = this->WeatherTransition.TransitionToVectorValues[i];
         auto LerpValue = FMath::Lerp(MPC_Value.DefaultValue, TargetValue.DefaultValue, TransitionProgress);
 
-        UE_LOG(Myth_Environment, Log,
-               TEXT("EnvironmentController: Transitioning Lerp Vector Parameter %s. Current: %s, Target: %s, Progress: %f (Value at Progress: %s)"),
-               *MPC_Value.ParameterName.ToString(),
-               *MPC_Value.DefaultValue.ToString(),
-               *TargetValue.DefaultValue.ToString(),
-               TransitionProgress,
-               *LerpValue.ToString());
         UKismetMaterialLibrary::SetVectorParameterValue(this, WeatherMPC, TransitionFromVectorValues[i].ParameterName, LerpValue);
     }
 
     // Lerp the fog density
     if (FogComponent) {
-        UE_LOG(Myth_Environment, Warning, TEXT("EnvironmentController: Transitioning Lerp Fog Density. Current: %f, Target: %f, Progress: %f"),
-               this->CachedFogDensity,
-               this->WeatherTransition.FogDensity, TransitionProgress);
         auto LerpFogDensity = FMath::Lerp(this->CachedFogDensity, this->WeatherTransition.FogDensity, TransitionProgress);
         FogComponent->SetFogDensity(LerpFogDensity);
 
         // Lerp the fog height falloff
-        UE_LOG(Myth_Environment, Warning, TEXT("EnvironmentController: Transitioning Lerp Fog Height Falloff. Current: %f, Target: %f, Progress: %f"),
-               this->CachedFogHeightFalloff,
-               this->WeatherTransition.FogHeightFalloff, TransitionProgress);
         auto LerpFogHeightFalloff = FMath::Lerp(this->CachedFogHeightFalloff, this->WeatherTransition.FogHeightFalloff, TransitionProgress);
         FogComponent->SetFogHeightFalloff(LerpFogHeightFalloff);
     }
 
     // If the transition is complete, set the current weather to the target weather
-    if (TransitionProgress >= 1.0f || this->WeatherTransition.TransitionToWeather == this->CurrentWeather || Time < TransitionStartedAt) {
-        auto NewWeatherTag = this->WeatherTransition.TransitionToWeather->Tag;
+    UWeatherType *TargetWeather = this->WeatherTransition.TransitionToWeather.LoadSynchronous();
+    if (TransitionProgress >= 1.0f || TargetWeather == this->CurrentWeather || Time < TransitionStartedAt) {
+        auto NewWeatherTag = TargetWeather ? TargetWeather->Tag : FGameplayTag();
         auto OldWeatherTag = this->CurrentWeather ? this->CurrentWeather->Tag : FGameplayTag();
 
-        this->CurrentWeather = this->WeatherTransition.TransitionToWeather;
+        this->CurrentWeather = TargetWeather;
         this->WeatherTransition.TransitionToWeather = nullptr;
         this->WeatherChangedAt = Time;
         if (this->CurrentWeather == this->GuaranteedTargetWeather) {
@@ -457,6 +473,121 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
         this->WeatherChangeDelegate.Broadcast(NewWeatherTag, OldWeatherTag);
         UE_LOG(Myth_Environment, Warning, TEXT("EnvironmentController: Transition complete. New weather: %s"), *this->CurrentWeather->GetName());
     }
+}
+
+void AMythicEnvironmentController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    DOREPLIFETIME_CONDITION(AMythicEnvironmentController, Time, COND_InitialOnly);
+    DOREPLIFETIME(AMythicEnvironmentController, CurrentWeather);
+    DOREPLIFETIME(AMythicEnvironmentController, WeatherTransition);
+    DOREPLIFETIME(AMythicEnvironmentController, GuaranteedTargetWeather);
+}
+
+void AMythicEnvironmentController::OnRep_Time() {
+    // Initial sync of time for client
+    // We can also trigger an immediate lighting update
+    UpdateLighting();
+    UE_LOG(Myth_Environment, Log, TEXT("OnRep_Time: Time synced to %s"), *Time.ToString());
+}
+
+void AMythicEnvironmentController::OnRep_CurrentWeather(UWeatherType *PreviousWeather) {
+    UE_LOG(Myth_Environment, Log, TEXT("OnRep_CurrentWeather: %s -> %s"),
+           PreviousWeather ? *PreviousWeather->GetName() : TEXT("None"),
+           CurrentWeather ? *CurrentWeather->GetName() : TEXT("None"));
+
+    // Ensure visuals are up to date
+    if (CurrentWeather) {
+        ApplyWeatherVisuals(CurrentWeather);
+    }
+
+    // Broadcast change
+    FGameplayTag OldTag = PreviousWeather ? PreviousWeather->Tag : FGameplayTag::EmptyTag;
+    FGameplayTag NewTag = CurrentWeather ? CurrentWeather->Tag : FGameplayTag::EmptyTag;
+    this->WeatherChangeDelegate.Broadcast(NewTag, OldTag);
+}
+
+// Apply authoritative visuals from the WeatherTransition struct (which holds server-synced instance values)
+void AMythicEnvironmentController::ApplyWeatherVisuals(const UWeatherType *Weather) {
+    if (!Weather || !WeatherMPC) {
+        return;
+    }
+
+    // Instead of re-rolling random values from the Weather Asset (which causes desync),
+    // CHECK FOR DATA VALIDITY
+    // If we have authoritative data in the transition struct, use it.
+    // This persist even after the transition is finished (as we only clear the pointer, not the arrays).
+    const bool bHasAuthoritativeData = WeatherTransition.TransitionToScalarValues.Num() > 0;
+
+    // Restore local helper state from valid transition data
+    if (WeatherTransition.StartTime.GetTicks() > 0) {
+        this->TransitionStartedAt = WeatherTransition.StartTime;
+    }
+
+    // we apply the specific values stored in WeatherTransition.
+    // These values are calculated by the Server, Replicated, and Saved.
+
+    // Apply Scalar Values
+    if (bHasAuthoritativeData) {
+        for (const auto &Param : WeatherTransition.TransitionToScalarValues) {
+            // Only apply if this parameter belongs to the current weather type context usually,
+            // but applying all cached values is safer to ensure state matches server.
+            UKismetMaterialLibrary::SetScalarParameterValue(this, WeatherMPC, Param.ParameterName, Param.DefaultValue);
+        }
+
+        // Apply Vector Values
+        for (const auto &Param : WeatherTransition.TransitionToVectorValues) {
+            UKismetMaterialLibrary::SetVectorParameterValue(this, WeatherMPC, Param.ParameterName, Param.DefaultValue);
+        }
+
+        // Apply Fog
+        if (FogComponent) {
+            FogComponent->SetFogDensity(WeatherTransition.FogDensity);
+            FogComponent->SetFogHeightFalloff(WeatherTransition.FogHeightFalloff);
+        }
+    }
+}
+
+void AMythicEnvironmentController::OnRep_WeatherTransition() {
+    // Resolve Soft Pointer
+    UWeatherType *TargetWeather = WeatherTransition.TransitionToWeather.LoadSynchronous();
+
+    UE_LOG(Myth_Environment, Log, TEXT("OnRep_WeatherTransition: Transition to %s"),
+           TargetWeather ? *TargetWeather->GetName() : TEXT("None"));
+
+    // Cache "From" values to interpolate from current visual state
+    TransitionFromScalarValues.Empty();
+    TransitionFromVectorValues.Empty();
+
+    // Iterate over TargetWeather attributes to cache starting values from MPC
+    if (TargetWeather) {
+        for (const auto &ScalarAttr : TargetWeather->ScalarAttributes) {
+            FCollectionScalarParameter Val;
+            Val.ParameterName = ScalarAttr.Name;
+            Val.DefaultValue = UKismetMaterialLibrary::GetScalarParameterValue(this, WeatherMPC, ScalarAttr.Name);
+            TransitionFromScalarValues.Add(Val);
+        }
+
+        for (const auto &VectorAttr : TargetWeather->VectorAttributes) {
+            FCollectionVectorParameter Val;
+            Val.ParameterName = VectorAttr.Name;
+            Val.DefaultValue = UKismetMaterialLibrary::GetVectorParameterValue(this, WeatherMPC, VectorAttr.Name);
+            TransitionFromVectorValues.Add(Val);
+        }
+    }
+
+    if (FogComponent) {
+        this->CachedFogHeightFalloff = FogComponent->FogHeightFalloff;
+        this->CachedFogDensity = FogComponent->FogDensity;
+    }
+
+    // Set the transition locally
+    this->TransitionStartedAt = WeatherTransition.StartTime;
+
+    // Trigger delegate
+    FGameplayTag FromTag = CurrentWeather ? CurrentWeather->Tag : FGameplayTag::EmptyTag;
+    FGameplayTag ToTag = TargetWeather ? TargetWeather->Tag : FGameplayTag::EmptyTag;
+    this->WeatherTransitionDelegate.Broadcast(ToTag, FromTag, WeatherTransition.TransitionLength);
 }
 
 void AMythicEnvironmentController::CycleWeather() {
@@ -496,66 +627,26 @@ void AMythicEnvironmentController::CycleWeather() {
         return;
     }
 
-    this->WeatherTransition = FWeatherCycleInfo(SelectedWeather);
+    // Create the new weather cycle with the StartTime set to current Time
+    this->WeatherTransition = FWeatherCycleInfo(SelectedWeather, this->Time);
 
-    // Multicast the weather cycle to all clients
-    this->MulticastSyncWeather(this->WeatherTransition);
+    // On Server, manually call OnRep to trigger local events/caching
+    OnRep_WeatherTransition();
 }
-
 
 void AMythicEnvironmentController::SetWeatherTransition(const FWeatherCycleInfo &NewWeatherCycle) {
-    auto NewWeatherTag = NewWeatherCycle.TransitionToWeather->Tag;
-    auto OldWeatherTag = this->CurrentWeather ? this->CurrentWeather->Tag : FGameplayTag();
-
-    // Update the current weather cycle
+    // This function was previously used by Multicast, now mainly internal or for instant sets
+    // We can deprecate it or redirect.
+    // For now, let's just ensure it updates the struct
     this->WeatherTransition = NewWeatherCycle;
-
-    // Broadcast the weather cycle to all listeners
-    this->WeatherTransitionDelegate.Broadcast(NewWeatherTag, OldWeatherTag, NewWeatherCycle.TransitionLength);
+    OnRep_WeatherTransition();
 }
 
-void AMythicEnvironmentController::MulticastSyncWeather_Implementation(const FWeatherCycleInfo &NewWeatherCycle) {
-    UE_LOG(Myth_Environment, Warning, TEXT("Weather cycle synced"));
+// REMOVED MulticastSyncWeather_Implementation as it is replaced by OnRep_WeatherTransition
+// Keeping empty shell if header still declares it, or removing if I removed from header. 
+// I commented out in header, so I should remove here.
 
-    // Get the WeatherType for the TransitionToWeatherTag
-    const auto WeatherType = NewWeatherCycle.TransitionToWeather;
-    if (!WeatherType) {
-        return;
-    }
-
-    // Clear the TransitionFromScalarValues and TransitionFromVectorValues
-    TransitionFromScalarValues.Empty();
-    TransitionFromVectorValues.Empty();
-
-    // Cache the TransitionFromScalarValues
-    for (const auto &ScalarAttribute : WeatherType->ScalarAttributes) {
-        FCollectionScalarParameter NewValue = FCollectionScalarParameter();
-        NewValue.ParameterName = ScalarAttribute.Name;
-        NewValue.DefaultValue = UKismetMaterialLibrary::GetScalarParameterValue(this, WeatherMPC, ScalarAttribute.Name);
-
-        TransitionFromScalarValues.Add(NewValue);
-    }
-
-    // Cache the TransitionFromVectorValues
-    for (const auto &VectorAttribute : WeatherType->VectorAttributes) {
-        FCollectionVectorParameter NewValue = FCollectionVectorParameter();
-        NewValue.ParameterName = VectorAttribute.Name;
-        NewValue.DefaultValue = UKismetMaterialLibrary::GetVectorParameterValue(this, WeatherMPC, VectorAttribute.Name);
-
-        TransitionFromVectorValues.Add(NewValue);
-    }
-
-    // Cache the height falloff and fog density
-    if (FogComponent) {
-        this->CachedFogHeightFalloff = FogComponent->FogHeightFalloff;
-        this->CachedFogDensity = FogComponent->FogDensity;
-    }
-
-    // Set the transition start time
-    this->TransitionStartedAt = this->Time;
-
-    SetWeatherTransition(NewWeatherCycle);
-}
+// ...
 
 // WEATHER
 void AMythicEnvironmentController::SetGuaranteedTargetWeather(FGameplayTag TargetWeather) {

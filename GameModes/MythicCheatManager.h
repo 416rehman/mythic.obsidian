@@ -21,93 +21,143 @@ public:
     // Show all available cheat commands
     // Example: Help
     UFUNCTION(Exec)
-    void Help();
+    UFUNCTION(Exec)
+    void MythHelp();
 
     // === SAVE SYSTEM ===
 
     // Save character to slot
     // Example: SaveCharacter MyCharacter
     UFUNCTION(Exec)
-    void SaveCharacter(const FString &SlotName = TEXT("DebugCharacter"));
+    UFUNCTION(Exec)
+    void MythSaveCharacter(const FString &SlotName = TEXT("DebugCharacter"));
 
     // Load character from slot
     // Example: LoadCharacter MyCharacter
     UFUNCTION(Exec)
-    void LoadCharacter(const FString &SlotName = TEXT("DebugCharacter"));
+    UFUNCTION(Exec)
+    void MythLoadCharacter(const FString &SlotName = TEXT("DebugCharacter"));
 
     // Save world state
     // Example: SaveWorld MyWorld
     UFUNCTION(Exec)
-    void SaveWorld(const FString &SlotName = TEXT("DebugWorld"));
+    UFUNCTION(Exec)
+    void MythSaveWorld(const FString &SlotName = TEXT("DebugWorld"));
 
     // Load world state
     // Example: LoadWorld MyWorld
     UFUNCTION(Exec)
-    void LoadWorld(const FString &SlotName = TEXT("DebugWorld"));
+    UFUNCTION(Exec)
+    void MythLoadWorld(const FString &SlotName = TEXT("DebugWorld"));
 
     // List all save files
     // Example: ListSaves
     UFUNCTION(Exec)
-    void ListSaves();
+    UFUNCTION(Exec)
+    void MythListSaves();
 
     // === WEATHER ===
 
     // List available weather types
     // Example: ListWeather
     UFUNCTION(Exec)
-    void ListWeather();
+    UFUNCTION(Exec)
+    void MythListWeather();
 
     // Set weather (transitions)
     // Example: SetWeather Weather.Rain
     UFUNCTION(Exec)
-    void SetWeather(const FString &WeatherTag);
+    UFUNCTION(Exec)
+    void MythSetWeather(const FString &WeatherTag);
 
     // Set weather instantly
     // Example: SetWeatherInstant Weather.Clear
     UFUNCTION(Exec)
-    void SetWeatherInstant(const FString &WeatherTag);
+    UFUNCTION(Exec)
+    void MythSetWeatherInstant(const FString &WeatherTag);
+
+    // === TIME OF DAY ===
+
+    // Set the time of day to a specific hour
+    // Example: SetTime 14.5 (2:30 PM)
+    UFUNCTION(Exec)
+    UFUNCTION(Exec)
+    void MythSetTime(float Hour);
+
+    // Add hours to the current time
+    // Example: AddTime 1.0
+    UFUNCTION(Exec)
+    UFUNCTION(Exec)
+    void MythAddTime(float Hours);
+
+    // Pause time
+    // Example: PauseTime
+    UFUNCTION(Exec)
+    UFUNCTION(Exec)
+    void MythPauseTime();
+
+    // Resume time
+    // Example: ResumeTime
+    UFUNCTION(Exec)
+    UFUNCTION(Exec)
+    void MythResumeTime();
+
+    // Set time update speed
+    // Example: SetTimeSpeed 0.01 (Fast)
+    // Example: SetTimeSpeed 1.0 (Slow)
+    UFUNCTION(Exec)
+    UFUNCTION(Exec)
+    void MythSetTimeSpeed(float NewFrequency);
+
 
     // === ITEMS ===
 
     // List all item definitions
     // Example: ListItems
     UFUNCTION(Exec)
-    void ListItems();
+    UFUNCTION(Exec)
+    void MythListItems();
 
     // Give item by name (partial match)
     // Example: GiveItem Sword 5
     // Example: GiveItem IronOre 10
     UFUNCTION(Exec)
-    void GiveItem(const FString &ItemName, int32 Count = 1);
+    UFUNCTION(Exec)
+    void MythGiveItem(const FString &ItemName, int32 Count = 1);
 
     // Clear all items from inventory
     // Example: ClearInventory
     UFUNCTION(Exec)
-    void ClearInventory();
+    UFUNCTION(Exec)
+    void MythClearInventory();
 
     // === ATTRIBUTES ===
 
     // List all attributes and their values
     // Example: ListAttributes
     UFUNCTION(Exec)
-    void ListAttributes();
+    UFUNCTION(Exec)
+    void MythListAttributes();
 
     // Set an attribute value
     // Example: SetAttribute MaxHealth 500
     // Example: SetAttribute CurrentStamina 100
     UFUNCTION(Exec)
-    void SetAttribute(const FString &AttributeName, float Value);
+    UFUNCTION(Exec)
+    void MythSetAttribute(const FString &AttributeName, float Value);
 
     // === PROFICIENCIES ===
 
     // List proficiencies and progress
     // Example: ListProficiencies
     UFUNCTION(Exec)
-    void ListProficiencies();
+    UFUNCTION(Exec)
+    void MythListProficiencies();
 
     // Give proficiency progress
     // Example: GiveProficiency Combat 100
     // Example: GiveProficiency Mining 50
     UFUNCTION(Exec)
-    void GiveProficiency(const FString &ProficiencyName, float Amount);
+    UFUNCTION(Exec)
+    void MythGiveProficiency(const FString &ProficiencyName, float Amount);
 };

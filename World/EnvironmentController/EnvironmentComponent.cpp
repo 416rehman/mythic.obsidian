@@ -22,7 +22,8 @@ void UEnvironmentComponent::BeginPlay() {
     // Listen for the environment controller to be set in the environment subsystem then do the following
     if (auto Controller = EnvironmentSubsystem->GetEnvironmentController()) {
         OnEnvironmentControllerRegistered(Controller);
-    } else {
+    }
+    else {
         EnvironmentSubsystem->OnEnvironmentControllerRegisterDelegate.AddUniqueDynamic(this, &UEnvironmentComponent::OnEnvironmentControllerRegistered);
     }
 }
@@ -32,7 +33,7 @@ void UEnvironmentComponent::OnEnvironmentControllerRegistered(AMythicEnvironment
         UE_LOG(Myth, Error, TEXT("UEnvironmentComponent::OnEnvironmentControllerRegistered: EnvironmentController is null"));
         return;
     }
-    
+
     // When the environment controller broadcasts its events, broadcast our own events
     EnvironmentController->HourChangeDelegate.AddUniqueDynamic(this, &UEnvironmentComponent::CallOnHourChanged);
     EnvironmentController->DayTimeChangeDelegate.AddUniqueDynamic(this, &UEnvironmentComponent::CallOnDaytimeChanged);
@@ -42,4 +43,16 @@ void UEnvironmentComponent::OnEnvironmentControllerRegistered(AMythicEnvironment
     EnvironmentController->WeatherTransitionDelegate.AddUniqueDynamic(this, &UEnvironmentComponent::CallOnWeatherChangeStarted);
     EnvironmentController->WeatherChangeDelegate.AddUniqueDynamic(this, &UEnvironmentComponent::CallOnWeatherChanged);
     EnvironmentController->TargetWeatherReachedDelegate.AddUniqueDynamic(this, &UEnvironmentComponent::CallOnTargetWeatherReached);
+
+    // CATCH-UP LOGIC: Broadcast current state immediately so actors initialize correctly
+    // 1. DayTime
+    auto CurrentHour = EnvironmentController->GetTimespan().GetHours();
+    auto CurrentDayTime = HourAsDayTime(CurrentHour);
+    // Broadcast with same Old/New to indicate immediate state
+    this->CallOnDaytimeChanged(CurrentDayTime, CurrentDayTime);
+
+    // 2. Weather
+    if (auto CurrentWeather = EnvironmentController->GetCurrentWeather()) {
+        this->CallOnWeatherChanged(CurrentWeather->Tag, CurrentWeather->Tag);
+    }
 }
