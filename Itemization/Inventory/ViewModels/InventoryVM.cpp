@@ -167,7 +167,7 @@ void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *I
     for (int32 SlotIdx = 0; SlotIdx < AllSlots.Num(); ++SlotIdx) {
         const FMythicInventorySlotEntry &Entry = AllSlots[SlotIdx];
         if (Entry.SlotDefinition) {
-            if (Entry.bIsActive) {
+            if (Entry.bEquipmentSlot) {
                 SetOfEquipableSlots.Add(SlotIdx);
             }
             else {

@@ -37,6 +37,9 @@ public:
     UPROPERTY(Replicated, EditAnywhere, meta=(ShowOnlyInnerProperties), SaveGame)
     UInputAction *InputAction;
 
+    UPROPERTY(Transient)
+    TWeakObjectPtr<class UEnhancedInputComponent> BoundInputComponent;
+
     TArray<uint32> InputBindings;
 
     /** Fragment Overrides */

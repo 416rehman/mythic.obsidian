@@ -200,7 +200,11 @@ public:
     }
 
     virtual int32 GetFunctionCallspace(UFunction *Function, FFrame *Stack) override {
-        checkf(OwningActor, TEXT("GetFunctionCallspace: OwningActor is null"));
+        // If the owning actor is not set (e.g. during early replication), fallback to local execution
+        // This prevents crashes when RepNotifies are called before the OwningActor property is replicated
+        if (!OwningActor) {
+            return FunctionCallspace::Local;
+        }
         return OwningActor->GetFunctionCallspace(Function, Stack);
     }
 

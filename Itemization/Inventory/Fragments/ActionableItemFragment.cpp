@@ -26,6 +26,7 @@ void UActionableItemFragment::OnClientItemActivated(UMythicItemInstance *ItemIns
     }
 
     if (auto EnhancedInputComp = Cast<UEnhancedInputComponent>(OwnerController->InputComponent)) {
+        BoundInputComponent = EnhancedInputComp;
         // Bind the input action
         FEnhancedInputActionEventBinding &binding = EnhancedInputComp->BindAction(InputAction, ETriggerEvent::Started, this,
                                                                                   &UActionableItemFragment::InputStarted);
@@ -45,18 +46,17 @@ void UActionableItemFragment::OnClientItemActivated(UMythicItemInstance *ItemIns
 }
 
 void UActionableItemFragment::OnClientItemDeactivated(UMythicItemInstance *ItemInstance) {
-    // Player input component
-    auto owner = ItemInstance->GetInventoryOwner();
-    auto OwnerController = Cast<APlayerController>(owner);
-    if (auto EnhancedInputComp = Cast<UEnhancedInputComponent>(OwnerController->InputComponent)) {
-        // Unbind the input action
-        for (auto handle : InputBindings) {
-            EnhancedInputComp->RemoveBindingByHandle(handle);
+    if (BoundInputComponent.IsValid()) {
+        if (auto EnhancedInputComp = BoundInputComponent.Get()) {
+             // Unbind the input action
+            for (auto handle : InputBindings) {
+                EnhancedInputComp->RemoveBindingByHandle(handle);
+            }
         }
     }
-    else {
-        UE_LOG(LogTemp, Warning, TEXT("ActionableItemFragment::ClientUnbindInput: EnhancedInputComponent not found"));
-    }
+    
+    BoundInputComponent.Reset();
+    
     // Clear regardless of component existence
     InputBindings.Empty();
 }

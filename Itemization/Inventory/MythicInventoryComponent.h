@@ -35,14 +35,18 @@ struct FMythicInventorySlotEntry : public FFastArraySerializerItem {
     TObjectPtr<UMythicItemInstance> SlottedItemInstance = nullptr;
 
     UPROPERTY()
-    bool bIsActive = false;
+    bool bEquipmentSlot = false;
+
+    // Transient client-side cache of the last item in this slot to handle deactivation
+    UPROPERTY(Transient, NotReplicated)
+    TObjectPtr<UMythicItemInstance> ClientLastKnownItem = nullptr;
 
     // Definition of the slot (Icon, Whitelists, Tags)
     UPROPERTY()
     TObjectPtr<UInventorySlotDefinition> SlotDefinition = nullptr;
 
-    void ActivateSlot();
-    void DeactivateSlot();
+    void ClientUpdateActiveState();
+    void ServerUpdateActiveState();
     void Clear();
 };
 
@@ -65,24 +69,11 @@ struct FMythicInventoryFastArray : public FFastArraySerializer {
     int32 Num() const { return Items.Num(); }
     bool IsValidIndex(int32 Index) const { return Items.IsValidIndex(Index); }
 
-    void AddSlot(const FMythicInventorySlotEntry &NewSlot) {
-        FMythicInventorySlotEntry &AddedItem = Items.Add_GetRef(NewSlot);
-        MarkItemDirty(AddedItem);
-    }
+    void AddSlot(const FMythicInventorySlotEntry &NewSlot);
 
-    void RemoveSlotAt(int32 Index) {
-        if (Items.IsValidIndex(Index)) {
-            Items.RemoveAt(Index);
-            MarkArrayDirty();
-        }
-    }
+    void RemoveSlotAt(int32 Index);
 
-    void ModifySlotAtIndex(int32 Index, const TFunction<void(FMythicInventorySlotEntry &SlotData)> &Modifier) {
-        if (Items.IsValidIndex(Index)) {
-            Modifier(Items[Index]);
-            MarkItemDirty(Items[Index]);
-        }
-    }
+    void ModifySlotAtIndex(int32 Index, const TFunction<void(FMythicInventorySlotEntry &SlotData)> &Modifier);
 
     TObjectPtr<UMythicItemInstance> GetItemInSlot(int32 Index) const {
         if (Items.IsValidIndex(Index)) { return Items[Index].SlottedItemInstance; }
@@ -133,12 +124,16 @@ protected:
     /*
     * Fast array serializer for inventory slots
     */
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Slots")
+    /*
+    * Fast array serializer for inventory slots
+    */
+    UPROPERTY(ReplicatedUsing=OnRep_Slots, BlueprintReadOnly, Category = "Slots")
     FMythicInventoryFastArray Slots = FMythicInventoryFastArray();
 
-    // Transient client-side cache of active flags for minimal vfx updates (optional)
-    UPROPERTY(Transient)
-    TArray<bool> LastKnownActive;
+    UFUNCTION()
+    void OnRep_Slots();
+
+
 
 public:
     // Inventory Profile to use for initialization

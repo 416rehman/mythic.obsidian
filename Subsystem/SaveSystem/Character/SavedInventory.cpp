@@ -23,7 +23,7 @@ void FSerializedInventoryData::Serialize(UMythicInventoryComponent *Component, F
             SavedSlot.SlotDefinition = FSoftObjectPath(SlotEntry.SlotDefinition);
         }
 
-        SavedSlot.bIsActive = SlotEntry.bIsActive;
+        SavedSlot.bIsActive = SlotEntry.bEquipmentSlot;
         SavedSlot.bHasItem = (SlotEntry.SlottedItemInstance != nullptr);
 
         if (SlotEntry.SlottedItemInstance) {
@@ -56,7 +56,7 @@ static void ProcessSlot(UMythicInventoryComponent *Component, int32 SaveIndex, i
     FMythicInventorySlotEntry &FoundSlot = TargetSlots[TargetIndex];
 
     // Restore active state
-    FoundSlot.bIsActive = SavedSlot.bIsActive;
+    FoundSlot.bEquipmentSlot = SavedSlot.bIsActive;
 
     if (SavedSlot.bHasItem) {
         UClass *ItemClass = SavedSlot.ItemData.ItemClass.TryLoadClass<UMythicItemInstance>();
