@@ -6,6 +6,7 @@
 #include "NavigationSystem.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Kismet/GameplayStatics.h"
+#include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 
 
 class UNavigationSystemV1;

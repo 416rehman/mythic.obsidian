@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "InputAction.h"
+#include "EnhancedInput/Public/InputAction.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Itemization/Inventory/Fragments/ItemFragment.h"
 #include "ActionableItemFragment.generated.h"

@@ -17,11 +17,17 @@ enum EItemRarity {
 
 class UItemFragment;
 
+/**
+ * Base class for all item definitions.
+ * Use the buttons in "Set Category" to auto-configure ItemType and required fragments.
+ */
 UCLASS(Blueprintable, BlueprintType, EditInlineNew)
 class MYTHIC_API UItemDefinition : public UMythicDataAsset {
     GENERATED_BODY()
 
 public:
+    UItemDefinition();
+
     /** The name of the item */
     UPROPERTY(BlueprintReadOnly, EditAnywhere, meta=(DisplayName="Name"))
     FText Name;
@@ -32,11 +38,11 @@ public:
 
     /** The type of the item, stored in gameplay tag Itemization.Type */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(Categories="Itemization.Type", DisplayName="ItemType"))
-    FGameplayTag ItemType = ITEMIZATION_TYPE_MISC;
+    FGameplayTag ItemType;
 
     /** Rarity of the item, stored in gameplay tag Itemization.Rarity */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(Categories="Itemization.Rarity", DisplayName="Rarity"))
-    TEnumAsByte<EItemRarity> Rarity = Common;
+    TEnumAsByte<EItemRarity> Rarity;
 
     /** Static mesh to use for the item when it is in the world */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(DisplayName="WorldMesh", MakeStructureDefaultValue="None"))
@@ -61,13 +67,66 @@ public:
                 return talent;
             }
         }
-
         return nullptr;
     }
 
 #if WITH_EDITOR
+    //~ Set Category - Auto-configure this item for a specific category
+
+    /** Sets ItemType to Weapon and adds AttackFragment */
+    UFUNCTION(CallInEditor, Category="Set Category")
+    void Weapon();
+
+    /** Sets ItemType to Tool and adds AttackFragment */
+    UFUNCTION(CallInEditor, Category="Set Category")
+    void Tool();
+
+    /** Sets ItemType to Gear and adds AffixesFragment */
+    UFUNCTION(CallInEditor, Category="Set Category")
+    void Gear();
+
+    /** Sets ItemType to Accessory and adds AffixesFragment */
+    UFUNCTION(CallInEditor, Category="Set Category")
+    void Accessory();
+
+    /** Sets ItemType to Artifact and adds AffixesFragment */
+    UFUNCTION(CallInEditor, Category="Set Category")
+    void Artifact();
+
+    /** Sets ItemType to Consumable and adds ConsumableActionFragment */
+    UFUNCTION(CallInEditor, Category="Set Category")
+    void Consumable();
+
+    /** Sets ItemType to Learning and adds ConsumableActionFragment */
+    UFUNCTION(CallInEditor, Category="Set Category")
+    void Learning();
+
+    /** Sets ItemType to Farming */
+    UFUNCTION(CallInEditor, Category="Set Category")
+    void Farming();
+
+    /** Sets ItemType to Mining */
+    UFUNCTION(CallInEditor, Category="Set Category")
+    void Mining();
+
+    /** Sets ItemType to Placable */
+    UFUNCTION(CallInEditor, Category="Set Category")
+    void Placable();
+
+    /** Sets ItemType to Exploration */
+    UFUNCTION(CallInEditor, Category="Set Category")
+    void Exploration();
+
+    /** Sets ItemType to Misc */
+    UFUNCTION(CallInEditor, Category="Set Category")
+    void Misc();
+
     virtual void PostLoad() override;
     virtual void PreSave(FObjectPreSaveContext SaveContext) override;
     virtual EDataValidationResult IsDataValid(class FDataValidationContext &Context) const override;
+
+private:
+    template <typename T>
+    void EnsureFragment();
 #endif
 };
