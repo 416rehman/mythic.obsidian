@@ -22,11 +22,11 @@ UMythicInventoryComponent::UMythicInventoryComponent(const FObjectInitializer &O
 
 void FMythicInventorySlotEntry::ClientUpdateActiveState() {
     bool bChanged = ClientLastKnownItem != SlottedItemInstance;
-    UE_LOG(Myth, Log, TEXT("ClientUpdateActiveState: Slot Item: %s, LastKnown: %s, bEquipmentSlot: %d, Changed: %d"), 
-        SlottedItemInstance ? *SlottedItemInstance->GetName() : TEXT("Null"),
-        ClientLastKnownItem ? *ClientLastKnownItem->GetName() : TEXT("Null"),
-        bEquipmentSlot,
-        bChanged);
+    UE_LOG(Myth, Log, TEXT("ClientUpdateActiveState: Slot Item: %s, LastKnown: %s, bEquipmentSlot: %d, Changed: %d"),
+           SlottedItemInstance ? *SlottedItemInstance->GetName() : TEXT("Null"),
+           ClientLastKnownItem ? *ClientLastKnownItem->GetName() : TEXT("Null"),
+           bEquipmentSlot,
+           bChanged);
 
     // If the item has changed (or this is the first time we're seeing it)
     if (bChanged) {
@@ -262,7 +262,7 @@ bool UMythicInventoryComponent::SetItemInSlotInternal(int32 SlotIndex, UMythicIt
     if (!NewItemInstance) {
         // Deactivate old item if applicable
         if (Slots.Items[SlotIndex].SlottedItemInstance && Slots.Items[SlotIndex].bEquipmentSlot) {
-             Slots.Items[SlotIndex].SlottedItemInstance->OnInactiveItem();
+            Slots.Items[SlotIndex].SlottedItemInstance->OnInactiveItem();
         }
 
         Slots.ModifySlotAtIndex(SlotIndex, [](FMythicInventorySlotEntry &SlotData) {
@@ -289,6 +289,10 @@ bool UMythicInventoryComponent::SetItemInSlotInternal(int32 SlotIndex, UMythicIt
             return false;
         }
         if (!NewItemInstance->GetItemDefinition()->ItemType.MatchesAny(Slot.SlotDefinition->WhitelistedItemTypes)) {
+            UE_LOG(Myth, Error, TEXT("SetItemInSlotInternal: Item %s of type %s is not whitelisted for slot %d"),
+                   *NewItemInstance->GetName(),
+                   *NewItemInstance->GetItemDefinition()->ItemType.ToString(),
+                   SlotIndex);
             return false;
         }
     }
@@ -304,7 +308,7 @@ bool UMythicInventoryComponent::SetItemInSlotInternal(int32 SlotIndex, UMythicIt
         if (IsValid(Slot.SlottedItemInstance)) {
             Slot.SlottedItemInstance->SetOwner(this);
             Slot.SlottedItemInstance->SetInventory(this, SlotIndex);
-            
+
             // Activate new item if applicable
             Slot.ServerUpdateActiveState();
         }
@@ -543,7 +547,7 @@ void UMythicInventoryComponent::HandleSlotsAdded(const TArrayView<int32> &AddedI
         if (Slots.IsValidIndex(idx)) {
             Slots.Items[idx].ClientUpdateActiveState();
         }
-        
+
         OnSlotUpdated.Broadcast(idx);
         if (IsValid(ViewModel)) {
             ViewModel->RefreshSlotFromInventory(this, idx);
@@ -568,7 +572,7 @@ void UMythicInventoryComponent::HandleSlotsRemoved(const TArrayView<int32> &Remo
     // Deactivate items that are about to be removed
     for (int32 idx : RemovedIndices) {
         if (Slots.IsValidIndex(idx)) {
-            FMythicInventorySlotEntry& Slot = Slots.Items[idx];
+            FMythicInventorySlotEntry &Slot = Slots.Items[idx];
             if (IsValid(Slot.ClientLastKnownItem)) {
                 Slot.ClientLastKnownItem->OnClientInactiveItem();
                 Slot.ClientLastKnownItem = nullptr;
@@ -682,7 +686,7 @@ bool UMythicInventoryComponent::DestroySlot(int32 SlotIndex) {
     }
 
     FMythicInventorySlotEntry &InSlot = Slots.Items[SlotIndex];
-    
+
     // Server Deactivate
     if (InSlot.SlottedItemInstance && InSlot.bEquipmentSlot) {
         InSlot.SlottedItemInstance->OnInactiveItem();

@@ -128,13 +128,11 @@ void UConsumableActionFragment::ServerHandleTags_Implementation(UMythicItemInsta
         if (ConsumableActionConfig.TagsToAdd.IsValid()) {
             UE_LOG(Myth, Warning, TEXT("UConsumableFragment::HandleTags: Adding Tag %s to ASC %s"), *ConsumableActionConfig.TagsToAdd.ToString(),
                    *ASC->GetName());
-            ASC->AddLooseGameplayTags(ConsumableActionConfig.TagsToAdd);
-            ASC->AddReplicatedLooseGameplayTags(ConsumableActionConfig.TagsToAdd);
+            ASC->AddLooseGameplayTags(ConsumableActionConfig.TagsToAdd, 1, EGameplayTagReplicationState::TagAndCountToAll);
         }
 
         if (ConsumableActionConfig.TagsToRemove.IsValid()) {
-            ASC->RemoveReplicatedLooseGameplayTags(ConsumableActionConfig.TagsToRemove);
-            ASC->RemoveLooseGameplayTags(ConsumableActionConfig.TagsToRemove);
+            ASC->RemoveLooseGameplayTags(ConsumableActionConfig.TagsToRemove, 1, EGameplayTagReplicationState::TagAndCountToAll);
         }
     }
     else {

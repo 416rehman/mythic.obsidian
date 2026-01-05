@@ -26,11 +26,11 @@ struct FTrackedDestructibleData : public FFastArraySerializerItem {
 
     // The absolute time after which the resource can respawn
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Resource")
-    double RespawnTime;
+    double RespawnTime = 0.0;
 
     // The ISM this resource belongs to
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Resource")
-    UMythicResourceISM *ResourceISM;
+    UMythicResourceISM *ResourceISM = nullptr;
 
     bool operator==(const FTrackedDestructibleData &other) const {
         return other.ResourceISM == this->ResourceISM && other.InstanceId == this->InstanceId;
