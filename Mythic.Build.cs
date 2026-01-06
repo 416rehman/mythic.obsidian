@@ -50,7 +50,9 @@ public class Mythic : ModuleRules
 			"OnlineSubsystemUtils",
 			"OnlineSubsystemEOS",
 			"NavigationSystem",
-			"DataConfigCore"
+			"DataConfigCore",
+			"Json",
+			"JsonUtilities"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
