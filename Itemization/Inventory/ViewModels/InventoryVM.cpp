@@ -30,6 +30,26 @@ UTexture2D *UInventoryTabVM::GetTabIcon() const {
     return TabIcon;
 }
 
+void UInventoryTabVM::SetGroupTag(FGameplayTag InGroupTag) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(GroupTag, InGroupTag)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(GroupTag);
+    }
+}
+
+FGameplayTag UInventoryTabVM::GetGroupTag() const {
+    return GroupTag;
+}
+
+void UInventoryTabVM::SetIsProtected(bool bInIsProtected) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(IsProtected, bInIsProtected)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(IsProtected);
+    }
+}
+
+bool UInventoryTabVM::GetIsProtected() const {
+    return IsProtected;
+}
+
 void UInventoryTabVM::SetSlots(TArray<TObjectPtr<UItemSlotVM>> InSlots) {
     if (UE_MVVM_SET_PROPERTY_VALUE(Slots, InSlots)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Slots);
@@ -41,9 +61,12 @@ TArray<TObjectPtr<UItemSlotVM>> UInventoryTabVM::GetSlots() const {
     return Slots;
 }
 
-void UInventoryTabVM::Initialize(FText InTabName, UTexture2D *InTabIcon, TArray<TObjectPtr<UItemSlotVM>> InSlots, int32 InSelectedSlotIndex) {
+void UInventoryTabVM::Initialize(FText InTabName, UTexture2D *InTabIcon, FGameplayTag InGroupTag, bool bInIsProtected,
+                                 TArray<TObjectPtr<UItemSlotVM>> InSlots) {
     SetTabName(InTabName);
     SetTabIcon(InTabIcon);
+    SetGroupTag(InGroupTag);
+    SetIsProtected(bInIsProtected);
     SetSlots(InSlots);
 }
 
@@ -103,42 +126,49 @@ void UInventoryVM::Clear() {
     UE_LOG(Myth, Log, TEXT("InventoryVM cleared."));
 }
 
-TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythicInventorySlotEntry> &allSlots, TSet<int32> InventoryIndices) {
-    auto DefToTabMap = TMap<TObjectPtr<UInventorySlotDefinition>, TObjectPtr<UInventoryTabVM>>();
+TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythicInventorySlotEntry> &allSlots, TSet<int32> SlotIndices) {
+    // Map GroupTag -> TabVM
+    TMap<FGameplayTag, TObjectPtr<UInventoryTabVM>> GroupToTabMap;
 
-    auto AsArray = InventoryIndices.Array();
+    auto AsArray = SlotIndices.Array();
     for (int32 i = 0; i < AsArray.Num(); ++i) {
-        auto AbsIndex = AsArray[i];
+        int32 AbsIndex = AsArray[i];
         const FMythicInventorySlotEntry &Entry = allSlots[AbsIndex];
 
-        // Skip if no slot definition
         if (!Entry.SlotDefinition) {
             continue;
         }
 
-        // Get the tab for this definition, or create it if it doesn't exist
-        TObjectPtr<UInventoryTabVM> *FoundTab = DefToTabMap.Find(Entry.SlotDefinition);
+        // Get or create tab for this group
+        TObjectPtr<UInventoryTabVM> *FoundTab = GroupToTabMap.Find(Entry.GroupTag);
         if (FoundTab == nullptr) {
-            // Create new tab
             auto NewTabVM = NewObject<UInventoryTabVM>(this);
-            // Get the name and icon from the slot definition
-            FText Label = Entry.SlotDefinition->DisplayName;
-            if (Label.IsEmpty()) {
-                Label = FText::FromString(Entry.SlotDefinition->GetName());
+
+            // Get group info from Profile if available
+            FText GroupName = FText::FromString(Entry.GroupTag.ToString());
+            UTexture2D *GroupIcon = nullptr;
+            bool bProtected = Entry.bProtectedGroup;
+
+            if (OwningInventoryComponent && OwningInventoryComponent->InventoryProfile) {
+                const FInventorySlotGroup *Group = OwningInventoryComponent->InventoryProfile->SlotGroups.Find(Entry.GroupTag);
+                if (Group) {
+                    GroupName = Group->GroupName.IsEmpty() ? GroupName : Group->GroupName;
+                    GroupIcon = Group->Icon;
+                    bProtected = Group->bProtectedItems;
+                }
             }
 
-            NewTabVM->Initialize(Label, Entry.SlotDefinition->Icon, TArray<TObjectPtr<UItemSlotVM>>(), 0);
-            DefToTabMap.Add(Entry.SlotDefinition, NewTabVM);
-            FoundTab = DefToTabMap.Find(Entry.SlotDefinition);
+            NewTabVM->Initialize(GroupName, GroupIcon, Entry.GroupTag, bProtected, TArray<TObjectPtr<UItemSlotVM>>());
+            GroupToTabMap.Add(Entry.GroupTag, NewTabVM);
+            FoundTab = GroupToTabMap.Find(Entry.GroupTag);
         }
 
-        // Add to tab
+        // Create slot VM and add to tab
         if (FoundTab && *FoundTab) {
             auto NewSlotVM = NewObject<UItemSlotVM>(this);
             NewSlotVM->Initialize(Entry.SlottedItemInstance, this, Entry.SlotDefinition, AbsIndex);
             (*FoundTab)->Slots.Add(NewSlotVM);
 
-            // Ensure the map is large enough
             if (AbsoluteIndexToSlotVM.Num() <= AbsIndex) {
                 AbsoluteIndexToSlotVM.SetNum(AbsIndex + 1);
             }
@@ -146,12 +176,24 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythic
         }
     }
 
-    auto TabsArray = TArray<TObjectPtr<UInventoryTabVM>>();
-    DefToTabMap.GenerateValueArray(TabsArray);
+    // Convert to array and sort by DisplayOrder
+    TArray<TObjectPtr<UInventoryTabVM>> TabsArray;
+    GroupToTabMap.GenerateValueArray(TabsArray);
+
+    // Sort by DisplayOrder from Profile
+    if (OwningInventoryComponent && OwningInventoryComponent->InventoryProfile) {
+        TabsArray.Sort([this](const TObjectPtr<UInventoryTabVM> &A, const TObjectPtr<UInventoryTabVM> &B) {
+            const FInventorySlotGroup *GroupA = OwningInventoryComponent->InventoryProfile->SlotGroups.Find(A->GroupTag);
+            const FInventorySlotGroup *GroupB = OwningInventoryComponent->InventoryProfile->SlotGroups.Find(B->GroupTag);
+            int32 OrderA = GroupA ? GroupA->DisplayOrder : 0;
+            int32 OrderB = GroupB ? GroupB->DisplayOrder : 0;
+            return OrderA < OrderB;
+        });
+    }
+
     return TabsArray;
 }
 
-// Internal builder from inventory
 void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *InInventoryComponent) {
     Clear();
     SetOwningInventoryComponent(InInventoryComponent);
@@ -162,13 +204,13 @@ void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *I
 
     const auto AllSlots = InInventoryComponent->GetAllSlots();
 
-    auto InventoryIndices = TSet<int32>();
-    auto SetOfEquipableSlots = TSet<int32>();
+    TSet<int32> InventoryIndices;
+    TSet<int32> EquipmentIndices;
     for (int32 SlotIdx = 0; SlotIdx < AllSlots.Num(); ++SlotIdx) {
         const FMythicInventorySlotEntry &Entry = AllSlots[SlotIdx];
         if (Entry.SlotDefinition) {
             if (Entry.bEquipmentSlot) {
-                SetOfEquipableSlots.Add(SlotIdx);
+                EquipmentIndices.Add(SlotIdx);
             }
             else {
                 InventoryIndices.Add(SlotIdx);
@@ -177,16 +219,14 @@ void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *I
     }
 
     SetInventoryTabs(CreateVMs(AllSlots, InventoryIndices));
-    SetEquipmentTabs(CreateVMs(AllSlots, SetOfEquipableSlots));
+    SetEquipmentTabs(CreateVMs(AllSlots, EquipmentIndices));
 
-    // Initialize selection VM
     if (!SelectionVM) {
         SelectionVM = NewObject<UInventorySelectionVM>(this);
     }
 
     UE_LOG(Myth, Log, TEXT("InventoryVM initialized from inventory component: %s"), *InInventoryComponent->GetName());
 
-    // default to first inventory tab, first slot
     if (InventoryTabs.Num() > 0) {
         auto FirstInvTab = InventoryTabs[0];
         SelectionVM->SetSelectedTabVM(FirstInvTab);

@@ -172,24 +172,36 @@ void UMythicInventoryComponent::InitializeSlots() {
     DestroyAllSlots();
 
     if (!InventoryProfile) {
-        UE_LOG(Myth, Warning, TEXT("[InitializeSlots] No details profile assigned to inventory component on %s"), *lOwner->GetName());
+        UE_LOG(Myth, Warning, TEXT("[InitializeSlots] No profile assigned to inventory component on %s"), *lOwner->GetName());
         return;
     }
 
-    // Create new slots based on the profile
-    for (const FInventoryProfileEntry &Entry : InventoryProfile->Slots) {
-        if (!Entry.SlotDefinition) {
-            UE_LOG(Myth, Error, TEXT("Inventory InitializeSlots:: SlotDefinition is null in profile %s for owner %s"), *InventoryProfile->GetName(),
-                   *GetOwner()->GetName());
-            continue;
-        }
+    // Create slots from groups
+    for (const auto &GroupPair : InventoryProfile->SlotGroups) {
+        const FGameplayTag &GroupTag = GroupPair.Key;
+        const FInventorySlotGroup &Group = GroupPair.Value;
 
-        for (int32 i = 0; i < Entry.Count; ++i) {
-            FMythicInventorySlotEntry SlotEntry;
-            SlotEntry.SlotDefinition = Entry.SlotDefinition;
-            SlotEntry.bEquipmentSlot = Entry.bIsActiveSlot;
+        int32 EntryIndex = 0;
+        for (const FInventoryProfileEntry &Entry : Group.Slots) {
+            if (!Entry.SlotDefinition) {
+                UE_LOG(Myth, Error, TEXT("InitializeSlots: SlotDefinition is null in group %s for owner %s"),
+                       *GroupTag.ToString(), *lOwner->GetName());
+                ++EntryIndex;
+                continue;
+            }
 
-            Slots.AddSlot(SlotEntry);
+            for (int32 i = 0; i < Entry.Count; ++i) {
+                FMythicInventorySlotEntry SlotEntry;
+                SlotEntry.SlotDefinition = Entry.SlotDefinition;
+                SlotEntry.bEquipmentSlot = Group.bIsEquipmentGroup;
+                SlotEntry.GroupTag = GroupTag;
+                SlotEntry.EntryIndex = EntryIndex;
+                SlotEntry.bRequireUniqueInEntry = Entry.bRequireUniqueItems;
+                SlotEntry.bProtectedGroup = Group.bProtectedItems;
+
+                Slots.AddSlot(SlotEntry);
+            }
+            ++EntryIndex;
         }
     }
 
@@ -197,12 +209,9 @@ void UMythicInventoryComponent::InitializeSlots() {
     UE_LOG(Myth, Verbose, TEXT("Initialized Inventory from %d to %d slots"), OldSlotsSize, NewSlotsSize);
 
     if (OldSlotsSize != NewSlotsSize) {
-        // Server-side local update for any UI (listen server)
-        // SetupLocalViewModel();
         OnInventorySizeChanged.Broadcast(NewSlotsSize, OldSlotsSize);
     }
     else {
-        // If the size is the same, update the view model items
         if (IsValid(ViewModel)) {
             ViewModel->RefreshAllItemsFromInventory(this);
         }
@@ -294,6 +303,25 @@ bool UMythicInventoryComponent::SetItemInSlotInternal(int32 SlotIndex, UMythicIt
                    *NewItemInstance->GetItemDefinition()->ItemType.ToString(),
                    SlotIndex);
             return false;
+        }
+    }
+
+    // Uniqueness check for slots requiring unique items within the same entry
+    if (Slot.bRequireUniqueInEntry && NewItemInstance->GetItemDefinition()) {
+        for (int32 i = 0; i < Slots.Num(); ++i) {
+            if (i == SlotIndex) {
+                continue;
+            }
+            const FMythicInventorySlotEntry &OtherSlot = Slots.Items[i];
+            // Check if same group and same entry index
+            if (OtherSlot.GroupTag == Slot.GroupTag &&
+                OtherSlot.EntryIndex == Slot.EntryIndex &&
+                OtherSlot.SlottedItemInstance &&
+                OtherSlot.SlottedItemInstance->GetItemDefinition() == NewItemInstance->GetItemDefinition()) {
+                UE_LOG(Myth, Warning, TEXT("SetItemInSlotInternal: Item %s already exists in entry (uniqueness required)"),
+                       *NewItemInstance->GetName());
+                return false;
+            }
         }
     }
 
@@ -454,10 +482,22 @@ int32 UMythicInventoryComponent::SendItem(int32 SlotIndex, UMythicInventoryCompo
 
 bool UMythicInventoryComponent::DropItem(int32 SlotIndex, const FVector &location, const float radius, AController *TargetRecipient) {
     AActor *lOwner = GetOwner();
-    checkf(lOwner != nullptr, TEXT("GetItem:: Invalid Inventory Owner"));
-    checkf(lOwner->HasAuthority(), TEXT("AddToAnySlot:: Called without Authority!"));
+    checkf(lOwner != nullptr, TEXT("DropItem:: Invalid Inventory Owner"));
+    checkf(lOwner->HasAuthority(), TEXT("DropItem:: Called without Authority!"));
 
-    auto item_instance = Slots.GetItemInSlot(SlotIndex);
+    if (!Slots.IsValidIndex(SlotIndex)) {
+        return false;
+    }
+
+    const FMythicInventorySlotEntry &Slot = Slots.Items[SlotIndex];
+
+    // Check if slot is protected
+    if (Slot.bProtectedGroup) {
+        UE_LOG(Myth, Warning, TEXT("DropItem: Cannot drop item from protected group"));
+        return false;
+    }
+
+    auto item_instance = Slot.SlottedItemInstance;
     if (item_instance == nullptr) {
         UE_LOG(Myth, Verbose, TEXT("DropItem:: No item in slot %d"), SlotIndex);
         return false;

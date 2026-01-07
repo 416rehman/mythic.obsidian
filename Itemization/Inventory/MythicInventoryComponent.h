@@ -37,6 +37,22 @@ struct FMythicInventorySlotEntry : public FFastArraySerializerItem {
     UPROPERTY()
     bool bEquipmentSlot = false;
 
+    // Tag identifying which group this slot belongs to
+    UPROPERTY()
+    FGameplayTag GroupTag;
+
+    // Index of the entry within the group (for uniqueness scoping)
+    UPROPERTY()
+    int32 EntryIndex = 0;
+
+    // Cached from entry - if true, enforce unique items within slots of same EntryIndex
+    UPROPERTY()
+    bool bRequireUniqueInEntry = false;
+
+    // Cached from group - if true, items cannot be dropped/sold/transferred by player
+    UPROPERTY()
+    bool bProtectedGroup = false;
+
     // Transient client-side cache of the last item in this slot to handle deactivation
     UPROPERTY(Transient, NotReplicated)
     TObjectPtr<UMythicItemInstance> ClientLastKnownItem = nullptr;
@@ -132,8 +148,6 @@ protected:
 
     UFUNCTION()
     void OnRep_Slots();
-
-
 
 public:
     // Inventory Profile to use for initialization
