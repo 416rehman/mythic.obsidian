@@ -231,7 +231,7 @@ struct FAbilityDefinition {
 
                 // Replace the tag with <RichText>Value</RichText><Optional>[Min-Max]</Optional>
                 FText Replacement = FText::FromString(FString::Printf(
-                    TEXT("<Roll>%d%hs</><RollRange>[%d-%d]</>"), static_cast<int>(AttributeValue), RollDef.bIsPercentage ? "%" : "", static_cast<int>(MinValue),
+                    TEXT("<Roll>%d%hs</><Context>[%d-%d]</>"), static_cast<int>(AttributeValue), RollDef.bIsPercentage ? "%" : "", static_cast<int>(MinValue),
                     static_cast<int>(MaxValue)));
                 SourceString = FText::FromString(SourceString.ToString().Replace(*ToReplace.ToString(), *Replacement.ToString()));
             }
