@@ -1,41 +1,160 @@
 #pragma once
 
 #include "Engine/AssetManager.h"
+#include "Engine/StreamableManager.h"
 #include "MythicAssetManager.generated.h"
 
 class UCraftableFragment;
 class UItemDefinition;
+
 /**
- * Game implementation of asset manager, overrides functionality and stores game-specific types
- * It is expected that most games will want to override AssetManager as it provides a good place for game-specific loading logic
- * This is used by setting AssetManagerClassName in DefaultEngine.ini
+ * Game implementation of asset manager with async loading utilities.
+ * Set via AssetManagerClassName in DefaultEngine.ini
  *
- * LoadPrimaryAssets (To load from disk into mem) -> GetPrimaryAssetObject (To get the object) -> Cast<UItemDefinition> (To cast to the desired type)
+ * ASYNC LOADING - Simple static API with automatic weak pointer safety:
+ *
+ *   UMythicAssetManager::LoadAsync(this, SoftObjectPtr, [this](UMyAsset* Asset) {
+ *       // Callback only fires if 'this' is still valid
+ *   });
+ *
+ *   UMythicAssetManager::LoadAsync(this, SoftClassPtr, [this](TSubclassOf<AActor> Class) {
+ *       // Use the class
+ *   });
  */
 UCLASS()
-class MYTHIC_API UMythicAssetManager : public UAssetManager
-{
+class MYTHIC_API UMythicAssetManager : public UAssetManager {
     GENERATED_BODY()
 
 public:
-    // Constructor and overrides
     UMythicAssetManager() {}
     virtual void StartInitialLoading() override;
 
-    /** Static types for items */
-    static const FPrimaryAssetType	ItemDefinitionType;
-    static const FPrimaryAssetType	CraftingSchematicType;
+    /** Returns the current AssetManager singleton */
+    static UMythicAssetManager &Get();
 
-    /** Returns the current AssetManager object */
-    static UMythicAssetManager& Get();
+    // ==================== ASYNC LOADING API ====================
+    // Static methods with automatic weak pointer safety
 
     /**
-     * Synchronously loads an ItemDefinition subclass, this can hitch but is useful when you cannot wait for an async load
-     * This does not maintain a reference to the item so it will garbage collect if not loaded some other way
-     *
-     * @param PrimaryAssetId The asset identifier to load
-     * @param bLogWarning If true, this will log a warning if the item failed to load
+     * Load a single asset asynchronously. Callback only fires if Caller is still valid.
+     * @param Caller The UObject requesting the load (used for weak ref safety)
+     * @param AssetPtr Soft object pointer to load
+     * @param OnLoaded Callback when loading completes
      */
-    UItemDefinition* ForceLoadItemDefinition(const FPrimaryAssetId& PrimaryAssetId, bool bLogWarning = true);
+    template <typename T, typename CallbackType>
+    static void LoadAsync(UObject *Caller, const TSoftObjectPtr<T> &AssetPtr, CallbackType &&OnLoaded);
+
+    /**
+     * Load a single class asynchronously. Callback only fires if Caller is still valid.
+     * @param Caller The UObject requesting the load
+     * @param ClassPtr Soft class pointer to load
+     * @param OnLoaded Callback when loading completes
+     */
+    template <typename T, typename CallbackType>
+    static void LoadAsync(UObject *Caller, const TSoftClassPtr<T> &ClassPtr, CallbackType &&OnLoaded);
+
+    /**
+     * Load multiple assets asynchronously. Callback only fires if Caller is still valid.
+     * @param Caller The UObject requesting the load
+     * @param AssetPaths Array of soft object paths to load
+     * @param OnLoaded Callback when all loading completes
+     */
+    template <typename CallbackType>
+    static void LoadAsync(UObject *Caller, const TArray<FSoftObjectPath> &AssetPaths, CallbackType &&OnLoaded);
+
+    // ==================== PRIMARY ASSETS ====================
+
+    /** Static types for items */
+    static const FPrimaryAssetType ItemDefinitionType;
+
+private:
+    /** Active load handles to keep assets in memory */
+    TMap<FSoftObjectPath, TSharedPtr<FStreamableHandle>> ActiveHandles;
+
+    /** Store a handle to keep the asset loaded */
+    void StoreHandle(const FSoftObjectPath &AssetPath, TSharedPtr<FStreamableHandle> Handle);
+
+    /** Internal load implementations */
+    void LoadAssetInternal(const FSoftObjectPath &AssetPath, TFunction<void(UObject *)> OnLoaded, TAsyncLoadPriority Priority);
+    void LoadAssetsInternal(const TArray<FSoftObjectPath> &AssetPaths, TFunction<void(const TArray<UObject *> &)> OnLoaded, TAsyncLoadPriority Priority);
 };
 
+// ==================== Template Implementations ====================
+
+template <typename T, typename CallbackType>
+void UMythicAssetManager::LoadAsync(UObject *Caller, const TSoftObjectPtr<T> &AssetPtr, CallbackType &&OnLoaded) {
+    if (!Caller) {
+        return;
+    }
+
+    // If already loaded, callback immediately
+    if (T *Asset = AssetPtr.Get()) {
+        OnLoaded(Asset);
+        return;
+    }
+
+    // If null, callback with nullptr
+    if (AssetPtr.IsNull()) {
+        OnLoaded(nullptr);
+        return;
+    }
+
+    // Async load with weak pointer safety
+    TWeakObjectPtr<UObject> WeakCaller(Caller);
+    FSoftObjectPath Path = AssetPtr.ToSoftObjectPath();
+
+    Get().LoadAssetInternal(Path, [WeakCaller, Callback = Forward<CallbackType>(OnLoaded)](UObject *LoadedAsset) mutable {
+        if (WeakCaller.IsValid()) {
+            Callback(Cast<T>(LoadedAsset));
+        }
+    }, FStreamableManager::DefaultAsyncLoadPriority);
+}
+
+template <typename T, typename CallbackType>
+void UMythicAssetManager::LoadAsync(UObject *Caller, const TSoftClassPtr<T> &ClassPtr, CallbackType &&OnLoaded) {
+    if (!Caller) {
+        return;
+    }
+
+    // If already loaded, callback immediately
+    if (UClass *Class = ClassPtr.Get()) {
+        OnLoaded(TSubclassOf<T>(Class));
+        return;
+    }
+
+    // If null, callback with nullptr
+    if (ClassPtr.IsNull()) {
+        OnLoaded(TSubclassOf<T>(nullptr));
+        return;
+    }
+
+    // Async load with weak pointer safety
+    TWeakObjectPtr<UObject> WeakCaller(Caller);
+    FSoftObjectPath Path = ClassPtr.ToSoftObjectPath();
+
+    Get().LoadAssetInternal(Path, [WeakCaller, Callback = Forward<CallbackType>(OnLoaded)](UObject *LoadedAsset) mutable {
+        if (WeakCaller.IsValid()) {
+            Callback(TSubclassOf<T>(Cast<UClass>(LoadedAsset)));
+        }
+    }, FStreamableManager::DefaultAsyncLoadPriority);
+}
+
+template <typename CallbackType>
+void UMythicAssetManager::LoadAsync(UObject *Caller, const TArray<FSoftObjectPath> &AssetPaths, CallbackType &&OnLoaded) {
+    if (!Caller) {
+        return;
+    }
+
+    if (AssetPaths.IsEmpty()) {
+        OnLoaded(TArray<UObject *>());
+        return;
+    }
+
+    TWeakObjectPtr<UObject> WeakCaller(Caller);
+
+    Get().LoadAssetsInternal(AssetPaths, [WeakCaller, Callback = Forward<CallbackType>(OnLoaded)](const TArray<UObject *> &LoadedAssets) mutable {
+        if (WeakCaller.IsValid()) {
+            Callback(LoadedAssets);
+        }
+    }, FStreamableManager::DefaultAsyncLoadPriority);
+}

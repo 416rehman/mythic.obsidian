@@ -8,7 +8,7 @@
  * This macro defines a set of helper functions for accessing and initializing attributes.
  *
  * The following example of the macro:
- *		ATTRIBUTE_ACCESSORS(ULyraHealthSet, Health)
+ *		ATTRIBUTE_ACCESSORS(UMythicHealthSet, Health)
  * will create the following functions:
  *		static FGameplayAttribute GetHealthAttribute();
  *		float GetHealth() const;

@@ -4,6 +4,7 @@
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Mythic/Utility/MythicReplicatedObject.h"
+#include "Mythic//GAS/MythicAbilitySystemComponent.h"
 #if WITH_EDITOR
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -160,7 +161,7 @@ public:
 
     // Get the owning inventory component's owners ability system component
     UFUNCTION(BlueprintPure, Category = "Item Fragment")
-    UAbilitySystemComponent *GetOwningAbilitySystemComponent() const;
+    UMythicAbilitySystemComponent *GetOwningAbilitySystemComponent() const;
 
     // Compare the runtime properties of this fragment with another fragment to determine if they can be stacked
     // i.e. a fragment that always grants +1 strength can be stacked with another fragment that always grants +1 strength
@@ -211,12 +212,13 @@ inline UMythicInventoryComponent *UItemFragment::GetOwningInventoryComponent() c
     return owningItemInstance->GetInventoryComponent();
 }
 
-inline UAbilitySystemComponent *UItemFragment::GetOwningAbilitySystemComponent() const {
-    auto owningInventoryComponent = GetOwningInventoryComponent();
-    if (!owningInventoryComponent) {
+inline UMythicAbilitySystemComponent *UItemFragment::GetOwningAbilitySystemComponent() const {
+    auto Owner = GetOwningActor();
+    if (!Owner) {
         UE_LOG(Myth, Error, TEXT("UItemFragment::GetOwningAbilitySystemComponent: Fragment has no owning inventory component."));
         return nullptr;
     }
 
-    return UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(owningInventoryComponent->GetOwner());
+    auto ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Owner);
+    return Cast<UMythicAbilitySystemComponent>(ASC);
 }

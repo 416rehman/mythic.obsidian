@@ -7,6 +7,7 @@
 #include "Itemization/Inventory/Fragments/Passive/CraftableFragment.h"
 #include "TimerManager.h"
 #include "Player/MythicPlayerController.h"
+#include "System/MythicAssetManager.h"
 
 // FastArray callbacks (no-op for now, reserved for UI or state updates)
 void FCraftingQueue::PreReplicatedRemove(const TArrayView<int32> &RemovedIndices, int32 FinalSize) {
@@ -131,7 +132,11 @@ bool UCraftingComponent::VerifyRequirements(UItemDefinition *Item, int32 Amount,
 
     // Only verify, don't consume
     for (auto Requirement : CraftableFragment->CraftingRequirements) {
-        auto RequiredItem = Requirement.RequiredItem.LoadSynchronous();
+        auto RequiredItem = Requirement.RequiredItem.Get();
+        if (!RequiredItem) {
+            UE_LOG(Myth, Warning, TEXT("Crafting requirement item not loaded. Precache by accessing the craftable."));
+            return false;
+        }
         int32 TotalNeeded = Requirement.RequiredAmount * Amount;
         int32 TotalFound = 0;
 
@@ -162,7 +167,10 @@ bool UCraftingComponent::ConsumeRequirements(UItemDefinition *Item, int32 Amount
 
     // Now consume the materials
     for (auto Requirement : CraftableFragment->CraftingRequirements) {
-        auto RequiredItem = Requirement.RequiredItem.LoadSynchronous();
+        auto RequiredItem = Requirement.RequiredItem.Get();
+        if (!RequiredItem) {
+            continue; // Already verified in VerifyRequirements
+        }
         int32 AmountToRemove = Requirement.RequiredAmount * Amount;
 
         // Remove from inventories

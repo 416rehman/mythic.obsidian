@@ -335,7 +335,9 @@ void UMythicCheatManager::MythGiveItem(const FString &ItemName, int32 Count) {
     UItemDefinition *MatchedItem = nullptr;
     for (const FPrimaryAssetId &AssetId : ItemAssetIds) {
         if (AssetId.PrimaryAssetName.ToString().Contains(ItemName, ESearchCase::IgnoreCase)) {
-            MatchedItem = AssetManager.ForceLoadItemDefinition(AssetId, true);
+            // TryLoad is acceptable for debug cheat commands
+            FSoftObjectPath ItemPath = AssetManager.GetPrimaryAssetPath(AssetId);
+            MatchedItem = Cast<UItemDefinition>(ItemPath.TryLoad());
             if (MatchedItem) {
                 break;
             }

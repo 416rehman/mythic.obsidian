@@ -3,12 +3,12 @@
 #pragma once
 
 #include "GameplayEffectTypes.h"
+#include "MythicAbilitySourceInterface.h"
 
 #include "MythicGameplayEffectContext.generated.h"
 
 class AActor;
 class FArchive;
-class IMythicAbilitySourceInterface;
 class UObject;
 class UPhysicalMaterial;
 
@@ -30,6 +30,16 @@ struct FMythicGameplayEffectContext : public FGameplayEffectContext {
 
     FMythicGameplayEffectContext(AActor *InInstigator, AActor *InEffectCauser)
         : FGameplayEffectContext(InInstigator, InEffectCauser) {}
+
+    /** Returns the wrapped FMythicGameplayEffectContext from the handle, or nullptr if it doesn't exist or is the wrong type */
+    static FMythicGameplayEffectContext *ExtractEffectContext(struct FGameplayEffectContextHandle Handle);
+
+    /** Sets the object used as the ability source */
+    void SetAbilitySource(const IMythicAbilitySourceInterface *InObject, float InSourceLevel);
+
+    /** Returns the ability source interface associated with the source object. Only valid on the authority. */
+    const IMythicAbilitySourceInterface *GetAbilitySource() const;
+    const UPhysicalMaterial *GetPhysicalMaterial() const;
 
     // Is this a critical hit?
     MYTHIC_CONTEXT_BOOL_PROPERTY(CriticalHit)
@@ -69,15 +79,20 @@ struct FMythicGameplayEffectContext : public FGameplayEffectContext {
     }
 
     virtual UScriptStruct *GetScriptStruct() const override {
-        return FMythicGameplayEffectContext::StaticStruct();
+        return StaticStruct();
     }
 
     /** Overridden to serialize new fields */
     virtual bool NetSerialize(FArchive &Ar, class UPackageMap *Map, bool &bOutSuccess) override;
+
+protected:
+    /** Ability Source object (should implement IMythicAbilitySourceInterface). NOT replicated currently */
+    UPROPERTY()
+    TWeakObjectPtr<const UObject> AbilitySourceObject;
 };
 
 template <>
-struct TStructOpsTypeTraits<FMythicGameplayEffectContext> : public TStructOpsTypeTraitsBase2<FMythicGameplayEffectContext> {
+struct TStructOpsTypeTraits<FMythicGameplayEffectContext> : TStructOpsTypeTraitsBase2<FMythicGameplayEffectContext> {
     enum {
         WithNetSerializer = true,
         WithCopy = true
@@ -222,7 +237,7 @@ public:
         }
         return false;
     }
-    
+
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static bool GetStun(const FGameplayEffectContextHandle &ContextHandle) {
         if (ContextHandle.IsValid()) {
@@ -266,7 +281,7 @@ public:
         }
         return false;
     }
-    
+
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static bool GetTerrify(const FGameplayEffectContextHandle &ContextHandle) {
         if (ContextHandle.IsValid()) {

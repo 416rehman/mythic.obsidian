@@ -3,6 +3,7 @@
 #include "TalentFragment.h"
 #include "AbilitySystemComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
+#include "System/MythicAssetManager.h"
 
 #if WITH_EDITOR
 bool UTalentFragment::IsValidFragment(FText &OutErrorMessage) const {
@@ -65,24 +66,29 @@ void UTalentFragment::RollTalents(UTalentPool *TalentPool, int NumTalentsToRoll)
 void UTalentFragment::OnInstanced(UMythicItemInstance *ItemInstance) {
     Super::OnInstanced(ItemInstance);
 
-    // ItemInstance->GetInventoryOwner() might be invalid this early
     auto Owner = ItemInstance->GetOwningActor();
     if (!Owner) {
         UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInstanced: Invalid owner."));
         return;
     }
 
-    auto TalentPool = this->TalentBuildData.TalentPool.LoadSynchronous();
-    if (!TalentPool) {
-        UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInstanced: Invalid talent pool."));
-        return;
-    }
+    // LoadAsync handles already-loaded case internally (immediate callback)
+    UMythicAssetManager::LoadAsync(this, this->TalentBuildData.TalentPool,
+                                   [this, ItemInstance](UTalentPool *TalentPool) {
+                                       if (!TalentPool) {
+                                           UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInstanced: Failed to load talent pool."));
+                                           return;
+                                       }
 
-    auto Rarity = ItemInstance->GetItemDefinition()->Rarity;
-    // Legendary = 1 Talent, Mythic = 2 Talents
-    auto NumTalentsToRoll = Rarity == Legendary ? 1 : Rarity == Mythic ? 2 : 0;
+                                       if (!ItemInstance || !ItemInstance->GetItemDefinition()) {
+                                           UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInstanced: Item became invalid during async load."));
+                                           return;
+                                       }
 
-    RollTalents(TalentPool, NumTalentsToRoll);
+                                       auto Rarity = ItemInstance->GetItemDefinition()->Rarity;
+                                       auto NumTalentsToRoll = Rarity == Legendary ? 1 : Rarity == Mythic ? 2 : 0;
+                                       RollTalents(TalentPool, NumTalentsToRoll);
+                                   });
 }
 
 void UTalentFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {

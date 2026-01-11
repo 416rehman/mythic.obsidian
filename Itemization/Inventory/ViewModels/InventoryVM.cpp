@@ -182,12 +182,9 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythic
 
     // Sort by DisplayOrder from Profile
     if (OwningInventoryComponent && OwningInventoryComponent->InventoryProfile) {
-        TabsArray.Sort([this](const TObjectPtr<UInventoryTabVM> &A, const TObjectPtr<UInventoryTabVM> &B) {
-            const FInventorySlotGroup *GroupA = OwningInventoryComponent->InventoryProfile->SlotGroups.Find(A->GroupTag);
-            const FInventorySlotGroup *GroupB = OwningInventoryComponent->InventoryProfile->SlotGroups.Find(B->GroupTag);
-            int32 OrderA = GroupA ? GroupA->DisplayOrder : 0;
-            int32 OrderB = GroupB ? GroupB->DisplayOrder : 0;
-            return OrderA < OrderB;
+        Algo::SortBy(TabsArray, [this](const UInventoryTabVM *Tab) -> int32 {
+            const FInventorySlotGroup *Group = OwningInventoryComponent->InventoryProfile->SlotGroups.Find(Tab->GroupTag);
+            return Group ? Group->DisplayOrder : 0;
         });
     }
 

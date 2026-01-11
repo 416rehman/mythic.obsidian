@@ -3,7 +3,7 @@
 /** States */
 // State tags are applied to entities to indicate their current state, such as dead, in combat, etc.
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DEAD, "GAS.State.Dead", "The entity is dead");
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DYING,"GAS.State.Dying", "The entity is dying");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DYING, "GAS.State.Dying", "The entity is dying");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_INCOMBAT, "GAS.State.InCombat", "The entity was damaged recently");
 
 /** Debuffs */
@@ -27,7 +27,8 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_ENLIGHTEN, "GAS.Buff.Enlighten", "The en
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_INVINCIBLE, "GAS.Buff.Invincible", "The entity is invincible and cannot be damaged");
 
 /// Gameplay Buffs
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_GAMEPLAY_CONDUIT_OF_LIGHTNING, "GAS.Buff.Gameplay.ConduitOfLightning", "The entity is a conduit of lightning and deals increased damage");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_GAMEPLAY_CONDUIT_OF_LIGHTNING, "GAS.Buff.Gameplay.ConduitOfLightning",
+                               "The entity is a conduit of lightning and deals increased damage");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_GAMEPLAY_GAMBIT, "GAS.Buff.Gameplay.Gambit", "Every 10 second, a random buff is applied to the entity");
 
 /** GAS Abilities */
@@ -61,3 +62,7 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_DESTRUCTIBLE, "GAS.Event.Dmg.Destru
 UE_DEFINE_GAMEPLAY_TAG(GAMEPLAYCUE_ABILITY_HEAL_ACTIVATED, "GameplayCue.Ability.Heal.Activated");
 UE_DEFINE_GAMEPLAY_TAG(GAMEPLAYCUE_ABILITY_HEAL_RECEIVED, "GameplayCue.Ability.Heal.Received");
 UE_DEFINE_GAMEPLAY_TAG(GAMEPLAYCUE_ABILITY_LEVELUP, "GameplayCue.Ability.LevelUp");
+
+// Internal Notifies - format NOTIFY_<SYSTEM>_<ACTION>_<RESULT>_<REASON>
+UE_DEFINE_GAMEPLAY_TAG(NOTIFY_ABILITY_ACTIVATION_FAILED_COST, "Notify.Ability.Activation.Failed.Cost");
+UE_DEFINE_GAMEPLAY_TAG(NOTIFY_ABILITY_ACTIVATION_FAILED_ISDEAD, "Notify.Ability.Activation.Failed.IsDead");

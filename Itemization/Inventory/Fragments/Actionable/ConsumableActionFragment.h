@@ -24,7 +24,7 @@ struct FConsumableActionRuntimeReplicatedData {
 
     // Cache the ASC for the player
     UPROPERTY(BlueprintReadOnly)
-    UAbilitySystemComponent *ASC = nullptr;
+    UMythicAbilitySystemComponent *ASC = nullptr;
 };
 
 USTRUCT(Blueprintable, BlueprintType)
@@ -42,7 +42,7 @@ struct FConsumableActionConfig {
     // The Gameplay ability to grant to the player ASC when the item is consumed
     // To activate the ability on grant, consider using a Passive ability
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Abilities", SaveGame)
-    TSoftClassPtr<UGameplayAbility> GameplayAbility = nullptr;
+    TSoftClassPtr<UMythicGameplayAbility> GameplayAbility = nullptr;
 
     // Should we remove the ability instead of granting it
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Abilities", SaveGame)
@@ -112,18 +112,19 @@ public:
         REP_FRAGMENT_DATA(ConsumableAction)
     }
 
-    //~ GiveAbility only works on the server
+    //~ HandleAction only works on the server
     UFUNCTION(Server, Reliable)
-    void ServerHandleGrantAbility(UMythicItemInstance *ItemInstance);
+    void ServerHandleAction(UMythicItemInstance *ItemInstance);
+
+    //~ GiveAbility only works on the server
+    bool HandleGrantAbility(UMythicAbilitySystemComponent *ASC, UMythicItemInstance *ItemInstance);
     //~
 
     //~ RemoveAbility only works on the server
-    UFUNCTION(Server, Reliable)
-    void ServerHandleInHandRemoveAbility(UMythicItemInstance *ItemInstance);
+    void HandleInHandRemoveAbility(UMythicAbilitySystemComponent *ASC);
     //~
 
-    //~ ServerHandleTags only works on the server
-    UFUNCTION(Server, Reliable)
-    void ServerHandleTags(UMythicItemInstance *ItemInstance);
+    //~ HandleTags only works on the server
+    void HandleTags(UMythicItemInstance *ItemInstance);
     //~
 };

@@ -4,8 +4,11 @@
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
+#include "GAS/MythicAbilitySystemComponent.h"
+#include "GAS/Abilities/MythicAbilityCost_ItemStack.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Mythic/Mythic.h"
+#include "System/MythicAssetManager.h"
 
 void UConsumableActionFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
     Super::OnItemActivated(ItemInstance);
@@ -19,7 +22,7 @@ void UConsumableActionFragment::OnInventorySlotChanged(UMythicInventoryComponent
     Super::OnInventorySlotChanged(Inventory, SlotIndex);
     auto CachedASC = &this->ConsumableActionRuntimeReplicatedData.ASC;
     if (Inventory) {
-        *CachedASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Inventory->GetOwner());
+        *CachedASC = Cast<UMythicAbilitySystemComponent>(UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Inventory->GetOwner()));
     }
     else {
         *CachedASC = nullptr;
@@ -29,28 +32,49 @@ void UConsumableActionFragment::OnInventorySlotChanged(UMythicInventoryComponent
 void UConsumableActionFragment::OnInstanced(UMythicItemInstance *ItemInstance) {
     Super::OnInstanced(ItemInstance);
 
-    this->ConsumableActionRuntimeReplicatedData.ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(ItemInstance->GetInventoryOwner());
+    this->ConsumableActionRuntimeReplicatedData.ASC = Cast<UMythicAbilitySystemComponent>(
+        UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(ItemInstance->GetInventoryOwner()));
+
+    // Precache the ability class (LoadAsync handles null case)
+    UMythicAssetManager::LoadAsync(this, this->ConsumableActionConfig.GameplayAbility,
+                                   [](TSubclassOf<UGameplayAbility>) {});
 }
 
 void UConsumableActionFragment::OnClientActionEnd(UMythicItemInstance *ItemInstance) {
+    ServerHandleAction_Implementation(ItemInstance);
+}
+
+void UConsumableActionFragment::ServerHandleAction_Implementation(UMythicItemInstance *ItemInstance) {
+    if (!ItemInstance) {
+        UE_LOG(Myth, Error, TEXT("UConsumableActionFragment::OnClientActionEnd: Invalid ItemInstance."));
+        return;
+    }
+
     // ASC is cached by the server and replicated
-    auto ASC = this->ConsumableActionRuntimeReplicatedData.ASC;
+    auto ASC = Cast<UMythicAbilitySystemComponent>(
+        UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(ItemInstance->GetInventoryOwner()));
     if (!ASC) {
         UE_LOG(Myth, Error, TEXT("UConsumableActionFragment::OnClientActionEnd: Invalid ASC."));
         return;
     }
+
+    auto bShouldRemoveItem = true;
+
     // 1. Loose tags
-    ServerHandleTags(ItemInstance);
+    HandleTags(ItemInstance);
 
     // 2. Ability
     if (this->ConsumableActionConfig.GameplayAbility) {
         // Remove the ability
         if (this->ConsumableActionConfig.RemoveAbility) {
-            ServerHandleInHandRemoveAbility(ItemInstance);
+            HandleInHandRemoveAbility(ASC);
         }
         // Grant the ability
         else {
-            ServerHandleGrantAbility(ItemInstance);
+            if (HandleGrantAbility(ASC, ItemInstance)) {
+                // If we granted an ability, don't remove the item. They handle removal internally
+                bShouldRemoveItem = false;
+            }
         }
     }
 
@@ -69,43 +93,59 @@ void UConsumableActionFragment::OnClientActionEnd(UMythicItemInstance *ItemInsta
     }
 
     // FINALLY. Consume the item
-    if (auto Inventory = this->GetOwningInventoryComponent()) {
-        Inventory->ServerRemoveItem(this->ParentItemInstance, 1);
+    if (bShouldRemoveItem) {
+        ItemInstance->ConsumeItem(1);
     }
 }
 
-void UConsumableActionFragment::ServerHandleGrantAbility_Implementation(UMythicItemInstance *ItemInstance) {
+bool UConsumableActionFragment::HandleGrantAbility(UMythicAbilitySystemComponent *ASC, UMythicItemInstance *ItemInstance) {
     if (this->ConsumableActionConfig.GameplayAbility == nullptr) {
-        return;
+        return false;
     }
 
-    ConsumableActionRuntimeReplicatedData.ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(ItemInstance->GetInventoryOwner());
-    auto ASC = ConsumableActionRuntimeReplicatedData.ASC;
     if (!ASC) {
-        UE_LOG(Myth, Error, TEXT("UConsumableFragment::ServerGrantAbility_Implementation: OwningASC is null"));
-        return;
+        UE_LOG(Myth, Error, TEXT("UConsumableFragment::ServerGrantAbility_Implementation: ASC is null"));
+        return false;
     }
+
+    // Get the ability class - should be pre-loaded, use .Get()
+    UClass *AbilityClass = this->ConsumableActionConfig.GameplayAbility.Get();
+    if (!AbilityClass) {
+        UE_LOG(Myth, Error, TEXT("UConsumableFragment::GrantAbility: Ability class not loaded. Ensure it's pre-loaded."));
+        return false;
+    }
+
+    auto AbilityCDO = Cast<UMythicGameplayAbility>(AbilityClass->GetDefaultObject());
+    if (!AbilityCDO) {
+        UE_LOG(Myth, Error, TEXT("UConsumableFragment::GrantAbility: Ability is not a MythicGameplayAbility"));
+        return false;
+    }
+
+    // This cost will consume item stacks when the ability is activated
+    AbilityCDO->AdditionalCosts.AddUnique(NewObject<UMythicAbilityCost_ItemTagStack>(AbilityCDO));
 
     // Give the ability to the player
-    auto AbilitySpec = FGameplayAbilitySpec(this->ConsumableActionConfig.GameplayAbility.LoadSynchronous(), 1, INDEX_NONE, this);
+    auto AbilitySpec = FGameplayAbilitySpec(AbilityCDO, 1, INDEX_NONE, ItemInstance);
     auto AbilityHandle = ASC->GiveAbility(AbilitySpec);
 
-    if (AbilityHandle.IsValid()) {
-        UE_LOG(Myth, Warning, TEXT("UConsumableFragment::ServerGrantAbility_Implementation: Granted Ability"));
+    if (!AbilityHandle.IsValid()) {
+        UE_LOG(Myth, Error, TEXT("UConsumableFragment::GrantAbility: Failed to grant ability"));
+        return false;
     }
-    else {
-        UE_LOG(Myth, Error, TEXT("UConsumableFragment::ServerGrantAbility_Implementation: Failed to grant ability"));
-    }
+
+    UE_LOG(Myth, Warning, TEXT("UConsumableFragment::GrantAbility: Granted Ability"));
+    return true;
 }
 
-void UConsumableActionFragment::ServerHandleInHandRemoveAbility_Implementation(UMythicItemInstance *ItemInstance) {
-    auto ASC = ConsumableActionRuntimeReplicatedData.ASC;
-    if (!ASC) {
-        UE_LOG(Myth, Error, TEXT("UConsumableFragment::ServerRemoveAbility_Implementation: OwningASC is null"));
+void UConsumableActionFragment::HandleInHandRemoveAbility(UMythicAbilitySystemComponent *ASC) {
+    UClass *AbilityClass = this->ConsumableActionConfig.GameplayAbility.Get();
+    if (!AbilityClass) {
+        UE_LOG(Myth, Error, TEXT("UConsumableFragment::HandleInHandRemoveAbility: Ability class not loaded."));
+        return;
     }
 
-    auto Spec = ASC->FindAbilitySpecFromClass(this->ConsumableActionConfig.GameplayAbility.LoadSynchronous());
-    if (Spec->Handle.IsValid()) {
+    auto Spec = ASC->FindAbilitySpecFromClass(AbilityClass);
+    if (Spec && Spec->Handle.IsValid()) {
         ASC->ClearAbility(Spec->Handle);
         UE_LOG(Myth, Warning, TEXT("UConsumableFragment::OnInactiveItem: Removed Granted Ability"));
     }
@@ -114,7 +154,7 @@ void UConsumableActionFragment::ServerHandleInHandRemoveAbility_Implementation(U
     }
 }
 
-void UConsumableActionFragment::ServerHandleTags_Implementation(UMythicItemInstance *ItemInstance) {
+void UConsumableActionFragment::HandleTags(UMythicItemInstance *ItemInstance) {
     // Tags to add and remove
     auto InventoryOwner = ItemInstance->GetInventoryOwner();
     // Check authority

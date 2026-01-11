@@ -8,12 +8,36 @@
 #if UE_WITH_IRIS
 namespace UE::Net {
     // Forward to FGameplayEffectContextNetSerializer
-    // Note: If FLyraGameplayEffectContext::NetSerialize() is modified, a custom NetSerializesr must be implemented as the current fallback will no longer be sufficient.
+    // Note: If FMythicGameplayEffectContext::NetSerialize() is modified, a custom NetSerializesr must be implemented as the current fallback will no longer be sufficient.
     UE_NET_IMPLEMENT_FORWARDING_NETSERIALIZER_AND_REGISTRY_DELEGATES(MythicGameplayEffectContext, FGameplayEffectContextNetSerializer);
 }
 #endif
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(MythicGameplayEffectContext)
+
+FMythicGameplayEffectContext *FMythicGameplayEffectContext::ExtractEffectContext(struct FGameplayEffectContextHandle Handle) {
+    FGameplayEffectContext *BaseEffectContext = Handle.Get();
+    if ((BaseEffectContext != nullptr) && BaseEffectContext->GetScriptStruct()->IsChildOf(StaticStruct())) {
+        return static_cast<FMythicGameplayEffectContext *>(BaseEffectContext);
+    }
+
+    return nullptr;
+}
+
+void FMythicGameplayEffectContext::SetAbilitySource(const IMythicAbilitySourceInterface *InObject, float InSourceLevel) {
+    AbilitySourceObject = MakeWeakObjectPtr(Cast<const UObject>(InObject));
+}
+
+const IMythicAbilitySourceInterface *FMythicGameplayEffectContext::GetAbilitySource() const {
+    return Cast<IMythicAbilitySourceInterface>(AbilitySourceObject.Get());
+}
+
+const UPhysicalMaterial *FMythicGameplayEffectContext::GetPhysicalMaterial() const {
+    if (const FHitResult *HitResultPtr = GetHitResult()) {
+        return HitResultPtr->PhysMaterial.Get();
+    }
+    return nullptr;
+}
 
 bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, bool &bOutSuccess) {
     enum RepFlag {
@@ -107,7 +131,7 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
     if (RepBits & (1 << REP_HitResult)) {
         if (Ar.IsLoading()) {
             if (!HitResult.IsValid()) {
-                HitResult = TSharedPtr<FHitResult>(new FHitResult());
+                HitResult = MakeShared<FHitResult>();
             }
         }
         HitResult->NetSerialize(Ar, Map, bOutSuccess);
@@ -154,4 +178,3 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
     bOutSuccess = true;
     return true;
 }
-

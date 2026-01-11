@@ -139,6 +139,10 @@ public:
         return nullptr;
     }
 
+    /// Consume the item by reducing its stack size by StackQty. If in inventory, uses inventory's ServerRemoveItem. 
+    /// On zero stack, inventory will remove the item from inventory, if not in inventory, destroys world item.
+    void ConsumeItem(int32 StackQty = 1);
+
     /// on destroy, do proper chain of destruction
     virtual void OnDestroyed() override;
 };

@@ -2,6 +2,7 @@
 
 #include "MythicInventoryComponent.h"
 #include "Fragments/ItemFragment.h"
+#include "Itemization/Loot/MythicWorldItem.h"
 #include "Mythic/Mythic.h"
 
 void UMythicItemInstance::Serialize(FArchive &Ar) {
@@ -245,6 +246,22 @@ bool UMythicItemInstance::isStackableWith(const UMythicItemInstance *Other) cons
     }
 
     return true;
+}
+
+void UMythicItemInstance::ConsumeItem(int32 StackQty) {
+    if (auto Inventory = this->GetInventoryComponent()) {
+        Inventory->ServerRemoveItem(this, 1);
+        return;
+    }
+
+    this->SetStackSize(this->GetStacks() - StackQty);
+    if (this->GetStacks() <= 0) {
+        auto WorldItem = Cast<AMythicWorldItem>(this->GetOwningActor());
+        this->Destroy();
+        if (WorldItem) {
+            WorldItem->Destroy();
+        }
+    }
 }
 
 void UMythicItemInstance::OnDestroyed() {

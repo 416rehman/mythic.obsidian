@@ -13,6 +13,7 @@
 #include "Kismet/KismetMaterialLibrary.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
+#include "System/MythicAssetManager.h"
 
 // Sets default values
 AMythicEnvironmentController::AMythicEnvironmentController() : FogComponent(nullptr), SkyAtmosphereComponent(nullptr),
@@ -399,7 +400,7 @@ void AMythicEnvironmentController::WeatherTick() {
     // If there is a weather transition in progress, update the weather transition
     // Check if the soft pointer is valid or points to something
     if (!this->WeatherTransition.TransitionToWeather.IsNull()) {
-        UWeatherType *TargetWeather = this->WeatherTransition.TransitionToWeather.LoadSynchronous();
+        UWeatherType *TargetWeather = this->WeatherTransition.TransitionToWeather.Get();
         if (TargetWeather) {
             UE_LOG(Myth_Environment, Warning, TEXT("Weather transition in progress to %s"), *TargetWeather->GetName());
             HandleWeatherTransition();
@@ -455,7 +456,7 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
     }
 
     // If the transition is complete, set the current weather to the target weather
-    UWeatherType *TargetWeather = this->WeatherTransition.TransitionToWeather.LoadSynchronous();
+    UWeatherType *TargetWeather = this->WeatherTransition.TransitionToWeather.Get();
     if (TransitionProgress >= 1.0f || TargetWeather == this->CurrentWeather || Time < TransitionStartedAt) {
         auto NewWeatherTag = TargetWeather ? TargetWeather->Tag : FGameplayTag();
         auto OldWeatherTag = this->CurrentWeather ? this->CurrentWeather->Tag : FGameplayTag();
@@ -549,45 +550,46 @@ void AMythicEnvironmentController::ApplyWeatherVisuals(const UWeatherType *Weath
 }
 
 void AMythicEnvironmentController::OnRep_WeatherTransition() {
-    // Resolve Soft Pointer
-    UWeatherType *TargetWeather = WeatherTransition.TransitionToWeather.LoadSynchronous();
+    // Async load the weather type if not already loaded
+    UMythicAssetManager::LoadAsync(this, WeatherTransition.TransitionToWeather,
+                                   [this](UWeatherType *TargetWeather) {
+                                       UE_LOG(Myth_Environment, Log, TEXT("OnRep_WeatherTransition: Transition to %s"),
+                                              TargetWeather ? *TargetWeather->GetName() : TEXT("None"));
 
-    UE_LOG(Myth_Environment, Log, TEXT("OnRep_WeatherTransition: Transition to %s"),
-           TargetWeather ? *TargetWeather->GetName() : TEXT("None"));
+                                       // Cache "From" values to interpolate from current visual state
+                                       TransitionFromScalarValues.Empty();
+                                       TransitionFromVectorValues.Empty();
 
-    // Cache "From" values to interpolate from current visual state
-    TransitionFromScalarValues.Empty();
-    TransitionFromVectorValues.Empty();
+                                       // Iterate over TargetWeather attributes to cache starting values from MPC
+                                       if (TargetWeather) {
+                                           for (const auto &ScalarAttr : TargetWeather->ScalarAttributes) {
+                                               FCollectionScalarParameter Val;
+                                               Val.ParameterName = ScalarAttr.Name;
+                                               Val.DefaultValue = UKismetMaterialLibrary::GetScalarParameterValue(this, WeatherMPC, ScalarAttr.Name);
+                                               TransitionFromScalarValues.Add(Val);
+                                           }
 
-    // Iterate over TargetWeather attributes to cache starting values from MPC
-    if (TargetWeather) {
-        for (const auto &ScalarAttr : TargetWeather->ScalarAttributes) {
-            FCollectionScalarParameter Val;
-            Val.ParameterName = ScalarAttr.Name;
-            Val.DefaultValue = UKismetMaterialLibrary::GetScalarParameterValue(this, WeatherMPC, ScalarAttr.Name);
-            TransitionFromScalarValues.Add(Val);
-        }
+                                           for (const auto &VectorAttr : TargetWeather->VectorAttributes) {
+                                               FCollectionVectorParameter Val;
+                                               Val.ParameterName = VectorAttr.Name;
+                                               Val.DefaultValue = UKismetMaterialLibrary::GetVectorParameterValue(this, WeatherMPC, VectorAttr.Name);
+                                               TransitionFromVectorValues.Add(Val);
+                                           }
+                                       }
 
-        for (const auto &VectorAttr : TargetWeather->VectorAttributes) {
-            FCollectionVectorParameter Val;
-            Val.ParameterName = VectorAttr.Name;
-            Val.DefaultValue = UKismetMaterialLibrary::GetVectorParameterValue(this, WeatherMPC, VectorAttr.Name);
-            TransitionFromVectorValues.Add(Val);
-        }
-    }
+                                       if (FogComponent) {
+                                           this->CachedFogHeightFalloff = FogComponent->FogHeightFalloff;
+                                           this->CachedFogDensity = FogComponent->FogDensity;
+                                       }
 
-    if (FogComponent) {
-        this->CachedFogHeightFalloff = FogComponent->FogHeightFalloff;
-        this->CachedFogDensity = FogComponent->FogDensity;
-    }
+                                       // Set the transition locally
+                                       this->TransitionStartedAt = WeatherTransition.StartTime;
 
-    // Set the transition locally
-    this->TransitionStartedAt = WeatherTransition.StartTime;
-
-    // Trigger delegate
-    FGameplayTag FromTag = CurrentWeather ? CurrentWeather->Tag : FGameplayTag::EmptyTag;
-    FGameplayTag ToTag = TargetWeather ? TargetWeather->Tag : FGameplayTag::EmptyTag;
-    this->WeatherTransitionDelegate.Broadcast(ToTag, FromTag, WeatherTransition.TransitionLength);
+                                       // Trigger delegate
+                                       FGameplayTag FromTag = CurrentWeather ? CurrentWeather->Tag : FGameplayTag::EmptyTag;
+                                       FGameplayTag ToTag = TargetWeather ? TargetWeather->Tag : FGameplayTag::EmptyTag;
+                                       this->WeatherTransitionDelegate.Broadcast(ToTag, FromTag, WeatherTransition.TransitionLength);
+                                   });
 }
 
 void AMythicEnvironmentController::CycleWeather() {

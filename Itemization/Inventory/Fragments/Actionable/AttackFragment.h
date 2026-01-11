@@ -4,10 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "GAS/MythicTags_GAS.h"
+#include "GAS/Abilities/MythicGameplayAbility.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "Itemization/Inventory/Fragments/ActionableItemFragment.h"
 #include "Itemization/Inventory/Fragments/FragmentTypes.h"
 #include "AttackFragment.generated.h"
+
+class UMythicAbilitySystemComponent;
 
 USTRUCT(Blueprintable, BlueprintType)
 struct FAttackRuntimeServerOnlyData {
@@ -33,7 +36,7 @@ struct FAttackRuntimeReplicatedData {
     FRolledAttributeSpec RolledDamageSpec = FRolledAttributeSpec();
 
     UPROPERTY()
-    UAbilitySystemComponent *ASC = nullptr;
+    UMythicAbilitySystemComponent *ASC = nullptr;
 
     UPROPERTY()
     FGameplayAbilitySpecHandle AbilityHandle = FGameplayAbilitySpecHandle();
@@ -44,7 +47,7 @@ struct FAttackConfig {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadWrite, EditAnywhere, SaveGame)
-    TSubclassOf<UGameplayAbility> TriggerAbility = nullptr;
+    TSubclassOf<UMythicGameplayAbility> TriggerAbility = nullptr;
 
     // The ability will be trigerred with this tag when the attack is executed
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Attack", SaveGame)

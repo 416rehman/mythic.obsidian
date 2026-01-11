@@ -4,6 +4,7 @@
 
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
+#include "MythicAssetManager.h"
 #include "Streaming/LevelStreamingDelegates.h"
 #include "World/GameDirector/MythicGamePlayerSubsystem.h"
 
@@ -33,35 +34,37 @@ bool UMythicGameInstance::CanJoinRequestedSession() const {
 
 // Adds a widget to the viewport, tries to load the level async, waits for the level to be loaded async, and then removes the widget
 void UMythicGameInstance::LoadLevel(FName LevelName, TSoftClassPtr<UUserWidget> LoadingScreenWidgetClass) {
-    // Check if the soft class pointer is valid AND if the asset is loaded
-    if (!LoadingScreenWidgetClass.IsValid()) {
-        LoadingScreenWidgetClass.LoadSynchronous();
-    }
-    // Check if the asset is loaded
-    if (!LoadingScreenWidgetClass.IsValid()) {
-        UE_LOG(LogTemp, Error, TEXT("Failed to load the loading screen widget class"));
-        return;
+    MapName = LevelName;
+
+    // LoadAsync handles null and already-loaded cases automatically
+    UMythicAssetManager::LoadAsync(this, LoadingScreenWidgetClass,
+                                   [this](TSubclassOf<UUserWidget> LoadedClass) {
+                                       OnLoadingScreenClassLoaded(LoadedClass);
+                                   });
+}
+
+void UMythicGameInstance::OnLoadingScreenClassLoaded(TSubclassOf<UUserWidget> LoadedClass) {
+    // Create and show loading screen if we have a valid class
+    if (LoadedClass) {
+        LoadingScreenWidget = CreateWidget<UUserWidget>(this, LoadedClass);
+        if (LoadingScreenWidget) {
+            auto ViewPort = GetGameViewportClient();
+            if (ViewPort) {
+                ViewPort->AddViewportWidgetForPlayer(GetFirstGamePlayer(), LoadingScreenWidget->TakeWidget(), 1);
+            }
+            else {
+                LoadingScreenWidget->AddToViewport();
+            }
+        }
     }
 
-    LoadingScreenWidget = CreateWidget<UUserWidget>(this, LoadingScreenWidgetClass.Get());
-    if (LoadingScreenWidget) {
-        auto ViewPort = GetGameViewportClient();
-        if (ViewPort) {
-            ViewPort->AddViewportWidgetForPlayer(GetFirstGamePlayer(), LoadingScreenWidget->TakeWidget(), 1);
-        }
-        else {
-            LoadingScreenWidget->AddToViewport();
-        }
-    }
-    // Get the game player subsystem
+    // Get the game player subsystem and start level load
     ULocalPlayer *LocalPlayer = GetFirstGamePlayer();
     UMythicGamePlayerSubsystem *GamePlayerSubsystem = LocalPlayer ? LocalPlayer->GetSubsystem<UMythicGamePlayerSubsystem>() : nullptr;
     if (GamePlayerSubsystem) {
         // Bind to the on level loaded delegate
         FLevelStreamingDelegates::OnLevelStreamingStateChanged.AddUObject(this, &UMythicGameInstance::OnLevelLoaded);
-
-        MapName = LevelName;
-        UGameplayStatics::OpenLevel(GetWorld(), LevelName, true, "");
+        UGameplayStatics::OpenLevel(GetWorld(), MapName, true, "");
     }
     else {
         UE_LOG(LogTemp, Error, TEXT("Failed to get the game player subsystem"));
