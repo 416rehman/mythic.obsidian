@@ -32,6 +32,13 @@ public:
     TSoftObjectPtr<UMythicAbilityTagRelationshipMapping> DefaultAbilityTagRelationshipMapping;
 
     /** 
+     * Default generic ability used for items that have an Input Tag but no specific Gameplay Ability.
+     * Often used for Consumables that apply effects or simple actions.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Abilities")
+    TSoftClassPtr<class UMythicGameplayAbility> DefaultItemInputAbility;
+
+    /** 
      * Returns the loaded AbilityTagRelationshipMapping, or nullptr if not yet loaded.
      * The asset is preloaded during game startup - this should always be valid during gameplay.
      */

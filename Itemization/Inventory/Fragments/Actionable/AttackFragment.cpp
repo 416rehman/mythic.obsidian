@@ -14,16 +14,6 @@ bool UAttackFragment::IsValidFragment(FText &OutErrorMessage) const {
         return false;
     }
 
-    if (!this->AttackConfig.AttackBeginEventTag.IsValid()) {
-        OutErrorMessage = FText::FromString("AttackFragment: AttackBeginEventTag is not set");
-        return false;
-    }
-
-    if (!this->AttackConfig.AttackEndEventTag.IsValid()) {
-        OutErrorMessage = FText::FromString("AttackFragment: AttackEndEventTag is not set");
-        return false;
-    }
-
     if (!this->AttackConfig.AttackMontage) {
         OutErrorMessage = FText::FromString("AttackFragment: AttackMontage is not set");
         return false;
@@ -40,6 +30,12 @@ bool UAttackFragment::IsValidFragment(FText &OutErrorMessage) const {
 void UAttackFragment::OnInstanced(UMythicItemInstance *Instance) {
     Super::OnInstanced(Instance);
 
+    UE_LOG(Myth, Log, TEXT("UAttackFragment::OnInstanced: Fragment=%s, Item=%s, InputTag=%s, TriggerAbility=%s"),
+           *GetName(),
+           *GetNameSafe(Instance),
+           *InputTag.ToString(),
+           *GetNameSafe(AttackConfig.TriggerAbility));
+
     // Roll the min/max damage values, make sure min is less than max
     this->AttackRuntimeReplicatedData.RolledDamageSpec = FRolledAttributeSpec(AttackBuildData.DamageAttribute, Instance->GetItemLevel(),
                                                                               AttackBuildData.DamageRollDefinition);
@@ -48,83 +44,85 @@ void UAttackFragment::OnInstanced(UMythicItemInstance *Instance) {
 void UAttackFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
     Super::OnItemActivated(ItemInstance);
 
+    UE_LOG(Myth, Log, TEXT("UAttackFragment::OnItemActivated: Fragment=%s, Item=%s, InputTag=%s"),
+           *GetName(),
+           *GetNameSafe(ItemInstance),
+           *InputTag.ToString());
+
     this->AttackRuntimeReplicatedData.ASC = this->GetOwningAbilitySystemComponent();
     if (!this->AttackRuntimeReplicatedData.ASC) {
-        UE_LOG(Myth, Error, TEXT("UAttackFragment::OnItemActivated: ASC is null"));
+        UE_LOG(Myth, Error, TEXT("UAttackFragment::OnItemActivated: ASC is null! Cannot grant ability."));
         return;
     }
 
+    UE_LOG(Myth, Log, TEXT("  -> Got ASC: %s (Owner: %s)"),
+           *GetNameSafe(AttackRuntimeReplicatedData.ASC),
+           *GetNameSafe(AttackRuntimeReplicatedData.ASC->GetOwnerActor()));
+
     auto Roll = &this->AttackRuntimeReplicatedData.RolledDamageSpec;
     if (Roll->bIsApplied) {
+        UE_LOG(Myth, Log, TEXT("  -> Damage already applied, skipping attribute modification"));
         return;
     }
 
     const auto ASC = this->AttackRuntimeReplicatedData.ASC;
     ASC->ApplyModToAttribute(Roll->Attribute, EGameplayModOp::AddBase, Roll->Value);
     Roll->bIsApplied = true;
+    UE_LOG(Myth, Log, TEXT("  -> Applied damage attribute: %s = %f"), *Roll->Attribute.GetName(), Roll->Value);
 
     // Give the player the ability to attack
-    if (AttackConfig.TriggerAbility) {
-        this->AttackRuntimeReplicatedData.AbilityHandle = ASC->GiveAbility(FGameplayAbilitySpec(AttackConfig.TriggerAbility, 1, INDEX_NONE, this));
+    UE_LOG(Myth, Log, TEXT("  -> Granting ability %s with InputTag %s"), *GetNameSafe(AttackConfig.TriggerAbility), *InputTag.ToString());
+    this->AttackRuntimeReplicatedData.AbilityHandle = GrantItemAbility(ASC, ItemInstance, AttackConfig.TriggerAbility);
+
+    if (!this->AttackRuntimeReplicatedData.AbilityHandle.IsValid()) {
+        UE_LOG(Myth, Error, TEXT("UAttackFragment::OnItemActivated: Failed to grant attack ability %s"), *GetNameSafe(AttackConfig.TriggerAbility));
+    }
+    else {
+        UE_LOG(Myth, Log, TEXT("  -> SUCCESS! Granted ability"));
+
+        // Log the granted ability's dynamic tags to verify the InputTag was applied
+        if (FGameplayAbilitySpec *Spec = ASC->FindAbilitySpecFromHandle(this->AttackRuntimeReplicatedData.AbilityHandle)) {
+            FGameplayTagContainer DynamicTags = Spec->GetDynamicSpecSourceTags();
+            UE_LOG(Myth, Log, TEXT("  -> Granted ability DynamicSpecSourceTags: %s"), *DynamicTags.ToString());
+        }
     }
 }
 
 void UAttackFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
     Super::OnItemDeactivated(ItemInstance);
+
+    UE_LOG(Myth, Log, TEXT("UAttackFragment::OnItemDeactivated: Fragment=%s, Item=%s"),
+           *GetName(),
+           *GetNameSafe(ItemInstance));
+
     auto ASC = this->AttackRuntimeReplicatedData.ASC;
     if (!ASC) {
+        UE_LOG(Myth, Log, TEXT("  -> No ASC cached, nothing to clean up"));
         return;
     }
 
     const auto Roll = &this->AttackRuntimeReplicatedData.RolledDamageSpec;
     if (!Roll->bIsApplied) {
+        UE_LOG(Myth, Log, TEXT("  -> Damage not applied, nothing to reverse"));
         return;
     }
 
     // Reverse the damage attribute
     ASC->ApplyModToAttribute(Roll->Attribute, EGameplayModOp::AddBase, -Roll->Value);
     Roll->bIsApplied = false;
+    UE_LOG(Myth, Log, TEXT("  -> Reversed damage attribute"));
 
     // Remove the ability
     auto AbilityHandle = this->AttackRuntimeReplicatedData.AbilityHandle;
     if (AttackConfig.TriggerAbility && AbilityHandle.IsValid()) {
         ASC->ClearAbility(AbilityHandle);
+        UE_LOG(Myth, Log, TEXT("  -> Cleared ability"));
     }
 
     // Remove the ability component
     this->AttackRuntimeReplicatedData.ASC = nullptr;
 }
 
-void UAttackFragment::TriggerAbilityWithEvent(FGameplayTag Tag) {
-    auto ASC = this->AttackRuntimeReplicatedData.ASC;
-
-    // Payload to pass to the ability to be triggered
-    auto Payload = FGameplayEventData();
-    Payload.EventTag = Tag;
-    Payload.Instigator = this->GetOwningActor();
-    Payload.OptionalObject = this; // OptionalObject is the fragment itself.
-
-    // Pass current item instance to the ability system component
-    ASC->TriggerAbilityFromGameplayEvent(this->AttackRuntimeReplicatedData.AbilityHandle, nullptr, Tag, &Payload, *ASC);
-}
-
-void UAttackFragment::OnClientActionBegin(UMythicItemInstance *ItemInst) {
-    Super::OnClientActionBegin(ItemInst);
-
-    // Trigger the begin event of the attack ability via the event tag
-    if (AttackConfig.AttackBeginEventTag.IsValid()) {
-        TriggerAbilityWithEvent(AttackConfig.AttackBeginEventTag);
-    }
-}
-
-void UAttackFragment::OnClientActionEnd(UMythicItemInstance *ItemInst) {
-    Super::OnClientActionEnd(ItemInst);
-
-    // Trigger the end event of the attack ability via the event tag
-    if (AttackConfig.AttackEndEventTag.IsValid()) {
-        TriggerAbilityWithEvent(AttackConfig.AttackEndEventTag);
-    }
-}
 
 bool UAttackFragment::CanBeStackedWith(const UItemFragment *Other) const {
     auto OtherFragment = Cast<UAttackFragment>(Other);
@@ -141,7 +139,5 @@ bool UAttackFragment::CanBeStackedWith(const UItemFragment *Other) const {
         Roll->Attribute == OtherRoll->Attribute &&
         Roll->Value == OtherRoll->Value &&
         AttackConfig.TriggerAbility == OtherConfig.TriggerAbility &&
-        AttackConfig.AttackBeginEventTag == OtherConfig.AttackBeginEventTag &&
-        AttackConfig.AttackEndEventTag == OtherConfig.AttackEndEventTag &&
         AttackConfig.AttackMontage == OtherConfig.AttackMontage;
 }

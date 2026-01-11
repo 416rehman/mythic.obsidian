@@ -49,14 +49,6 @@ struct FAttackConfig {
     UPROPERTY(BlueprintReadWrite, EditAnywhere, SaveGame)
     TSubclassOf<UMythicGameplayAbility> TriggerAbility = nullptr;
 
-    // The ability will be trigerred with this tag when the attack is executed
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Attack", SaveGame)
-    FGameplayTag AttackBeginEventTag = GAS_EVENT_ATTACK_BEGIN;
-
-    // The ability will be trigerred with this tag when the attack is finished
-    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Attack", SaveGame)
-    FGameplayTag AttackEndEventTag = GAS_EVENT_ATTACK_END;
-
     // The animation montage to play when this attack is executed
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Attack", SaveGame)
     UAnimMontage *AttackMontage = nullptr;
@@ -118,13 +110,9 @@ public:
 
     virtual void OnItemActivated(UMythicItemInstance *ItemInstance) override;
     virtual void OnItemDeactivated(UMythicItemInstance *ItemInstance) override;
-    virtual void OnClientActionBegin(UMythicItemInstance *ItemInst) override;
-    virtual void OnClientActionEnd(UMythicItemInstance *ItemInst) override;
 
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
     //~ Overrides
-
-    void TriggerAbilityWithEvent(FGameplayTag Tag);
 
     // Replication
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {

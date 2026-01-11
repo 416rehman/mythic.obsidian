@@ -14,4 +14,7 @@ void UMythicDeveloperSettings::GetStartupAssetPaths(TArray<FSoftObjectPath> &Out
     if (!DefaultAbilityTagRelationshipMapping.IsNull()) {
         OutPaths.Add(DefaultAbilityTagRelationshipMapping.ToSoftObjectPath());
     }
+    if (!DefaultItemInputAbility.IsNull()) {
+        OutPaths.Add(DefaultItemInputAbility.ToSoftObjectPath());
+    }
 }

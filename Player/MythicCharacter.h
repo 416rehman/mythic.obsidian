@@ -37,4 +37,13 @@ public:
     // LookAt Actor. Used by AnimBP to set the head of this character to look at the specified actor.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Blueprintable)
     AActor *LookAtActor;
+
+protected:
+    virtual void SetupPlayerInputComponent(UInputComponent *PlayerInputComponent) override;
+
+    void Input_AbilityInputTagPressed(FGameplayTag InputTag);
+    void Input_AbilityInputTagReleased(FGameplayTag InputTag);
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Input")
+    TObjectPtr<class UMythicInputConfig> InputConfig;
 };

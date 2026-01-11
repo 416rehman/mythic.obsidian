@@ -1,12 +1,16 @@
 // ConsumableEffectFragment.cpp
 
 #include "ConsumableEffectFragment.h"
+#include "ConsumableEffectFragment.h"
 #include "AbilitySystemComponent.h"
+#include "GAS/MythicAbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Mythic/Mythic.h"
 #include "UObject/UnrealType.h"
+#include "GameplayAbilitySpec.h"
+#include "GAS/Abilities/MythicGameplayAbility.h"
 
 // Helper to access protected AttributeBasedMagnitude via reflection
 static const FAttributeBasedFloat *GetAttributeBasedFloat(const FGameplayEffectModifierMagnitude &Magnitude) {
@@ -285,6 +289,21 @@ FText FMythicEffectDisplayData::GetRichText(UAbilitySystemComponent *ASC, bool b
 void UConsumableEffectFragment::OnInstanced(UMythicItemInstance *ItemInstance) {
     Super::OnInstanced(ItemInstance);
     ConsumableEffectRuntimeReplicatedData.ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(ItemInstance->GetInventoryOwner());
+
+    // Grant Generic Ability to handle Input if InputTag is set
+    // Using nullptr for AbilityClass triggers the fallback to DefaultItemInputAbility in helper
+    if (InputTag.IsValid()) {
+        if (UMythicAbilitySystemComponent *MythicASC = Cast<UMythicAbilitySystemComponent>(ConsumableEffectRuntimeReplicatedData.ASC)) {
+            ConsumableEffectRuntimeReplicatedData.AbilityHandle = GrantItemAbility(MythicASC, ItemInstance, nullptr);
+            if (!ConsumableEffectRuntimeReplicatedData.AbilityHandle.IsValid()) {
+                UE_LOG(Myth, Error, TEXT("UConsumableEffectFragment::OnInstanced: Failed to grant generic ability for input handling."));
+            }
+        }
+    }
+}
+
+void UConsumableEffectFragment::ExecuteGenericAction(UMythicItemInstance *ItemInstance) {
+    ServerApplyEffects(ItemInstance);
 }
 
 void UConsumableEffectFragment::OnInventorySlotChanged(UMythicInventoryComponent *Inventory, int32 SlotIndex) {
@@ -292,6 +311,13 @@ void UConsumableEffectFragment::OnInventorySlotChanged(UMythicInventoryComponent
     ConsumableEffectRuntimeReplicatedData.ASC = Inventory
         ? UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Inventory->GetOwner())
         : nullptr;
+}
+
+void UConsumableEffectFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
+    Super::OnItemDeactivated(ItemInstance);
+    if (ConsumableEffectRuntimeReplicatedData.ASC && ConsumableEffectRuntimeReplicatedData.AbilityHandle.IsValid()) {
+        ConsumableEffectRuntimeReplicatedData.ASC->ClearAbility(ConsumableEffectRuntimeReplicatedData.AbilityHandle);
+    }
 }
 
 void UConsumableEffectFragment::OnClientActionEnd(UMythicItemInstance *ItemInstance) {
@@ -313,6 +339,7 @@ void UConsumableEffectFragment::ServerApplyEffects_Implementation(UMythicItemIns
 
     for (const FConsumableEffectEntry &Entry : ConsumableEffectConfig.Effects) {
         if (!Entry.GameplayEffectClass) {
+            UE_LOG(Myth, Warning, TEXT("UConsumableEffectFragment: Invalid GameplayEffectClass in config"));
             continue;
         }
 
@@ -328,6 +355,9 @@ void UConsumableEffectFragment::ServerApplyEffects_Implementation(UMythicItemIns
 
             ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
             UE_LOG(Myth, Log, TEXT("Applied effect: %s"), *Entry.GameplayEffectClass->GetName());
+        }
+        else {
+            UE_LOG(Myth, Error, TEXT("UConsumableEffectFragment: Failed to make outgoing spec for effect: %s"), *Entry.GameplayEffectClass->GetName());
         }
     }
 }

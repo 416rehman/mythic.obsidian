@@ -41,4 +41,22 @@ public:
     /** Gets the ability target data associated with the given ability handle and activation info */
     void GetAbilityTargetData(const FGameplayAbilitySpecHandle AbilityHandle, FGameplayAbilityActivationInfo ActivationInfo,
                               FGameplayAbilityTargetDataHandle &OutTargetDataHandle);
+
+    /*
+     * Input Processing (Lyra-style)
+     */
+    void AbilityInputTagPressed(const FGameplayTag &InputTag);
+    void AbilityInputTagReleased(const FGameplayTag &InputTag);
+    void ProcessAbilityInput(float DeltaTime, bool bGamePaused);
+    void ClearAbilityInput();
+
+protected:
+    // Handles for abilities that had their input pressed this frame.
+    TArray<FGameplayAbilitySpecHandle> InputPressedSpecHandles;
+
+    // Handles for abilities that had their input released this frame.
+    TArray<FGameplayAbilitySpecHandle> InputReleasedSpecHandles;
+
+    // Handles for abilities that have their input held.
+    TArray<FGameplayAbilitySpecHandle> InputHeldSpecHandles;
 };

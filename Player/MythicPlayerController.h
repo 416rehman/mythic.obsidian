@@ -56,6 +56,7 @@ public:
 protected:
     virtual void SetupInputComponent() override;
     virtual void BeginPlay() override;
+    virtual void PostProcessInput(const float DeltaTime, const bool bGamePaused) override;
 
     // Login with the saved credentials if passed in via command line arguments. Otherwise, start the login process.
     // I.e Before this function is called, you could display a "Logging in..." message to the user.

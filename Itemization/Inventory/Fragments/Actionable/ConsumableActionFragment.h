@@ -104,6 +104,8 @@ public:
     virtual void OnItemDeactivated(UMythicItemInstance *ItemInstance) override;
     virtual void OnInventorySlotChanged(UMythicInventoryComponent *Inventory, int32 SlotIndex) override;
 
+    virtual void ExecuteGenericAction(UMythicItemInstance *ItemInstance) override;
+
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
     //~
 

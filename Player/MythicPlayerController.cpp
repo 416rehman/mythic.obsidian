@@ -6,6 +6,7 @@
 #include "OnlineSubsystemUtils.h"
 #include "GameModes/MythicCheatManager.h"
 #include "GameModes/GameState/MythicGameState.h"
+#include "GAS/MythicAbilitySystemComponent.h"
 #include "Interfaces/OnlineIdentityInterface.h"
 #include "Itemization/Crafting/CraftingComponent.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
@@ -182,4 +183,12 @@ const UProficiencyComponent *AMythicPlayerController::GetProficiencyComponent() 
 void AMythicPlayerController::SetupInputComponent() {
     // set up gameplay key bindings
     Super::SetupInputComponent();
+}
+
+void AMythicPlayerController::PostProcessInput(const float DeltaTime, const bool bGamePaused) {
+    if (UMythicAbilitySystemComponent *MythicASC = Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponent())) {
+        MythicASC->ProcessAbilityInput(DeltaTime, bGamePaused);
+    }
+
+    Super::PostProcessInput(DeltaTime, bGamePaused);
 }

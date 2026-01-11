@@ -449,12 +449,14 @@ bool UMythicGameplayAbility::DoesAbilitySatisfyTagRequirements(const UAbilitySys
         if (OptionalRelevantTags && BlockedTag.IsValid()) {
             OptionalRelevantTags->AddTag(BlockedTag);
         }
+        UE_LOG(Myth, Verbose, TEXT("Ability %s blocked by tags."), *GetName());
         return false;
     }
     if (bMissing) {
         if (OptionalRelevantTags && MissingTag.IsValid()) {
             OptionalRelevantTags->AddTag(MissingTag);
         }
+        UE_LOG(Myth, Verbose, TEXT("Ability %s missing required tags."), *GetName());
         return false;
     }
 

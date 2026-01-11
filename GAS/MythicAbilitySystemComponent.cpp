@@ -1,6 +1,7 @@
 ﻿#include "MythicAbilitySystemComponent.h"
 
 #include "Mythic.h"
+#include "MythicTags_GAS.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "System/MythicAssetManager.h"
 
@@ -32,6 +33,172 @@ void UMythicAbilitySystemComponent::BeginPlay() {
 
 void UMythicAbilitySystemComponent::SetTagRelationshipMapping(UMythicAbilityTagRelationshipMapping *NewMapping) {
     AbilityTagRelationshipMapping = NewMapping;
+}
+
+void UMythicAbilitySystemComponent::AbilityInputTagPressed(const FGameplayTag &InputTag) {
+    if (InputTag.IsValid()) {
+        UE_LOG(Myth, Log, TEXT("ASC::AbilityInputTagPressed: Tag=%s, ASC=%s, ActivatableAbilities.Num=%d"),
+               *InputTag.ToString(),
+               *GetName(),
+               ActivatableAbilities.Items.Num());
+
+        int32 MatchCount = 0;
+        for (const FGameplayAbilitySpec &AbilitySpec : ActivatableAbilities.Items) {
+            if (AbilitySpec.Ability) {
+                FGameplayTagContainer DynamicTags = AbilitySpec.GetDynamicSpecSourceTags();
+                bool bMatches = DynamicTags.HasTagExact(InputTag);
+                UE_LOG(Myth, Log, TEXT("  -> Ability: %s, DynamicTags: %s, Matches: %s"),
+                       *GetNameSafe(AbilitySpec.Ability),
+                       *DynamicTags.ToString(),
+                       bMatches ? TEXT("YES") : TEXT("NO"));
+
+                if (bMatches) {
+                    InputPressedSpecHandles.AddUnique(AbilitySpec.Handle);
+                    InputHeldSpecHandles.AddUnique(AbilitySpec.Handle);
+                    MatchCount++;
+                }
+            }
+        }
+        UE_LOG(Myth, Log, TEXT("  -> Total matches for InputTag %s: %d"), *InputTag.ToString(), MatchCount);
+    }
+    else {
+        UE_LOG(Myth, Warning, TEXT("ASC::AbilityInputTagPressed: InputTag is NOT VALID!"));
+    }
+}
+
+void UMythicAbilitySystemComponent::AbilityInputTagReleased(const FGameplayTag &InputTag) {
+    if (InputTag.IsValid()) {
+        UE_LOG(Myth, Log, TEXT("ASC::AbilityInputTagReleased: Tag=%s, ASC=%s"),
+               *InputTag.ToString(),
+               *GetName());
+
+        int32 MatchCount = 0;
+        for (const FGameplayAbilitySpec &AbilitySpec : ActivatableAbilities.Items) {
+            if (AbilitySpec.Ability && (AbilitySpec.GetDynamicSpecSourceTags().HasTagExact(InputTag))) {
+                InputReleasedSpecHandles.AddUnique(AbilitySpec.Handle);
+                InputHeldSpecHandles.Remove(AbilitySpec.Handle);
+                UE_LOG(Myth, Log, TEXT("  -> Matched Ability: %s"), *GetNameSafe(AbilitySpec.Ability));
+                MatchCount++;
+            }
+        }
+        UE_LOG(Myth, Log, TEXT("  -> Total matches for InputTag %s: %d"), *InputTag.ToString(), MatchCount);
+    }
+    else {
+        UE_LOG(Myth, Warning, TEXT("ASC::AbilityInputTagReleased: InputTag is NOT VALID!"));
+    }
+}
+
+void UMythicAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bGamePaused) {
+    if (HasMatchingGameplayTag(GAS_INPUT_BLOCKED)) {
+        ClearAbilityInput();
+        return;
+    }
+
+    static TArray<FGameplayAbilitySpecHandle> AbilitiesToActivate;
+    AbilitiesToActivate.Reset();
+
+    if (InputPressedSpecHandles.Num() > 0 || InputHeldSpecHandles.Num() > 0 || InputReleasedSpecHandles.Num() > 0) {
+        UE_LOG(Myth, Log, TEXT("ASC::ProcessAbilityInput: Pressed=%d, Held=%d, Released=%d"),
+               InputPressedSpecHandles.Num(),
+               InputHeldSpecHandles.Num(),
+               InputReleasedSpecHandles.Num());
+    }
+
+    //
+    // Process all abilities that activate when the input is held.
+    //
+    for (const FGameplayAbilitySpecHandle &SpecHandle : InputHeldSpecHandles) {
+        if (const FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(SpecHandle)) {
+            if (AbilitySpec->Ability && !AbilitySpec->IsActive()) {
+                const UMythicGameplayAbility *MythicAbilityCDO = Cast<UMythicGameplayAbility>(AbilitySpec->Ability);
+                if (MythicAbilityCDO) {
+                    UE_LOG(Myth, Log, TEXT("  -> Held ability %s, ActivationPolicy=%d (WhileInputActive=%d)"),
+                           *GetNameSafe(AbilitySpec->Ability),
+                           (int32)MythicAbilityCDO->GetActivationPolicy(),
+                           (int32)EMythicAbilityActivationPolicy::WhileInputActive);
+
+                    if (MythicAbilityCDO->GetActivationPolicy() == EMythicAbilityActivationPolicy::WhileInputActive) {
+                        AbilitiesToActivate.AddUnique(AbilitySpec->Handle);
+                    }
+                }
+            }
+        }
+    }
+
+    //
+    // Process all abilities that had their input pressed this frame.
+    //
+    for (const FGameplayAbilitySpecHandle &SpecHandle : InputPressedSpecHandles) {
+        if (FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(SpecHandle)) {
+            if (AbilitySpec->Ability) {
+                AbilitySpec->InputPressed = true;
+
+                if (AbilitySpec->IsActive()) {
+                    // Ability is active so pass along the input event.
+                    UE_LOG(Myth, Log, TEXT("  -> Pressed ability %s is already ACTIVE, forwarding input"), *GetNameSafe(AbilitySpec->Ability));
+                    AbilitySpecInputPressed(*AbilitySpec);
+                }
+                else {
+                    const UMythicGameplayAbility *MythicAbilityCDO = Cast<UMythicGameplayAbility>(AbilitySpec->Ability);
+                    if (MythicAbilityCDO) {
+                        UE_LOG(Myth, Log, TEXT("  -> Pressed ability %s, ActivationPolicy=%d (OnInputTriggered=%d)"),
+                               *GetNameSafe(AbilitySpec->Ability),
+                               (int32)MythicAbilityCDO->GetActivationPolicy(),
+                               (int32)EMythicAbilityActivationPolicy::OnInputTriggered);
+
+                        if (MythicAbilityCDO->GetActivationPolicy() == EMythicAbilityActivationPolicy::OnInputTriggered) {
+                            AbilitiesToActivate.AddUnique(AbilitySpec->Handle);
+                        }
+                    }
+                    else {
+                        UE_LOG(Myth, Warning, TEXT("  -> Pressed ability %s is NOT a MythicGameplayAbility!"), *GetNameSafe(AbilitySpec->Ability));
+                    }
+                }
+            }
+        }
+    }
+
+    //
+    // Try to activate all the abilities that are from presses and holds.
+    // We do it all at once so that held inputs don't activate the ability
+    // and then also send a input event to the ability because of the press.
+    //
+    UE_LOG(Myth, Log, TEXT("  -> AbilitiesToActivate.Num=%d"), AbilitiesToActivate.Num());
+    for (const FGameplayAbilitySpecHandle &AbilitySpecHandle : AbilitiesToActivate) {
+        if (FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(AbilitySpecHandle)) {
+            UE_LOG(Myth, Log, TEXT("  -> Attempting to activate ability %s"), *GetNameSafe(AbilitySpec->Ability));
+        }
+        bool bSuccess = TryActivateAbility(AbilitySpecHandle);
+        UE_LOG(Myth, Log, TEXT("  -> TryActivateAbility result: %s"), bSuccess ? TEXT("SUCCESS") : TEXT("FAILED"));
+    }
+
+    //
+    // Process all abilities that had their input released this frame.
+    //
+    for (const FGameplayAbilitySpecHandle &SpecHandle : InputReleasedSpecHandles) {
+        if (FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(SpecHandle)) {
+            if (AbilitySpec->Ability) {
+                AbilitySpec->InputPressed = false;
+
+                if (AbilitySpec->IsActive()) {
+                    // Ability is active so pass along the input event.
+                    AbilitySpecInputReleased(*AbilitySpec);
+                }
+            }
+        }
+    }
+
+    //
+    // Clear the cached ability handles.
+    //
+    InputPressedSpecHandles.Reset();
+    InputReleasedSpecHandles.Reset();
+}
+
+void UMythicAbilitySystemComponent::ClearAbilityInput() {
+    InputPressedSpecHandles.Reset();
+    InputReleasedSpecHandles.Reset();
+    InputHeldSpecHandles.Reset();
 }
 
 const TArray<UMythicAttributeSet *> &UMythicAbilitySystemComponent::GetAttributeSets() const {

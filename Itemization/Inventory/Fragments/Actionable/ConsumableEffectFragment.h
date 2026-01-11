@@ -135,6 +135,9 @@ struct FConsumableEffectRuntimeReplicatedData {
 
     UPROPERTY(BlueprintReadOnly)
     UAbilitySystemComponent *ASC = nullptr;
+
+    UPROPERTY()
+    FGameplayAbilitySpecHandle AbilityHandle;
 };
 
 // Entry for a single gameplay effect with SetByCaller support
@@ -184,8 +187,11 @@ public:
 
     virtual void OnClientActionEnd(UMythicItemInstance *ItemInstance) override;
     virtual void OnInstanced(UMythicItemInstance *ItemInstance) override;
+    virtual void OnItemDeactivated(UMythicItemInstance *ItemInstance) override;
     virtual void OnInventorySlotChanged(UMythicInventoryComponent *Inventory, int32 SlotIndex) override;
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
+
+    virtual void ExecuteGenericAction(UMythicItemInstance *ItemInstance) override;
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {
         Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -215,10 +221,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Consumable")
     FText GetCombinedRichText() const;
 
-protected:
     UFUNCTION(Server, Reliable)
     void ServerApplyEffects(UMythicItemInstance *ItemInstance);
 
+protected:
     static FMythicEffectModifierDisplayData ParseModifier(
         const FGameplayModifierInfo &Modifier,
         const TMap<FGameplayTag, float> &SetByCallerValues);

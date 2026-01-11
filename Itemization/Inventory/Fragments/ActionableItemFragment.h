@@ -34,20 +34,17 @@ class MYTHIC_API UActionableItemFragment : public UItemFragment {
     GENERATED_BODY()
 
 public:
-    UPROPERTY(Replicated, EditAnywhere, meta=(ShowOnlyInnerProperties), SaveGame)
-    UInputAction *InputAction;
+    UPROPERTY(Replicated, EditAnywhere, meta=(ShowOnlyInnerProperties), SaveGame, meta=(Categories="Input"))
+    FGameplayTag InputTag;
 
-    UPROPERTY(Transient)
-    TWeakObjectPtr<class UEnhancedInputComponent> BoundInputComponent;
-
-    TArray<uint32> InputBindings;
+    /** Display name for the action associated with this item (e.g., "Attack", "Drink", "Use") */
+    UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, meta=(ShowOnlyInnerProperties), SaveGame)
+    FText ActionDisplayName;
 
     /** Fragment Overrides */
 #if WITH_EDITOR
     virtual bool IsValidFragment(FText &OutErrorMessage) const override;
 #endif
-    virtual void OnClientItemActivated(UMythicItemInstance *ItemInstance) override;
-    virtual void OnClientItemDeactivated(UMythicItemInstance *ItemInstance) override;
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
 
     /** Called when action input starts. Override to implement item-specific behavior. */
@@ -58,12 +55,23 @@ public:
     UFUNCTION(BlueprintCallable)
     virtual void OnClientActionEnd(UMythicItemInstance *ItemInstance) {}
 
-    void InputStarted(const FInputActionInstance &InputActionInstance);
-
-    void InputEnded(const FInputActionValue &InputActionValue);
-
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {
         Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-        DOREPLIFETIME(UActionableItemFragment, InputAction);
+        DOREPLIFETIME(UActionableItemFragment, InputTag);
+        DOREPLIFETIME(UActionableItemFragment, ActionDisplayName);
     }
+
+    /** 
+     * Executes the generic action for this fragment. 
+     * Called by GA_GenericConsumable.
+     */
+    virtual void ExecuteGenericAction(UMythicItemInstance *ItemInstance);
+
+protected:
+    /** 
+     * Helper to grant an ability with the correct Input Tag config.
+     * Uses DefaultItemInputAbility from Settings if AbilityClass is null but InputTag is valid.
+     */
+    FGameplayAbilitySpecHandle GrantItemAbility(class UMythicAbilitySystemComponent *ASC, UMythicItemInstance *ItemInstance,
+                                                TSubclassOf<class UMythicGameplayAbility> AbilityClass);
 };

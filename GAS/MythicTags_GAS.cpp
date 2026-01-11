@@ -66,3 +66,7 @@ UE_DEFINE_GAMEPLAY_TAG(GAMEPLAYCUE_ABILITY_LEVELUP, "GameplayCue.Ability.LevelUp
 // Internal Notifies - format NOTIFY_<SYSTEM>_<ACTION>_<RESULT>_<REASON>
 UE_DEFINE_GAMEPLAY_TAG(NOTIFY_ABILITY_ACTIVATION_FAILED_COST, "Notify.Ability.Activation.Failed.Cost");
 UE_DEFINE_GAMEPLAY_TAG(NOTIFY_ABILITY_ACTIVATION_FAILED_ISDEAD, "Notify.Ability.Activation.Failed.IsDead");
+
+/** Input */
+// Input tags control ability input processing behavior
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_INPUT_BLOCKED, "GAS.Input.Blocked", "When present on ASC, all ability input is blocked and cleared");
