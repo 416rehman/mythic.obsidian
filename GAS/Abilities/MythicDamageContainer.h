@@ -1,5 +1,6 @@
 #pragma once
 #include "Abilities/GameplayAbilityTargetTypes.h"
+#include "GameplayTagContainer.h"
 #include "MythicDamageContainer.generated.h"
 
 class URPGAbilitySystemComponent;
@@ -20,7 +21,6 @@ USTRUCT(BlueprintType, Blueprintable)
 struct FMythicDamageContainer {
     GENERATED_BODY()
 
-public:
     FMythicDamageContainer() {}
     // The DamageCalculationEffect is applied to the player to calculate the damage. I.e setting the TotalDamage attribute
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = MythicDamageContainer)
@@ -37,12 +37,11 @@ USTRUCT(BlueprintType, Blueprintable)
 struct FMythicDamageContainerSpec {
     GENERATED_BODY()
 
-public:
     FMythicDamageContainerSpec() {}
 
     UPROPERTY(BlueprintReadOnly, Category = GameplayEffectContainer)
     FGameplayEffectContextHandle EffectContextHandle;
-    
+
     /** Computed target data */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = GameplayEffectContainer)
     FGameplayAbilityTargetDataHandle TargetsHandle;
@@ -54,14 +53,14 @@ public:
     /** Damage Context Effect Spec */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = GameplayEffectContainer)
     FGameplayEffectSpecHandle DamageCalculationEffectSpec;
-    
+
     /** Damage Application Effect Spec */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = GameplayEffectContainer)
     FGameplayEffectSpecHandle DamageApplicationEffectSpec;
 
     // Implements Destructible interface
-    bool IsDestructible(AActor* Actor);
-    
+    bool IsDestructible(AActor *Actor);
+
     /** Adds new targets to target data */
-    void AddTargets(const TArray<FHitResult>& HitResults, const TArray<AActor*>& TargetActors);
+    void AddTargets(const TArray<FHitResult> &HitResults, const TArray<AActor *> &TargetActors);
 };

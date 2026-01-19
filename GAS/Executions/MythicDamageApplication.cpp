@@ -124,9 +124,10 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     // TODO: Apply status effects to the target
     // TODO: Modify damage based on IncreasedDamageToEnemiesUnderStatusEffects, BonusDamageToSuperiorEnemies, WeaponType, etc.
 
-    // Output the final damage
-    OutExecutionOutput.
-        AddOutputModifier(FGameplayModifierEvaluatedData(UMythicAttributeSet_Life::GetHealthAttribute(), EGameplayModOp::Additive, -FinalDamage));
+    // Output to the Damage meta attribute (positive value)
+    // PostGameplayEffectExecute in AttributeSet_Life will convert Damage -> -Health
+    // This allows gameplay cues to receive damage magnitude
+    OutExecutionOutput.AddOutputModifier(FGameplayModifierEvaluatedData(UMythicAttributeSet_Life::GetDamageAttribute(), EGameplayModOp::Additive, FinalDamage));
 
     // // Send a "HIT" gameplay event to source
     // FGameplayTag HitTag = GAS_EVENT_DMG_DELIVERED;

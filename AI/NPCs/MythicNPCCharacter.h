@@ -60,5 +60,8 @@ public:
 
     virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty> &OutLifetimeProps) const override;
 
+    // PossessedBy - Server side
+    virtual void PossessedBy(AController *NewController) override;
+
     friend class UMythicNPCManager;
 };

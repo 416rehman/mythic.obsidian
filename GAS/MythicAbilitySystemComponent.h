@@ -50,6 +50,15 @@ public:
     void ProcessAbilityInput(float DeltaTime, bool bGamePaused);
     void ClearAbilityInput();
 
+    // Execute a gameplay cue on ALL clients via NetMulticast (for effects everyone should see)
+    UFUNCTION(BlueprintCallable, Category = "GameplayCue")
+    void ExecuteGameplayCueMulticast(FGameplayTag CueTag, const FGameplayCueParameters &CueParams);
+
+protected:
+    // NetMulticast RPC to execute a cue on all clients
+    UFUNCTION(NetMulticast, Unreliable)
+    void Multicast_ExecuteGameplayCue(FGameplayTag CueTag, FGameplayCueParameters CueParams);
+
 protected:
     // Handles for abilities that had their input pressed this frame.
     TArray<FGameplayAbilitySpecHandle> InputPressedSpecHandles;

@@ -68,7 +68,6 @@ void AMythicCharacter::Input_AbilityInputTagPressed(FGameplayTag InputTag) {
            *InputTag.ToString(),
            *GetName());
     if (UMythicAbilitySystemComponent *MythicASC = Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponent())) {
-        UE_LOG(Myth, Log, TEXT("  -> Forwarding to ASC: %s"), *GetNameSafe(MythicASC));
         MythicASC->AbilityInputTagPressed(InputTag);
     }
     else {
@@ -77,11 +76,7 @@ void AMythicCharacter::Input_AbilityInputTagPressed(FGameplayTag InputTag) {
 }
 
 void AMythicCharacter::Input_AbilityInputTagReleased(FGameplayTag InputTag) {
-    UE_LOG(Myth, Log, TEXT("AMythicCharacter::Input_AbilityInputTagReleased: Tag=%s, Character=%s"),
-           *InputTag.ToString(),
-           *GetName());
     if (UMythicAbilitySystemComponent *MythicASC = Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponent())) {
-        UE_LOG(Myth, Log, TEXT("  -> Forwarding to ASC: %s"), *GetNameSafe(MythicASC));
         MythicASC->AbilityInputTagReleased(InputTag);
     }
     else {

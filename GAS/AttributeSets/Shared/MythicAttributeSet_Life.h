@@ -21,13 +21,29 @@ protected:
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_Health)
     FGameplayAttributeData Health;
 
+    // Meta Attribute - NOT replicated, used for damage/healing calculations
+    // Damage is applied to this, then converted to -Health in PostGameplayEffectExecute
+    UPROPERTY(BlueprintReadOnly, Category = "Attributes")
+    FGameplayAttributeData Damage;
+    // Meta Attribute - NOT replicated, used for damage/healing calculations
+    // Healing is applied to this, then converted to +Health in PostGameplayEffectExecute
+    UPROPERTY(BlueprintReadOnly, Category = "Attributes")
+    FGameplayAttributeData Healing;
+
     // Store the health before any changes are made by a gameplay effect
     float HealthBeforeAttributeChange;
     float MaxHealthBeforeAttributeChange;
 
+    // Track if we're already dead to prevent re-triggering death
+    bool bOutOfHealth = false;
+
 public:
+    UMythicAttributeSet_Life();
+
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Life, MaxHealth);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Life, Health);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Life, Damage);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Life, Healing);
 
     UFUNCTION()
     virtual void OnRep_MaxHealth(const FGameplayAttributeData &OldMaxHealth);

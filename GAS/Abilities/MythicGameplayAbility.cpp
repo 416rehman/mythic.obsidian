@@ -123,16 +123,17 @@ void UMythicGameplayAbility::SendEvent(FGameplayAbilityTargetDataHandle TargetDa
 TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainerSpec(const FMythicDamageContainerSpec &ContainerSpec) {
     TArray<FActiveGameplayEffectHandle> AllEffects;
 
+    // This prevents double damage in locally predicted abilities
+    if (!CurrentActorInfo->IsNetAuthority()) {
+        return AllEffects;
+    }
+
     // 1. CREATE DAMAGE CONTEXT - This stage only sets the context like isCritical, isBlocked, etc. No damage is calculated yet.
     if (!ContainerSpec.DamageCalculationEffectSpec.IsValid()) {
         UE_LOG(Myth, Error, TEXT("UMythicGameplayAbility::ApplyDamageContainerSpec: ContainerSpec.DamageCalculationEffectSpec is null"));
     }
     auto CalculationEffectHandle = K2_ApplyGameplayEffectSpecToOwner(ContainerSpec.DamageCalculationEffectSpec);
     AllEffects.Push(CalculationEffectHandle);
-
-    // Scoped prediction window for the damage application
-    UAbilitySystemComponent *const AbilitySystemComponent = CurrentActorInfo->AbilitySystemComponent.Get();
-    FScopedPredictionWindow NewScopedWindow(AbilitySystemComponent, true);
 
     // 2. SEND DAMAGE PRE EVENT
     if (ContainerSpec.TargetsHandle.Num() > 0) {
@@ -155,10 +156,17 @@ TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainer
     return AllEffects;
 }
 
+
 TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainer(const FMythicDamageContainer &Container, const TArray<FHitResult> &HitResults,
                                                                                  const TArray<AActor *> &TargetActors,
                                                                                  int32 OverrideGameplayLevel) {
-    // If no HitResults or TargetActors, gtfo
+    TArray<FActiveGameplayEffectHandle> AllEffects;
+
+    // Only apply damage on server (authority)
+    if (!CurrentActorInfo->IsNetAuthority()) {
+        return AllEffects;
+    }
+
     if (TargetActors.IsEmpty() || HitResults.IsEmpty()) {
         UE_LOG(Myth, Warning, TEXT("No Targets"));
     }

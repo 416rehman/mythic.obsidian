@@ -57,10 +57,7 @@ UAbilitySystemComponent *AMythicNPCCharacter::GetAbilitySystemComponent() const 
 }
 
 void AMythicNPCCharacter::InitializeASC() {
-    if (auto OwnController = this->GetController()) {
-        // AI Controller is the owner, and this NPC is the avatar
-        AbilitySystemComponent->InitAbilityActorInfo(OwnController, this);
-    }
+    AbilitySystemComponent->InitAbilityActorInfo(this, this);
 }
 
 void AMythicNPCCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty> &OutLifetimeProps) const {
@@ -69,43 +66,15 @@ void AMythicNPCCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimePrope
     DOREPLIFETIME(AMythicNPCCharacter, AbilitySystemComponent);
 }
 
+void AMythicNPCCharacter::PossessedBy(AController *NewController) {
+    Super::PossessedBy(NewController);
+    InitializeASC();
+}
+
 // Called when the game starts or when spawned
 void AMythicNPCCharacter::BeginPlay() {
     Super::BeginPlay();
 
+    InitializeASC();
     // TODO: Initialize attributes based on the NPC's data
-    // Server Only
-    // if (this->HasAuthority()) {
-    // AMythicGameState *GameState = GetWorld()->GetGameState<AMythicGameState>();
-    // if (!GameState) {
-    //     UE_LOG(Myth, Error, TEXT("GameState not found"));
-    //     return;
-    // }
-    //
-    // UMythicAbilitySystemComponent *MythicASC = GameState->GetMythicAbilitySystemComponent();
-    // if (!MythicASC) {
-    //     UE_LOG(Myth, Error, TEXT("MythicASC not found"));
-    //     return;
-    // }
-    //
-    //
-    // auto LevelF = static_cast<float>(this->Config.Level);
-    //
-    // // Enemy Health = Random(HealthMin, HealthMax) * WorldTierAttributes->GetEnemyHealthMultiplier()
-    // auto MinHealth = GameState->HealthMinCurveRowHandle.Eval(LevelF, "");
-    // auto MaxHealth = GameState->HealthMaxCurveRowHandle.Eval(LevelF, "");
-    // auto Health = FMath::RandRange(MinHealth, MaxHealth) * MythicASC->GetNumericAttribute(
-    //     GameState->WorldTierAttributes->GetEnemyHealthMultiplierAttribute());
-    // UE_LOG(Myth, Log, TEXT("Attribute Initialized. Health: %f"), Health);
-    // LifeAttributes->SetMaxHealth(Health);
-    // LifeAttributes->SetHealth(Health);
-    //
-    // // Enemy Damage = Random(DamageMin, DamageMax) * WorldTierAttributes->GetEnemyDamageMultiplier()
-    // auto MinDamage = GameState->DamageMinCurveRowHandle.Eval(LevelF, "");
-    // auto MaxDamage = GameState->DamageMaxCurveRowHandle.Eval(LevelF, "");
-    // auto Damage = FMath::RandRange(MinDamage, MaxDamage) * MythicASC->GetNumericAttribute(
-    //     GameState->WorldTierAttributes->GetEnemyDamageMultiplierAttribute());
-    // UE_LOG(Myth, Log, TEXT("Attribute Initialized. Damage: %f"), Damage);
-    // CombatAttributes->SetDamage(Damage);
-    // }
 }

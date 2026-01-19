@@ -42,24 +42,17 @@ void UMythicAbilitySystemComponent::AbilityInputTagPressed(const FGameplayTag &I
                *GetName(),
                ActivatableAbilities.Items.Num());
 
-        int32 MatchCount = 0;
         for (const FGameplayAbilitySpec &AbilitySpec : ActivatableAbilities.Items) {
             if (AbilitySpec.Ability) {
                 FGameplayTagContainer DynamicTags = AbilitySpec.GetDynamicSpecSourceTags();
                 bool bMatches = DynamicTags.HasTagExact(InputTag);
-                UE_LOG(Myth, Log, TEXT("  -> Ability: %s, DynamicTags: %s, Matches: %s"),
-                       *GetNameSafe(AbilitySpec.Ability),
-                       *DynamicTags.ToString(),
-                       bMatches ? TEXT("YES") : TEXT("NO"));
-
                 if (bMatches) {
+                    UE_LOG(Myth, Log, TEXT("  -> Matched Ability: %s"), *GetNameSafe(AbilitySpec.Ability));
                     InputPressedSpecHandles.AddUnique(AbilitySpec.Handle);
                     InputHeldSpecHandles.AddUnique(AbilitySpec.Handle);
-                    MatchCount++;
                 }
             }
         }
-        UE_LOG(Myth, Log, TEXT("  -> Total matches for InputTag %s: %d"), *InputTag.ToString(), MatchCount);
     }
     else {
         UE_LOG(Myth, Warning, TEXT("ASC::AbilityInputTagPressed: InputTag is NOT VALID!"));
@@ -72,16 +65,13 @@ void UMythicAbilitySystemComponent::AbilityInputTagReleased(const FGameplayTag &
                *InputTag.ToString(),
                *GetName());
 
-        int32 MatchCount = 0;
         for (const FGameplayAbilitySpec &AbilitySpec : ActivatableAbilities.Items) {
             if (AbilitySpec.Ability && (AbilitySpec.GetDynamicSpecSourceTags().HasTagExact(InputTag))) {
                 InputReleasedSpecHandles.AddUnique(AbilitySpec.Handle);
                 InputHeldSpecHandles.Remove(AbilitySpec.Handle);
                 UE_LOG(Myth, Log, TEXT("  -> Matched Ability: %s"), *GetNameSafe(AbilitySpec.Ability));
-                MatchCount++;
             }
         }
-        UE_LOG(Myth, Log, TEXT("  -> Total matches for InputTag %s: %d"), *InputTag.ToString(), MatchCount);
     }
     else {
         UE_LOG(Myth, Warning, TEXT("ASC::AbilityInputTagReleased: InputTag is NOT VALID!"));
@@ -96,13 +86,6 @@ void UMythicAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bG
 
     static TArray<FGameplayAbilitySpecHandle> AbilitiesToActivate;
     AbilitiesToActivate.Reset();
-
-    if (InputPressedSpecHandles.Num() > 0 || InputHeldSpecHandles.Num() > 0 || InputReleasedSpecHandles.Num() > 0) {
-        UE_LOG(Myth, Log, TEXT("ASC::ProcessAbilityInput: Pressed=%d, Held=%d, Released=%d"),
-               InputPressedSpecHandles.Num(),
-               InputHeldSpecHandles.Num(),
-               InputReleasedSpecHandles.Num());
-    }
 
     //
     // Process all abilities that activate when the input is held.
@@ -163,7 +146,6 @@ void UMythicAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bG
     // We do it all at once so that held inputs don't activate the ability
     // and then also send a input event to the ability because of the press.
     //
-    UE_LOG(Myth, Log, TEXT("  -> AbilitiesToActivate.Num=%d"), AbilitiesToActivate.Num());
     for (const FGameplayAbilitySpecHandle &AbilitySpecHandle : AbilitiesToActivate) {
         if (FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(AbilitySpecHandle)) {
             UE_LOG(Myth, Log, TEXT("  -> Attempting to activate ability %s"), *GetNameSafe(AbilitySpec->Ability));
@@ -203,6 +185,22 @@ void UMythicAbilitySystemComponent::ClearAbilityInput() {
 
 const TArray<UMythicAttributeSet *> &UMythicAbilitySystemComponent::GetAttributeSets() const {
     return reinterpret_cast<const TArray<UMythicAttributeSet *> &>(this->GetSpawnedAttributes());
+}
+
+void UMythicAbilitySystemComponent::ExecuteGameplayCueMulticast(FGameplayTag CueTag, const FGameplayCueParameters &CueParams) {
+    if (!CueTag.IsValid()) {
+        return;
+    }
+
+    // Server sends multicast to all clients
+    if (GetOwnerRole() == ROLE_Authority) {
+        Multicast_ExecuteGameplayCue(CueTag, CueParams);
+    }
+}
+
+void UMythicAbilitySystemComponent::Multicast_ExecuteGameplayCue_Implementation(FGameplayTag CueTag, FGameplayCueParameters CueParams) {
+    // Execute the cue locally on all clients
+    ExecuteGameplayCue(CueTag, CueParams);
 }
 
 bool UMythicAbilitySystemComponent::IsActivationGroupBlocked(EMythicAbilityActivationGroup Group) const {
