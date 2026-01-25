@@ -40,6 +40,9 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_RADIUS);
 /** Abilities */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_ABILITY_HEAL);
 
+/** Pipelines */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_PIPELINE_DEATH_HANDLED);
+
 /** Events */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ACTIVATE_LEVELUP);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ACTIVATE_XPGAIN);
@@ -51,8 +54,10 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DMG_PRE);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DMG_DELIVERED);
 // The owner has been damaged - Triggered by LifeComponent (LifeComponent decides how to interpret an actor's life and death)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DMG_RECEIVED);
-// The owner has died - Triggered by LifeComponent (LifeComponent decides how to interpret an actor's life and death)
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DEATH_PRE);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DEATH);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DEATH_POST);
 // The owner has killed an entity - Triggered by LifeComponent (LifeComponent decides how to interpret an actor's life and death)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_KILL);
 // The owner has healed an entity - Triggered by Healing LifeComponent (LifeComponent decides how to interpret an actor's life and death)

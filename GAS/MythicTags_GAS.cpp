@@ -43,19 +43,34 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(SETBYCALLER_COOLDOWN, "SetByCaller.Cooldown", "Co
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(SETBYCALLER_COST, "SetByCaller.Cost", "Cost SetByCaller tag");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(SETBYCALLER_RANGE, "SetByCaller.Range", "Distance, Radius, or generic Area of Effect");
 
+/** GAS Pipeline Tags */
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_PIPELINE_DEATH_HANDLED, "GAS.Pipeline.Death.Handled",
+                               "Indicates that death has been handled and further death processing should be skipped");
+
 /** GAS Events */
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ACTIVATE_LEVELUP, "GAS.Event.Activate.LevelUp", "Event called when player levels up");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ACTIVATE_XPGAIN, "GAS.Event.Activate.XPGain", "Event called when player gains XP");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ACTIVATE_LEVELUP, "GAS.Event.Activate.LevelUp", "Event called when player levels up");
+
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_HITBOX, "GAS.Event.Hitbox", "Event called when owner's animation's hitbox overlaps with another entity");
+
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_PRE, "GAS.Event.Dmg.Pre", "Event called before owner deals damage to another entity");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_DELIVERED, "GAS.Event.Dmg.Delivered", "Event called when owner deals damage to another entity");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_RECEIVED, "GAS.Event.Dmg.Received", "Event called when owner receives damage from another entity");
+
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DEATH_PRE, "GAS.Event.Death.Pre",
+                               "First event in the death pipeline, i.e. a talent could give owner 'GAS_PIPELINE_DEATH_HANDLED' tag");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DEATH, "GAS.Event.Death", "Event called when owner dies");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DEATH_POST, "GAS.Event.Death.Post",
+                               "Last event in the death pipeline, i.e. a talent could remove 'GAS_PIPELINE_DEATH_HANDLED' tag from owner");
+
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_KILL, "GAS.Event.Kill", "Event called when owner kills another entity");
+
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_HEAL_DELIVERED, "GAS.Event.Heal.Delivered", "Event called when owner heals another entity");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_HEAL_RECEIVED, "GAS.Event.Heal.Received", "Event called when owner is healed by another entity");
+
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ATTACK_BEGIN, "GAS.Event.Attack.Begin", "Event called when owner's attack begins");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ATTACK_END, "GAS.Event.Attack.End", "Event called when owner's attack ends");
+
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_DESTRUCTIBLE, "GAS.Event.Dmg.Destructible", "Event called when the owner's attack hits a destructible object");
 
 /** GameplayCues */

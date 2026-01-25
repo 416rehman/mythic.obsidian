@@ -62,6 +62,11 @@ public:
 
     // PreGameplayEffectExecute is called just before a GE is executed. This can be used to modify the GE or cancel it.
     virtual bool PreGameplayEffectExecute(FGameplayEffectModCallbackData &Data) override;
+    void SendEventToInstigator(const FGameplayEffectModCallbackData &Data, AActor *Instigator, UAbilitySystemComponent *InstigatorASC,
+                               UAbilitySystemComponent *OwnerASC,
+                               FGameplayTag EventTag, float Magnitude);
+    void SendEventToOwner(const FGameplayEffectModCallbackData &Data, UAbilitySystemComponent *OwnerASC, AActor *Instigator, FGameplayTag EventTag,
+                          float Magnitude);
     // PostGameplayEffectExecute is called after a GE is executed. This can be used to show damage numbers, play sounds, etc.
     virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) override;
 

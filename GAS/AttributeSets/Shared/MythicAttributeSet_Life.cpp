@@ -44,32 +44,76 @@ bool UMythicAttributeSet_Life::PreGameplayEffectExecute(FGameplayEffectModCallba
     return true;
 }
 
+void UMythicAttributeSet_Life::SendEventToInstigator(const FGameplayEffectModCallbackData &Data, AActor *Instigator, UAbilitySystemComponent *InstigatorASC,
+                                                     UAbilitySystemComponent *OwnerASC, FGameplayTag EventTag, float Magnitude) {
+    if (InstigatorASC && OwnerASC) {
+        FGameplayEventData Payload;
+        Payload.EventTag = EventTag;
+        Payload.Instigator = Instigator;
+        Payload.Target = OwnerASC->GetAvatarActor();
+        Payload.OptionalObject = Data.EffectSpec.Def;
+        Payload.ContextHandle = Data.EffectSpec.GetContext();
+        Payload.InstigatorTags = *Data.EffectSpec.CapturedSourceTags.GetAggregatedTags();
+        Payload.TargetTags = *Data.EffectSpec.CapturedTargetTags.GetAggregatedTags();
+        Payload.EventMagnitude = Magnitude;
+        InstigatorASC->HandleGameplayEvent(EventTag, &Payload);
+    }
+}
+
+void UMythicAttributeSet_Life::SendEventToOwner(const FGameplayEffectModCallbackData &Data, UAbilitySystemComponent *OwnerASC, AActor *Instigator,
+                                                FGameplayTag EventTag, float Magnitude) {
+    if (OwnerASC) {
+        FGameplayEventData Payload;
+        Payload.EventTag = EventTag;
+        Payload.Instigator = Instigator;
+        Payload.OptionalObject = Data.EffectSpec.Def;
+        Payload.ContextHandle = Data.EffectSpec.GetContext();
+        Payload.InstigatorTags = *Data.EffectSpec.CapturedSourceTags.GetAggregatedTags();
+        Payload.TargetTags = *Data.EffectSpec.CapturedTargetTags.GetAggregatedTags();
+        Payload.EventMagnitude = Magnitude;
+        OwnerASC->HandleGameplayEvent(EventTag, &Payload);
+    }
+}
+
 void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) {
     Super::PostGameplayEffectExecute(Data);
 
     const FGameplayEffectContextHandle &EffectContext = Data.EffectSpec.GetEffectContext();
     AActor *Instigator = EffectContext.GetOriginalInstigator();
     AActor *Causer = EffectContext.GetEffectCauser();
-
+    auto InstigatorASC = EffectContext.GetOriginalInstigatorAbilitySystemComponent();
+    auto ASC = this->GetOwningAbilitySystemComponent();
     // Handle Damage meta attribute - converts to -Health
     if (Data.EvaluatedData.Attribute == GetDamageAttribute()) {
+        // if already out of health, do nothing
+        if (bOutOfHealth) {
+            SetDamage(0.0f); // Reset meta attribute
+            return;
+        }
+
         // Store the damage magnitude before we clear it
         const float DamageDone = GetDamage();
 
         // Convert damage to -Health and clamp
         const float NewHealth = FMath::Clamp(GetHealth() - DamageDone, 0.0f, GetMaxHealth());
         SetHealth(NewHealth);
+        // Check for death
+        if (GetHealth() <= 0.0f && !bOutOfHealth) {
+            bOutOfHealth = true;
+        }
+
         SetDamage(0.0f); // Reset meta attribute
 
         // Broadcast health change with the DAMAGE magnitude (for UI/cues)
         if (DamageDone > 0.0f) {
-            OnHealthChanged.Broadcast(Instigator, Causer, &Data.EffectSpec, -DamageDone, HealthBeforeAttributeChange, GetHealth());
-        }
+            // OnHealthChanged.Broadcast(Instigator, Causer, &Data.EffectSpec, -DamageDone, HealthBeforeAttributeChange, GetHealth());
+            SendEventToInstigator(Data, Instigator, InstigatorASC, ASC, GAS_EVENT_DMG_DELIVERED, DamageDone);
+            SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DMG_RECEIVED, DamageDone);
 
-        // Check for death
-        if (GetHealth() <= 0.0f && !bOutOfHealth) {
-            bOutOfHealth = true;
-            // OnOutOfHealth event could be added here
+            // Check for death
+            if (bOutOfHealth) {
+                SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DEATH, DamageDone);
+            }
         }
     }
     // Handle Healing meta attribute - converts to +Health
@@ -82,19 +126,16 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
         SetHealing(0.0f); // Reset meta attribute
 
         if (HealingDone > 0.0f) {
-            OnHealthChanged.Broadcast(Instigator, Causer, &Data.EffectSpec, HealingDone, HealthBeforeAttributeChange, GetHealth());
-        }
-
-        // Reset death flag if healed back
-        if (bOutOfHealth && GetHealth() > 0.0f) {
-            bOutOfHealth = false;
+            // OnHealthChanged.Broadcast(Instigator, Causer, &Data.EffectSpec, HealingDone, HealthBeforeAttributeChange, GetHealth());
+            SendEventToInstigator(Data, Instigator, InstigatorASC, ASC, GAS_EVENT_HEAL_DELIVERED, HealingDone);
+            SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_HEAL_RECEIVED, HealingDone);
         }
     }
     // Handle direct Health changes
     else if (Data.EvaluatedData.Attribute == GetHealthAttribute()) {
         // Clamp health
         SetHealth(FMath::Clamp(GetHealth(), 0.0f, GetMaxHealth()));
-        OnHealthChanged.Broadcast(Instigator, Causer, &Data.EffectSpec, Data.EvaluatedData.Magnitude, HealthBeforeAttributeChange, GetHealth());
+        // OnHealthChanged.Broadcast(Instigator, Causer, &Data.EffectSpec, Data.EvaluatedData.Magnitude, HealthBeforeAttributeChange, GetHealth());
 
         if (GetHealth() <= 0.0f && !bOutOfHealth) {
             bOutOfHealth = true;
@@ -109,7 +150,7 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
         if (GetHealth() > GetMaxHealth()) {
             SetHealth(GetMaxHealth());
         }
-        OnMaxHealthChanged.Broadcast(Instigator, Causer, &Data.EffectSpec, Data.EvaluatedData.Magnitude, MaxHealthBeforeAttributeChange, GetMaxHealth());
+        // OnMaxHealthChanged.Broadcast(Instigator, Causer, &Data.EffectSpec, Data.EvaluatedData.Magnitude, MaxHealthBeforeAttributeChange, GetMaxHealth());
     }
 }
 

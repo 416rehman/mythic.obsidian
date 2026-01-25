@@ -5,6 +5,7 @@
 #include "MythicDeveloperSettings.generated.h"
 
 class UMythicAbilityTagRelationshipMapping;
+class UMythicDamageNumberConfig;
 
 /**
  * Settings for Mythic gameplay systems.
@@ -47,4 +48,11 @@ public:
 
     /** Get all soft object paths that should be preloaded at startup */
     void GetStartupAssetPaths(TArray<FSoftObjectPath> &OutPaths) const;
+
+    /**
+     * Configuration for screen-space damage numbers.
+     * Controls font, colors, animation, and formatting.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "UI|Damage Numbers")
+    TSoftObjectPtr<UMythicDamageNumberConfig> DamageNumberConfig;
 };
