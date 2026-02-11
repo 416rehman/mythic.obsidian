@@ -111,7 +111,7 @@ void UMythicLivingWorldSubsystem::InitializeSharedData() {
 
 void UMythicLivingWorldSubsystem::StartSimulation() {
     SimThread = MakeUnique<FMythicWorldSimThread>();
-    SimThread->Setup(CausalFabric, FactionDB, TerritoryGrid, Settings->SimTickIntervalSeconds);
+    SimThread->Setup(CausalFabric, FactionDB, TerritoryGrid, Settings, Settings->SimTickIntervalSeconds);
     SimThread->StartThread();
 }
 

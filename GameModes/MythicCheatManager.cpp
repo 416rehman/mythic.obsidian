@@ -638,14 +638,36 @@ void UMythicCheatManager::MythLivingWorldFactions() {
     UE_LOG(Myth, Warning, TEXT("=== FACTIONS (%d active / %d max) ==="), FDB->GetActiveFactionCount(), FDB->GetMaxFactions());
 
     FDB->ForEachAliveFaction([](FMythicFactionId Id, const FMythicFactionData &Data) {
-        UE_LOG(Myth, Warning, TEXT("  [%d] %s (%s) | Econ: %.2f | Military: %.2f | Pop: %d | Cells: %d"),
+        // Compact behavior flags string
+        FString Flags;
+        if (Data.bControlsTerritory) {
+            Flags += TEXT("T");
+        }
+        if (Data.bHasEconomy) {
+            Flags += TEXT("E");
+        }
+        if (Data.bHasCivilianPopulation) {
+            Flags += TEXT("C");
+        }
+        if (Data.bParticipatesInTrade) {
+            Flags += TEXT("$");
+        }
+        if (Data.bCanNegotiate) {
+            Flags += TEXT("D");
+        }
+
+        UE_LOG(Myth, Warning, TEXT("  [%d] %s (%s) [%s] | Mil: %.2f | Pop: %d | Cells: %d"),
                Id.Index,
                *Data.DisplayName.ToString(),
                *Data.FactionTag.ToString(),
-               Data.EconomicStrength,
+               *Flags,
                Data.MilitaryStrength,
                Data.Population,
                Data.ControlledCellCount);
+
+        UE_LOG(Myth, Warning, TEXT("       Reserves: F=%.1f M=%.1f A=%.1f W=%.1f | Prices: F=%.2f M=%.2f A=%.2f W=%.2f"),
+               Data.Reserves.Food, Data.Reserves.Materials, Data.Reserves.Arms, Data.Reserves.Wealth,
+               Data.Prices.Food, Data.Prices.Materials, Data.Prices.Arms, Data.Prices.Wealth);
     });
 
     UE_LOG(Myth, Warning, TEXT(""));

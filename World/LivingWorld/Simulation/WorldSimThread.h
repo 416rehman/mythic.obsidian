@@ -10,6 +10,7 @@
 class UMythicCausalFabric;
 class UMythicFactionDatabase;
 class UMythicTerritoryGrid;
+class UMythicLivingWorldSettings;
 
 /**
  * Dedicated background thread for world simulation.
@@ -34,6 +35,7 @@ public:
         UMythicCausalFabric *InFabric,
         UMythicFactionDatabase *InFactionDB,
         UMythicTerritoryGrid *InTerritoryGrid,
+        const UMythicLivingWorldSettings *InSettings,
         float InTickIntervalSeconds);
 
     /** Start the background thread */
@@ -66,6 +68,7 @@ private:
     void TickDiplomacy();
     void TickTerritoryPropagation();
     void TickIdeologyMetabolism();
+    void TickFactionEvolution();
     void TickSchemeEngine();
     void TickCrystallization();
     void TickHistoryAppend();
@@ -89,4 +92,12 @@ private:
     UMythicCausalFabric *Fabric = nullptr;
     UMythicFactionDatabase *FactionDB = nullptr;
     UMythicTerritoryGrid *TerritoryGrid = nullptr;
+    const UMythicLivingWorldSettings *Settings = nullptr;
+
+    /**
+     * Pairwise trade volume accumulator for economic dependency.
+     * Indexed as [A * MaxFactions + B]. Background thread only.
+     */
+    TArray<float> TradeVolume;
+    int32 MaxFactions = 0;
 };

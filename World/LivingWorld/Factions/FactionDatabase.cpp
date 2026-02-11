@@ -64,6 +64,7 @@ FMythicFactionId UMythicFactionDatabase::RegisterFaction(const FMythicFactionDat
 
     const int32 NewIndex = RegisteredCount;
     WriteFactions[NewIndex] = Data;
+    WriteFactions[NewIndex].bHasBeenPopulated = (Data.Population > 0);
     ++RegisteredCount;
 
     // Default new faction relationships to Neutral
@@ -88,12 +89,42 @@ void UMythicFactionDatabase::AnnihilateFaction(FMythicFactionId Id) {
 
     Faction->bAlive = false;
     Faction->Population = 0;
-    Faction->EconomicStrength = 0.0f;
     Faction->MilitaryStrength = 0.0f;
     Faction->ControlledCellCount = 0;
     Faction->LeaderEntityId = 0;
+    Faction->Supply = FMythicResourceStock();
+    Faction->Demand = FMythicResourceStock();
+    Faction->Reserves = FMythicResourceStock();
+    Faction->Prices = FMythicResourceStock();
 
     UE_LOG(LogMythFaction, Log, TEXT("Faction '%s' (index %d) annihilated"), *Faction->DisplayName.ToString(), Id.Index);
+}
+
+FMythicFactionData *UMythicFactionDatabase::GetFactionMutableByIndex(int32 Index) {
+    if (Index < 0 || Index >= RegisteredCount) {
+        return nullptr;
+    }
+    return &WriteFactions[Index];
+}
+
+EMythicFactionRelation UMythicFactionDatabase::GetWriteRelationship(FMythicFactionId A, FMythicFactionId B) const {
+    if (!A.IsValid() || !B.IsValid() || A.Index >= RegisteredCount || B.Index >= RegisteredCount) {
+        return EMythicFactionRelation::Neutral;
+    }
+    if (A == B) {
+        return EMythicFactionRelation::Allied;
+    }
+    return WriteRelationships[RelationIndex(A, B)];
+}
+
+void UMythicFactionDatabase::ForEachAliveFactionMutable(TFunctionRef<void(FMythicFactionId, FMythicFactionData &)> Callback) {
+    for (int32 i = 0; i < RegisteredCount; ++i) {
+        if (WriteFactions[i].bAlive) {
+            FMythicFactionId Id;
+            Id.Index = static_cast<uint8>(i);
+            Callback(Id, WriteFactions[i]);
+        }
+    }
 }
 
 void UMythicFactionDatabase::CommitWrites() {

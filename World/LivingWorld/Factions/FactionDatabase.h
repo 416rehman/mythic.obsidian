@@ -26,40 +26,101 @@ enum class EMythicFactionRelation : uint8 {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * How strongly a faction feels about each moral axis.
- * All values range from -1.0 to +1.0.
- *   Positive = faction approves of this behavior.
- *   Negative = faction condemns this behavior.
- *   Zero = faction is indifferent.
+ * How strongly a faction feels about each moral axis. Range: -1.0 to +1.0 per axis.
+ *   +1.0 = faction fully endorses this behavior (members do it, won't punish it).
+ *   -1.0 = faction utterly condemns it (severe punishment, hostility toward offenders).
+ *    0.0 = indifferent (no opinion, won't react).
  *
- * Used in dot-product evaluation against player/NPC moral signatures.
- * The result is checked against faction thresholds to determine reaction severity.
+ * Simulation uses:
+ *   - Dot-product against player/NPC moral signatures → checked against faction thresholds
+ *     to decide reaction severity (disapproval, criminal charge, hostile response).
+ *   - Diplomacy: ideology distance between two factions affects relationship score.
+ *     Similar ideologies → trend toward allies. Opposed → trend toward hostile.
+ *   - Economy: specific axes gate income sources (Theft → raid income, Authority → tax income).
+ *   - Faction Evolution: ideology drift + schism detection compare axis values.
  */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicIdeologyProfile {
     GENERATED_BODY()
 
+    /**
+     * +1.0 = glorifies combat (won't punish murder, NPCs cheer killing).
+     * -1.0 = total pacifism (any kill near territory triggers hostility, guards attack killers).
+     *  0.0 = pragmatic (self-defense OK, unprovoked murder still condemned).
+     * Sim effect: when a kill event occurs near this faction's territory, the severity
+     * is (event.Violence × this.Violence). Negative result = faction disapproves.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float Violence = 0.0f;
 
+    /**
+     * +1.0 = theft is honorable (faction members steal openly, won't report theft).
+     * -1.0 = theft is unforgivable (pickpocket → criminal charge, looting → hostile response).
+     *  0.0 = indifferent.
+     * Sim effect: factions with Theft > RaidIdeologyThreshold (default 0.3) earn raid income
+     * by stealing from nearby trade routes. Higher Theft → more profitable raiding.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float Theft = 0.0f;
 
+    /**
+     * +1.0 = cunning and manipulation are virtues (fraud goes unpunished).
+     * -1.0 = absolute intolerance for lies (forged documents → death sentence).
+     *  0.0 = neutral.
+     * Sim effect: primarily affects NPC reaction severity to deception-tagged events.
+     * Two factions with opposing Deception values will have high ideology distance → diplomatic friction.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float Deception = 0.0f;
 
+    /**
+     * +1.0 = always spare the fallen (executing prisoners → max severity reaction).
+     * -1.0 = no quarter given (showing mercy is weakness, faction kills prisoners on sight).
+     *  0.0 = practical (won't punish either choice).
+     * Sim effect: affects reaction to death/combat events. A Mercy=-1.0 faction won't penalize
+     * you for killing surrendered enemies; a Mercy=+1.0 faction treats it as a grave offense.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float Mercy = 0.0f;
 
+    /**
+     * +1.0 = oaths are absolute (betrayal = death, desertion = hunt-on-sight).
+     * -1.0 = every person for themselves (betrayal is just business).
+     *  0.0 = moderate expectations.
+     * Sim effect: high Loyalty increases faction cohesion — SchismIdeologyThreshold effectively
+     * needs more divergence to trigger a split. Low Loyalty → factions fracture more easily.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float Loyalty = 0.0f;
 
+    /**
+     * +1.0 = zealously protects sacred sites (defiling a temple → instant war).
+     * -1.0 = nothing is sacred (grave robbing, blood rituals all acceptable).
+     *  0.0 = secular, no strong opinion.
+     * Sim effect: affects reaction severity to sanctity-tagged events (shrine desecration,
+     * cannibalism, necromancy). High Sanctity factions will condemn necromancer factions.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float Sanctity = 0.0f;
 
+    /**
+     * +1.0 = absolute rule, strict hierarchy (rebellion → instant hostile response).
+     * -1.0 = anarchist (no laws, anti-government, won't enforce order).
+     *  0.0 = moderate governance.
+     * Sim effect: factions with Authority > TaxAuthorityThreshold (default -0.5) earn tax
+     * income from their population. Also affects reaction to authority-tagged events
+     * (assassinating leaders, freeing prisoners, inciting rebellion).
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float Authority = 0.0f;
 
+    /**
+     * +1.0 = embraces all magic (mages welcomed, enchanting encouraged).
+     * -1.0 = magic is abomination (mages hunted, enchanted items destroyed on sight).
+     *  0.0 = neutral on magic.
+     * Sim effect: affects reaction to arcane-tagged events (spellcasting, enchanting, potions).
+     * Two factions at opposite Arcane extremes will have large ideology distance → diplomatic hostility.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float Arcane = 0.0f;
 
@@ -169,29 +230,114 @@ struct MYTHIC_API FMythicFactionData {
         Tooltip = "Severity threshold for hostile response (attack on sight, war declaration, lethal force)."))
     float HostileThreshold = 0.8f;
 
+    // ─── Behavior Flags (runtime-mutable, drive sim formula selection) ───
+    // These flags determine which simulation formulas apply to a faction.
+    // The sim can flip these at runtime based on faction evolution (e.g., a warband
+    // capturing enough territory gains bControlsTerritory + bHasCivilianPopulation).
+
+    /**
+     * Faction produces resources from territory cells and expands/defends via influence.
+     * TRUE: Kingdom, Empire, Religious order. FALSE: Bandit roamers, merchant guilds.
+     * Controls: territory-based production scaling, influence propagation, governance evolution.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Behavior")
+    bool bControlsTerritory = true;
+
+    /**
+     * Faction participates in resource production, consumption, and trade.
+     * TRUE: Any faction with an economy. FALSE: Mindless creatures, undead hordes.
+     * When false: pop grows only via spawning (SpawnRatePerCell), no resource tracking.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Behavior")
+    bool bHasEconomy = true;
+
+    /**
+     * Population grows organically via births/deaths/migration (vs spawning or recruitment).
+     * TRUE: Kingdoms, settlements, villages. FALSE: Mercenary bands (recruitment), creature packs (spawning).
+     * Affects: birth/death/migration formulas, food sufficiency impact.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Behavior")
+    bool bHasCivilianPopulation = true;
+
+    /**
+     * Faction can buy/sell resources with other factions via natural trade.
+     * TRUE: Kingdoms, merchants, mercenaries. FALSE: Bandits, creatures.
+     * Trade only occurs with Neutral-or-better relationships.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Behavior")
+    bool bParticipatesInTrade = true;
+
+    /**
+     * Faction relationships can shift via diplomacy scoring each tick.
+     * TRUE: All sentient factions. FALSE: Creatures, undead (locked to Hostile forever).
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Behavior")
+    bool bCanNegotiate = true;
+
     // ─── Economy ──────────────────────────────────────────
 
-    /** Aggregate economic strength (0.0 - 1.0). Affects merchant inventory, pricing, military funding. */
-    UPROPERTY(BlueprintReadOnly, Category = "Economy")
-    float EconomicStrength = 0.5f;
+    /**
+     * Designer-set production profile. Defines this faction's economic identity.
+     * Each resource is produced per tick scaled by (ControlledCells / ReferenceCells).
+     * Ex: Farming kingdom: Food=1.0, Mat=0.3, Arms=0.0, Wealth=0.1
+     * Ex: Mining hold:     Food=0.2, Mat=1.0, Arms=0.0, Wealth=0.2
+     * Ex: Bandits:         All 0.0 (they steal, not produce)
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Economy")
+    FMythicResourceStock BaseProduction;
 
-    /** Military strength (0.0 - 1.0). Affects guard deployment, response capability. */
+    /** Computed supply per tick. Territory production + income sources (tax/raid/contract). Sim-written. */
+    UPROPERTY(BlueprintReadOnly, Category = "Economy")
+    FMythicResourceStock Supply;
+
+    /** Computed demand per tick. Population food + military upkeep. Sim-written. */
+    UPROPERTY(BlueprintReadOnly, Category = "Economy")
+    FMythicResourceStock Demand;
+
+    /**
+     * Resource stockpile. Accumulated Supply - Demand each tick. Can go negative (deficit).
+     * Negative reserves = faction is struggling. Affects food sufficiency, military strength, trade.
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Economy")
+    FMythicResourceStock Reserves;
+
+    /** Market prices = Demand / max(Supply, 0.01). High demand + low supply = expensive. Sim-written. */
+    UPROPERTY(BlueprintReadOnly, Category = "Economy")
+    FMythicResourceStock Prices;
+
+    /**
+     * Aggregate military strength 0.0-1.0. Derived: (Arms*0.6 + Wealth*0.4) / MaxReserve, clamped.
+     * 0.0 = defenseless. 0.5 = moderate. 1.0 = fully armed. Affects contract income, diplo weight.
+     */
     UPROPERTY(BlueprintReadOnly, Category = "Economy")
     float MilitaryStrength = 0.5f;
 
     // ─── Population ───────────────────────────────────────
 
-    /** Total population count for background simulation */
-    UPROPERTY(BlueprintReadOnly, Category = "Population")
+    /**
+     * Total population count. Set initial value here in data asset.
+     * Ex: Large kingdom=500, Small guild=40, Creature pack=0 (grows via spawning).
+     * Sim modifies this each tick via births/deaths/migration/spawning/recruitment.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Population")
     int32 Population = 0;
 
-    /** Index of the current leader NPC entity (0 = no leader) */
+    /**
+     * Runtime flag set by the sim when Population first goes above 0.
+     * Prevents annihilation of newly registered factions that haven't been
+     * populated yet (e.g., territory grid hasn't assigned cells).
+     * Transient: not saved to disk, re-derived at runtime.
+     */
+    UPROPERTY(Transient)
+    bool bHasBeenPopulated = false;
+
+    /** Index of the current leader NPC entity (0 = no leader). Set by crystallization (Phase 6). */
     UPROPERTY(BlueprintReadOnly, Category = "Population")
     int32 LeaderEntityId = 0;
 
     // ─── Territory ────────────────────────────────────────
 
-    /** Number of cells this faction currently controls */
+    /** Number of territory grid cells this faction currently dominates. Sim-written from territory propagation. */
     UPROPERTY(BlueprintReadOnly, Category = "Territory")
     int32 ControlledCellCount = 0;
 };
@@ -248,6 +394,18 @@ public:
 
     /** Mark a faction as annihilated */
     void AnnihilateFaction(FMythicFactionId Id);
+
+    /** Get number of registered factions (for sim iteration bounds) */
+    int32 GetRegisteredCount() const { return RegisteredCount; }
+
+    /** Get mutable faction data by raw index (for sim loops that iterate all factions) */
+    FMythicFactionData *GetFactionMutableByIndex(int32 Index);
+
+    /** Read relationship from write buffer (for background thread reads during sim) */
+    EMythicFactionRelation GetWriteRelationship(FMythicFactionId A, FMythicFactionId B) const;
+
+    /** Iterate all alive factions in write buffer (background thread only) */
+    void ForEachAliveFactionMutable(TFunctionRef<void(FMythicFactionId, FMythicFactionData &)> Callback);
 
     /** Commit the write buffer — game thread snapshot swap */
     void CommitWrites();
