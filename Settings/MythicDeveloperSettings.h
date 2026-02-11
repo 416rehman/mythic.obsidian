@@ -6,6 +6,7 @@
 
 class UMythicAbilityTagRelationshipMapping;
 class UMythicDamageNumberConfig;
+class UMythicLivingWorldSettings;
 
 /**
  * Settings for Mythic gameplay systems.
@@ -55,4 +56,12 @@ public:
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "UI|Damage Numbers")
     TSoftObjectPtr<UMythicDamageNumberConfig> DamageNumberConfig;
+
+    /**
+     * Living World System settings data asset.
+     * Controls causal fabric, faction database, territory grid, and simulation parameters.
+     * Assign in Project Settings > Game > Mythic > Living World.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Living World")
+    TSoftObjectPtr<UMythicLivingWorldSettings> LivingWorldSettings;
 };

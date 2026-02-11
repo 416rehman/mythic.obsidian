@@ -13,6 +13,9 @@
 #include "Mythic/Player/Proficiency/ProficiencyDefinition.h"
 #include "Mythic/GAS/MythicAbilitySystemComponent.h"
 #include "Mythic/Mythic.h"
+#include "Mythic/World/LivingWorld/LivingWorldSubsystem.h"
+#include "Mythic/World/LivingWorld/Factions/FactionDatabase.h"
+#include "Mythic/World/LivingWorld/Territory/TerritoryGrid.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 
@@ -55,6 +58,11 @@ void UMythicCheatManager::MythHelp() {
     UE_LOG(Myth, Warning, TEXT("--- PROFICIENCIES ---"));
     UE_LOG(Myth, Warning, TEXT("  MythListProficiencies              - List proficiencies and progress"));
     UE_LOG(Myth, Warning, TEXT("  MythGiveProficiency <Name> <Amt>   - Give proficiency progress"));
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("--- LIVING WORLD ---"));
+    UE_LOG(Myth, Warning, TEXT("  MythLivingWorldStatus              - System status (thread, fabric, factions, territory)"));
+    UE_LOG(Myth, Warning, TEXT("  MythLivingWorldFactions            - List all registered factions"));
+    UE_LOG(Myth, Warning, TEXT("  MythLivingWorldTerritory           - Territory info for player's current cell"));
     UE_LOG(Myth, Warning, TEXT(""));
 }
 
@@ -568,4 +576,114 @@ void UMythicCheatManager::MythGiveProficiency(const FString &ProficiencyName, fl
     }
 
     UE_LOG(Myth, Error, TEXT(">>> Proficiency '%s' not found. Use ListProficiencies."), *ProficiencyName);
+}
+
+// ============================================================================
+// LIVING WORLD
+// ============================================================================
+
+void UMythicCheatManager::MythLivingWorldStatus() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UMythicLivingWorldSubsystem *LW = PC->GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>();
+    if (!LW) {
+        UE_LOG(Myth, Error, TEXT(">>> Living World Subsystem not found"));
+        return;
+    }
+
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("=== LIVING WORLD STATUS ==="));
+    UE_LOG(Myth, Warning, TEXT("  System active: %s"), LW->IsSystemActive() ? TEXT("YES") : TEXT("NO"));
+
+    // Causal Fabric
+    if (const UMythicCausalFabric *Fabric = LW->GetCausalFabric()) {
+        UE_LOG(Myth, Warning, TEXT("  Causal Fabric: initialized (capacity %d)"), Fabric->GetCapacity());
+    }
+    else {
+        UE_LOG(Myth, Warning, TEXT("  Causal Fabric: NOT initialized"));
+    }
+
+    // Faction DB
+    if (const UMythicFactionDatabase *FDB = LW->GetFactionDatabase()) {
+        UE_LOG(Myth, Warning, TEXT("  Faction DB: %d active / %d max"), FDB->GetActiveFactionCount(), FDB->GetMaxFactions());
+    }
+    else {
+        UE_LOG(Myth, Warning, TEXT("  Faction DB: NOT initialized"));
+    }
+
+    // Territory Grid
+    if (const UMythicTerritoryGrid *Grid = LW->GetTerritoryGrid()) {
+        UE_LOG(Myth, Warning, TEXT("  Territory Grid: initialized"));
+    }
+    else {
+        UE_LOG(Myth, Warning, TEXT("  Territory Grid: NOT initialized"));
+    }
+
+    UE_LOG(Myth, Warning, TEXT(""));
+}
+
+void UMythicCheatManager::MythLivingWorldFactions() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UMythicLivingWorldSubsystem *LW = PC->GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>();
+    if (!LW || !LW->GetFactionDatabase()) {
+        UE_LOG(Myth, Error, TEXT(">>> Living World / Faction DB not available"));
+        return;
+    }
+
+    const UMythicFactionDatabase *FDB = LW->GetFactionDatabase();
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("=== FACTIONS (%d active / %d max) ==="), FDB->GetActiveFactionCount(), FDB->GetMaxFactions());
+
+    FDB->ForEachAliveFaction([](FMythicFactionId Id, const FMythicFactionData &Data) {
+        UE_LOG(Myth, Warning, TEXT("  [%d] %s (%s) | Econ: %.2f | Military: %.2f | Pop: %d | Cells: %d"),
+               Id.Index,
+               *Data.DisplayName.ToString(),
+               *Data.FactionTag.ToString(),
+               Data.EconomicStrength,
+               Data.MilitaryStrength,
+               Data.Population,
+               Data.ControlledCellCount);
+    });
+
+    UE_LOG(Myth, Warning, TEXT(""));
+}
+
+void UMythicCheatManager::MythLivingWorldTerritory() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC || !PC->GetPawn()) {
+        UE_LOG(Myth, Error, TEXT(">>> No pawn"));
+        return;
+    }
+
+    UMythicLivingWorldSubsystem *LW = PC->GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>();
+    if (!LW || !LW->GetTerritoryGrid()) {
+        UE_LOG(Myth, Error, TEXT(">>> Living World / Territory Grid not available"));
+        return;
+    }
+
+    const UMythicTerritoryGrid *Grid = LW->GetTerritoryGrid();
+    const FVector PlayerPos = PC->GetPawn()->GetActorLocation();
+    const FMythicCellCoord Cell = Grid->WorldToCell(PlayerPos);
+    const FMythicTerritoryCell CellData = Grid->GetCell(Cell);
+
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("=== TERRITORY (Player Cell) ==="));
+    UE_LOG(Myth, Warning, TEXT("  Position: (%.0f, %.0f, %.0f)"), PlayerPos.X, PlayerPos.Y, PlayerPos.Z);
+    UE_LOG(Myth, Warning, TEXT("  Cell: (%d, %d)"), Cell.X, Cell.Y);
+    UE_LOG(Myth, Warning, TEXT("  Dominant Faction Index: %d"), CellData.DominantFaction.Index);
+    UE_LOG(Myth, Warning, TEXT("  Influence: %.3f"), CellData.Influence);
+    UE_LOG(Myth, Warning, TEXT("  Player Owned: %s (Player %d)"), CellData.bPlayerOwned ? TEXT("YES") : TEXT("NO"), CellData.OwningPlayerIndex);
+
+    // Cross-reference faction name if DB is available
+    if (CellData.DominantFaction.IsValid()) {
+        if (const UMythicFactionDatabase *FDB = LW->GetFactionDatabase()) {
+            if (const FMythicFactionData *Faction = FDB->GetFaction(CellData.DominantFaction)) {
+                UE_LOG(Myth, Warning, TEXT("  Dominant Faction: %s"), *Faction->DisplayName.ToString());
+            }
+        }
+    }
+    UE_LOG(Myth, Warning, TEXT(""));
 }

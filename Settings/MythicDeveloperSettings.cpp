@@ -17,4 +17,7 @@ void UMythicDeveloperSettings::GetStartupAssetPaths(TArray<FSoftObjectPath> &Out
     if (!DefaultItemInputAbility.IsNull()) {
         OutPaths.Add(DefaultItemInputAbility.ToSoftObjectPath());
     }
+    if (!LivingWorldSettings.IsNull()) {
+        OutPaths.Add(LivingWorldSettings.ToSoftObjectPath());
+    }
 }

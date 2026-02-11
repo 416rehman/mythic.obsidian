@@ -139,4 +139,21 @@ public:
     // Example: GiveProficiency Mining 50
     UFUNCTION(Exec)
     void MythGiveProficiency(const FString &ProficiencyName, float Amount);
+
+    // === LIVING WORLD ===
+
+    // Show living world system status (subsystem, thread, fabric, factions, territory)
+    // Example: LivingWorldStatus
+    UFUNCTION(Exec)
+    void MythLivingWorldStatus();
+
+    // List all registered factions and their state
+    // Example: LivingWorldFactions
+    UFUNCTION(Exec)
+    void MythLivingWorldFactions();
+
+    // Show territory info for the player's current cell
+    // Example: LivingWorldTerritory
+    UFUNCTION(Exec)
+    void MythLivingWorldTerritory();
 };
