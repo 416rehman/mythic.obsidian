@@ -16,6 +16,12 @@
 #include "Mythic/World/LivingWorld/LivingWorldSubsystem.h"
 #include "Mythic/World/LivingWorld/Factions/FactionDatabase.h"
 #include "Mythic/World/LivingWorld/Territory/TerritoryGrid.h"
+#include "Mythic/World/LivingWorld/Settlements/SettlementRegistry.h"
+#include "Mythic/World/LivingWorld/CausalFabric/CausalFabric.h"
+#include "MassEntitySubsystem.h"
+#include "MassEntityQuery.h"
+#include "Mythic/Mass/Tags/MythicMassTags.h"
+#include "Mythic/Mass/Fragments/MythicMassFragments.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 
@@ -63,6 +69,9 @@ void UMythicCheatManager::MythHelp() {
     UE_LOG(Myth, Warning, TEXT("  MythLivingWorldStatus              - System status (thread, fabric, factions, territory)"));
     UE_LOG(Myth, Warning, TEXT("  MythLivingWorldFactions            - List all registered factions"));
     UE_LOG(Myth, Warning, TEXT("  MythLivingWorldTerritory           - Territory info for player's current cell"));
+    UE_LOG(Myth, Warning, TEXT("  MythLivingWorldPopulation          - MASS entity counts (NPCs, creatures)"));
+    UE_LOG(Myth, Warning, TEXT("  MythLivingWorldSettlements         - List all settlements with faction/density"));
+    UE_LOG(Myth, Warning, TEXT("  MythLivingWorldTransferSettlement <ID> <Faction> - Force transfer settlement"));
     UE_LOG(Myth, Warning, TEXT(""));
 }
 
@@ -708,4 +717,162 @@ void UMythicCheatManager::MythLivingWorldTerritory() {
         }
     }
     UE_LOG(Myth, Warning, TEXT(""));
+}
+
+void UMythicCheatManager::MythLivingWorldPopulation() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UWorld *World = PC->GetWorld();
+    if (!World) {
+        UE_LOG(Myth, Error, TEXT(">>> No World"));
+        return;
+    }
+
+    UMassEntitySubsystem *MassSubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+    if (!MassSubsystem) {
+        UE_LOG(Myth, Error, TEXT(">>> MASS Entity Subsystem not found"));
+        return;
+    }
+
+    TSharedPtr<FMassEntityManager> EntityManagerPtr = TSharedPtr<FMassEntityManager>(&MassSubsystem->GetMutableEntityManager(), [](FMassEntityManager *) {});
+
+    // Count NPCs (entities with FMythicNPCTag + FMythicIdentityFragment)
+    int32 NPCCount = 0;
+    {
+        FMassEntityQuery NPCQuery(EntityManagerPtr);
+        NPCQuery.AddTagRequirement<FMythicNPCTag>(EMassFragmentPresence::All);
+        NPCQuery.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
+        NPCCount = NPCQuery.GetNumMatchingEntities();
+    }
+
+    // Count Creatures (entities with FMythicCreatureTag + FMythicCreatureFragment)
+    int32 CreatureCount = 0;
+    {
+        FMassEntityQuery CreatureQuery(EntityManagerPtr);
+        CreatureQuery.AddTagRequirement<FMythicCreatureTag>(EMassFragmentPresence::All);
+        CreatureQuery.AddRequirement<FMythicCreatureFragment>(EMassFragmentAccess::ReadOnly);
+        CreatureCount = CreatureQuery.GetNumMatchingEntities();
+    }
+
+    // Count Hydrated (Tier 1+ entities)
+    int32 HydratedCount = 0;
+    {
+        FMassEntityQuery HydratedQuery(EntityManagerPtr);
+        HydratedQuery.AddTagRequirement<FMythicHydratedTag>(EMassFragmentPresence::All);
+        HydratedQuery.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
+        HydratedCount = HydratedQuery.GetNumMatchingEntities();
+    }
+
+    const int32 TotalCount = NPCCount + CreatureCount;
+
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("=== LIVING WORLD POPULATION ==="));
+    UE_LOG(Myth, Warning, TEXT("  Total MASS entities: %d"), TotalCount);
+    UE_LOG(Myth, Warning, TEXT("    NPCs: %d"), NPCCount);
+    UE_LOG(Myth, Warning, TEXT("    Creatures: %d"), CreatureCount);
+    UE_LOG(Myth, Warning, TEXT("    Hydrated (Tier 1+): %d"), HydratedCount);
+    UE_LOG(Myth, Warning, TEXT(""));
+}
+
+void UMythicCheatManager::MythLivingWorldSettlements() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UMythicLivingWorldSubsystem *LW = PC->GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>();
+    if (!LW) {
+        UE_LOG(Myth, Error, TEXT(">>> Living World Subsystem not found"));
+        return;
+    }
+
+    UMythicSettlementRegistry *Registry = LW->GetSettlementRegistry();
+    if (!Registry) {
+        UE_LOG(Myth, Error, TEXT(">>> Settlement Registry not available"));
+        return;
+    }
+
+    const UMythicFactionDatabase *FDB = LW->GetFactionDatabase();
+
+    TArray<int32> SettlementIds;
+    Registry->GetAllSettlementIds(SettlementIds);
+
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("=== SETTLEMENTS (%d) ==="), Registry->GetSettlementCount());
+
+    for (const int32 Id : SettlementIds) {
+        const FMythicSettlementData *Data = Registry->GetSettlementData(Id);
+        if (!Data) {
+            continue;
+        }
+
+        FString FactionName = TEXT("Unknown");
+        if (FDB && Data->GoverningFaction.IsValid()) {
+            if (const FMythicFactionData *FactionData = FDB->GetFaction(Data->GoverningFaction)) {
+                FactionName = FactionData->DisplayName.ToString();
+            }
+        }
+
+        UE_LOG(Myth, Warning, TEXT("  [ID=%d] %s%s"),
+               Id,
+               *Data->DisplayName.ToString(),
+               Data->bIsCapital ? TEXT(" (CAPITAL)") : TEXT(""));
+        UE_LOG(Myth, Warning, TEXT("       Faction: %s (ID=%d) | MaxDensity: %d/cell | Cells: %d"),
+               *FactionName,
+               Data->GoverningFaction.Index,
+               Data->MaxPopulationDensity,
+               Data->RasterizedCells.Num());
+    }
+
+    if (SettlementIds.Num() == 0) {
+        UE_LOG(Myth, Warning, TEXT("  (no settlements registered)"));
+    }
+
+    UE_LOG(Myth, Warning, TEXT(""));
+}
+
+void UMythicCheatManager::MythLivingWorldTransferSettlement(int32 SettlementId, int32 FactionIndex) {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UMythicLivingWorldSubsystem *LW = PC->GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>();
+    if (!LW) {
+        UE_LOG(Myth, Error, TEXT(">>> Living World Subsystem not found"));
+        return;
+    }
+
+    UMythicSettlementRegistry *Registry = LW->GetSettlementRegistry();
+    UMythicTerritoryGrid *Grid = LW->GetTerritoryGrid();
+    UMythicFactionDatabase *FDB = LW->GetFactionDatabase();
+    UMythicCausalFabric *Fabric = LW->GetCausalFabric();
+
+    if (!Registry || !Grid || !FDB) {
+        UE_LOG(Myth, Error, TEXT(">>> Missing required subsystems (Registry, Grid, or FactionDB)"));
+        return;
+    }
+
+    const FMythicSettlementData *Data = Registry->GetSettlementData(SettlementId);
+    if (!Data) {
+        UE_LOG(Myth, Error, TEXT(">>> Settlement ID %d not found. Use MythLivingWorldSettlements."), SettlementId);
+        return;
+    }
+
+    FMythicFactionId NewFaction;
+    NewFaction.Index = FactionIndex;
+    if (!FDB->GetFaction(NewFaction)) {
+        UE_LOG(Myth, Error, TEXT(">>> Faction index %d not found. Use MythLivingWorldFactions."), FactionIndex);
+        return;
+    }
+
+    const FString OldFactionName = FDB->GetFaction(Data->GoverningFaction)
+        ? FDB->GetFaction(Data->GoverningFaction)->DisplayName.ToString()
+        : TEXT("Unknown");
+    const FString NewFactionName = FDB->GetFaction(NewFaction)->DisplayName.ToString();
+
+    Registry->TransferSettlement(SettlementId, NewFaction, Grid, FDB, Fabric);
+
+    UE_LOG(Myth, Warning, TEXT(">>> Settlement '%s' (ID=%d) transferred: %s -> %s"),
+           *Data->DisplayName.ToString(),
+           SettlementId,
+           *OldFactionName,
+           *NewFactionName);
 }

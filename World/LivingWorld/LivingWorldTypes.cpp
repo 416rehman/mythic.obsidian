@@ -8,3 +8,5 @@ DEFINE_LOG_CATEGORY(LogMythTerritory);
 DEFINE_LOG_CATEGORY(LogMythMorality);
 DEFINE_LOG_CATEGORY(LogMythCausalFabric);
 DEFINE_LOG_CATEGORY(LogMythWorldSim);
+DEFINE_LOG_CATEGORY(LogMythPopulation);
+DEFINE_LOG_CATEGORY(LogMythSettlement);

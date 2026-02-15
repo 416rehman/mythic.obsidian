@@ -7,6 +7,7 @@
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "World/LivingWorld/Morality/MoralSignature.h"
+#include "World/LivingWorld/MythicTags_LivingWorld.h"
 #include "HAL/PlatformProcess.h"
 
 FMythicWorldSimThread::FMythicWorldSimThread() {}
@@ -387,6 +388,7 @@ void FMythicWorldSimThread::TickPopulation() {
             // Emit annihilation event
             if (Fabric) {
                 FMythicWorldEvent AnnEvent;
+                AnnEvent.EventTag = TAG_EVENT_FACTION_ANNIHILATION;
                 AnnEvent.PrimaryFaction = DeadId;
                 AnnEvent.Significance = 1.0f;
                 AnnEvent.CategoryFlags = EMythicEventCategory::Diplomacy | EMythicEventCategory::Death;
@@ -501,6 +503,7 @@ void FMythicWorldSimThread::TickDiplomacy() {
                 // Emit diplomacy event for significant shifts
                 if (Fabric) {
                     FMythicWorldEvent DiploEvent;
+                    DiploEvent.EventTag = TAG_EVENT_DIPLOMACY_SHIFT;
                     DiploEvent.PrimaryFaction = IdA;
                     DiploEvent.SecondaryFaction = IdB;
                     DiploEvent.Significance = 0.5f;
@@ -652,6 +655,7 @@ void FMythicWorldSimThread::TickFactionEvolution() {
 
             if (Fabric) {
                 FMythicWorldEvent EvolutionEvent;
+                EvolutionEvent.EventTag = TAG_EVENT_FACTION_EVOLUTION;
                 EvolutionEvent.PrimaryFaction = FId;
                 EvolutionEvent.Significance = 0.8f;
                 EvolutionEvent.CategoryFlags = EMythicEventCategory::Diplomacy;
@@ -673,6 +677,7 @@ void FMythicWorldSimThread::TickFactionEvolution() {
 
             if (Fabric) {
                 FMythicWorldEvent DevolutionEvent;
+                DevolutionEvent.EventTag = TAG_EVENT_FACTION_DEVOLUTION;
                 DevolutionEvent.PrimaryFaction = FId;
                 DevolutionEvent.Significance = 0.8f;
                 DevolutionEvent.CategoryFlags = EMythicEventCategory::Diplomacy;
@@ -748,10 +753,8 @@ void FMythicWorldSimThread::TickFactionEvolution() {
                     );
 
                 // Gameplay tag
-                NewFaction.FactionTag = FGameplayTag::RequestGameplayTag(
-                    FName(*FString::Printf(TEXT("Faction.Generated.%d"), NewIndex)),
-                    false
-                    );
+                // Procedurally generated factions do not get a gameplay tag — they are identified by FMythicFactionId
+                NewFaction.FactionTag = FGameplayTag();
 
                 // Ideology: parent's ideology with random mutation per axis
                 NewFaction.Ideology = F->Ideology;
@@ -840,6 +843,7 @@ void FMythicWorldSimThread::TickFactionEvolution() {
 
                     if (Fabric) {
                         FMythicWorldEvent SchismEvent;
+                        SchismEvent.EventTag = TAG_EVENT_FACTION_SCHISM;
                         SchismEvent.PrimaryFaction = FId;
                         SchismEvent.SecondaryFaction = NewId;
                         SchismEvent.Significance = 1.0f;
@@ -897,6 +901,7 @@ void FMythicWorldSimThread::TickFactionEvolution() {
                 FMythicFactionId AbsorberId;
                 AbsorberId.Index = static_cast<uint8>(BestAbsorber);
                 FMythicWorldEvent AbsorbEvent;
+                AbsorbEvent.EventTag = TAG_EVENT_FACTION_ABSORPTION;
                 AbsorbEvent.PrimaryFaction = AbsorberId;
                 AbsorbEvent.SecondaryFaction = DeadId;
                 AbsorbEvent.Significance = 0.6f;

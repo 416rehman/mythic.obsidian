@@ -6,6 +6,7 @@
 #include "World/LivingWorld/CausalFabric/CausalFabric.h"
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
+#include "World/LivingWorld/Settlements/SettlementRegistry.h"
 #include "World/LivingWorld/Simulation/WorldSimThread.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "Engine/AssetManager.h"
@@ -42,6 +43,7 @@ void UMythicLivingWorldSubsystem::Deinitialize() {
     CausalFabric = nullptr;
     FactionDB = nullptr;
     TerritoryGrid = nullptr;
+    SettlementRegistry = nullptr;
     Settings = nullptr;
 
     Super::Deinitialize();
@@ -58,6 +60,36 @@ bool UMythicLivingWorldSubsystem::IsSystemActive() const {
 void UMythicLivingWorldSubsystem::SubmitWorldEvent(const FMythicWorldEvent &Event) {
     FScopeLock Lock(&PendingEventsMutex);
     PendingEvents.Add(Event);
+}
+
+void UMythicLivingWorldSubsystem::RegisterSettlement(AMythicSettlement *Settlement) {
+    if (!SettlementRegistry) {
+        SettlementRegistry = NewObject<UMythicSettlementRegistry>(this);
+    }
+
+    const int32 SettlementId = SettlementRegistry->RegisterSettlement(Settlement);
+
+    // Immediately seed this settlement's cells into the territory grid
+    if (SettlementId != INDEX_NONE && TerritoryGrid && FactionDB) {
+        const FMythicSettlementData *Data = SettlementRegistry->GetSettlementData(SettlementId);
+        if (Data && Data->GoverningFaction.IsValid()) {
+            for (const FMythicCellCoord &Cell : Data->RasterizedCells) {
+                TerritoryGrid->SetCellInfluence(Cell, Data->GoverningFaction, 1.0f);
+            }
+
+            FMythicFactionData *FactionData = FactionDB->GetFactionMutable(Data->GoverningFaction);
+            if (FactionData) {
+                FactionData->ControlledCellCount += Data->RasterizedCells.Num();
+            }
+
+            // Commit so sim thread and read snapshots see the seeded data
+            TerritoryGrid->CommitWrites();
+            FactionDB->CommitWrites();
+
+            UE_LOG(LogMythLivingWorld, Log, TEXT("Settlement '%s' seeded %d cells for faction %d."),
+                   *Data->DisplayName.ToString(), Data->RasterizedCells.Num(), Data->GoverningFaction.Index);
+        }
+    }
 }
 
 bool UMythicLivingWorldSubsystem::LoadSettings() {
@@ -107,6 +139,9 @@ void UMythicLivingWorldSubsystem::InitializeSharedData() {
     else {
         UE_LOG(LogMythLivingWorld, Error, TEXT("Territory Grid Settings not loaded. Territory system will not function."));
     }
+
+    // Create Settlement Registry
+    SettlementRegistry = NewObject<UMythicSettlementRegistry>(this);
 }
 
 void UMythicLivingWorldSubsystem::StartSimulation() {
@@ -120,4 +155,19 @@ void UMythicLivingWorldSubsystem::StopSimulation() {
         SimThread->StopThread();
         SimThread.Reset();
     }
+}
+
+void UMythicLivingWorldSubsystem::SeedTerritoryFromSettlements() {
+    if (!SettlementRegistry || !TerritoryGrid || !FactionDB) {
+        UE_LOG(LogMythLivingWorld, Warning, TEXT("Cannot seed territory: missing registry, grid, or faction DB."));
+        return;
+    }
+
+    SettlementRegistry->SeedTerritoryFromSettlements(TerritoryGrid, FactionDB);
+
+    // Commit the seeded data so the sim thread and game thread see it
+    TerritoryGrid->CommitWrites();
+    FactionDB->CommitWrites();
+
+    UE_LOG(LogMythLivingWorld, Log, TEXT("Territory seeding complete."));
 }

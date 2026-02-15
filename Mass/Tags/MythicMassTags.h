@@ -1,0 +1,32 @@
+// Mythic Living World — MASS ECS Tag Definitions
+// Tags are zero-size markers for fast archetype filtering. No data, just identity.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "MassEntityTypes.h"
+#include "MythicMassTags.generated.h"
+
+/** Marks an entity as a humanoid NPC (as opposed to a creature) */
+USTRUCT()
+struct MYTHIC_API FMythicNPCTag : public FMassTag {
+    GENERATED_BODY()
+};
+
+/** Marks an entity as a creature (wolf, deer, bird, etc.) */
+USTRUCT()
+struct MYTHIC_API FMythicCreatureTag : public FMassTag {
+    GENERATED_BODY()
+};
+
+/** Marks that this entity has been hydrated with Tier 1+ fragments (Psychodynamic, Personality, Social) */
+USTRUCT()
+struct MYTHIC_API FMythicHydratedTag : public FMassTag {
+    GENERATED_BODY()
+};
+
+/** Marks that this entity has been promoted to Tier 2+ and is bound to a cognitive actor */
+USTRUCT()
+struct MYTHIC_API FMythicCognitiveTag : public FMassTag {
+    GENERATED_BODY()
+};

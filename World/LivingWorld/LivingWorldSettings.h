@@ -9,6 +9,8 @@
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "LivingWorldSettings.generated.h"
 
+class UMythicSettlementSettings;
+
 /**
  * Master settings for the Living World System.
  * Create an instance of this data asset in the editor and assign it to the
@@ -422,4 +424,60 @@ public:
      */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Evolution", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float SchismIdeologyMutation = 0.1f;
+
+    // ─── Settlements ─────────────────────────────────────
+
+    /** Settlement settings (defaults, capital boost) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Settlements")
+    TSoftObjectPtr<UMythicSettlementSettings> SettlementSettings;
+
+    // ─── Population Spawner ──────────────────────────────
+
+    /**
+     * Cells around each player to populate with MASS entities.
+     * Beyond this radius, cells are not spawned. Lower = fewer entities, better performance.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population Spawner", meta = (ClampMin = "1.0", ClampMax = "20.0"))
+    float PopulationSpawnRadius = 3.0f;
+
+    /**
+     * Hard cap on MASS entities per territory cell (overrides settlement MaxPopulationDensity if lower).
+     * Safety valve against performance issues from misconfigured settlements.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population Spawner", meta = (ClampMin = "1", ClampMax = "200"))
+    int32 MaxEntitiesPerCell = 20;
+
+    /** Cells beyond any player at which MASS entities are despawned */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population Spawner", meta = (ClampMin = "1.0", ClampMax = "30.0"))
+    float PopulationDespawnDistance = 5.0f;
+
+    /** Max entity spawns per processor tick (budget cap to prevent frame spikes) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population Spawner", meta = (ClampMin = "1", ClampMax = "200"))
+    int32 MaxSpawnsPerTick = 50;
+
+    /** Max entity despawns per processor tick */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population Spawner", meta = (ClampMin = "1", ClampMax = "200"))
+    int32 MaxDespawnsPerTick = 50;
+
+    /** Interval in seconds between population spawner ticks (not per-frame) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population Spawner", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float PopulationSpawnIntervalSeconds = 0.5f;
+
+    // ─── Creature Ecology ────────────────────────────────
+
+    /** Interval in seconds between creature ecology processor ticks */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float CreatureEcologyIntervalSeconds = 0.5f;
+
+    /** Cells within which pack members share pressure state */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float PackPressureShareRadius = 2.0f;
+
+    /** Aggression multiplier applied to creatures within their territorial radius of their den */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float TerritorialAggressionBoost = 0.3f;
+
+    /** Max herd-flee contagion propagations per ecology tick (budget cap) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "1", ClampMax = "100"))
+    int32 MaxHerdContagionPerTick = 10;
 };

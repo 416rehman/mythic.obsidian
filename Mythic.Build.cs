@@ -52,7 +52,14 @@ public class Mythic : ModuleRules
 			"NavigationSystem",
 			"DataConfigCore",
 			"Json",
-			"JsonUtilities"
+			"JsonUtilities",
+			// MASS ECS — Living World population layer
+			"MassEntity",
+			"MassSpawner",
+			"MassSimulation",
+			"MassSignals",
+			"MassCommon",
+			"StructUtils"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

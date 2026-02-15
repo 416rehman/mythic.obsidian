@@ -13,6 +13,8 @@ class UMythicLivingWorldSettings;
 class UMythicCausalFabric;
 class UMythicFactionDatabase;
 class UMythicTerritoryGrid;
+class UMythicSettlementRegistry;
+class AMythicSettlement;
 
 /**
  * Central coordinator for the Living World System.
@@ -56,6 +58,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Living World")
     const UMythicLivingWorldSettings *GetSettings() const { return Settings; }
 
+    /** Get the settlement registry for settlement queries. */
+    UFUNCTION(BlueprintCallable, Category = "Living World")
+    UMythicSettlementRegistry *GetSettlementRegistry() const { return SettlementRegistry; }
+
     /** Is the living world system initialized and running? */
     UFUNCTION(BlueprintCallable, Category = "Living World")
     bool IsSystemActive() const;
@@ -73,6 +79,12 @@ public:
      */
     void SubmitWorldEvent(const FMythicWorldEvent &Event);
 
+    /**
+     * Register a settlement actor with the system.
+     * Called by AMythicSettlement::BeginPlay after spline rasterization.
+     */
+    void RegisterSettlement(AMythicSettlement *Settlement);
+
 private:
     /** Load and validate the settings data asset */
     bool LoadSettings();
@@ -85,6 +97,9 @@ private:
 
     /** Stop the background simulation thread */
     void StopSimulation();
+
+    /** Seed territory grid from all registered settlements */
+    void SeedTerritoryFromSettlements();
 
     // ─── Owned Data ───────────────────────────────────────
 
@@ -102,6 +117,9 @@ private:
 
     /** Background sim thread — NOT a UObject, manually owned */
     TUniquePtr<FMythicWorldSimThread> SimThread;
+
+    UPROPERTY()
+    TObjectPtr<UMythicSettlementRegistry> SettlementRegistry;
 
     /** Events submitted from game thread, pending batch write by background thread */
     TArray<FMythicWorldEvent> PendingEvents;

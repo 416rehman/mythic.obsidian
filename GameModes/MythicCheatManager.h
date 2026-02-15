@@ -156,4 +156,19 @@ public:
     // Example: LivingWorldTerritory
     UFUNCTION(Exec)
     void MythLivingWorldTerritory();
+
+    // Show MASS entity counts (NPCs vs Creatures, per-settlement breakdown)
+    // Example: LivingWorldPopulation
+    UFUNCTION(Exec)
+    void MythLivingWorldPopulation();
+
+    // List all registered settlements with governing faction and population info
+    // Example: LivingWorldSettlements
+    UFUNCTION(Exec)
+    void MythLivingWorldSettlements();
+
+    // Force-transfer a settlement to a different faction (by settlement ID and faction index)
+    // Example: LivingWorldTransferSettlement 0 2
+    UFUNCTION(Exec)
+    void MythLivingWorldTransferSettlement(int32 SettlementId, int32 FactionIndex);
 };

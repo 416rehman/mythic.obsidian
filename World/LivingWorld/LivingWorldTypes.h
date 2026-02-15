@@ -23,6 +23,10 @@ DECLARE_LOG_CATEGORY_EXTERN(LogMythCausalFabric, Log, All);
 
 DECLARE_LOG_CATEGORY_EXTERN(LogMythWorldSim, Log, All);
 
+DECLARE_LOG_CATEGORY_EXTERN(LogMythPopulation, Log, All);
+
+DECLARE_LOG_CATEGORY_EXTERN(LogMythSettlement, Log, All);
+
 // ─────────────────────────────────────────────────────────────
 // Faction ID — Lightweight typed index
 // ─────────────────────────────────────────────────────────────
