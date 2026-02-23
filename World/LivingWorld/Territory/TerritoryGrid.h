@@ -125,6 +125,7 @@ public:
     /** Get grid dimensions */
     int32 GetWidth() const { return Width; }
     int32 GetHeight() const { return Height; }
+    float GetCellSize() const { return CellWorldSize; }
 
     /**
      * Get all cells controlled by a specific faction.
@@ -149,10 +150,13 @@ private:
     /** Write buffer — background thread only */
     TArray<FMythicTerritoryCell> WriteBuffer;
 
-    /** Read buffer — game thread snapshot */
+    /** Read buffer — GameThread access (snapshot) */
     TArray<FMythicTerritoryCell> ReadBuffer;
 
-    /** Track which cells changed since last commit (for delta replication) */
+    /** Lock protecting ReadBuffer during CommitWrites */
+    mutable FCriticalSection SnapshotLock;
+
+    /** Dirty flags — track changed cells for network/visual updates */
     TBitArray<> DirtyCells;
 
     /** Flatten 2D coord to 1D index */

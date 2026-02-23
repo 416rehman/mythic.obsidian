@@ -15,6 +15,8 @@ class UMythicFactionDatabase;
 class UMythicTerritoryGrid;
 class UMythicSettlementRegistry;
 class AMythicSettlement;
+class UMythicFactionDatabaseSettings;
+class UMythicTerritoryGridSettings;
 
 /**
  * Central coordinator for the Living World System.
@@ -85,6 +87,13 @@ public:
      */
     void RegisterSettlement(AMythicSettlement *Settlement);
 
+    /**
+     * Transfer a settlement to a new faction. Thread-safe (locks simulation).
+     * Updates territory control, cell counts, and events.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Living World")
+    void TransferSettlement(int32 SettlementId, FMythicFactionId NewFaction);
+
 private:
     /** Load and validate the settings data asset */
     bool LoadSettings();
@@ -118,6 +127,14 @@ private:
     /** Background sim thread — NOT a UObject, manually owned */
     TUniquePtr<FMythicWorldSimThread> SimThread;
 
+    /** Internal cache for Faction DB settings to prevent GC */
+    UPROPERTY()
+    TObjectPtr<const UMythicFactionDatabaseSettings> FactionConfig;
+
+    /** Internal cache for Territory Grid settings to prevent GC */
+    UPROPERTY()
+    TObjectPtr<const UMythicTerritoryGridSettings> TerritoryConfig;
+
     UPROPERTY()
     TObjectPtr<UMythicSettlementRegistry> SettlementRegistry;
 
@@ -126,4 +143,7 @@ private:
 
     /** Sync primitive for pending events buffer (game thread writes, background thread reads) */
     FCriticalSection PendingEventsMutex;
+
+    /** Global lock for simulation state (Write Buffers). Held by SimThread during tick, GameThread during writes. */
+    FCriticalSection SimulationLock;
 };

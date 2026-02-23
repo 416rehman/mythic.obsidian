@@ -20,8 +20,8 @@ UMythicCreatureEcologyProcessor::UMythicCreatureEcologyProcessor() {
     ExecutionOrder.ExecuteAfter.Add(TEXT("UMythicPopulationSpawnerProcessor"));
 
     // Register queries in constructor so CallInitialize can bind the entity manager before ConfigureQueries
-    RegisterQuery(CreatureQuery);
-    RegisterQuery(HydratedCreatureQuery);
+    CreatureQuery.RegisterWithProcessor(*this);
+    HydratedCreatureQuery.RegisterWithProcessor(*this);
 }
 
 void UMythicCreatureEcologyProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager> &EntityManager) {

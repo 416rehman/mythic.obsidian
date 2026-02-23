@@ -171,4 +171,31 @@ public:
     // Example: LivingWorldTransferSettlement 0 2
     UFUNCTION(Exec)
     void MythLivingWorldTransferSettlement(int32 SettlementId, int32 FactionIndex);
+
+    // Toggle Living World Debug Visualization (Territory cells, Settlements)
+    // Example: ToggleLivingWorldDebug
+    UFUNCTION(Exec)
+    void MythToggleLivingWorldDebug();
+
+    // === LIVING WORLD: EVENT PIPELINE (Phase 4) ===
+
+    // Fire a test action event at the player's location
+    // Example: LivingWorldSimulateEvent Action.Combat.MeleeKill Violence 0.8
+    UFUNCTION(Exec)
+    void MythLivingWorldSimulateEvent(const FString &ActionTag, const FString &MoralAxis, float MoralValue);
+
+    // Show pressure values of the nearest hydrated MASS entity
+    // Example: LivingWorldPressure
+    UFUNCTION(Exec)
+    void MythLivingWorldPressure();
+
+    // Show significance scores and tier of nearby MASS entities
+    // Example: LivingWorldSignificance
+    UFUNCTION(Exec)
+    void MythLivingWorldSignificance();
+
+    // Force-promote the nearest MASS entity to Tier 1 (hydrated)
+    // Example: LivingWorldForcePromote
+    UFUNCTION(Exec)
+    void MythLivingWorldForcePromote();
 };

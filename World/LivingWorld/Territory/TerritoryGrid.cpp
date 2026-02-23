@@ -48,65 +48,140 @@ void UMythicTerritoryGrid::SetCellPlayerOwned(const FMythicCellCoord &Coord, boo
 void UMythicTerritoryGrid::PropagateInfluence() {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicTerritoryGrid_PropagateInfluence);
 
-    // Simple neighbor-averaging influence bleed
-    // Each cell's influence bleeds to 4-neighbors at the configured rate
-    // Iterates all cells — ~16K cells at 128x128, each with 4 neighbor checks
-    // Cost: ~1ms worst case (only runs on background thread every 5-30s)
+    // Territory propagation: influence bleeds from owned cells into neighbors.
+    // Three behaviors:
+    //   1. Empty cells — strongest adjacent faction above threshold claims them
+    //   2. Same-faction neighbors — reinforce (increase influence)
+    //   3. Different-faction neighbors — erode (decrease influence, can flip ownership)
+    //
+    // Iterates all cells — ~16K cells at 128×128, each with 4 neighbor checks.
+    // Uses a small per-cell faction map (max 4 entries from 4 neighbors).
+    // Cost: ~1-2ms worst case (only runs on background thread every 5-30s)
 
-    // Work on a temp buffer to avoid read-during-write issues
-    TArray<float> NewInfluence;
-    NewInfluence.SetNumUninitialized(Width * Height);
+    struct FCellUpdate {
+        FMythicFactionId Faction;
+        float Influence;
+    };
+
+    const int32 TotalCells = Width * Height;
+    TArray<FCellUpdate> Updates;
+    Updates.SetNumUninitialized(TotalCells);
 
     for (int32 Y = 0; Y < Height; ++Y) {
         for (int32 X = 0; X < Width; ++X) {
             const int32 Index = Y * Width + X;
-            const FMythicTerritoryCell &Cell = WriteBuffer[Index];
+            const FMythicTerritoryCell& Cell = WriteBuffer[Index];
 
-            float BleedIn = 0.0f;
-            int32 NeighborCount = 0;
+            // Track incoming influence from each faction via neighbors
+            // Max 4 neighbors → max 4 distinct factions (use inline allocation)
+            struct FFactionBleed {
+                FMythicFactionId Faction;
+                float TotalInfluence;
+            };
+            FFactionBleed FactionBleeds[4];
+            int32 BleedCount = 0;
 
-            // 4-direction neighbors
             const int32 Neighbors[4][2] = {{X - 1, Y}, {X + 1, Y}, {X, Y - 1}, {X, Y + 1}};
-            for (const auto &N : Neighbors) {
-                if (N[0] >= 0 && N[0] < Width && N[1] >= 0 && N[1] < Height) {
-                    const int32 NIdx = N[1] * Width + N[0];
-                    const FMythicTerritoryCell &Neighbor = WriteBuffer[NIdx];
 
-                    // Same faction neighbors reinforce influence
-                    if (Neighbor.DominantFaction == Cell.DominantFaction) {
-                        BleedIn += Neighbor.Influence * InfluenceBleedRate;
+            for (const auto& N : Neighbors) {
+                if (N[0] < 0 || N[0] >= Width || N[1] < 0 || N[1] >= Height) {
+                    continue;
+                }
+
+                const int32 NIdx = N[1] * Width + N[0];
+                const FMythicTerritoryCell& Neighbor = WriteBuffer[NIdx];
+
+                if (!Neighbor.DominantFaction.IsValid() || Neighbor.Influence <= 0.0f) {
+                    continue;
+                }
+
+                // Accumulate bleed per faction
+                bool bFound = false;
+                for (int32 b = 0; b < BleedCount; ++b) {
+                    if (FactionBleeds[b].Faction == Neighbor.DominantFaction) {
+                        FactionBleeds[b].TotalInfluence += Neighbor.Influence * InfluenceBleedRate;
+                        bFound = true;
+                        break;
                     }
-                    ++NeighborCount;
+                }
+                if (!bFound && BleedCount < 4) {
+                    FactionBleeds[BleedCount].Faction = Neighbor.DominantFaction;
+                    FactionBleeds[BleedCount].TotalInfluence = Neighbor.Influence * InfluenceBleedRate;
+                    ++BleedCount;
                 }
             }
 
-            // New influence = current influence + average bleed from same-faction neighbors, capped at 1.0
-            if (NeighborCount > 0) {
-                NewInfluence[Index] = FMath::Min(Cell.Influence + BleedIn / static_cast<float>(NeighborCount), 1.0f);
-            }
-            else {
-                NewInfluence[Index] = Cell.Influence;
+            // No averaging by neighbor count — bleed rate already controls per-neighbor
+            // contribution. More faction neighbors → more total bleed, which correctly
+            // models stronger influence from faction clusters.
+
+            if (!Cell.DominantFaction.IsValid()) {
+                // ─── Empty cell: strongest adjacent faction claims it ───
+                float BestInfluence = 0.0f;
+                FMythicFactionId BestFaction;
+                for (int32 b = 0; b < BleedCount; ++b) {
+                    if (FactionBleeds[b].TotalInfluence > BestInfluence) {
+                        BestInfluence = FactionBleeds[b].TotalInfluence;
+                        BestFaction = FactionBleeds[b].Faction;
+                    }
+                }
+
+                Updates[Index].Faction = BestFaction;
+                Updates[Index].Influence = BestInfluence;
+            } else {
+                // ─── Owned cell: reinforce from allies, erode from enemies ───
+                float Reinforcement = 0.0f;
+                float Erosion = 0.0f;
+
+                for (int32 b = 0; b < BleedCount; ++b) {
+                    if (FactionBleeds[b].Faction == Cell.DominantFaction) {
+                        Reinforcement += FactionBleeds[b].TotalInfluence;
+                    } else {
+                        Erosion += FactionBleeds[b].TotalInfluence;
+                    }
+                }
+
+                float NewInfluence = Cell.Influence + Reinforcement - Erosion;
+                Updates[Index].Influence = NewInfluence;
+                Updates[Index].Faction = Cell.DominantFaction;
+
+                // If eroded below zero, the strongest attacker claims it
+                if (NewInfluence <= 0.0f) {
+                    float BestAttacker = 0.0f;
+                    FMythicFactionId BestFaction;
+                    for (int32 b = 0; b < BleedCount; ++b) {
+                        if (FactionBleeds[b].Faction != Cell.DominantFaction) {
+                            if (FactionBleeds[b].TotalInfluence > BestAttacker) {
+                                BestAttacker = FactionBleeds[b].TotalInfluence;
+                                BestFaction = FactionBleeds[b].Faction;
+                            }
+                        }
+                    }
+                    Updates[Index].Faction = BestFaction;
+                    Updates[Index].Influence = BestAttacker;
+                }
             }
         }
     }
 
-    // Apply new influence values
-    for (int32 i = 0; i < Width * Height; ++i) {
-        if (WriteBuffer[i].Influence != NewInfluence[i]) {
-            WriteBuffer[i].Influence = NewInfluence[i];
-            DirtyCells[i] = true;
-        }
+    // Apply updates
+    for (int32 i = 0; i < TotalCells; ++i) {
+        const float ClampedInfluence = FMath::Clamp(Updates[i].Influence, 0.0f, 1.0f);
+        const bool bAboveThreshold = ClampedInfluence >= MinControlThreshold && Updates[i].Faction.IsValid();
 
-        // Drop faction control if influence falls below threshold
-        if (WriteBuffer[i].Influence < MinControlThreshold && WriteBuffer[i].DominantFaction.IsValid()) {
-            WriteBuffer[i].DominantFaction = FMythicFactionId();
-            WriteBuffer[i].Influence = 0.0f;
+        const FMythicFactionId NewFaction = bAboveThreshold ? Updates[i].Faction : FMythicFactionId();
+        const float NewInfluence = bAboveThreshold ? ClampedInfluence : 0.0f;
+
+        if (WriteBuffer[i].DominantFaction != NewFaction || WriteBuffer[i].Influence != NewInfluence) {
+            WriteBuffer[i].DominantFaction = NewFaction;
+            WriteBuffer[i].Influence = NewInfluence;
             DirtyCells[i] = true;
         }
     }
 }
 
 void UMythicTerritoryGrid::CommitWrites() {
+    FScopeLock Lock(&SnapshotLock);
     FMemory::Memcpy(ReadBuffer.GetData(), WriteBuffer.GetData(), WriteBuffer.Num() * sizeof(FMythicTerritoryCell));
     // DirtyCells preserved until GetChangedCells is called
 }
@@ -115,6 +190,7 @@ FMythicTerritoryCell UMythicTerritoryGrid::GetCell(const FMythicCellCoord &Coord
     if (!IsValidCoord(Coord)) {
         return FMythicTerritoryCell();
     }
+    FScopeLock Lock(&SnapshotLock);
     return ReadBuffer[CoordToIndex(Coord)];
 }
 
@@ -122,6 +198,7 @@ FMythicFactionId UMythicTerritoryGrid::GetDominantFaction(const FMythicCellCoord
     if (!IsValidCoord(Coord)) {
         return FMythicFactionId();
     }
+    FScopeLock Lock(&SnapshotLock);
     return ReadBuffer[CoordToIndex(Coord)].DominantFaction;
 }
 
@@ -148,6 +225,7 @@ bool UMythicTerritoryGrid::IsValidCoord(const FMythicCellCoord &Coord) const {
 
 void UMythicTerritoryGrid::GetFactionCells(FMythicFactionId Faction, int32 MaxResults, TArray<FMythicCellCoord> &OutCells) const {
     OutCells.Reset();
+    FScopeLock Lock(&SnapshotLock);
     for (int32 i = 0; i < ReadBuffer.Num() && OutCells.Num() < MaxResults; ++i) {
         if (ReadBuffer[i].DominantFaction == Faction) {
             OutCells.Add(FMythicCellCoord(

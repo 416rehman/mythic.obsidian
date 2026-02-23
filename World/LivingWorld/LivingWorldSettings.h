@@ -463,6 +463,54 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population Spawner", meta = (ClampMin = "0.1", ClampMax = "5.0"))
     float PopulationSpawnIntervalSeconds = 0.5f;
 
+    // ─── Event Pipeline ──────────────────────────────────
+
+    /**
+     * Exponential decay rate per second for pressure channels.
+     * Each channel decays: P *= exp(-DecayRate × elapsed). Lazy-evaluated on touch.
+     * Lower = long-lasting emotional impact. Higher = entities recover quickly.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline", meta = (ClampMin = "0.001", ClampMax = "0.1"))
+    float PressureDecayRate = 0.01f;
+
+    /**
+     * Pressure level that triggers venting behavior.
+     * When any pressure channel exceeds this, the entity routes through personality → vent action.
+     * Lower = more reactive NPCs. Higher = only extreme events cause behavioral response.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline", meta = (ClampMin = "0.1", ClampMax = "10.0"))
+    float VentThreshold = 1.0f;
+
+    /**
+     * Cell radius within which entities can "hear" action events and become witnesses.
+     * 0 = same cell only, 2 = 2-cell Manhattan distance. Larger = more entities react per event.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline", meta = (ClampMin = "0", ClampMax = "5"))
+    int32 WitnessHearingRadius = 2;
+
+    /**
+     * Interval between witness perception processor ticks (seconds).
+     * 0 = every frame (event-driven, zero cost when no events pending).
+     * >0 = throttled. Recommend 0.0 since the processor is already event-gated.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WitnessIntervalSeconds = 0.0f;
+
+    /**
+     * Interval between significance rescore/promotion ticks (seconds).
+     * Lower = faster tier transitions. Higher = less CPU.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float SignificanceIntervalSeconds = 0.5f;
+
+    /**
+     * Prevents oscillation between significance tiers.
+     * Entity must cross threshold±margin to change tier.
+     * Ex: 0.1 with PromotionThreshold=0.7 → must reach 0.8 to promote, 0.2 to demote.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline", meta = (ClampMin = "0.0", ClampMax = "0.5"))
+    float SignificanceHysteresisMargin = 0.1f;
+
     // ─── Creature Ecology ────────────────────────────────
 
     /** Interval in seconds between creature ecology processor ticks */

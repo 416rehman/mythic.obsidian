@@ -23,8 +23,12 @@ UMythicPopulationSpawnerProcessor::UMythicPopulationSpawnerProcessor() {
     bRequiresGameThreadExecution = true;
     bAutoRegisterWithProcessingPhases = true;
 
+    // This processor spawns the initial NPC entities — it must run even when zero NPC
+    // archetypes exist. Without this, MASS prunes it at startup (chicken-and-egg deadlock).
+    QueryBasedPruning = EMassQueryBasedPruning::Never;
+
     // Register queries in constructor so CallInitialize can bind the entity manager before ConfigureQueries
-    RegisterQuery(ExistingNPCQuery);
+    ExistingNPCQuery.RegisterWithProcessor(*this);
 }
 
 void UMythicPopulationSpawnerProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager> &EntityManager) {
@@ -65,6 +69,9 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
     }
     TimeSinceLastTick = 0.0f;
 
+    UE_LOG(LogMythLivingWorld, Verbose, TEXT("PopulationSpawner: tick fired (interval %.1fs)"),
+           Settings->PopulationSpawnIntervalSeconds);
+
     UMythicTerritoryGrid *Grid = LWS->GetTerritoryGrid();
     UMythicSettlementRegistry *Registry = LWS->GetSettlementRegistry();
     UMythicFactionDatabase *FactionDB = LWS->GetFactionDatabase();
@@ -85,8 +92,11 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
     }
 
     if (PlayerCells.IsEmpty()) {
+        UE_LOG(LogMythLivingWorld, Verbose, TEXT("PopulationSpawner: no player pawns found, skipping."));
         return;
     }
+
+    UE_LOG(LogMythLivingWorld, Verbose, TEXT("PopulationSpawner: %d player(s) detected."), PlayerCells.Num());
 
     // ─── Step 2: Count existing entities per cell ──────
 
@@ -105,6 +115,14 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
     const float SpawnRadiusSq = FMath::Square(Settings->PopulationSpawnRadius);
     const int32 SpawnRadiusCells = FMath::CeilToInt(Settings->PopulationSpawnRadius);
     int32 SpawnBudget = Settings->MaxSpawnsPerTick;
+
+    struct FMythicNPCPopulationSpawnData {
+        FMythicIdentityFragment Identity;
+        FMythicScheduleFragment Schedule;
+        FMythicSignificanceFragment Significance;
+    };
+    TArray<FMythicNPCPopulationSpawnData> SpawnDataArray;
+    SpawnDataArray.Reserve(SpawnBudget);
 
     // Collect unique cells within spawn radius of any player
     TSet<FMythicCellCoord> CellsToPopulate;
@@ -132,18 +150,18 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
                 }
                 CellsToPopulate.Add(CandidateCell);
 
-                const FMythicFactionData *FactionData = FactionDB->GetFaction(Settlement->GoverningFaction);
-                if (!FactionData) {
+                FMythicFactionData FactionData;
+                if (!FactionDB->GetFaction(Settlement->GoverningFaction, FactionData)) {
                     continue;
                 }
 
                 // Capacity = ControlledCellCount × PopulationPerCell (same formula as WorldSimThread)
-                const int32 FactionCapacity = FactionData->ControlledCellCount * Settings->PopulationPerCell;
+                const int32 FactionCapacity = FactionData.ControlledCellCount * Settings->PopulationPerCell;
 
                 const int32 TargetCount = ComputeTargetDensity(
                     Settlement->MaxPopulationDensity,
                     Settings->MaxEntitiesPerCell,
-                    FactionData->Population,
+                    FactionData.Population,
                     FactionCapacity
                     );
 
@@ -158,32 +176,54 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
                 const int32 ToSpawn = FMath::Min(Deficit, SpawnBudget);
 
                 for (int32 SpawnIdx = 0; SpawnIdx < ToSpawn; ++SpawnIdx) {
-                    FMassEntityHandle NewEntity = EntityManager.ReserveEntity();
+                    FMythicNPCPopulationSpawnData SpawnData;
+                    SpawnData.Identity.Faction = Settlement->GoverningFaction;
+                    SpawnData.Identity.Cell = CandidateCell;
+                    SpawnData.Identity.NameHash = GetTypeHash(CandidateCell) ^ (SpawnIdx * 2654435761u);
+                    SpawnData.Identity.VisualArchetype = static_cast<uint8>(SpawnData.Identity.NameHash % 8);
 
-                    FMythicIdentityFragment IdentityData;
-                    IdentityData.Faction = Settlement->GoverningFaction;
-                    IdentityData.Cell = CandidateCell;
-                    IdentityData.NameHash = GetTypeHash(CandidateCell) ^ (SpawnIdx * 2654435761u);
-                    IdentityData.VisualArchetype = static_cast<uint8>(IdentityData.NameHash % 8);
+                    SpawnData.Schedule.Phase = EMythicSchedulePhase::Idle;
+                    SpawnData.Schedule.HomeCell = CandidateCell;
+                    SpawnData.Schedule.WorkCell = CandidateCell;
 
-                    FMythicScheduleFragment ScheduleData;
-                    ScheduleData.Phase = EMythicSchedulePhase::Idle;
-                    ScheduleData.HomeCell = CandidateCell;
-                    ScheduleData.WorkCell = CandidateCell;
+                    SpawnData.Significance.Tier = EMythicSignificanceTier::Tier0_Ambient;
 
-                    FMythicSignificanceFragment SignificanceData;
-                    SignificanceData.Tier = EMythicSignificanceTier::Tier0_Ambient;
-
-                    // Deferred build: reserve → build with fragments → add tag
-                    Context.Defer().PushCommand<FMassCommandBuildEntity<FMythicIdentityFragment, FMythicScheduleFragment, FMythicSignificanceFragment>>(
-                        NewEntity, MoveTemp(IdentityData), MoveTemp(ScheduleData), MoveTemp(SignificanceData)
-                        );
-                    Context.Defer().AddTag<FMythicNPCTag>(NewEntity);
+                    SpawnDataArray.Add(SpawnData);
                 }
 
                 SpawnBudget -= ToSpawn;
+
+                UE_LOG(LogMythLivingWorld, Verbose, TEXT("PopulationSpawner: cell (%d,%d) — target=%d, current=%d, spawned=%d (faction=%d, pop=%d, cap=%d)"),
+                       CandidateCell.X, CandidateCell.Y, TargetCount, CurrentCount, ToSpawn,
+                       Settlement->GoverningFaction.Index, FactionData.Population, FactionCapacity);
             }
         }
+    }
+
+    if (SpawnDataArray.Num() > 0) {
+        Context.Defer().PushCommand<FMassDeferredCreateCommand>([SpawnDataArray](FMassEntityManager &Manager) {
+            TRACE_CPUPROFILER_EVENT_SCOPE(MythicPopulationSpawner_DeferredSpawn);
+
+            const UScriptStruct *Composition[] = {
+                FMythicIdentityFragment::StaticStruct(),
+                FMythicScheduleFragment::StaticStruct(),
+                FMythicSignificanceFragment::StaticStruct(),
+                FMythicNPCTag::StaticStruct()
+            };
+            FMassArchetypeHandle Archetype = Manager.CreateArchetype(MakeArrayView(Composition));
+
+            TArray<FMassEntityHandle> SpawnedEntities;
+            Manager.BatchCreateEntities(Archetype, SpawnDataArray.Num(), SpawnedEntities);
+
+            for (int32 i = 0; i < SpawnDataArray.Num(); ++i) {
+                const FMythicNPCPopulationSpawnData &Data = SpawnDataArray[i];
+                FMassEntityHandle Entity = SpawnedEntities[i];
+
+                Manager.GetFragmentDataChecked<FMythicIdentityFragment>(Entity) = Data.Identity;
+                Manager.GetFragmentDataChecked<FMythicScheduleFragment>(Entity) = Data.Schedule;
+                Manager.GetFragmentDataChecked<FMythicSignificanceFragment>(Entity) = Data.Significance;
+            }
+        });
     }
 
     // ─── Step 4: Despawn entities too far from all players ──

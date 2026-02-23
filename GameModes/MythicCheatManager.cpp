@@ -24,6 +24,12 @@
 #include "Mythic/Mass/Fragments/MythicMassFragments.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
+#include "EngineUtils.h"
+#include "World/LivingWorld/Debugging/MythicLivingWorldDebugActor.h"
+#include "World/LivingWorld/Events/ActionEventSubsystem.h"
+#include "World/LivingWorld/Events/ActionEventTypes.h"
+#include "MassExecutionContext.h"
+#include "MassCommandBuffer.h"
 
 // ============================================================================
 // HELP
@@ -711,8 +717,9 @@ void UMythicCheatManager::MythLivingWorldTerritory() {
     // Cross-reference faction name if DB is available
     if (CellData.DominantFaction.IsValid()) {
         if (const UMythicFactionDatabase *FDB = LW->GetFactionDatabase()) {
-            if (const FMythicFactionData *Faction = FDB->GetFaction(CellData.DominantFaction)) {
-                UE_LOG(Myth, Warning, TEXT("  Dominant Faction: %s"), *Faction->DisplayName.ToString());
+            FMythicFactionData FactionData;
+            if (FDB->GetFaction(CellData.DominantFaction, FactionData)) {
+                UE_LOG(Myth, Warning, TEXT("  Dominant Faction: %s"), *FactionData.DisplayName.ToString());
             }
         }
     }
@@ -807,8 +814,9 @@ void UMythicCheatManager::MythLivingWorldSettlements() {
 
         FString FactionName = TEXT("Unknown");
         if (FDB && Data->GoverningFaction.IsValid()) {
-            if (const FMythicFactionData *FactionData = FDB->GetFaction(Data->GoverningFaction)) {
-                FactionName = FactionData->DisplayName.ToString();
+            FMythicFactionData FactionData;
+            if (FDB->GetFaction(Data->GoverningFaction, FactionData)) {
+                FactionName = FactionData.DisplayName.ToString();
             }
         }
 
@@ -858,15 +866,17 @@ void UMythicCheatManager::MythLivingWorldTransferSettlement(int32 SettlementId, 
 
     FMythicFactionId NewFaction;
     NewFaction.Index = FactionIndex;
-    if (!FDB->GetFaction(NewFaction)) {
+    FMythicFactionData NewFactionData;
+    if (!FDB->GetFaction(NewFaction, NewFactionData)) {
         UE_LOG(Myth, Error, TEXT(">>> Faction index %d not found. Use MythLivingWorldFactions."), FactionIndex);
         return;
     }
 
-    const FString OldFactionName = FDB->GetFaction(Data->GoverningFaction)
-        ? FDB->GetFaction(Data->GoverningFaction)->DisplayName.ToString()
+    FMythicFactionData OldFactionData;
+    const FString OldFactionName = FDB->GetFaction(Data->GoverningFaction, OldFactionData)
+        ? OldFactionData.DisplayName.ToString()
         : TEXT("Unknown");
-    const FString NewFactionName = FDB->GetFaction(NewFaction)->DisplayName.ToString();
+    const FString NewFactionName = NewFactionData.DisplayName.ToString();
 
     Registry->TransferSettlement(SettlementId, NewFaction, Grid, FDB, Fabric);
 
@@ -875,4 +885,305 @@ void UMythicCheatManager::MythLivingWorldTransferSettlement(int32 SettlementId, 
            SettlementId,
            *OldFactionName,
            *NewFactionName);
+}
+
+void UMythicCheatManager::MythToggleLivingWorldDebug() {
+    AMythicLivingWorldDebugActor *ExistingDebugActor = nullptr;
+    for (TActorIterator<AMythicLivingWorldDebugActor> It(GetWorld()); It; ++It) {
+        ExistingDebugActor = *It;
+        break;
+    }
+
+    if (ExistingDebugActor) {
+        ExistingDebugActor->Destroy();
+        UE_LOG(Myth, Display, TEXT("Living World Debug Visualization DISABLED"));
+    }
+    else {
+        GetWorld()->SpawnActor<AMythicLivingWorldDebugActor>();
+        UE_LOG(Myth, Display, TEXT("Living World Debug Visualization ENABLED"));
+    }
+}
+
+// ============================================================================
+// LIVING WORLD: EVENT PIPELINE (Phase 4)
+// ============================================================================
+
+void UMythicCheatManager::MythLivingWorldSimulateEvent(const FString &ActionTag, const FString &MoralAxis, float MoralValue) {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC || !PC->GetPawn()) {
+        UE_LOG(Myth, Error, TEXT(">>> No pawn to simulate event from"));
+        return;
+    }
+
+    UWorld *World = PC->GetWorld();
+    if (!World) {
+        return;
+    }
+
+    UMythicActionEventSubsystem *ActionSub = World->GetSubsystem<UMythicActionEventSubsystem>();
+    if (!ActionSub) {
+        UE_LOG(Myth, Error, TEXT(">>> ActionEventSubsystem not available (server only)"));
+        return;
+    }
+
+    // Parse the moral axis from string
+    int32 AxisIndex = -1;
+    static const FString AxisNames[] = {
+        TEXT("Violence"), TEXT("Theft"), TEXT("Deception"), TEXT("Mercy"),
+        TEXT("Loyalty"), TEXT("Sanctity"), TEXT("Authority"), TEXT("Arcane")
+    };
+    for (int32 i = 0; i < MoralAxisCount; ++i) {
+        if (AxisNames[i].Contains(MoralAxis, ESearchCase::IgnoreCase)) {
+            AxisIndex = i;
+            break;
+        }
+    }
+
+    if (AxisIndex < 0) {
+        UE_LOG(Myth, Error, TEXT(">>> Unknown moral axis '%s'. Valid: Violence, Theft, Deception, Mercy, Loyalty, Sanctity, Authority, Arcane"), *MoralAxis);
+        return;
+    }
+
+    // Build the action event
+    FMythicActionEvent Event;
+    Event.Perpetrator = PC->GetPawn();
+    Event.ActionTag = FGameplayTag::RequestGameplayTag(FName(*ActionTag), false);
+    if (!Event.ActionTag.IsValid()) {
+        UE_LOG(Myth, Warning, TEXT(">>> Tag '%s' not registered — event will still submit with invalid tag"), *ActionTag);
+    }
+    Event.MoralVector.AxisValues[AxisIndex] = MoralValue;
+    Event.CategoryFlags = 0x01; // Combat category for testing
+    Event.Significance = FMath::Abs(MoralValue);
+
+    ActionSub->SubmitAction(Event);
+
+    UE_LOG(Myth, Warning, TEXT(">>> Simulated event: Tag=%s Axis=%s Value=%.2f Significance=%.2f"),
+           *ActionTag, *AxisNames[AxisIndex], MoralValue, Event.Significance);
+}
+
+void UMythicCheatManager::MythLivingWorldPressure() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC || !PC->GetPawn()) {
+        UE_LOG(Myth, Error, TEXT(">>> No pawn"));
+        return;
+    }
+
+    UWorld *World = PC->GetWorld();
+    if (!World) {
+        return;
+    }
+
+    UMassEntitySubsystem *MassSubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+    if (!MassSubsystem) {
+        UE_LOG(Myth, Error, TEXT(">>> MASS Entity Subsystem not found"));
+        return;
+    }
+
+    UMythicLivingWorldSubsystem *LW = PC->GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>();
+    if (!LW || !LW->GetTerritoryGrid()) {
+        UE_LOG(Myth, Error, TEXT(">>> Living World not available"));
+        return;
+    }
+
+    const FMythicCellCoord PlayerCell = LW->GetTerritoryGrid()->WorldToCell(PC->GetPawn()->GetActorLocation());
+
+    TSharedPtr<FMassEntityManager> EntityManagerPtr = TSharedPtr<FMassEntityManager>(&MassSubsystem->GetMutableEntityManager(), [](FMassEntityManager *) {});
+
+    // Query hydrated entities near the player
+    FMassEntityQuery PressureQuery(EntityManagerPtr);
+    PressureQuery.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
+    PressureQuery.AddRequirement<FMythicPsychodynamicFragment>(EMassFragmentAccess::ReadOnly);
+    PressureQuery.AddTagRequirement<FMythicHydratedTag>(EMassFragmentPresence::All);
+
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("=== NEARBY ENTITY PRESSURE ==="));
+
+    static const FString ChannelNames[] = {
+        TEXT("Threat"), TEXT("Injustice"), TEXT("Grief"), TEXT("Shame"), TEXT("Desire"), TEXT("Wrath")
+    };
+
+    int32 DisplayCount = 0;
+    const int32 MaxDisplay = 5;
+
+    FMassEntityManager &EM_Pressure = MassSubsystem->GetMutableEntityManager();
+    FMassExecutionContext TempContext(EM_Pressure);
+    PressureQuery.ForEachEntityChunk(TempContext, [&](FMassExecutionContext &ChunkContext) {
+        if (DisplayCount >= MaxDisplay) { return; }
+
+        const int32 NumEntities = ChunkContext.GetNumEntities();
+        const auto IdentityView = ChunkContext.GetFragmentView<FMythicIdentityFragment>();
+        const auto PsychoView = ChunkContext.GetFragmentView<FMythicPsychodynamicFragment>();
+
+        for (int32 i = 0; i < NumEntities && DisplayCount < MaxDisplay; ++i) {
+            const FMythicCellCoord &Cell = IdentityView[i].Cell;
+            const int32 Dist = FMath::Abs(Cell.X - PlayerCell.X) + FMath::Abs(Cell.Y - PlayerCell.Y);
+            if (Dist > 3) { continue; }
+
+            ++DisplayCount;
+            const FMythicPsychodynamicFragment &Psycho = PsychoView[i];
+            FString PressureStr;
+            for (int32 c = 0; c < PressureChannelCount; ++c) {
+                if (c > 0) { PressureStr += TEXT(" | "); }
+                PressureStr += FString::Printf(TEXT("%s=%.2f"), *ChannelNames[c], Psycho.Pressure[c]);
+            }
+            UE_LOG(Myth, Warning, TEXT("  Entity at (%d,%d): %s | LastEvent=%.1f"),
+                   Cell.X, Cell.Y, *PressureStr, Psycho.LastEventTime);
+        }
+    });
+
+    if (DisplayCount == 0) {
+        UE_LOG(Myth, Warning, TEXT("  (no hydrated entities nearby)"));
+    }
+    UE_LOG(Myth, Warning, TEXT(""));
+}
+
+void UMythicCheatManager::MythLivingWorldSignificance() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC || !PC->GetPawn()) {
+        UE_LOG(Myth, Error, TEXT(">>> No pawn"));
+        return;
+    }
+
+    UWorld *World = PC->GetWorld();
+    if (!World) {
+        return;
+    }
+
+    UMassEntitySubsystem *MassSubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+    if (!MassSubsystem) {
+        UE_LOG(Myth, Error, TEXT(">>> MASS Entity Subsystem not found"));
+        return;
+    }
+
+    UMythicLivingWorldSubsystem *LW = PC->GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>();
+    if (!LW || !LW->GetTerritoryGrid()) {
+        UE_LOG(Myth, Error, TEXT(">>> Living World not available"));
+        return;
+    }
+
+    const FMythicCellCoord PlayerCell = LW->GetTerritoryGrid()->WorldToCell(PC->GetPawn()->GetActorLocation());
+
+    TSharedPtr<FMassEntityManager> EntityManagerPtr = TSharedPtr<FMassEntityManager>(&MassSubsystem->GetMutableEntityManager(), [](FMassEntityManager *) {});
+
+    FMassEntityQuery SigQuery(EntityManagerPtr);
+    SigQuery.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
+    SigQuery.AddRequirement<FMythicSignificanceFragment>(EMassFragmentAccess::ReadOnly);
+
+    static const FString TierNames[] = {TEXT("Ambient"), TEXT("Reactive"), TEXT("Cognitive"), TEXT("Persistent")};
+
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("=== NEARBY ENTITY SIGNIFICANCE ==="));
+
+    int32 DisplayCount = 0;
+    const int32 MaxDisplay = 10;
+
+    int32 TierCounts[4] = {};
+
+    FMassEntityManager &EM_Sig = MassSubsystem->GetMutableEntityManager();
+    FMassExecutionContext TempContext(EM_Sig);
+    SigQuery.ForEachEntityChunk(TempContext, [&](FMassExecutionContext &ChunkContext) {
+        const int32 NumEntities = ChunkContext.GetNumEntities();
+        const auto IdentityView = ChunkContext.GetFragmentView<FMythicIdentityFragment>();
+        const auto SigView = ChunkContext.GetFragmentView<FMythicSignificanceFragment>();
+
+        for (int32 i = 0; i < NumEntities; ++i) {
+            const int32 TierIdx = FMath::Clamp(static_cast<int32>(SigView[i].Tier), 0, 3);
+            TierCounts[TierIdx]++;
+
+            if (DisplayCount >= MaxDisplay) { continue; }
+
+            const FMythicCellCoord &Cell = IdentityView[i].Cell;
+            const int32 Dist = FMath::Abs(Cell.X - PlayerCell.X) + FMath::Abs(Cell.Y - PlayerCell.Y);
+            if (Dist > 3) { continue; }
+
+            ++DisplayCount;
+            UE_LOG(Myth, Warning, TEXT("  (%d,%d) Score=%.2f Tier=%s Events=%d Dirty=%s"),
+                   Cell.X, Cell.Y,
+                   SigView[i].Score,
+                   *TierNames[TierIdx],
+                   SigView[i].RelevantEventCount,
+                   SigView[i].bDirty ? TEXT("Y") : TEXT("N"));
+        }
+    });
+
+    UE_LOG(Myth, Warning, TEXT("  --- Tier Summary ---"));
+    for (int32 t = 0; t < 4; ++t) {
+        UE_LOG(Myth, Warning, TEXT("    %s: %d"), *TierNames[t], TierCounts[t]);
+    }
+    UE_LOG(Myth, Warning, TEXT(""));
+}
+
+void UMythicCheatManager::MythLivingWorldForcePromote() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC || !PC->GetPawn()) {
+        UE_LOG(Myth, Error, TEXT(">>> No pawn"));
+        return;
+    }
+
+    UWorld *World = PC->GetWorld();
+    if (!World) {
+        return;
+    }
+
+    UMassEntitySubsystem *MassSubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+    if (!MassSubsystem) {
+        UE_LOG(Myth, Error, TEXT(">>> MASS Entity Subsystem not found"));
+        return;
+    }
+
+    UMythicLivingWorldSubsystem *LW = PC->GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>();
+    if (!LW || !LW->GetTerritoryGrid()) {
+        UE_LOG(Myth, Error, TEXT(">>> Living World not available"));
+        return;
+    }
+
+    const FMythicCellCoord PlayerCell = LW->GetTerritoryGrid()->WorldToCell(PC->GetPawn()->GetActorLocation());
+
+    TSharedPtr<FMassEntityManager> EntityManagerPtr = TSharedPtr<FMassEntityManager>(&MassSubsystem->GetMutableEntityManager(), [](FMassEntityManager *) {});
+
+    // Find the nearest Tier 0 entity and force-promote it
+    FMassEntityQuery AmbientQuery(EntityManagerPtr);
+    AmbientQuery.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
+    AmbientQuery.AddRequirement<FMythicSignificanceFragment>(EMassFragmentAccess::ReadWrite);
+    AmbientQuery.AddTagRequirement<FMythicHydratedTag>(EMassFragmentPresence::None);
+
+    bool bPromoted = false;
+    FMassEntityManager &EM_Promote = MassSubsystem->GetMutableEntityManager();
+    FMassExecutionContext TempContext(EM_Promote);
+    AmbientQuery.ForEachEntityChunk(TempContext, [&](FMassExecutionContext &ChunkContext) {
+        if (bPromoted) { return; }
+
+        const int32 NumEntities = ChunkContext.GetNumEntities();
+        const auto IdentityView = ChunkContext.GetFragmentView<FMythicIdentityFragment>();
+        auto SigView = ChunkContext.GetMutableFragmentView<FMythicSignificanceFragment>();
+
+        for (int32 i = 0; i < NumEntities; ++i) {
+            const FMythicCellCoord &Cell = IdentityView[i].Cell;
+            const int32 Dist = FMath::Abs(Cell.X - PlayerCell.X) + FMath::Abs(Cell.Y - PlayerCell.Y);
+            if (Dist > 2) { continue; }
+
+            const FMassEntityHandle Entity = ChunkContext.GetEntity(i);
+            FMassEntityManager &EM = MassSubsystem->GetMutableEntityManager();
+
+            // Deferred commands for fragment/tag addition
+            TSharedPtr<FMassCommandBuffer> CmdBuffer = MakeShared<FMassCommandBuffer>();
+            CmdBuffer->AddTag<FMythicHydratedTag>(Entity);
+            CmdBuffer->AddFragment<FMythicPsychodynamicFragment>(Entity);
+            CmdBuffer->AddFragment<FMythicPersonalityFragment>(Entity);
+            CmdBuffer->AddFragment<FMythicSocialFragment>(Entity);
+            EM.FlushCommands(CmdBuffer);
+
+            SigView[i].Tier = EMythicSignificanceTier::Tier1_Reactive;
+            SigView[i].Score = 1.0f;
+            SigView[i].bDirty = false;
+
+            bPromoted = true;
+            UE_LOG(Myth, Warning, TEXT(">>> Force-promoted entity at (%d,%d) to Tier1_Reactive"), Cell.X, Cell.Y);
+            return;
+        }
+    });
+
+    if (!bPromoted) {
+        UE_LOG(Myth, Warning, TEXT(">>> No Tier 0 entities found near player to promote"));
+    }
 }

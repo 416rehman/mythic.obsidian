@@ -23,6 +23,12 @@ class UMythicLivingWorldSettings;
  * Never blocks the game thread — all shared data uses double-buffered reads.
  */
 class MYTHIC_API FMythicWorldSimThread : public FRunnable {
+#if WITH_AUTOMATION_WORKER
+    friend class FLivingWorldSimEconomyTest;
+    friend class FLivingWorldSimPopulationTest;
+    friend class FLivingWorldSimDiplomacyTest;
+#endif
+
 public:
     FMythicWorldSimThread();
     virtual ~FMythicWorldSimThread() override;
@@ -36,7 +42,9 @@ public:
         UMythicFactionDatabase *InFactionDB,
         UMythicTerritoryGrid *InTerritoryGrid,
         const UMythicLivingWorldSettings *InSettings,
-        float InTickIntervalSeconds);
+        float InTickIntervalSeconds,
+        FCriticalSection* InSimulationLock
+    );
 
     /** Start the background thread */
     void StartThread();
@@ -93,6 +101,7 @@ private:
     UMythicFactionDatabase *FactionDB = nullptr;
     UMythicTerritoryGrid *TerritoryGrid = nullptr;
     const UMythicLivingWorldSettings *Settings = nullptr;
+    FCriticalSection* SimulationLock = nullptr;
 
     /**
      * Pairwise trade volume accumulator for economic dependency.

@@ -21,12 +21,14 @@ void FMythicWorldSimThread::Setup(
     UMythicFactionDatabase *InFactionDB,
     UMythicTerritoryGrid *InTerritoryGrid,
     const UMythicLivingWorldSettings *InSettings,
-    float InTickIntervalSeconds) {
+    float InTickIntervalSeconds,
+    FCriticalSection* InSimulationLock) {
     Fabric = InFabric;
     FactionDB = InFactionDB;
     TerritoryGrid = InTerritoryGrid;
     Settings = InSettings;
     TickIntervalSeconds = FMath::Max(InTickIntervalSeconds, 0.1f);
+    SimulationLock = InSimulationLock;
 
     // Init trade volume matrix
     MaxFactions = FactionDB ? FactionDB->GetMaxFactions() : 0;
@@ -105,6 +107,8 @@ void FMythicWorldSimThread::Exit() {
 
 void FMythicWorldSimThread::SimTick() {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicWorldSim_SimTick);
+
+    FScopeLock Lock(SimulationLock);
 
     if (!Settings || !FactionDB) {
         return;
@@ -388,7 +392,7 @@ void FMythicWorldSimThread::TickPopulation() {
             // Emit annihilation event
             if (Fabric) {
                 FMythicWorldEvent AnnEvent;
-                AnnEvent.EventTag = TAG_EVENT_FACTION_ANNIHILATION;
+                AnnEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_ANNIHILATION;
                 AnnEvent.PrimaryFaction = DeadId;
                 AnnEvent.Significance = 1.0f;
                 AnnEvent.CategoryFlags = EMythicEventCategory::Diplomacy | EMythicEventCategory::Death;
@@ -503,7 +507,7 @@ void FMythicWorldSimThread::TickDiplomacy() {
                 // Emit diplomacy event for significant shifts
                 if (Fabric) {
                     FMythicWorldEvent DiploEvent;
-                    DiploEvent.EventTag = TAG_EVENT_DIPLOMACY_SHIFT;
+                    DiploEvent.EventTag = TAG_LIVINGWORLD_EVENT_DIPLOMACY_SHIFT;
                     DiploEvent.PrimaryFaction = IdA;
                     DiploEvent.SecondaryFaction = IdB;
                     DiploEvent.Significance = 0.5f;
@@ -655,7 +659,7 @@ void FMythicWorldSimThread::TickFactionEvolution() {
 
             if (Fabric) {
                 FMythicWorldEvent EvolutionEvent;
-                EvolutionEvent.EventTag = TAG_EVENT_FACTION_EVOLUTION;
+                EvolutionEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_EVOLUTION;
                 EvolutionEvent.PrimaryFaction = FId;
                 EvolutionEvent.Significance = 0.8f;
                 EvolutionEvent.CategoryFlags = EMythicEventCategory::Diplomacy;
@@ -677,7 +681,7 @@ void FMythicWorldSimThread::TickFactionEvolution() {
 
             if (Fabric) {
                 FMythicWorldEvent DevolutionEvent;
-                DevolutionEvent.EventTag = TAG_EVENT_FACTION_DEVOLUTION;
+                DevolutionEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_DEVOLUTION;
                 DevolutionEvent.PrimaryFaction = FId;
                 DevolutionEvent.Significance = 0.8f;
                 DevolutionEvent.CategoryFlags = EMythicEventCategory::Diplomacy;
@@ -843,7 +847,7 @@ void FMythicWorldSimThread::TickFactionEvolution() {
 
                     if (Fabric) {
                         FMythicWorldEvent SchismEvent;
-                        SchismEvent.EventTag = TAG_EVENT_FACTION_SCHISM;
+                        SchismEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_SCHISM;
                         SchismEvent.PrimaryFaction = FId;
                         SchismEvent.SecondaryFaction = NewId;
                         SchismEvent.Significance = 1.0f;
@@ -901,7 +905,7 @@ void FMythicWorldSimThread::TickFactionEvolution() {
                 FMythicFactionId AbsorberId;
                 AbsorberId.Index = static_cast<uint8>(BestAbsorber);
                 FMythicWorldEvent AbsorbEvent;
-                AbsorbEvent.EventTag = TAG_EVENT_FACTION_ABSORPTION;
+                AbsorbEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_ABSORPTION;
                 AbsorbEvent.PrimaryFaction = AbsorberId;
                 AbsorbEvent.SecondaryFaction = DeadId;
                 AbsorbEvent.Significance = 0.6f;

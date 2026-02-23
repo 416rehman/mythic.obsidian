@@ -31,7 +31,7 @@ void AMythicSettlement::BeginPlay() {
             if (InitialFactionTag.IsValid()) {
                 FMythicFactionId ResolvedId;
                 if (const UMythicFactionDatabase *FactionDB = LWS->GetFactionDatabase()) {
-                    FactionDB->FindFactionByTag(InitialFactionTag, &ResolvedId);
+                    ResolvedId = FactionDB->FindFactionId(InitialFactionTag);
                 }
 
                 if (ResolvedId.IsValid()) {

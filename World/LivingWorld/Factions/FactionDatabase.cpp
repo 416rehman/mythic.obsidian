@@ -5,6 +5,7 @@
 void UMythicFactionDatabase::Initialize(const UMythicFactionDatabaseSettings *Settings) {
     check(Settings);
 
+
     MaxFactions = Settings->MaxFactions;
     WriteFactions.SetNum(MaxFactions);
     ReadFactions.SetNum(MaxFactions);
@@ -21,11 +22,13 @@ void UMythicFactionDatabase::Initialize(const UMythicFactionDatabaseSettings *Se
 
     // Load initial factions
     RegisteredCount = 0;
-    for (const FMythicFactionData &InitialFaction : Settings->InitialFactions) {
+    for (int32 i = 0; i < Settings->InitialFactions.Num(); ++i) {
         if (RegisteredCount >= MaxFactions) {
             UE_LOG(LogMythFaction, Warning, TEXT("Max faction capacity reached during initialization. Remaining factions skipped."));
             break;
         }
+
+        const FMythicFactionData &InitialFaction = Settings->InitialFactions[i];
 
         WriteFactions[RegisteredCount] = InitialFaction;
         ++RegisteredCount;
@@ -36,6 +39,27 @@ void UMythicFactionDatabase::Initialize(const UMythicFactionDatabaseSettings *Se
 
     UE_LOG(LogMythFaction, Log, TEXT("Faction Database initialized: %d factions loaded, max capacity %d"),
            RegisteredCount, MaxFactions);
+}
+
+void UMythicFactionDatabase::BeginDestroy() {
+    Super::BeginDestroy();
+
+    // Explicitly empty arrays to ensure FText/struct destruction happens 
+    // before the UObject memory is reclaimed
+    WriteFactions.Empty();
+    ReadFactions.Empty();
+    WriteRelationships.Empty();
+    ReadRelationships.Empty();
+}
+
+bool UMythicFactionDatabase::GetFaction(FMythicFactionId Id, FMythicFactionData &OutData) const {
+    if (!Id.IsValid() || Id.Index >= RegisteredCount) {
+        return false;
+    }
+
+    FScopeLock Lock(&SnapshotLock);
+    OutData = ReadFactions[Id.Index];
+    return true;
 }
 
 FMythicFactionData *UMythicFactionDatabase::GetFactionMutable(FMythicFactionId Id) {
@@ -127,28 +151,44 @@ void UMythicFactionDatabase::ForEachAliveFactionMutable(TFunctionRef<void(FMythi
     }
 }
 
+// ─── Commit Snapshot ──────────────────────────────────
 void UMythicFactionDatabase::CommitWrites() {
-    FMemory::Memcpy(ReadFactions.GetData(), WriteFactions.GetData(), MaxFactions * sizeof(FMythicFactionData));
-    FMemory::Memcpy(ReadRelationships.GetData(), WriteRelationships.GetData(), WriteRelationships.Num() * sizeof(EMythicFactionRelation));
+    FScopeLock Lock(&SnapshotLock);
+
+    // SAFETY: Use TArray assignment, NOT Memcpy. 
+    // FMythicFactionData contains FText which requires copy construction to manage ref-counts.
+    // Memcpy bypasses this, leading to double-free crashes.
+    ReadFactions = WriteFactions;
+    ReadRelationships = WriteRelationships;
 }
 
-const FMythicFactionData *UMythicFactionDatabase::GetFaction(FMythicFactionId Id) const {
-    if (!Id.IsValid() || Id.Index >= RegisteredCount) {
-        return nullptr;
-    }
-    return &ReadFactions[Id.Index];
-}
 
-const FMythicFactionData *UMythicFactionDatabase::FindFactionByTag(const FGameplayTag &Tag, FMythicFactionId *OutId) const {
+bool UMythicFactionDatabase::FindFactionByTag(const FGameplayTag &Tag, FMythicFactionData &OutData, FMythicFactionId *OutId) const {
+    FScopeLock Lock(&SnapshotLock);
+
     for (int32 i = 0; i < RegisteredCount; ++i) {
         if (ReadFactions[i].FactionTag == Tag) {
+            OutData = ReadFactions[i];
             if (OutId) {
                 OutId->Index = static_cast<uint8>(i);
             }
-            return &ReadFactions[i];
+            return true;
         }
     }
-    return nullptr;
+    return false;
+}
+
+FMythicFactionId UMythicFactionDatabase::FindFactionId(const FGameplayTag &Tag) const {
+    FScopeLock Lock(&SnapshotLock);
+
+    for (int32 i = 0; i < RegisteredCount; ++i) {
+        if (ReadFactions[i].FactionTag == Tag) {
+            FMythicFactionId Id;
+            Id.Index = static_cast<uint8>(i);
+            return Id;
+        }
+    }
+    return FMythicFactionId();
 }
 
 EMythicFactionRelation UMythicFactionDatabase::GetRelationship(FMythicFactionId A, FMythicFactionId B) const {
@@ -160,6 +200,7 @@ EMythicFactionRelation UMythicFactionDatabase::GetRelationship(FMythicFactionId 
         return EMythicFactionRelation::Allied;
     }
 
+    FScopeLock Lock(&SnapshotLock);
     return ReadRelationships[RelationIndex(A, B)];
 }
 
@@ -174,6 +215,7 @@ int32 UMythicFactionDatabase::GetActiveFactionCount() const {
 }
 
 void UMythicFactionDatabase::ForEachAliveFaction(TFunctionRef<void(FMythicFactionId, const FMythicFactionData &)> Callback) const {
+    FScopeLock Lock(&SnapshotLock);
     for (int32 i = 0; i < RegisteredCount; ++i) {
         if (ReadFactions[i].bAlive) {
             FMythicFactionId Id;

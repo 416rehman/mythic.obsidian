@@ -44,6 +44,8 @@ void UMythicLivingWorldSubsystem::Deinitialize() {
     FactionDB = nullptr;
     TerritoryGrid = nullptr;
     SettlementRegistry = nullptr;
+    FactionConfig = nullptr;
+    TerritoryConfig = nullptr;
     Settings = nullptr;
 
     Super::Deinitialize();
@@ -66,6 +68,8 @@ void UMythicLivingWorldSubsystem::RegisterSettlement(AMythicSettlement *Settleme
     if (!SettlementRegistry) {
         SettlementRegistry = NewObject<UMythicSettlementRegistry>(this);
     }
+
+    FScopeLock Lock(&SimulationLock); // Protect WriteBuffer access
 
     const int32 SettlementId = SettlementRegistry->RegisterSettlement(Settlement);
 
@@ -90,6 +94,15 @@ void UMythicLivingWorldSubsystem::RegisterSettlement(AMythicSettlement *Settleme
                    *Data->DisplayName.ToString(), Data->RasterizedCells.Num(), Data->GoverningFaction.Index);
         }
     }
+}
+
+void UMythicLivingWorldSubsystem::TransferSettlement(int32 SettlementId, FMythicFactionId NewFaction) {
+    if (!SettlementRegistry || !TerritoryGrid || !FactionDB) {
+        return;
+    }
+
+    FScopeLock Lock(&SimulationLock); // Protect WriteBuffer access
+    SettlementRegistry->TransferSettlement(SettlementId, NewFaction, TerritoryGrid, FactionDB, CausalFabric);
 }
 
 bool UMythicLivingWorldSubsystem::LoadSettings() {
@@ -121,20 +134,20 @@ void UMythicLivingWorldSubsystem::InitializeSharedData() {
     CausalFabric->Initialize(Settings->FabricCapacity);
 
     // Create Faction Database
-    const UMythicFactionDatabaseSettings *FactionSettings = Settings->FactionSettings.LoadSynchronous();
-    if (FactionSettings) {
+    FactionConfig = Settings->FactionSettings.LoadSynchronous();
+    if (FactionConfig) {
         FactionDB = NewObject<UMythicFactionDatabase>(this);
-        FactionDB->Initialize(FactionSettings);
+        FactionDB->Initialize(FactionConfig);
     }
     else {
         UE_LOG(LogMythLivingWorld, Error, TEXT("Faction Database Settings not loaded. Factions will not function."));
     }
 
     // Create Territory Grid
-    const UMythicTerritoryGridSettings *GridSettings = Settings->TerritorySettings.LoadSynchronous();
-    if (GridSettings) {
+    TerritoryConfig = Settings->TerritorySettings.LoadSynchronous();
+    if (TerritoryConfig) {
         TerritoryGrid = NewObject<UMythicTerritoryGrid>(this);
-        TerritoryGrid->Initialize(GridSettings);
+        TerritoryGrid->Initialize(TerritoryConfig);
     }
     else {
         UE_LOG(LogMythLivingWorld, Error, TEXT("Territory Grid Settings not loaded. Territory system will not function."));
@@ -146,7 +159,7 @@ void UMythicLivingWorldSubsystem::InitializeSharedData() {
 
 void UMythicLivingWorldSubsystem::StartSimulation() {
     SimThread = MakeUnique<FMythicWorldSimThread>();
-    SimThread->Setup(CausalFabric, FactionDB, TerritoryGrid, Settings, Settings->SimTickIntervalSeconds);
+    SimThread->Setup(CausalFabric, FactionDB, TerritoryGrid, Settings, Settings->SimTickIntervalSeconds, &SimulationLock);
     SimThread->StartThread();
 }
 
@@ -163,7 +176,10 @@ void UMythicLivingWorldSubsystem::SeedTerritoryFromSettlements() {
         return;
     }
 
-    SettlementRegistry->SeedTerritoryFromSettlements(TerritoryGrid, FactionDB);
+    {
+        FScopeLock Lock(&SimulationLock); // Protect WriteBuffer access
+        SettlementRegistry->SeedTerritoryFromSettlements(TerritoryGrid, FactionDB);
+    }
 
     // Commit the seeded data so the sim thread and game thread see it
     TerritoryGrid->CommitWrites();

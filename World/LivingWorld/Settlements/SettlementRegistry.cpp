@@ -170,7 +170,7 @@ void UMythicSettlementRegistry::TransferSettlement(
     // Log a causal fabric event
     if (CausalFabric && Data->RasterizedCells.Num() > 0) {
         FMythicWorldEvent Event;
-        Event.EventTag = TAG_EVENT_TERRITORY_SETTLEMENT_TRANSFER;
+        Event.EventTag = TAG_LIVINGWORLD_EVENT_TERRITORY_SETTLEMENT_TRANSFER;
         Event.PrimaryFaction = NewFaction;
         Event.SecondaryFaction = OldFaction;
         Event.Cell = Data->RasterizedCells[0]; // Settlement center (first cell is a reasonable pick)

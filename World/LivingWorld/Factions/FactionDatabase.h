@@ -378,6 +378,9 @@ public:
     /** Initialize from settings. Must be called once before use. */
     void Initialize(const UMythicFactionDatabaseSettings *Settings);
 
+    /** Cleanup arrays before destruction */
+    virtual void BeginDestroy() override;
+
     // ─── Write Interface (Background Thread Only) ─────────
 
     /** Get mutable reference to a faction's data in the write buffer */
@@ -412,11 +415,14 @@ public:
 
     // ─── Read Interface (Game Thread — Lock-Free) ─────────
 
-    /** Get faction data by ID (read snapshot). Returns nullptr if ID is invalid. */
-    const FMythicFactionData *GetFaction(FMythicFactionId Id) const;
+    /** Get faction data by ID (read snapshot). Returns false if ID is invalid. Copies thread-safe snapshot. */
+    bool GetFaction(FMythicFactionId Id, FMythicFactionData &OutData) const;
 
-    /** Get faction by gameplay tag. Linear scan — use sparingly, cache the ID. */
-    const FMythicFactionData *FindFactionByTag(const FGameplayTag &Tag, FMythicFactionId *OutId = nullptr) const;
+    /** Get faction by gameplay tag. Linear scan — use sparingly. Copies thread-safe snapshot. Optionally returns ID. */
+    bool FindFactionByTag(const FGameplayTag &Tag, FMythicFactionData &OutData, FMythicFactionId *OutId = nullptr) const;
+
+    /** Find faction ID by tag. Lightweight linear scan. Thread-safe. */
+    FMythicFactionId FindFactionId(const FGameplayTag &Tag) const;
 
     /** Get the relationship between two factions */
     EMythicFactionRelation GetRelationship(FMythicFactionId A, FMythicFactionId B) const;
@@ -434,17 +440,25 @@ private:
     int32 MaxFactions = 0;
 
     /** Write buffer — background thread only */
+    UPROPERTY(Transient)
     TArray<FMythicFactionData> WriteFactions;
 
     /** Read buffer — game thread snapshot */
+    UPROPERTY(Transient)
     TArray<FMythicFactionData> ReadFactions;
 
     /** Relationship matrix — flat array, indexed by RelationIndex(A, B) */
+    UPROPERTY(Transient)
     TArray<EMythicFactionRelation> WriteRelationships;
+
+    UPROPERTY(Transient)
     TArray<EMythicFactionRelation> ReadRelationships;
 
     /** Number of factions currently registered */
     int32 RegisteredCount = 0;
+
+    /** Lock protecting the Read snapshots from concurrent modification by CommitWrites */
+    mutable FCriticalSection SnapshotLock;
 
     /** Flatten two faction IDs into a relationship matrix index (upper triangle) */
     int32 RelationIndex(FMythicFactionId A, FMythicFactionId B) const {
