@@ -105,6 +105,37 @@ FMythicFactionId UMythicFactionDatabase::RegisterFaction(const FMythicFactionDat
     return NewId;
 }
 
+FMythicFactionId UMythicFactionDatabase::CreateFactionFromConquest(FMythicFactionId OriginalFaction, int32 SurvivorCount) {
+    if (!OriginalFaction.IsValid() || OriginalFaction.Index >= RegisteredCount) {
+        return FMythicFactionId();
+    }
+    
+    if (RegisteredCount >= MaxFactions) {
+        return FMythicFactionId();
+    }
+
+    const FMythicFactionData& Original = WriteFactions[OriginalFaction.Index];
+    
+    FMythicFactionData Resistance;
+    Resistance.DisplayName = FText::Format(NSLOCTEXT("LivingWorld", "ResistanceFmt", "{0} Resistance"), Original.DisplayName);
+    
+    // Append .Resistance to the tag
+    FString NewTagStr = Original.FactionTag.ToString() + TEXT(".Resistance");
+    Resistance.FactionTag = FGameplayTag::RequestGameplayTag(FName(*NewTagStr), false);
+    
+    Resistance.bAlive = true;
+    Resistance.Status = EMythicFactionStatus::Resistance;
+    Resistance.Population = SurvivorCount;
+    Resistance.Ideology = Original.Ideology; // Inherit ideology
+    
+    // Resistance factions start with zero territory but can grow
+    Resistance.ControlledCellCount = 0;
+    Resistance.MilitaryStrength = 0.1f;
+    
+    // Register the new faction
+    return RegisterFaction(Resistance);
+}
+
 void UMythicFactionDatabase::AnnihilateFaction(FMythicFactionId Id) {
     FMythicFactionData *Faction = GetFactionMutable(Id);
     if (!Faction) {
@@ -112,6 +143,7 @@ void UMythicFactionDatabase::AnnihilateFaction(FMythicFactionId Id) {
     }
 
     Faction->bAlive = false;
+    Faction->Status = EMythicFactionStatus::Annihilated;
     Faction->Population = 0;
     Faction->MilitaryStrength = 0.0f;
     Faction->ControlledCellCount = 0;
@@ -224,3 +256,99 @@ void UMythicFactionDatabase::ForEachAliveFaction(TFunctionRef<void(FMythicFactio
         }
     }
 }
+
+void UMythicFactionDatabase::ReportLeaderCandidate(FMythicFactionId FactionId, uint32 EntityId, float Score) {
+    if (!FactionId.IsValid() || FactionId.Index >= RegisteredCount) {
+        return;
+    }
+
+    // This is a game-thread write to the write buffer. Safe because:
+    // 1. Background thread reads leader data but doesn't write to it
+    // 2. CommitWrites copies the entire struct atomically under lock
+    FMythicFactionData& Faction = WriteFactions[FactionId.Index];
+
+    // Only accept if the candidate has a higher significance score than the current leader
+    if (Score > Faction.LeaderSignificanceScore) {
+        const uint32 PreviousLeader = Faction.LeaderEntityId;
+        Faction.LeaderEntityId = EntityId;
+        Faction.LeaderSignificanceScore = Score;
+
+        if (PreviousLeader != EntityId) {
+            UE_LOG(LogMythFaction, Log, TEXT("Faction '%s': new leader nominated (entity=%d, score=%.2f, prev=%d)"),
+                   *Faction.DisplayName.ToString(), EntityId, Score, PreviousLeader);
+        }
+    }
+}
+
+void UMythicFactionDatabase::Serialize(FArchive& Ar) {
+    // Version for forward compatibility
+    int32 Version = 1;
+    Ar << Version;
+
+    Ar << MaxFactions;
+    Ar << RegisteredCount;
+
+    if (Ar.IsLoading()) {
+        WriteFactions.SetNum(MaxFactions);
+        ReadFactions.SetNum(MaxFactions);
+        const int32 RelationCount = MaxFactions * MaxFactions;
+        WriteRelationships.SetNum(RelationCount);
+        ReadRelationships.SetNum(RelationCount);
+    }
+
+    // Serialize each faction's data
+    for (int32 i = 0; i < RegisteredCount; ++i) {
+        FMythicFactionData& F = WriteFactions[i];
+
+        Ar << F.DisplayName;
+        Ar << F.FactionTag;
+        Ar << F.bAlive;
+        
+        // Serialize Status as uint8
+        uint8 StatusVal = static_cast<uint8>(F.Status);
+        Ar << StatusVal;
+        if (Ar.IsLoading()) {
+            F.Status = static_cast<EMythicFactionStatus>(StatusVal);
+        }
+
+        Ar << F.bHasBeenPopulated;
+        Ar << F.bIdeologyDirty;
+        Ar << F.Population;
+        Ar << F.MilitaryStrength;
+        Ar << F.ControlledCellCount;
+        Ar << F.LeaderEntityId;
+        Ar << F.LeaderSignificanceScore;
+
+        // Ideology profile — all 8 axes
+        Ar << F.Ideology.Violence;
+        Ar << F.Ideology.Theft;
+        Ar << F.Ideology.Deception;
+        Ar << F.Ideology.Mercy;
+        Ar << F.Ideology.Loyalty;
+        Ar << F.Ideology.Sanctity;
+        Ar << F.Ideology.Authority;
+        Ar << F.Ideology.Arcane;
+
+        // Resources (Supply, Demand, Reserves, Prices)
+        Ar << F.Supply.Food << F.Supply.Materials << F.Supply.Arms << F.Supply.Wealth;
+        Ar << F.Demand.Food << F.Demand.Materials << F.Demand.Arms << F.Demand.Wealth;
+        Ar << F.Reserves.Food << F.Reserves.Materials << F.Reserves.Arms << F.Reserves.Wealth;
+        Ar << F.Prices.Food << F.Prices.Materials << F.Prices.Arms << F.Prices.Wealth;
+    }
+
+    // Serialize relationships
+    const int32 RelationCount = MaxFactions * MaxFactions;
+    for (int32 i = 0; i < RelationCount; ++i) {
+        uint8 RelVal = static_cast<uint8>(WriteRelationships[i]);
+        Ar << RelVal;
+        if (Ar.IsLoading()) {
+            WriteRelationships[i] = static_cast<EMythicFactionRelation>(RelVal);
+        }
+    }
+
+    if (Ar.IsLoading()) {
+        // Commit loaded data to the read buffer
+        CommitWrites();
+    }
+}
+

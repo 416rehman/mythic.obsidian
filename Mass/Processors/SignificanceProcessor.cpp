@@ -10,7 +10,10 @@
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
-#include "Engine/World.h"
+#include "World/LivingWorld/Factions/FactionDatabase.h"
+#include "World/LivingWorld/Persistence/PersistentNPCRegistry.h"
+#include "World/LivingWorld/NPCGeneration/NPCGenerator.h"
+#include "World/LivingWorld/LivingWorldTypes.h"
 #include "GameFramework/PlayerController.h"
 
 UMythicSignificanceProcessor::UMythicSignificanceProcessor() {
@@ -150,6 +153,20 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
     });
 
     // ─── Pass 2: Promotion / Demotion ───
+    // First, count existing cognitive actors (Tier 1+) to enforce hard cap
+    int32 CognitiveActorCount = 0;
+    AllSignificanceQuery.ForEachEntityChunk(Context, [&CognitiveActorCount](FMassExecutionContext &ChunkContext) {
+        const int32 NumEntities = ChunkContext.GetNumEntities();
+        const auto SignificanceView = ChunkContext.GetFragmentView<FMythicSignificanceFragment>();
+        for (int32 i = 0; i < NumEntities; ++i) {
+            if (SignificanceView[i].Tier >= EMythicSignificanceTier::Tier1_Reactive) {
+                ++CognitiveActorCount;
+            }
+        }
+    });
+
+    const int32 MaxCognitiveActors = Settings->MaxCognitiveActors;
+
     AllSignificanceQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext &ChunkContext) {
         if (PromotionBudget <= 0) {
             return;
@@ -164,23 +181,108 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
             // ─── Tier 0 → Tier 1 Promotion ───
             if (Sig.Tier == EMythicSignificanceTier::Tier0_Ambient
                 && Sig.Score >= (PromotionThreshold + Hysteresis)) {
+
+                // Enforce hard cap on cognitive actors
+                if (CognitiveActorCount >= MaxCognitiveActors) {
+                    continue;
+                }
+
                 --PromotionBudget;
+                ++CognitiveActorCount;
 
                 // Promote: add hydration fragments via deferred commands
                 const FMassEntityHandle Entity = ChunkContext.GetEntity(i);
+                const FMythicIdentityFragment& Identity = ChunkContext.GetFragmentView<FMythicIdentityFragment>()[i];
+
+                // Check PersistentNPCRegistry — dead NPCs cannot be promoted
+                UMythicPersistentNPCRegistry* Registry = LWS->GetPersistentNPCRegistry();
+                if (Registry && Registry->IsPermaDead(Identity.NameHash)) {
+                    Sig.Score = 0.0f; // Suppress score
+                    continue; // Skip promotion, this NPC is dead forever
+                }
+
+
+
                 Context.Defer().AddTag<FMythicHydratedTag>(Entity);
                 Context.Defer().AddFragment<FMythicPsychodynamicFragment>(Entity);
                 Context.Defer().AddFragment<FMythicPersonalityFragment>(Entity);
                 Context.Defer().AddFragment<FMythicSocialFragment>(Entity);
 
-                Sig.Tier = EMythicSignificanceTier::Tier1_Reactive;
+                // ─── Generate personality from faction ideology ───
+                // Full NPC generation pipeline: NameHash + faction ideology → personality
+                UMythicFactionDatabase* FactionDB = LWS->GetFactionDatabase();
+                if (FactionDB && Identity.Faction.IsValid()) {
+                    FMythicFactionData FData;
+                    if (FactionDB->GetFaction(Identity.Faction, FData)) {
+                        // Generate personality biased by faction ideology
+                        FMythicPersonalityFragment GenPersonality = FMythicNPCGenerator::GeneratePersonality(
+                            Identity.NameHash, FData.Ideology, Identity.RoleTag);
 
-                UE_LOG(LogMythLivingWorld, Log, TEXT("Significance: Promoted entity to Tier1_Reactive (score=%.2f)"), Sig.Score);
+                        // Apply via deferred command (fragment data is set after archetype change)
+                        Context.Defer().PushCommand<FMassDeferredChangeCompositionCommand>(
+                            [Entity, GenPersonality](FMassEntityManager& Manager) {
+                                if (Manager.IsEntityValid(Entity)) {
+                                    FMythicPersonalityFragment* Personality = Manager.GetFragmentDataPtr<FMythicPersonalityFragment>(Entity);
+                                    if (Personality) {
+                                        *Personality = GenPersonality;
+                                    }
+                                }
+                            });
+                    }
+                }
+
+                // ─── Leadership succession reporting ───
+                // Report this entity as a potential leader candidate for its faction.
+                // ReportLeaderCandidate only accepts if the score exceeds the current leader's.
+                if (FactionDB && Identity.Faction.IsValid()) {
+                    FactionDB->ReportLeaderCandidate(
+                        Identity.Faction,
+                        Entity.Index,
+                        Sig.Score);
+                }
+
+                // ─── Promotion to Tier 2 (Actor Spawn) ───
+                if (Sig.Score >= Settings->Tier2PromotionThreshold) {
+                    Sig.Tier = EMythicSignificanceTier::Tier2_Cognitive;
+                    
+                    // Trigger actual actor spawn here or in PopulationSpawnerProcessor
+                    Context.Defer().AddTag<FMythicActorSpawnRequestTag>(Entity);
+                    
+                    UE_LOG(LogMythLivingWorld, Log, TEXT("Significance: Promoted entity DIRECT to Tier2_Cognitive (score=%.2f, NameHash=%u)"),
+                           Sig.Score, Identity.NameHash);
+                } else {
+                    Sig.Tier = EMythicSignificanceTier::Tier1_Reactive;
+
+                    UE_LOG(LogMythLivingWorld, Log, TEXT("Significance: Promoted entity to Tier1_Reactive (score=%.2f, cognitive=%d/%d)"),
+                           Sig.Score, CognitiveActorCount, MaxCognitiveActors);
+                }
+            }
+            // ─── Tier 1 → Tier 2 Promotion ───
+            else if (Sig.Tier == EMythicSignificanceTier::Tier1_Reactive
+                     && Sig.Score >= Settings->Tier2PromotionThreshold) {
+                     
+                const FMythicIdentityFragment& Identity = ChunkContext.GetFragmentView<FMythicIdentityFragment>()[i];
+                 
+                // Check PersistentNPCRegistry — dead NPCs cannot be promoted
+                UMythicPersistentNPCRegistry* Registry = LWS->GetPersistentNPCRegistry();
+                if (Registry && Registry->IsPermaDead(Identity.NameHash)) {
+                    Sig.Score = 0.0f; // Suppress score
+                    continue; // Skip promotion, this NPC is dead forever
+                }
+
+                Sig.Tier = EMythicSignificanceTier::Tier2_Cognitive;
+                
+                const FMassEntityHandle Entity = ChunkContext.GetEntity(i);
+                Context.Defer().AddTag<FMythicActorSpawnRequestTag>(Entity);
+                
+                UE_LOG(LogMythLivingWorld, Log, TEXT("Significance: Promoted entity to Tier2_Cognitive (score=%.2f, NameHash=%u)"),
+                       Sig.Score, Identity.NameHash);
             }
             // ─── Tier 1 → Tier 0 Demotion ───
             else if (Sig.Tier == EMythicSignificanceTier::Tier1_Reactive
                 && Sig.Score <= (DemotionThreshold - Hysteresis)) {
                 --PromotionBudget;
+                --CognitiveActorCount;
 
                 // Demote: remove hydration fragments
                 const FMassEntityHandle Entity = ChunkContext.GetEntity(i);
@@ -192,7 +294,8 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
                 Sig.Tier = EMythicSignificanceTier::Tier0_Ambient;
                 Sig.RelevantEventCount = 0;
 
-                UE_LOG(LogMythLivingWorld, Log, TEXT("Significance: Demoted entity to Tier0_Ambient (score=%.2f)"), Sig.Score);
+                UE_LOG(LogMythLivingWorld, Log, TEXT("Significance: Demoted entity to Tier0_Ambient (score=%.2f, cognitive=%d/%d)"),
+                       Sig.Score, CognitiveActorCount, MaxCognitiveActors);
             }
             // Tier 2+ promotion/demotion deferred to Phase 5 (cognitive actors)
         }

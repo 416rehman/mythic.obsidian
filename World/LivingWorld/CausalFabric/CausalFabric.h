@@ -59,6 +59,16 @@ struct MYTHIC_API FMythicWorldEvent {
      * Processors can quickly mask-test against this instead of tag comparison.
      */
     uint16 CategoryFlags = 0;
+
+    /** The action category for specific ability/magic categorization */
+    EMythicActionCategory ActionCategory = EMythicActionCategory::Melee;
+
+    /**
+     * Visibility group of the perpetrator at the time of the event.
+     * Used by WitnessProcessor for byte-compare LOS checks.
+     * 0 = default (visible to all groups).
+     */
+    uint8 VisibilityGroup = 0;
 };
 
 // Category flag constants for fast bitfield filtering
@@ -97,9 +107,9 @@ struct FMythicCellEventRange {
  *
  * Threading model:
  * - Background thread (world sim) writes events via AppendEvent()
- * - Game thread reads via query functions (lock-free — reads from snapshot)
+ * - Game thread reads via query functions (protected by ReadLock)
  * - Double-buffered: background thread writes to the write buffer,
- *   then atomically swaps the read pointer on commit
+ *   then copies to read buffer during CommitWrites under WriteLock.
  *
  * Memory: Fixed capacity ring buffer. When full, oldest events are overwritten.
  * Old events past the configurable horizon are considered archived.
@@ -120,7 +130,7 @@ public:
     /** Commit pending writes — swaps the read snapshot so game thread sees new events. */
     void CommitWrites();
 
-    // ─── Read Interface (Game Thread — Lock-Free) ─────────
+    // ─── Read Interface (Game Thread — Thread-Safe via RWLock) ─────────
 
     /** Get an event by ID. Returns nullptr if the event has been overwritten (outside ring). */
     const FMythicWorldEvent *GetEvent(uint32 EventId) const;
@@ -156,6 +166,31 @@ public:
     /** Get the current buffer capacity */
     int32 GetCapacity() const { return Capacity; }
 
+    /** Thread-safe RW lock for reads/commits */
+    mutable FRWLock FabricLock;
+
+    /**
+     * Query events where PrimaryFaction matches the given faction.
+     * Scans the read buffer from newest to oldest.
+     * Used by TickCrystallization for cultural memory promotion.
+     *
+     * @param Faction       Faction to filter by
+     * @param OutEvents     Output array (cleared before use)
+     * @param MaxResults    Budget cap on results
+     */
+    void QueryEventsByFaction(
+        const FMythicFactionId& Faction,
+        TArray<FMythicWorldEvent>& OutEvents,
+        int32 MaxResults) const;
+
+    // ─── Serialization ───────────────────────────────────
+
+    /**
+     * Serialize the fabric's event ring buffer for save/load.
+     * Writes all valid events in the current buffer to the archive.
+     */
+    void Serialize(FArchive& Ar);
+
 private:
     /** Ring buffer capacity — set once at init, configurable via data asset */
     int32 Capacity = 0;
@@ -166,8 +201,14 @@ private:
     /** Write buffer — only touched by background thread */
     TArray<FMythicWorldEvent> WriteBuffer;
 
-    /** Read buffer — snapshot for game thread, swapped on CommitWrites */
+    /** Read buffer — snapshot for game thread, copied on CommitWrites under WriteLock */
     TArray<FMythicWorldEvent> ReadBuffer;
+
+    /** Spatial index for the write buffer (Cell -> Array of EventIds) */
+    TMap<FMythicCellCoord, TArray<uint32>> WriteSpatialIndex;
+
+    /** Spatial index for the read buffer */
+    TMap<FMythicCellCoord, TArray<uint32>> ReadSpatialIndex;
 
     /** Write head position in the ring buffer */
     int32 WriteHead = 0;

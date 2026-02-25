@@ -111,6 +111,47 @@ void UMythicSettlementRegistry::GetAllSettlementIds(TArray<int32> &OutIds) const
     Settlements.GetKeys(OutIds);
 }
 
+void UMythicSettlementRegistry::HandleNPCDeath(uint32 DeadEntityId, double DeathTime) {
+    if (DeadEntityId == 0) return;
+
+    for (auto& Pair : Settlements) {
+        FMythicSettlementData& Data = Pair.Value;
+        
+        for (FMythicShopSlot& Shop : Data.Shops) {
+            if (Shop.OwnerEntityId == DeadEntityId && !Shop.bPlayerOwned) {
+                // Vacate the shop
+                Shop.OwnerEntityId = 0;
+                Shop.VacatedTime = DeathTime;
+                
+                UE_LOG(LogMythSettlement, Log, TEXT("Shop '%s' in '%s' vacated due to NPC %u death."),
+                       *Shop.ShopName, *Data.DisplayName.ToString(), DeadEntityId);
+            }
+        }
+    }
+}
+
+void UMythicSettlementRegistry::TickShopSuccession(double CurrentWorldTime, double SuccessionDelay) {
+    for (auto& Pair : Settlements) {
+        FMythicSettlementData& Data = Pair.Value;
+        
+        for (FMythicShopSlot& Shop : Data.Shops) {
+            // Check if shop is vacant, not player-owned, and succession timer has elapsed
+            if (Shop.OwnerEntityId == 0 && !Shop.bPlayerOwned && Shop.VacatedTime > 0.0) {
+                if (CurrentWorldTime - Shop.VacatedTime >= SuccessionDelay) {
+                    
+                    // The actual generation of a new NPC is handled by the population spawner,
+                    // but we clear the vacated time to signal it's ready for a new owner to claim.
+                    // When a new NPC with matching role tag spawns in this cell, they claim the slot.
+                    Shop.VacatedTime = 0.0;
+                    
+                    UE_LOG(LogMythSettlement, Log, TEXT("Shop '%s' in '%s' ready for succession (delay %.1fs elapsed)."),
+                           *Shop.ShopName, *Data.DisplayName.ToString(), SuccessionDelay);
+                }
+            }
+        }
+    }
+}
+
 void UMythicSettlementRegistry::TransferSettlement(
     int32 SettlementId,
     FMythicFactionId NewFaction,

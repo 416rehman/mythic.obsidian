@@ -34,4 +34,8 @@ struct FSerializedWorldData {
 
     UPROPERTY(BlueprintReadWrite)
     TArray<FSerializedDestructibleData> DestroyedResources;
+
+    // Living World system state (serialized blob from all LW subsystems)
+    UPROPERTY()
+    TArray<uint8> LivingWorldBlob;
 };

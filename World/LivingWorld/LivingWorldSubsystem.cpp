@@ -8,8 +8,13 @@
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "World/LivingWorld/Settlements/SettlementRegistry.h"
 #include "World/LivingWorld/Simulation/WorldSimThread.h"
+#include "World/LivingWorld/Social/SocialGraph.h"
+#include "World/LivingWorld/Simulation/SchemeEngine.h"
+#include "World/LivingWorld/Persistence/PersistentNPCRegistry.h"
 #include "Settings/MythicDeveloperSettings.h"
-#include "Engine/AssetManager.h"
+#include "AI/Party/PartySubsystem.h"
+#include "World/LivingWorld/LivingWorldReplication.h"
+#include "Async/Async.h"
 
 bool UMythicLivingWorldSubsystem::ShouldCreateSubsystem(UObject *Outer) const {
     return true;
@@ -44,9 +49,16 @@ void UMythicLivingWorldSubsystem::Deinitialize() {
     FactionDB = nullptr;
     TerritoryGrid = nullptr;
     SettlementRegistry = nullptr;
+    SocialGraph = nullptr;
+    SchemeEngine = nullptr;
     FactionConfig = nullptr;
     TerritoryConfig = nullptr;
     Settings = nullptr;
+
+    if (IsValid(Replicator)) {
+        Replicator->Destroy();
+    }
+    Replicator = nullptr;
 
     Super::Deinitialize();
 }
@@ -155,12 +167,50 @@ void UMythicLivingWorldSubsystem::InitializeSharedData() {
 
     // Create Settlement Registry
     SettlementRegistry = NewObject<UMythicSettlementRegistry>(this);
+
+    // Create Persistent NPC Registry
+    PersistentNPCRegistry = NewObject<UMythicPersistentNPCRegistry>(this);
+
+    // Create Social Graph (Phase 5)
+    SocialGraph = NewObject<UMythicSocialGraph>(this);
+    SocialGraph->Initialize(
+        Settings->SocialMaxEdgesPerEntity,
+        Settings->SocialPruneStrengthThreshold,
+        Settings->SocialEdgeDecayRate);
+
+    // Create Scheme Engine (Phase 5)
+    SchemeEngine = NewObject<UMythicSchemeEngine>(this);
+    SchemeEngine->Initialize(FactionDB, CausalFabric, TerritoryGrid, Settings);
+
+    // Spawn Networking Replicator (Server Only)
+    if (UWorld* World = GetWorld()) {
+        if (World->GetNetMode() != NM_Client) {
+            FActorSpawnParameters SpawnParams;
+            SpawnParams.Name = FName("MythicLivingWorldReplicator");
+            Replicator = World->SpawnActor<AMythicLivingWorldReplicator>(SpawnParams);
+        }
+    }
 }
 
 void UMythicLivingWorldSubsystem::StartSimulation() {
     SimThread = MakeUnique<FMythicWorldSimThread>();
-    SimThread->Setup(CausalFabric, FactionDB, TerritoryGrid, Settings, Settings->SimTickIntervalSeconds, &SimulationLock);
+    SimThread->Setup(CausalFabric, FactionDB, TerritoryGrid, SettlementRegistry, Settings, Settings->SimTickIntervalSeconds, &SimulationLock, SchemeEngine, &PendingEvents, &PendingEventsMutex);
+    SimThread->OnWorldSimCommitted.AddUObject(this, &UMythicLivingWorldSubsystem::OnSimCommitted);
     SimThread->StartThread();
+}
+
+void UMythicLivingWorldSubsystem::OnSimCommitted() {
+    if (Replicator) {
+        // Dispatch to the game thread to safely sync proxies
+        TWeakObjectPtr<UMythicLivingWorldSubsystem> WeakThis(this);
+        AsyncTask(ENamedThreads::GameThread, [WeakThis]() {
+            if (UMythicLivingWorldSubsystem* StrongThis = WeakThis.Get()) {
+                if (StrongThis->Replicator) {
+                    StrongThis->Replicator->SyncProxies(StrongThis);
+                }
+            }
+        });
+    }
 }
 
 void UMythicLivingWorldSubsystem::StopSimulation() {
@@ -187,3 +237,95 @@ void UMythicLivingWorldSubsystem::SeedTerritoryFromSettlements() {
 
     UE_LOG(LogMythLivingWorld, Log, TEXT("Territory seeding complete."));
 }
+
+void UMythicLivingWorldSubsystem::SaveLivingWorld(FArchive& Ar) {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MythicLivingWorld_Save);
+
+    // Master version header for the entire Living World save format
+    int32 MasterVersion = 1;
+    Ar << MasterVersion;
+
+    // Pause the simulation thread to get a consistent snapshot
+    // SimulationLock prevents the background thread from writing during serialization
+    FScopeLock Lock(&SimulationLock);
+
+    UE_LOG(LogMythLivingWorld, Log, TEXT("Saving Living World state..."));
+
+    // Serialize all systems in deterministic order
+    if (CausalFabric) {
+        CausalFabric->Serialize(Ar);
+    }
+
+    if (FactionDB) {
+        FactionDB->Serialize(Ar);
+    }
+
+    if (TerritoryGrid) {
+        TerritoryGrid->Serialize(Ar);
+    }
+
+    if (SchemeEngine) {
+        SchemeEngine->Serialize(Ar);
+    }
+
+    if (PersistentNPCRegistry) {
+        PersistentNPCRegistry->Serialize(Ar);
+    }
+
+    // PartySubsystem is a WorldSubsystem, not owned by us.
+    // Access it through the current world context.
+    if (UWorld* World = GetGameInstance()->GetWorld()) {
+        if (UMythicPartySubsystem* Party = World->GetSubsystem<UMythicPartySubsystem>()) {
+            Party->Serialize(Ar);
+        }
+    }
+
+    UE_LOG(LogMythLivingWorld, Log, TEXT("Living World state saved successfully."));
+}
+
+void UMythicLivingWorldSubsystem::LoadLivingWorld(FArchive& Ar) {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MythicLivingWorld_Load);
+
+    int32 MasterVersion = 0;
+    Ar << MasterVersion;
+
+    if (MasterVersion != 1) {
+        UE_LOG(LogMythLivingWorld, Error, TEXT("Unsupported Living World save version: %d"), MasterVersion);
+        return;
+    }
+
+    // Pause the simulation thread during deserialization
+    FScopeLock Lock(&SimulationLock);
+
+    UE_LOG(LogMythLivingWorld, Log, TEXT("Loading Living World state..."));
+
+    // Deserialize in the same order as save
+    if (CausalFabric) {
+        CausalFabric->Serialize(Ar);
+    }
+
+    if (FactionDB) {
+        FactionDB->Serialize(Ar);
+    }
+
+    if (TerritoryGrid) {
+        TerritoryGrid->Serialize(Ar);
+    }
+
+    if (SchemeEngine) {
+        SchemeEngine->Serialize(Ar);
+    }
+
+    if (PersistentNPCRegistry) {
+        PersistentNPCRegistry->Serialize(Ar);
+    }
+
+    if (UWorld* World = GetGameInstance()->GetWorld()) {
+        if (UMythicPartySubsystem* Party = World->GetSubsystem<UMythicPartySubsystem>()) {
+            Party->Serialize(Ar);
+        }
+    }
+
+    UE_LOG(LogMythLivingWorld, Log, TEXT("Living World state loaded successfully."));
+}
+

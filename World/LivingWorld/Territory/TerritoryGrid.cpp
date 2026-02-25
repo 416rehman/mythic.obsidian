@@ -17,6 +17,10 @@ void UMythicTerritoryGrid::Initialize(const UMythicTerritoryGridSettings *Settin
     ReadBuffer.SetNum(TotalCells);
     DirtyCells.Init(false, TotalCells);
 
+    // 256 max factions per FMythicFactionId (uint8 index)
+    WriteFactionCells.SetNum(256);
+    ReadFactionCells.SetNum(256);
+
     UE_LOG(LogMythTerritory, Log, TEXT("Territory Grid initialized: %dx%d (%d cells), cell size %.0fcm"),
            Width, Height, TotalCells, CellWorldSize);
 }
@@ -181,8 +185,22 @@ void UMythicTerritoryGrid::PropagateInfluence() {
 }
 
 void UMythicTerritoryGrid::CommitWrites() {
+    // Rebuild the cached faction cells list for O(1) queries
+    for (int32 i = 0; i < 256; ++i) {
+        WriteFactionCells[i].Reset();
+    }
+    
+    const int32 TotalCells = Width * Height;
+    for (int32 i = 0; i < TotalCells; ++i) {
+        const FMythicFactionId Faction = WriteBuffer[i].DominantFaction;
+        if (Faction.IsValid()) {
+            WriteFactionCells[Faction.Index].Add(FMythicCellCoord(i % Width, i / Width));
+        }
+    }
+
     FScopeLock Lock(&SnapshotLock);
     FMemory::Memcpy(ReadBuffer.GetData(), WriteBuffer.GetData(), WriteBuffer.Num() * sizeof(FMythicTerritoryCell));
+    ReadFactionCells = WriteFactionCells;
     // DirtyCells preserved until GetChangedCells is called
 }
 
@@ -225,14 +243,17 @@ bool UMythicTerritoryGrid::IsValidCoord(const FMythicCellCoord &Coord) const {
 
 void UMythicTerritoryGrid::GetFactionCells(FMythicFactionId Faction, int32 MaxResults, TArray<FMythicCellCoord> &OutCells) const {
     OutCells.Reset();
+    if (!Faction.IsValid()) {
+        return;
+    }
+
     FScopeLock Lock(&SnapshotLock);
-    for (int32 i = 0; i < ReadBuffer.Num() && OutCells.Num() < MaxResults; ++i) {
-        if (ReadBuffer[i].DominantFaction == Faction) {
-            OutCells.Add(FMythicCellCoord(
-                i % Width,
-                i / Width
-                ));
-        }
+    const TArray<FMythicCellCoord>& CachedCells = ReadFactionCells[Faction.Index];
+    
+    const int32 Count = FMath::Min(MaxResults, CachedCells.Num());
+    if (Count > 0) {
+        // Fast bulk copy to output
+        OutCells.Append(CachedCells.GetData(), Count);
     }
 }
 
@@ -246,3 +267,42 @@ void UMythicTerritoryGrid::GetChangedCells(TArray<FMythicCellCoord> &OutChangedC
             ));
     }
 }
+
+void UMythicTerritoryGrid::Serialize(FArchive& Ar) {
+    int32 Version = 1;
+    Ar << Version;
+
+    Ar << Width;
+    Ar << Height;
+    Ar << CellWorldSize;
+    Ar << WorldOrigin.X;
+    Ar << WorldOrigin.Y;
+    Ar << InfluenceBleedRate;
+    Ar << MinControlThreshold;
+
+    const int32 TotalCells = Width * Height;
+
+    if (Ar.IsLoading()) {
+        WriteBuffer.SetNum(TotalCells);
+        ReadBuffer.SetNum(TotalCells);
+        DirtyCells.Init(false, TotalCells);
+    }
+
+    for (int32 i = 0; i < TotalCells; ++i) {
+        FMythicTerritoryCell& Cell = WriteBuffer[i];
+        Ar << Cell.DominantFaction.Index;
+        Ar << Cell.Influence;
+
+        uint8 PlayerData = (Cell.bPlayerOwned ? 1 : 0) | (Cell.OwningPlayerIndex << 1);
+        Ar << PlayerData;
+        if (Ar.IsLoading()) {
+            Cell.bPlayerOwned = (PlayerData & 1) != 0;
+            Cell.OwningPlayerIndex = PlayerData >> 1;
+        }
+    }
+
+    if (Ar.IsLoading()) {
+        CommitWrites();
+    }
+}
+

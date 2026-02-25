@@ -11,6 +11,9 @@ class UMythicCausalFabric;
 class UMythicFactionDatabase;
 class UMythicTerritoryGrid;
 class UMythicLivingWorldSettings;
+class UMythicSchemeEngine;
+
+DECLARE_MULTICAST_DELEGATE(FOnWorldSimCommitted);
 
 /**
  * Dedicated background thread for world simulation.
@@ -33,6 +36,9 @@ public:
     FMythicWorldSimThread();
     virtual ~FMythicWorldSimThread() override;
 
+    /** Fired on the background thread immediately after CommitAllSnapshots finishes */
+    FOnWorldSimCommitted OnWorldSimCommitted;
+
     /**
      * Initialize the thread with references to the shared data systems.
      * These UObject pointers must remain valid for the lifetime of the thread.
@@ -41,9 +47,13 @@ public:
         UMythicCausalFabric *InFabric,
         UMythicFactionDatabase *InFactionDB,
         UMythicTerritoryGrid *InTerritoryGrid,
+        class UMythicSettlementRegistry *InSettlementRegistry,
         const UMythicLivingWorldSettings *InSettings,
         float InTickIntervalSeconds,
-        FCriticalSection* InSimulationLock
+        FCriticalSection* InSimulationLock,
+        UMythicSchemeEngine* InSchemeEngine = nullptr,
+        TArray<FMythicWorldEvent>* InPendingEvents = nullptr,
+        FCriticalSection* InPendingEventsMutex = nullptr
     );
 
     /** Start the background thread */
@@ -100,8 +110,12 @@ private:
     UMythicCausalFabric *Fabric = nullptr;
     UMythicFactionDatabase *FactionDB = nullptr;
     UMythicTerritoryGrid *TerritoryGrid = nullptr;
+    class UMythicSettlementRegistry *SettlementRegistry = nullptr;
     const UMythicLivingWorldSettings *Settings = nullptr;
     FCriticalSection* SimulationLock = nullptr;
+    UMythicSchemeEngine* SchemeEngine = nullptr;
+    TArray<FMythicWorldEvent>* PendingEvents = nullptr;
+    FCriticalSection* PendingEventsMutex = nullptr;
 
     /**
      * Pairwise trade volume accumulator for economic dependency.

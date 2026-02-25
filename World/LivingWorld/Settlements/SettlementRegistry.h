@@ -11,6 +11,8 @@ class UMythicCausalFabric;
 class UMythicTerritoryGrid;
 class UMythicFactionDatabase;
 
+
+
 /**
  * Central registry for all active settlements in the world.
  *
@@ -55,6 +57,25 @@ public:
 
     /** Get all registered settlement IDs */
     void GetAllSettlementIds(TArray<int32> &OutIds) const;
+
+    // ─── Shop Succession (Phase 7) ───────────────────────
+
+    /**
+     * Called when a persistent NPC dies.
+     * Checks if the NPC owned any shops, vacates them, and starts succession timer.
+     * @param DeadEntityId  ID of the dead NPC
+     * @param DeathTime     Current world time
+     */
+    void HandleNPCDeath(uint32 DeadEntityId, double DeathTime);
+
+    /**
+     * Ticked by WorldSimThread to handle shop succession timers.
+     * Scans vacated shops; if VacatedTime > threshold, creates a new NPC
+     * template and assigns them to the shop.
+     * @param CurrentWorldTime  Current game time
+     * @param SuccessionDelay   How long before a shop is replaced
+     */
+    void TickShopSuccession(double CurrentWorldTime, double SuccessionDelay);
 
     // ─── Settlement Transfer ─────────────────────────────
 

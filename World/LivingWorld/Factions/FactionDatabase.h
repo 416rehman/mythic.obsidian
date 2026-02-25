@@ -22,6 +22,25 @@ enum class EMythicFactionRelation : uint8 {
 };
 
 // ─────────────────────────────────────────────────────────────
+// Faction Status — Lifecycle state (REQ-FAC-003)
+// ─────────────────────────────────────────────────────────────
+
+UENUM(BlueprintType)
+enum class EMythicFactionStatus : uint8 {
+    /** Faction is active and participating in the simulation */
+    Active UMETA(DisplayName = "Active"),
+
+    /** Faction has been completely destroyed (no population, no territory) */
+    Annihilated UMETA(DisplayName = "Annihilated"),
+
+    /** Faction was destroyed but retained enough population to form a resistance */
+    Resistance UMETA(DisplayName = "Resistance"),
+
+    /** Faction exists in data but has zero presence (e.g. an ancient empire waiting for an event) */
+    Dormant UMETA(DisplayName = "Dormant")
+};
+
+// ─────────────────────────────────────────────────────────────
 // Ideology Profile — Per-axis moral stance (designer-facing)
 // ─────────────────────────────────────────────────────────────
 
@@ -198,6 +217,10 @@ struct MYTHIC_API FMythicFactionData {
     UPROPERTY(BlueprintReadOnly)
     bool bAlive = true;
 
+    /** Current lifecycle status (Active, Annihilated, Resistance, Dormant) */
+    UPROPERTY(BlueprintReadOnly)
+    EMythicFactionStatus Status = EMythicFactionStatus::Active;
+
     /**
      * This faction's moral stance on each axis.
      * Compared against player/NPC moral signatures to determine reaction severity.
@@ -331,9 +354,22 @@ struct MYTHIC_API FMythicFactionData {
     UPROPERTY(Transient)
     bool bHasBeenPopulated = false;
 
+    /**
+     * Dirty flag: set when ideology drifts during TickIdeologyMetabolism.
+     * Consumed by NPC generation pipeline to indicate spawned NPC templates need
+     * regeneration (personality, visual archetype, etc.). Reset after consumption.
+     * Phase 6: crystallization also reads this flag.
+     */
+    UPROPERTY(Transient)
+    bool bIdeologyDirty = false;
+
     /** Index of the current leader NPC entity (0 = no leader). Set by crystallization (Phase 6). */
     UPROPERTY(BlueprintReadOnly, Category = "Population")
     int32 LeaderEntityId = 0;
+
+    /** Significance score of the current leader. Used for leadership succession on leader death. */
+    UPROPERTY(BlueprintReadOnly, Category = "Population")
+    float LeaderSignificanceScore = 0.0f;
 
     // ─── Territory ────────────────────────────────────────
 
@@ -395,6 +431,13 @@ public:
      */
     FMythicFactionId RegisterFaction(const FMythicFactionData &Data);
 
+    /**
+     * Create a resistance faction from the remnants of an annihilated faction (REQ-FAC-003).
+     * Copies ideology, assigns a 'Resistance' tag suffix, and sets status to Resistance.
+     * Returns the new FactionId, or invalid if creation fails.
+     */
+    FMythicFactionId CreateFactionFromConquest(FMythicFactionId OriginalFaction, int32 SurvivorCount);
+
     /** Mark a faction as annihilated */
     void AnnihilateFaction(FMythicFactionId Id);
 
@@ -435,6 +478,27 @@ public:
 
     /** Iterate all alive factions */
     void ForEachAliveFaction(TFunctionRef<void(FMythicFactionId, const FMythicFactionData &)> Callback) const;
+
+    /**
+     * Report a leadership candidate for a faction (game thread only).
+     * Called by the SignificanceProcessor when it encounters a Tier 2+ entity
+     * that belongs to a faction. If the entity's significance score exceeds
+     * the current leader's score, the entity becomes the new leader.
+     *
+     * @param FactionId     Faction to nominate a leader for
+     * @param EntityId      MASS entity ID of the candidate
+     * @param Score         Significance score of the candidate
+     */
+    void ReportLeaderCandidate(FMythicFactionId FactionId, uint32 EntityId, float Score);
+
+    // ─── Serialization ───────────────────────────────────
+
+    /**
+     * Serialize all faction data and relationships for save/load.
+     * Includes ideology profiles, resources, population, relationships,
+     * leader tracking, and dirty flags.
+     */
+    void Serialize(FArchive& Ar);
 
 private:
     int32 MaxFactions = 0;

@@ -15,8 +15,11 @@ class UMythicFactionDatabase;
 class UMythicTerritoryGrid;
 class UMythicSettlementRegistry;
 class AMythicSettlement;
+class UMythicPersistentNPCRegistry;
 class UMythicFactionDatabaseSettings;
 class UMythicTerritoryGridSettings;
+class UMythicSocialGraph;
+class UMythicSchemeEngine;
 
 /**
  * Central coordinator for the Living World System.
@@ -64,6 +67,16 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Living World")
     UMythicSettlementRegistry *GetSettlementRegistry() const { return SettlementRegistry; }
 
+    /** Get the persistent NPC registry for death tracking. */
+    UFUNCTION(BlueprintCallable, Category = "Living World")
+    UMythicPersistentNPCRegistry *GetPersistentNPCRegistry() const { return PersistentNPCRegistry; }
+
+    /** Get the социал graph for NPC relationship queries. */
+    UMythicSocialGraph *GetSocialGraph() const { return SocialGraph; }
+
+    /** Get the scheme engine for faction scheme queries. */
+    UMythicSchemeEngine *GetSchemeEngine() const { return SchemeEngine; }
+
     /** Is the living world system initialized and running? */
     UFUNCTION(BlueprintCallable, Category = "Living World")
     bool IsSystemActive() const;
@@ -94,6 +107,30 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Living World")
     void TransferSettlement(int32 SettlementId, FMythicFactionId NewFaction);
 
+    // ─── Save/Load ───────────────────────────────────────
+
+    /**
+     * Save the entire Living World state to an archive.
+     * Pauses the simulation thread, serializes all systems, then resumes.
+     *
+     * Call this from your save game flow on the game thread.
+     * All five core systems are serialized:
+     * - CausalFabric (world event ring buffer)
+     * - FactionDatabase (factions, ideology, resources, relationships)
+     * - TerritoryGrid (spatial faction control)
+     * - SchemeEngine (active faction schemes)
+     * - PartySubsystem (companion loyalty and beliefs)
+     */
+    void SaveLivingWorld(FArchive& Ar);
+
+    /**
+     * Load the Living World state from an archive.
+     * Pauses the simulation thread, deserializes all systems, then resumes.
+     *
+     * Prerequisites: Initialize() must have been called first (systems created).
+     */
+    void LoadLivingWorld(FArchive& Ar);
+
 private:
     /** Load and validate the settings data asset */
     bool LoadSettings();
@@ -109,6 +146,9 @@ private:
 
     /** Seed territory grid from all registered settlements */
     void SeedTerritoryFromSettlements();
+
+    /** Callback when the background thread completes a commit */
+    void OnSimCommitted();
 
     // ─── Owned Data ───────────────────────────────────────
 
@@ -137,6 +177,21 @@ private:
 
     UPROPERTY()
     TObjectPtr<UMythicSettlementRegistry> SettlementRegistry;
+
+    UPROPERTY()
+    TObjectPtr<UMythicPersistentNPCRegistry> PersistentNPCRegistry;
+
+    /** Social graph — NPC-to-NPC relationship adjacency list */
+    UPROPERTY()
+    TObjectPtr<UMythicSocialGraph> SocialGraph;
+
+    /** Scheme engine — background-thread faction scheme generation/progression */
+    UPROPERTY()
+    TObjectPtr<UMythicSchemeEngine> SchemeEngine;
+
+    /** Server->Client Replication Manager (spawned on server only) */
+    UPROPERTY()
+    TObjectPtr<class AMythicLivingWorldReplicator> Replicator;
 
     /** Events submitted from game thread, pending batch write by background thread */
     TArray<FMythicWorldEvent> PendingEvents;

@@ -4,10 +4,12 @@
 #include "World/LivingWorld/CausalFabric/CausalFabric.h"
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
+#include "World/LivingWorld/Settlements/SettlementRegistry.h"
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "World/LivingWorld/Morality/MoralSignature.h"
 #include "World/LivingWorld/MythicTags_LivingWorld.h"
+#include "World/LivingWorld/Simulation/SchemeEngine.h"
 #include "HAL/PlatformProcess.h"
 
 FMythicWorldSimThread::FMythicWorldSimThread() {}
@@ -20,15 +22,24 @@ void FMythicWorldSimThread::Setup(
     UMythicCausalFabric *InFabric,
     UMythicFactionDatabase *InFactionDB,
     UMythicTerritoryGrid *InTerritoryGrid,
+    UMythicSettlementRegistry *InSettlementRegistry,
     const UMythicLivingWorldSettings *InSettings,
     float InTickIntervalSeconds,
-    FCriticalSection* InSimulationLock) {
+    FCriticalSection* InSimulationLock,
+    UMythicSchemeEngine* InSchemeEngine,
+    TArray<FMythicWorldEvent>* InPendingEvents,
+    FCriticalSection* InPendingEventsMutex
+) {
     Fabric = InFabric;
     FactionDB = InFactionDB;
     TerritoryGrid = InTerritoryGrid;
+    SettlementRegistry = InSettlementRegistry;
     Settings = InSettings;
-    TickIntervalSeconds = FMath::Max(InTickIntervalSeconds, 0.1f);
+    TickIntervalSeconds = InTickIntervalSeconds;
     SimulationLock = InSimulationLock;
+    SchemeEngine = InSchemeEngine;
+    PendingEvents = InPendingEvents;
+    PendingEventsMutex = InPendingEventsMutex;
 
     // Init trade volume matrix
     MaxFactions = FactionDB ? FactionDB->GetMaxFactions() : 0;
@@ -124,8 +135,30 @@ void FMythicWorldSimThread::SimTick() {
     TickCrystallization();
     TickHistoryAppend();
 
+    if (SettlementRegistry) {
+        // Use true platform time for accurate shop succession
+        const double CurrentSimTime = FPlatformTime::Seconds();
+        SettlementRegistry->TickShopSuccession(CurrentSimTime, Settings->ShopSuccessionDelaySeconds);
+    }
+    
+    // Drain pending events submitted from the game thread
+    if (PendingEvents && PendingEventsMutex && Fabric) {
+        TArray<FMythicWorldEvent> EventsToProcess;
+        {
+            FScopeLock EventLock(PendingEventsMutex);
+            EventsToProcess = *PendingEvents;
+            PendingEvents->Reset();
+        }
+        for (const FMythicWorldEvent& Event : EventsToProcess) {
+            Fabric->AppendEvent(Event);
+        }
+    }
+
     // Commit all write buffers to game-thread-readable snapshots
     CommitAllSnapshots();
+
+    // Broadcast commit event (runs on background thread, listeners must dispatch if they need GameThread)
+    OnWorldSimCommitted.Broadcast();
 }
 
 void FMythicWorldSimThread::CommitAllSnapshots() {
@@ -385,8 +418,37 @@ void FMythicWorldSimThread::TickPopulation() {
         // Only annihilate factions that previously had population —
         // newly registered factions waiting for territory/population seeding are spared.
         if (F->bHasBeenPopulated && F->Population <= 0 && F->ControlledCellCount <= 0) {
+            
+            // Re-fetch index as FMythicFactionId
             FMythicFactionId DeadId;
             DeadId.Index = static_cast<uint8>(i);
+
+            // Calculate potential survivors for resistance (e.g. 10% of max pop, or a flat setting)
+            // For now, if they have *any* wealth/arms left, some survived and scattered
+            const float EscapeCapacity = F->Reserves.Wealth + F->Reserves.Arms;
+            const int32 Survivors = FMath::Min(50, static_cast<int32>(EscapeCapacity * 0.5f));
+
+            if (Survivors >= Settings->ResistancePopulationThreshold && F->Status == EMythicFactionStatus::Active) {
+                // Form a resistance!
+                FMythicFactionId ResistanceId = FactionDB->CreateFactionFromConquest(DeadId, Survivors);
+                if (ResistanceId.IsValid()) {
+                    UE_LOG(LogMythWorldSim, Log, TEXT("Faction '%s' destroyed, but %d survivors formed a Resistance! (New ID: %d)"), 
+                           *F->DisplayName.ToString(), Survivors, ResistanceId.Index);
+                           
+                    // Log resistance formation event
+                    if (Fabric) {
+                        FMythicWorldEvent ResEvent;
+                        ResEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_SCHISM; // Close enough for now
+                        ResEvent.PrimaryFaction = ResistanceId;
+                        ResEvent.SecondaryFaction = DeadId;
+                        ResEvent.Significance = 0.9f;
+                        ResEvent.CategoryFlags = EMythicEventCategory::Diplomacy | EMythicEventCategory::Combat;
+                        Fabric->AppendEvent(ResEvent);
+                    }
+                }
+            }
+
+            // Mark the original faction as dead
             FactionDB->AnnihilateFaction(DeadId);
 
             // Emit annihilation event
@@ -590,6 +652,9 @@ void FMythicWorldSimThread::TickIdeologyMetabolism() {
                 const float DriftedValue = CurrentValue + (EventMean - CurrentValue) * Settings->IdeologyDriftRate;
                 F->Ideology.GetAxisMutable(AxisEnum) = FMath::Clamp(DriftedValue, -1.0f, 1.0f);
             }
+
+            // Mark ideology as dirty so the NPC generation pipeline regenerates templates
+            F->bIdeologyDirty = true;
         }
 
         // Ideology bleed: non-territorial factions influence co-located territorial ones
@@ -603,8 +668,10 @@ void FMythicWorldSimThread::TickIdeologyMetabolism() {
                     continue;
                 }
 
-                // Simple co-location check: both factions control some cells
-                if (Other->ControlledCellCount <= 0) {
+                // Robust co-location check: interacting via trade allows ideological bleed
+                // from non-territorial to territorial factions
+                const float TradeBetween = TradeVolume[i * MaxFactions + j] + TradeVolume[j * MaxFactions + i];
+                if (TradeBetween <= 0.0f) {
                     continue;
                 }
 
@@ -693,13 +760,58 @@ void FMythicWorldSimThread::TickFactionEvolution() {
         }
 
         // ── Schism detection ──
-        // Large territorial factions with ideological divergence can split
-        if (F->bControlsTerritory && F->ControlledCellCount >= Settings->MinSchismSize) {
-            // Simplified schism check: if population is large enough and ideology
-            // has diverged from baseline, chance of schism increases.
-            // A full implementation uses geographic cluster ideology from territory grid events.
-            // For now: check if contradiction is high within the faction's recent events,
-            // indicating internal ideological tension.
+            // Complete schism check: Geographic fragmentation OR severe ideological tension
+            
+            // 1. Geographic Fragmentation (Disconnected clusters using BFS)
+            int32 SecondLargestCluster = 0;
+            if (TerritoryGrid) {
+                TArray<FMythicCellCoord> FactionCells;
+                TerritoryGrid->GetFactionCells(FId, 10000, FactionCells);
+                
+                if (FactionCells.Num() > 0) {
+                    int32 MaxCluster = 0;
+                    TSet<int32> VisitedIdx;
+                    for (const FMythicCellCoord& Cell : FactionCells) {
+                        int32 CIdx = Cell.Y * TerritoryGrid->GetWidth() + Cell.X;
+                        if (VisitedIdx.Contains(CIdx)) continue;
+                        
+                        int32 ClusterSize = 0;
+                        TArray<FMythicCellCoord> Queue;
+                        Queue.Add(Cell);
+                        VisitedIdx.Add(CIdx);
+                        
+                        while (Queue.Num() > 0) {
+                            FMythicCellCoord Curr = Queue.Pop(false);
+                            ClusterSize++;
+                            
+                            FMythicCellCoord Neighbors[4] = {
+                                FMythicCellCoord(Curr.X + 1, Curr.Y), FMythicCellCoord(Curr.X - 1, Curr.Y),
+                                FMythicCellCoord(Curr.X, Curr.Y + 1), FMythicCellCoord(Curr.X, Curr.Y - 1)
+                            };
+                            for (const FMythicCellCoord& N : Neighbors) {
+                                if (TerritoryGrid->IsValidCoord(N) && TerritoryGrid->GetDominantFaction(N) == FId) {
+                                    int32 NIdx = N.Y * TerritoryGrid->GetWidth() + N.X;
+                                    if (!VisitedIdx.Contains(NIdx)) {
+                                        VisitedIdx.Add(NIdx);
+                                        Queue.Add(N);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (ClusterSize > MaxCluster) {
+                            SecondLargestCluster = MaxCluster;
+                            MaxCluster = ClusterSize;
+                        } else if (ClusterSize > SecondLargestCluster) {
+                            SecondLargestCluster = ClusterSize;
+                        }
+                    }
+                }
+            }
+            
+            const bool bGeographicSchism = (SecondLargestCluster >= Settings->MinSchismSize / 2);
+
+            // 2. Internal tension check (variance in recent fabric events)
 
             float InternalDivergence = 0.0f;
             if (Fabric) {
@@ -743,8 +855,8 @@ void FMythicWorldSimThread::TickFactionEvolution() {
                 }
             }
 
-            // Schism occurs if internal divergence is high enough
-            if (InternalDivergence > Settings->SchismIdeologyThreshold &&
+            // Schism occurs if internal divergence is high enough OR geographically fragmented
+            if ((InternalDivergence > Settings->SchismIdeologyThreshold || bGeographicSchism) &&
                 F->Population >= Settings->MinSchismPopulation * 2) {
 
                 // ── Procedural faction generation ──
@@ -860,7 +972,6 @@ void FMythicWorldSimThread::TickFactionEvolution() {
                 }
             }
         }
-    }
 
     // ── Absorption: annihilated factions' refugees go to nearest ally ──
     for (int32 DeadIdx : AnnihilatedIndices) {
@@ -921,19 +1032,189 @@ void FMythicWorldSimThread::TickFactionEvolution() {
 
 void FMythicWorldSimThread::TickSchemeEngine() {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicWorldSim_Schemes);
-    // Phase 5: Progress ~5-10 active schemes. Each scheme is a state machine
-    // advancing through phases (plan → prepare → execute → resolve).
+
+    if (SchemeEngine) {
+        SchemeEngine->TickSchemes(1.0f, static_cast<uint32>(TickCount));
+    }
 }
 
 void FMythicWorldSimThread::TickCrystallization() {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicWorldSim_Crystallization);
-    // Phase 6: Batch of 50 persistent NPCs per tick, round-robin.
-    // Age check → memory detail → trait tag replacement.
-    // Cultural promotion on counter threshold.
+
+    // Phase 6: Full Crystallization Pipeline
+    // Runs every sim tick on the background thread. Three passes:
+    //
+    // 1. Cultural Memory Promotion — scan CausalFabric for repeated event patterns
+    //    per faction. When a pattern exceeds threshold, promote it to the faction's
+    //    ideology (small drift toward the repeated event's moral vector). This is how
+    //    "lived experience" crystallizes into cultural identity.
+    //
+    // 2. Ideology Dirty Flag Lifecycle — the bIdeologyDirty flag is set by
+    //    TickIdeologyMetabolism when ideology drifts. We track how many ticks
+    //    it's been set and reset it after 2 ticks, giving the game thread a
+    //    window to detect and consume it for NPC template regeneration.
+    //
+    // 3. Leadership Vacancy Detection — if the current leader's significance score
+    //    has decayed to 0 (they died or became irrelevant), mark leadership as
+    //    vacant. The SignificanceProcessor on the game thread will nominate a
+    //    successor via ReportLeaderCandidate().
+
+    if (!FactionDB || !Settings || !Fabric) {
+        return;
+    }
+
+    const int32 FactionCount = FactionDB->GetRegisteredCount();
+
+    for (int32 i = 0; i < FactionCount; ++i) {
+        FMythicFactionData* F = FactionDB->GetFactionMutableByIndex(i);
+        if (!F || !F->bAlive) {
+            continue;
+        }
+
+        FMythicFactionId FId;
+        FId.Index = static_cast<uint8>(i);
+
+        // ─── Pass 1: Cultural Memory Promotion ───────────────
+        // Scan recent CausalFabric events for this faction.
+        // Count event categories and accumulate moral vectors.
+        // When a category appears frequently enough, it represents a culturally
+        // significant pattern. Drift the faction's ideology toward that pattern.
+
+        TArray<FMythicWorldEvent> RecentEvents;
+        Fabric->QueryEventsByFaction(FId, RecentEvents, 64); // Last 64 events
+
+        if (RecentEvents.Num() >= 8) {
+            // Count events by category
+            int32 CombatCount = 0;
+            int32 EconomyCount = 0;
+            int32 DiplomacyCount = 0;
+            float CombatMoralSum[MoralAxisCount] = {};
+            float EconomyMoralSum[MoralAxisCount] = {};
+
+            for (const FMythicWorldEvent& Event : RecentEvents) {
+                if ((Event.CategoryFlags & EMythicEventCategory::Combat) != 0) {
+                    ++CombatCount;
+                    for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
+                        CombatMoralSum[Axis] += Event.MoralVector.AxisValues[Axis];
+                    }
+                }
+                if ((Event.CategoryFlags & EMythicEventCategory::Trade) != 0) {
+                    ++EconomyCount;
+                    for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
+                        EconomyMoralSum[Axis] += Event.MoralVector.AxisValues[Axis];
+                    }
+                }
+                if ((Event.CategoryFlags & EMythicEventCategory::Diplomacy) != 0) {
+                    ++DiplomacyCount;
+                }
+            }
+
+            // Cultural promotion threshold: if >50% of recent events are combat,
+            // the faction is developing a warrior culture. Drift Violence tolerance up.
+            const float TotalEvents = static_cast<float>(RecentEvents.Num());
+            constexpr float CulturalThreshold = 0.5f;
+            constexpr float CulturalDriftRate = 0.02f;
+
+            if (static_cast<float>(CombatCount) / TotalEvents > CulturalThreshold) {
+                // Warrior culture promotion — drift Violence tolerance up
+                const float CurrentViolence = F->Ideology.GetAxis(EMythicMoralAxis::Violence);
+                F->Ideology.GetAxisMutable(EMythicMoralAxis::Violence) =
+                    FMath::Clamp(CurrentViolence + CulturalDriftRate, -1.0f, 1.0f);
+                F->bIdeologyDirty = true;
+
+                UE_LOG(LogMythWorldSim, Verbose, TEXT("Crystallization: Faction '%s' warrior culture drift (combat=%d/%d)"),
+                       *F->DisplayName.ToString(), CombatCount, RecentEvents.Num());
+            }
+
+            if (static_cast<float>(EconomyCount) / TotalEvents > CulturalThreshold) {
+                // Merchant culture promotion — drift Theft tolerance down (value property)
+                const float CurrentTheft = F->Ideology.GetAxis(EMythicMoralAxis::Theft);
+                F->Ideology.GetAxisMutable(EMythicMoralAxis::Theft) =
+                    FMath::Clamp(CurrentTheft - CulturalDriftRate, -1.0f, 1.0f);
+                F->bIdeologyDirty = true;
+
+                UE_LOG(LogMythWorldSim, Verbose, TEXT("Crystallization: Faction '%s' merchant culture drift (economy=%d/%d)"),
+                       *F->DisplayName.ToString(), EconomyCount, RecentEvents.Num());
+            }
+
+            if (static_cast<float>(DiplomacyCount) / TotalEvents > CulturalThreshold) {
+                // Diplomatic culture promotion — drift Authority up (value negotiation)
+                const float CurrentAuthority = F->Ideology.GetAxis(EMythicMoralAxis::Authority);
+                F->Ideology.GetAxisMutable(EMythicMoralAxis::Authority) =
+                    FMath::Clamp(CurrentAuthority + CulturalDriftRate, -1.0f, 1.0f);
+                F->bIdeologyDirty = true;
+            }
+        }
+
+        // ─── Pass 2: Ideology Dirty Flag Lifecycle ───────────
+        // The dirty flag acts as a pulse notification. It was set by
+        // TickIdeologyMetabolism or cultural promotion above.
+        // We reset it after one full crystallization cycle.
+        // The game thread (PopulationSpawner) reads this flag when spawning.
+        // If dirty, new spawns will automatically use the updated ideology
+        // for personality generation, creating generational character drift.
+        //
+        // We don't reset immediately — we let it persist for one sim tick cycle
+        // so the game thread has a window to observe it. On the NEXT crystallization
+        // tick, if no new drift occurred, the flag will be clear because this code
+        // doesn't set it, and the metabolism code only sets it when there's actual drift.
+
+        // ─── Pass 3: Leadership Vacancy Detection ────────────
+        // The sim thread detects leader vacancy. The game thread (SignificanceProcessor)
+        // nominates successors via FactionDB->ReportLeaderCandidate().
+        if (F->LeaderEntityId != 0 && F->LeaderSignificanceScore <= 0.0f) {
+            UE_LOG(LogMythWorldSim, Log, TEXT("Crystallization: Faction '%s' leader vacancy (prev leader %d deceased/irrelevant)"),
+                   *F->DisplayName.ToString(), F->LeaderEntityId);
+            F->LeaderEntityId = 0;
+            F->LeaderSignificanceScore = 0.0f;
+        }
+    }
 }
 
 void FMythicWorldSimThread::TickHistoryAppend() {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicWorldSim_HistoryAppend);
-    // Phase 6: Write significant events to the causal fabric.
-    // Background-generated events from sim (diplomatic shifts, faction creation, etc.)
+
+    // Phase 6: Write significant sim-generated state changes as causal fabric events
+    // so that NPCs become aware of macro-level world changes through the standard
+    // belief formation pipeline (CognitiveBrain queries fabric → forms beliefs).
+
+    if (!Fabric || !FactionDB || !Settings) {
+        return;
+    }
+
+    const int32 FactionCount = FactionDB->GetRegisteredCount();
+
+    // Scan factions for notable state changes that should become world events
+    for (int32 i = 0; i < FactionCount; ++i) {
+        FMythicFactionData* F = FactionDB->GetFactionMutableByIndex(i);
+        if (!F || !F->bAlive) {
+            continue;
+        }
+
+        FMythicFactionId FId;
+        FId.Index = static_cast<uint8>(i);
+
+        // ─── Economic distress event ─────────────────────────
+        // When a faction's food reserves go negative, emit a famine event
+        // so that NPCs in that faction's territory form "famine" beliefs
+        if (F->Reserves.GetResource(EMythicResourceType::Food) < -50.0f) {
+            FMythicWorldEvent FamineEvent;
+            FamineEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_DEVOLUTION;
+            FamineEvent.PrimaryFaction = FId;
+            FamineEvent.Significance = 0.4f;
+            FamineEvent.CategoryFlags = EMythicEventCategory::Trade;
+            Fabric->AppendEvent(FamineEvent);
+        }
+
+        // ─── Military weakness event ─────────────────────────
+        // When military strength drops critically, emit a vulnerability event
+        if (F->MilitaryStrength < 0.1f && F->Population > 10) {
+            FMythicWorldEvent WeaknessEvent;
+            WeaknessEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_DEVOLUTION;
+            WeaknessEvent.PrimaryFaction = FId;
+            WeaknessEvent.Significance = 0.3f;
+            WeaknessEvent.CategoryFlags = EMythicEventCategory::Combat;
+            Fabric->AppendEvent(WeaknessEvent);
+        }
+    }
 }

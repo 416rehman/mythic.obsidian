@@ -198,4 +198,26 @@ public:
     // Example: LivingWorldForcePromote
     UFUNCTION(Exec)
     void MythLivingWorldForcePromote();
+
+    // === LIVING WORLD: PHASE 5 (Cognitive + Social) ===
+
+    // Show social graph stats (total entities, edges, average degree)
+    // Example: LivingWorldSocialGraph
+    UFUNCTION(Exec)
+    void MythLivingWorldSocialGraph();
+
+    // Show active schemes (all factions)
+    // Example: LivingWorldSchemes
+    UFUNCTION(Exec)
+    void MythLivingWorldSchemes();
+
+    // Show active encounters
+    // Example: LivingWorldEncounters
+    UFUNCTION(Exec)
+    void MythLivingWorldEncounters();
+
+    // Show party status for the local player
+    // Example: LivingWorldParty
+    UFUNCTION(Exec)
+    void MythLivingWorldParty();
 };

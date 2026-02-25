@@ -139,6 +139,11 @@ public:
      */
     void GetChangedCells(TArray<FMythicCellCoord> &OutChangedCells) const;
 
+    // ─── Serialization ───────────────────────────────────
+
+    /** Serialize the entire grid state for save/load. */
+    void Serialize(FArchive& Ar);
+
 private:
     int32 Width = 0;
     int32 Height = 0;
@@ -152,6 +157,12 @@ private:
 
     /** Read buffer — GameThread access (snapshot) */
     TArray<FMythicTerritoryCell> ReadBuffer;
+
+    /** Write buffer cache of cells owned by each faction (Index = FactionId) */
+    TArray<TArray<FMythicCellCoord>> WriteFactionCells;
+
+    /** Read buffer cache of cells owned by each faction */
+    TArray<TArray<FMythicCellCoord>> ReadFactionCells;
 
     /** Lock protecting ReadBuffer during CommitWrites */
     mutable FCriticalSection SnapshotLock;

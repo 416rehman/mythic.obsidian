@@ -76,6 +76,7 @@ void UMythicActionEventSubsystem::SubmitAction(const FMythicActionEvent &Action)
     WorldEvent.MoralVector = Action.MoralVector;
     WorldEvent.Significance = Action.Significance;
     WorldEvent.CategoryFlags = Action.CategoryFlags;
+    WorldEvent.ActionCategory = Action.ActionCategory;
 
     // Submit to causal fabric (buffered write — background thread commits later)
     LivingWorldSubsystem->SubmitWorldEvent(WorldEvent);

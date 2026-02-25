@@ -17,6 +17,39 @@ class UMythicTerritoryGrid;
 // ─────────────────────────────────────────────────────────────
 
 /**
+ * Tracks a persistent point-of-interest role within a settlement (e.g., Blacksmith, Innkeeper).
+ * When the NPC holding this role dies, the slot is vacated and a succession timer begins.
+ */
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicShopSlot {
+    GENERATED_BODY()
+
+    /** Name of the shop ("The Rusty Anvil") */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FString ShopName;
+
+    /** Role required to run this shop (e.g., "NPC.Role.Merchant.Blacksmith") */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FGameplayTag RequiredRole;
+
+    /** Entity ID of the current owner (0 = vacated) */
+    UPROPERTY(BlueprintReadOnly)
+    int32 OwnerEntityId = 0;
+
+    /** If vacant, when did the previous owner die? (World Time) */
+    UPROPERTY(BlueprintReadOnly)
+    double VacatedTime = 0.0;
+
+    /** Is this shop currently owned by a player? (Overrides NPC succession) */
+    UPROPERTY(BlueprintReadOnly)
+    bool bPlayerOwned = false;
+
+    /** Player index if bPlayerOwned is true */
+    UPROPERTY(BlueprintReadOnly)
+    uint8 OwningPlayerIndex = 0;
+};
+
+/**
  * Runtime data for a settlement. Populated from the settlement actor's
  * editor-configured properties + spline rasterization results.
  */
@@ -43,6 +76,18 @@ struct MYTHIC_API FMythicSettlementData {
     /** Gameplay tag for quest/script references (e.g., "Settlement.Avalon") */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settlement")
     FGameplayTag SettlementTag;
+
+    /** Level instance or sub-level name */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settlement")
+    FName LevelName;
+
+    /** Center cell coordinate */
+    UPROPERTY(BlueprintReadOnly, Category = "Settlement")
+    FMythicCellCoord CenterCell;
+
+    /** List of all persistent shops/roles in this settlement */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settlement")
+    TArray<FMythicShopSlot> Shops;
 
     /** If true, this settlement is the faction's capital — receives significance boost */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settlement")

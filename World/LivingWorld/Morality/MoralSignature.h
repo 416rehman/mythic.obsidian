@@ -52,6 +52,19 @@ struct MYTHIC_API FMythicMoralAxisStats {
     float GetVariance() const {
         return Count >= 2 ? M2 / static_cast<float>(Count) : 0.0f;
     }
+
+    bool NetSerialize(FArchive& Ar, class UPackageMap* Map, bool& bOutSuccess) {
+        Ar << Count;
+        Ar << Mean;
+        Ar << M2;
+        bOutSuccess = true;
+        return true;
+    }
+};
+
+template<>
+struct TStructOpsTypeTraits<FMythicMoralAxisStats> : public TStructOpsTypeTraitsBase2<FMythicMoralAxisStats> {
+    enum { WithNetSerializer = true };
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -188,4 +201,21 @@ struct MYTHIC_API FMythicMoralSignature {
         DominantAxis = 0;
         TotalActions = 0;
     }
+
+    bool NetSerialize(FArchive& Ar, class UPackageMap* Map, bool& bOutSuccess) {
+        for (int32 i = 0; i < MoralAxisCount; ++i) {
+            Axes[i].NetSerialize(Ar, Map, bOutSuccess);
+        }
+        Ar << ContradictionScore;
+        Ar << TrajectoryAngle;
+        Ar << DominantAxis;
+        Ar << TotalActions;
+        bOutSuccess = true;
+        return true;
+    }
+};
+
+template<>
+struct TStructOpsTypeTraits<FMythicMoralSignature> : public TStructOpsTypeTraitsBase2<FMythicMoralSignature> {
+    enum { WithNetSerializer = true };
 };

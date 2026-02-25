@@ -77,9 +77,13 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
         return;
     }
 
-    const int32 HearingRadius = Settings->WitnessHearingRadius;
+    // Apply perception multiplier — weather/night/stealth reduce effective hearing range
+    const float PerceptionMul = ActionSub->GetPerceptionMultiplier();
+    const int32 BaseHearingRadius = Settings->WitnessHearingRadius;
+    const int32 EffectiveHearingRadius = FMath::Max(1, FMath::RoundToInt32(BaseHearingRadius * PerceptionMul));
     int32 WitnessBudget = Settings->MaxWitnessEvalsPerFrame;
     TArray<FMythicWitnessResult> &WitnessResults = ActionSub->GetPendingWitnessResults();
+    FMythicCrimeReportQueue &CrimeQueue = ActionSub->GetCrimeReportQueue();
 
     // Process each pending event, budget-capped
     for (FMythicPendingActionEvent &PendingEvent : PendingEvents) {
@@ -89,6 +93,9 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
 
         const FMythicWorldEvent &Event = PendingEvent.WorldEvent;
         const FMythicCellCoord &EventCell = Event.Cell;
+
+        // Track per-event crime witness count for confidence scoring
+        uint8 EventCrimeWitnessCount = 0;
 
         // For each entity chunk, scan for witnesses near the event cell
         AllEntitiesQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext &ChunkContext) {
@@ -107,13 +114,17 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
                 const int32 CellDist = FMath::Abs(Identity.Cell.X - EventCell.X)
                     + FMath::Abs(Identity.Cell.Y - EventCell.Y);
 
-                if (CellDist > HearingRadius) {
-                    continue; // Out of hearing range
+                if (CellDist > EffectiveHearingRadius) {
+                    continue; // Out of hearing range (reduced by weather/night perception)
                 }
 
-                // Skip entities from the perpetrator's faction witnessing their own faction's sanctioned actions
-                // (guards don't report their own faction's law enforcement, etc.)
-                // Full same-faction logic deferred to Phase 5 with role-based responses
+                // ─── Visibility Group Check (REQ-CRM-002) ───
+                // Byte compare — O(1), no raycasts. Entities in different visibility
+                // groups cannot see each other. Group 0 = default (visible to all).
+                // Cover/stealth sets player to a non-zero group → byte compare fails → not witnessed.
+                if (Identity.VisibilityGroup != 0 && Identity.VisibilityGroup != Event.VisibilityGroup) {
+                    continue; // Line-of-sight blocked (different visibility groups)
+                }
 
                 --WitnessBudget;
                 ++PendingEvent.WitnessesProcessed;
@@ -128,8 +139,31 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
                     continue;
                 }
 
+                FMythicMoralAction EvaluatedVector = Event.MoralVector;
+
+                // Category-specific moral axis mapping (REQ-BEH-010)
+                // Inject additional moral dimensions based on the action type
+                switch (Event.ActionCategory) {
+                    case EMythicActionCategory::Magic_Damage:
+                        // Destructive magic is viewed through both Violence and Arcane lenses
+                        EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Arcane)] += 0.5f;
+                        break;
+                    case EMythicActionCategory::Magic_Healing:
+                        // Healing magic is Mercy + Arcane
+                        EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Arcane)] += 0.3f;
+                        EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Mercy)] += 0.5f;
+                        break;
+                    case EMythicActionCategory::Magic_Forbidden:
+                        // Forbidden magic directly impacts Sacrilege and Arcane
+                        EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Sanctity)] += 1.0f;
+                        EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Arcane)] += 0.8f;
+                        break;
+                    default:
+                        break;
+                }
+
                 const EMythicMoralSeverity Severity = FMythicMoralSignature::EvaluateActionSeverity(
-                    Event.MoralVector,
+                    EvaluatedVector,
                     FactionData.Ideology,
                     FactionData.DisapproveThreshold,
                     FactionData.CondemnThreshold,
@@ -156,6 +190,24 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
                 Result.EventCell = Event.Cell;
                 Result.PerpFaction = Event.PrimaryFaction;
                 WitnessResults.Add(Result);
+
+                // ─── Crime Record Generation (REQ-CRM-001, REQ-CRM-004) ───
+                // When severity >= Condemn, this action IS a crime for the witness's faction.
+                // Crime is defined by faction moral surface, not hardcoded categories.
+                // The record is fed into belief propagation for rate-limited reporting.
+                if (Severity >= EMythicMoralSeverity::Condemn) {
+                    ++EventCrimeWitnessCount;
+                    FMythicCrimeRecord Crime;
+                    Crime.PerpFaction = Event.PrimaryFaction;
+                    Crime.ViolatedFaction = Identity.Faction;
+                    Crime.Severity = Severity;
+                    Crime.ActionMoralVector = Event.MoralVector;
+                    Crime.Cell = EventCell;
+                    Crime.WorldTime = Event.WorldTime;
+                    Crime.DirectWitnessCount = EventCrimeWitnessCount;
+                    Crime.Confidence = 1.0f; // Direct witness = full confidence
+                    CrimeQueue.Enqueue(Crime);
+                }
 
                 UE_LOG(LogMythLivingWorld, Verbose, TEXT("Witness: Entity in cell %s saw event at %s — Severity=%d"),
                        *Identity.Cell.ToString(), *EventCell.ToString(), static_cast<int32>(Severity));

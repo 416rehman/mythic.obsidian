@@ -28,6 +28,13 @@
 #include "World/LivingWorld/Debugging/MythicLivingWorldDebugActor.h"
 #include "World/LivingWorld/Events/ActionEventSubsystem.h"
 #include "World/LivingWorld/Events/ActionEventTypes.h"
+#include "World/LivingWorld/Social/SocialGraph.h"
+#include "World/LivingWorld/Simulation/SchemeEngine.h"
+#include "World/LivingWorld/Simulation/SchemeTypes.h"
+#include "World/LivingWorld/Encounters/EncounterDirector.h"
+#include "World/LivingWorld/Encounters/EncounterTemplate.h"
+#include "AI/Party/PartySubsystem.h"
+#include "AI/Party/MythicPartyTypes.h"
 #include "MassExecutionContext.h"
 #include "MassCommandBuffer.h"
 
@@ -1186,4 +1193,150 @@ void UMythicCheatManager::MythLivingWorldForcePromote() {
     if (!bPromoted) {
         UE_LOG(Myth, Warning, TEXT(">>> No Tier 0 entities found near player to promote"));
     }
+}
+
+// ============================================================================
+// LIVING WORLD: PHASE 5 (Cognitive + Social)
+// ============================================================================
+
+void UMythicCheatManager::MythLivingWorldSocialGraph() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UMythicLivingWorldSubsystem *LW = PC->GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>();
+    if (!LW || !LW->GetSocialGraph()) {
+        UE_LOG(Myth, Error, TEXT(">>> Social Graph not available"));
+        return;
+    }
+
+    const UMythicSocialGraph *Graph = LW->GetSocialGraph();
+    const int32 TotalEdges = Graph->GetTotalEdgeCount();
+    const int32 EntityCount = Graph->GetEntityCount();
+
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("=== SOCIAL GRAPH ==="));
+    UE_LOG(Myth, Warning, TEXT("  Entities with edges: %d"), EntityCount);
+    UE_LOG(Myth, Warning, TEXT("  Total edges: %d"), TotalEdges);
+    UE_LOG(Myth, Warning, TEXT("  Avg degree: %.1f"), EntityCount > 0 ? static_cast<float>(TotalEdges) / EntityCount : 0.0f);
+    UE_LOG(Myth, Warning, TEXT(""));
+}
+
+void UMythicCheatManager::MythLivingWorldSchemes() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UMythicLivingWorldSubsystem *LW = PC->GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>();
+    if (!LW || !LW->GetSchemeEngine()) {
+        UE_LOG(Myth, Error, TEXT(">>> Scheme Engine not available"));
+        return;
+    }
+
+    TArray<FMythicScheme> Schemes = LW->GetSchemeEngine()->GetActiveSchemes();
+
+    static const FString SchemeTypeNames[] = {
+        TEXT("Assassination"), TEXT("TradeDisruption"), TEXT("TerritoryReclaim"),
+        TEXT("SpyInfiltration"), TEXT("CompanionRecruitment"), TEXT("MilitaryRaid"), TEXT("DiplomaticPressure")
+    };
+
+    static const FString SchemeStateNames[] = {
+        TEXT("Planning"), TEXT("InProgress"), TEXT("Succeeded"), TEXT("Failed"), TEXT("Discovered")
+    };
+
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("=== ACTIVE SCHEMES (%d) ==="), Schemes.Num());
+
+    for (const FMythicScheme &S : Schemes) {
+        const FString &TypeName = SchemeTypeNames[FMath::Clamp(static_cast<int32>(S.Type), 0, SchemeTypeCount - 1)];
+        const FString &StateName = SchemeStateNames[FMath::Clamp(static_cast<int32>(S.State), 0, 4)];
+
+        UE_LOG(Myth, Warning, TEXT("  [%d] %s (%s): F%d→F%d | Progress: %.0f%% | Risk: %.2f"),
+               S.SchemeId, *TypeName, *StateName,
+               S.OriginFaction.Index, S.TargetFaction.Index,
+               S.Progress * 100.0f, S.DetectionRisk);
+    }
+
+    if (Schemes.Num() == 0) {
+        UE_LOG(Myth, Warning, TEXT("  (no active schemes)"));
+    }
+
+    UE_LOG(Myth, Warning, TEXT(""));
+}
+
+void UMythicCheatManager::MythLivingWorldEncounters() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UWorld *World = PC->GetWorld();
+    if (!World) { return; }
+
+    UMythicEncounterDirector *Director = World->GetSubsystem<UMythicEncounterDirector>();
+    if (!Director) {
+        UE_LOG(Myth, Error, TEXT(">>> Encounter Director not available"));
+        return;
+    }
+
+    const TArray<FMythicActiveEncounter> &Encounters = Director->GetActiveEncounters();
+
+    static const FString StateNames[] = {
+        TEXT("Pending"), TEXT("Spawning"), TEXT("Active"), TEXT("Completing"), TEXT("Completed")
+    };
+
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("=== ACTIVE ENCOUNTERS (%d) ==="), Encounters.Num());
+
+    for (const FMythicActiveEncounter &E : Encounters) {
+        const FString &StateName = StateNames[FMath::Clamp(static_cast<int32>(E.State), 0, 4)];
+
+        UE_LOG(Myth, Warning, TEXT("  [%d] %s (%s) at (%d,%d) | Faction %d | Entities: %d"),
+               E.EncounterId,
+               *E.TemplateTag.ToString(),
+               *StateName,
+               E.Cell.X, E.Cell.Y,
+               E.OriginFaction.Index,
+               E.EntityCount);
+    }
+
+    if (Encounters.Num() == 0) {
+        UE_LOG(Myth, Warning, TEXT("  (no active encounters)"));
+    }
+
+    UE_LOG(Myth, Warning, TEXT(""));
+}
+
+void UMythicCheatManager::MythLivingWorldParty() {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) { return; }
+
+    UWorld *World = PC->GetWorld();
+    if (!World) { return; }
+
+    UMythicPartySubsystem *PartySys = World->GetSubsystem<UMythicPartySubsystem>();
+    if (!PartySys) {
+        UE_LOG(Myth, Error, TEXT(">>> Party Subsystem not available"));
+        return;
+    }
+
+    const int32 PlayerId = 0; // Local player
+
+    TArray<FMythicPartyMember> Members;
+    const int32 PartySize = PartySys->GetPartyMembers(PlayerId, Members);
+
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("=== PARTY (Player %d, %d members) ==="), PlayerId, PartySize);
+
+    for (int32 i = 0; i < Members.Num(); ++i) {
+        const FMythicPartyMember &M = Members[i];
+        UE_LOG(Myth, Warning, TEXT("  [%d] %s | Loyalty: %.2f | Betrayal: %.2f | Beliefs: %d"),
+               i,
+               M.NPCActor.IsValid() ? TEXT("Valid") : TEXT("Invalid"),
+               M.LoyaltyScore,
+               M.BetrayalPressure,
+               M.SharedBeliefs.Num());
+    }
+
+    if (PartySize == 0) {
+        UE_LOG(Myth, Warning, TEXT("  (no companions)"));
+    }
+
+    UE_LOG(Myth, Warning, TEXT(""));
 }

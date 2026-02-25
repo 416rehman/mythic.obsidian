@@ -1,5 +1,6 @@
 // Mythic Living World — Unit Tests
-// Covers: CausalFabric, TerritoryGrid, FactionDatabase, MoralSignature, SettlementRegistry, WorldSimThread
+// Covers: CausalFabric, TerritoryGrid, FactionDatabase, MoralSignature, SettlementRegistry, WorldSimThread,
+//         SocialGraph, SchemeEngine
 // Run via: Session Frontend → Automation → Mythic.LivingWorld
 
 #include "Misc/AutomationTest.h"
@@ -9,6 +10,9 @@
 #include "World/LivingWorld/Morality/MoralSignature.h"
 #include "World/LivingWorld/Settlements/SettlementRegistry.h"
 #include "World/LivingWorld/Simulation/WorldSimThread.h"
+#include "World/LivingWorld/Social/SocialGraph.h"
+#include "World/LivingWorld/Simulation/SchemeEngine.h"
+#include "World/LivingWorld/Simulation/SchemeTypes.h"
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 
@@ -730,7 +734,7 @@ bool FLivingWorldSimEconomyTest::RunTest(const FString &Parameters) {
     // Setup and tick the sim thread directly (via friend access)
     FMythicWorldSimThread SimThread;
     FCriticalSection SimLock;
-    SimThread.Setup(Fabric, DB, Grid, Settings, 1.0f, &SimLock);
+    SimThread.Setup(Fabric, DB, Grid, nullptr, Settings, 1.0f, &SimLock);
 
     // Run one tick
     SimThread.SimTick();
@@ -774,7 +778,7 @@ bool FLivingWorldSimPopulationTest::RunTest(const FString &Parameters) {
 
     FMythicWorldSimThread SimThread;
     FCriticalSection SimLock;
-    SimThread.Setup(Fabric, DB, Grid, Settings, 1.0f, &SimLock);
+    SimThread.Setup(Fabric, DB, Grid, nullptr, Settings, 1.0f, &SimLock);
 
     // Tick economy first so reserves are populated, then population
     SimThread.TickEconomy();
@@ -828,7 +832,7 @@ bool FLivingWorldSimDiplomacyTest::RunTest(const FString &Parameters) {
 
     FMythicWorldSimThread SimThread;
     FCriticalSection SimLock;
-    SimThread.Setup(Fabric, DB, Grid, Settings, 1.0f, &SimLock);
+    SimThread.Setup(Fabric, DB, Grid, nullptr, Settings, 1.0f, &SimLock);
 
     // Run diplomacy ticks repeatedly to allow relationship drift
     for (int32 i = 0; i < 20; ++i) {
@@ -847,6 +851,532 @@ bool FLivingWorldSimDiplomacyTest::RunTest(const FString &Parameters) {
         LivingWorldTestHelpers::MakeFactionId(0), LivingWorldTestHelpers::MakeFactionId(2));
     TestTrue(TEXT("Opposed ideology factions should not be Allied"),
              OpposedRelation != EMythicFactionRelation::Allied);
+
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SOCIAL GRAPH TESTS
+// ═══════════════════════════════════════════════════════════════
+
+// ─── Initialization ──────────────────────────────────────────
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSocialGraphInitTest,
+    "Mythic.LivingWorld.SocialGraph.Initialize",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSocialGraphInitTest::RunTest(const FString& Parameters) {
+    auto* Graph = NewObject<UMythicSocialGraph>();
+    Graph->Initialize(8, 0.05f, 0.001f);
+
+    TestEqual(TEXT("Empty graph should have 0 entities"), Graph->GetEntityCount(), 0);
+    TestEqual(TEXT("Empty graph should have 0 edges"), Graph->GetTotalEdgeCount(), 0);
+
+    return true;
+}
+
+// ─── Edge CRUD ───────────────────────────────────────────────
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSocialGraphAddEdgeTest,
+    "Mythic.LivingWorld.SocialGraph.AddAndQueryEdges",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSocialGraphAddEdgeTest::RunTest(const FString& Parameters) {
+    auto* Graph = NewObject<UMythicSocialGraph>();
+    Graph->Initialize(8, 0.05f, 0.001f);
+
+    FMassEntityHandle EntityA;
+    EntityA.Index = 1; EntityA.SerialNumber = 1;
+    FMassEntityHandle EntityB;
+    EntityB.Index = 2; EntityB.SerialNumber = 1;
+    FMassEntityHandle EntityC;
+    EntityC.Index = 3; EntityC.SerialNumber = 1;
+    FMythicFactionId FactionA = LivingWorldTestHelpers::MakeFactionId(0);
+
+    const double Now = 1000.0;
+
+    // Add edge A → B
+    Graph->AddOrStrengthenEdge(EntityA, EntityB, EMythicSocialRelation::Friend, 0.8f, Now, FactionA);
+    TestEqual(TEXT("Should have 1 edge"), Graph->GetTotalEdgeCount(), 1);
+    TestEqual(TEXT("Should have 1 entity with edges"), Graph->GetEntityCount(), 1);
+
+    // Add edge A → C
+    Graph->AddOrStrengthenEdge(EntityA, EntityC, EMythicSocialRelation::Rival, 0.6f, Now, FactionA);
+    TestEqual(TEXT("Should have 2 edges"), Graph->GetTotalEdgeCount(), 2);
+
+    // Query edges from A
+    TArray<FMythicSocialEdge> Edges;
+    int32 Count = Graph->GetEdges(EntityA, Now, Edges);
+    TestEqual(TEXT("EntityA should have 2 outgoing edges"), Count, 2);
+
+    // Check specific edge exists
+    FMythicSocialEdge FoundEdge;
+    bool bHasEdge = Graph->HasEdge(EntityA, EntityB, Now, FoundEdge);
+    TestTrue(TEXT("A→B edge should exist"), bHasEdge);
+    TestEqual(TEXT("A→B relation should be Friend"),
+              FoundEdge.Relation, EMythicSocialRelation::Friend);
+
+    // Directed: B has no outgoing edges
+    TArray<FMythicSocialEdge> BEdges;
+    Count = Graph->GetEdges(EntityB, Now, BEdges);
+    TestEqual(TEXT("EntityB should have 0 outgoing edges"), Count, 0);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSocialGraphStrengthenTest,
+    "Mythic.LivingWorld.SocialGraph.StrengthenExistingEdge",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSocialGraphStrengthenTest::RunTest(const FString& Parameters) {
+    auto* Graph = NewObject<UMythicSocialGraph>();
+    Graph->Initialize(8, 0.05f, 0.001f);
+
+    FMassEntityHandle A; A.Index = 1; A.SerialNumber = 1;
+    FMassEntityHandle B; B.Index = 2; B.SerialNumber = 1;
+    FMythicFactionId Faction = LivingWorldTestHelpers::MakeFactionId(0);
+
+    Graph->AddOrStrengthenEdge(A, B, EMythicSocialRelation::Friend, 0.3f, 100.0, Faction);
+    Graph->AddOrStrengthenEdge(A, B, EMythicSocialRelation::Friend, 0.3f, 200.0, Faction);
+
+    TestEqual(TEXT("Should still be 1 edge after strengthen"), Graph->GetTotalEdgeCount(), 1);
+
+    FMythicSocialEdge Edge;
+    Graph->HasEdge(A, B, 200.0, Edge);
+    TestTrue(TEXT("Strengthened edge should have higher strength"), Edge.Strength > 0.3f);
+    TestEqual(TEXT("Last interaction time should be updated"), Edge.LastInteractionTime, 200.0);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSocialGraphRemoveEdgeTest,
+    "Mythic.LivingWorld.SocialGraph.RemoveEdge",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSocialGraphRemoveEdgeTest::RunTest(const FString& Parameters) {
+    auto* Graph = NewObject<UMythicSocialGraph>();
+    Graph->Initialize(8, 0.05f, 0.001f);
+
+    FMassEntityHandle A; A.Index = 1; A.SerialNumber = 1;
+    FMassEntityHandle B; B.Index = 2; B.SerialNumber = 1;
+    FMassEntityHandle C; C.Index = 3; C.SerialNumber = 1;
+    FMythicFactionId Faction = LivingWorldTestHelpers::MakeFactionId(0);
+
+    Graph->AddOrStrengthenEdge(A, B, EMythicSocialRelation::Friend, 0.8f, 100.0, Faction);
+    Graph->AddOrStrengthenEdge(A, C, EMythicSocialRelation::Rival, 0.6f, 100.0, Faction);
+
+    bool bRemoved = Graph->RemoveEdge(A, B);
+    TestTrue(TEXT("RemoveEdge should return true"), bRemoved);
+    TestEqual(TEXT("Should have 1 edge after removal"), Graph->GetTotalEdgeCount(), 1);
+
+    bRemoved = Graph->RemoveEdge(A, B);
+    TestFalse(TEXT("RemoveEdge should return false for non-existent"), bRemoved);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSocialGraphRemoveAllTest,
+    "Mythic.LivingWorld.SocialGraph.RemoveAllEdgesOnDeath",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSocialGraphRemoveAllTest::RunTest(const FString& Parameters) {
+    auto* Graph = NewObject<UMythicSocialGraph>();
+    Graph->Initialize(8, 0.05f, 0.001f);
+
+    FMassEntityHandle A; A.Index = 1; A.SerialNumber = 1;
+    FMassEntityHandle B; B.Index = 2; B.SerialNumber = 1;
+    FMassEntityHandle C; C.Index = 3; C.SerialNumber = 1;
+    FMythicFactionId Faction = LivingWorldTestHelpers::MakeFactionId(0);
+
+    Graph->AddOrStrengthenEdge(A, B, EMythicSocialRelation::Friend, 0.8f, 100.0, Faction);
+    Graph->AddOrStrengthenEdge(A, C, EMythicSocialRelation::Family, 0.9f, 100.0, Faction);
+    Graph->AddOrStrengthenEdge(B, A, EMythicSocialRelation::Friend, 0.7f, 100.0, Faction);
+    Graph->AddOrStrengthenEdge(C, A, EMythicSocialRelation::Family, 0.9f, 100.0, Faction);
+
+    TArray<FMassEntityHandle> SeveredConnections;
+    Graph->RemoveAllEdges(A, SeveredConnections);
+
+    TestEqual(TEXT("All edges involving A should be removed"), Graph->GetTotalEdgeCount(), 0);
+    TestTrue(TEXT("Severed connections should include B and C"), SeveredConnections.Num() >= 2);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSocialGraphRelationFilterTest,
+    "Mythic.LivingWorld.SocialGraph.QueryByRelation",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSocialGraphRelationFilterTest::RunTest(const FString& Parameters) {
+    auto* Graph = NewObject<UMythicSocialGraph>();
+    Graph->Initialize(8, 0.05f, 0.001f);
+
+    FMassEntityHandle A; A.Index = 1; A.SerialNumber = 1;
+    FMassEntityHandle B; B.Index = 2; B.SerialNumber = 1;
+    FMassEntityHandle C; C.Index = 3; C.SerialNumber = 1;
+    FMassEntityHandle D; D.Index = 4; D.SerialNumber = 1;
+    FMythicFactionId Faction = LivingWorldTestHelpers::MakeFactionId(0);
+
+    Graph->AddOrStrengthenEdge(A, B, EMythicSocialRelation::Friend, 0.8f, 100.0, Faction);
+    Graph->AddOrStrengthenEdge(A, C, EMythicSocialRelation::Rival, 0.7f, 100.0, Faction);
+    Graph->AddOrStrengthenEdge(A, D, EMythicSocialRelation::Friend, 0.6f, 100.0, Faction);
+
+    TArray<FMythicSocialEdge> Friends;
+    TestEqual(TEXT("A should have 2 Friend edges"),
+              Graph->GetEdgesByRelation(A, EMythicSocialRelation::Friend, 100.0, Friends), 2);
+
+    TArray<FMythicSocialEdge> Rivals;
+    TestEqual(TEXT("A should have 1 Rival edge"),
+              Graph->GetEdgesByRelation(A, EMythicSocialRelation::Rival, 100.0, Rivals), 1);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSocialGraphMaxEdgesTest,
+    "Mythic.LivingWorld.SocialGraph.MaxEdgeEviction",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSocialGraphMaxEdgesTest::RunTest(const FString& Parameters) {
+    const int32 MaxEdges = 3;
+    auto* Graph = NewObject<UMythicSocialGraph>();
+    Graph->Initialize(MaxEdges, 0.05f, 0.001f);
+
+    FMassEntityHandle Source; Source.Index = 1; Source.SerialNumber = 1;
+    FMythicFactionId Faction = LivingWorldTestHelpers::MakeFactionId(0);
+
+    for (int32 i = 0; i < MaxEdges; ++i) {
+        FMassEntityHandle Target;
+        Target.Index = 10 + i; Target.SerialNumber = 1;
+        Graph->AddOrStrengthenEdge(Source, Target, EMythicSocialRelation::Associate,
+                                   0.3f + 0.1f * i, 100.0, Faction);
+    }
+    TestEqual(TEXT("Should have MaxEdges"), Graph->GetTotalEdgeCount(), MaxEdges);
+
+    FMassEntityHandle NewTarget; NewTarget.Index = 99; NewTarget.SerialNumber = 1;
+    Graph->AddOrStrengthenEdge(Source, NewTarget, EMythicSocialRelation::Friend, 0.9f, 100.0, Faction);
+    TestEqual(TEXT("Should still have MaxEdges after eviction"), Graph->GetTotalEdgeCount(), MaxEdges);
+
+    FMythicSocialEdge FoundEdge;
+    TestTrue(TEXT("New high-strength edge should exist"),
+             Graph->HasEdge(Source, NewTarget, 100.0, FoundEdge));
+
+    FMassEntityHandle WeakestTarget; WeakestTarget.Index = 10; WeakestTarget.SerialNumber = 1;
+    TestFalse(TEXT("Weakest edge should be evicted"),
+              Graph->HasEdge(Source, WeakestTarget, 100.0, FoundEdge));
+
+    return true;
+}
+
+// ─── Pruning ─────────────────────────────────────────────────
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSocialGraphPruneTest,
+    "Mythic.LivingWorld.SocialGraph.PruneStaleEdges",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSocialGraphPruneTest::RunTest(const FString& Parameters) {
+    const float TestDecayRate = 0.1f;
+    const float PruneThreshold = 0.01f;
+    auto* Graph = NewObject<UMythicSocialGraph>();
+    Graph->Initialize(8, PruneThreshold, TestDecayRate);
+
+    FMassEntityHandle A; A.Index = 1; A.SerialNumber = 1;
+    FMassEntityHandle B; B.Index = 2; B.SerialNumber = 1;
+    FMassEntityHandle C; C.Index = 3; C.SerialNumber = 1;
+    FMythicFactionId Faction = LivingWorldTestHelpers::MakeFactionId(0);
+
+    Graph->AddOrStrengthenEdge(A, B, EMythicSocialRelation::Friend, 0.5f, 0.0, Faction);
+    Graph->AddOrStrengthenEdge(A, C, EMythicSocialRelation::Friend, 0.5f, 0.0, Faction);
+
+    int32 Pruned = Graph->PruneStaleEdges(100.0, 100);
+    TestEqual(TEXT("Both heavily decayed edges should be pruned"), Pruned, 2);
+    TestEqual(TEXT("Graph should be empty"), Graph->GetTotalEdgeCount(), 0);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSocialGraphPruneSelectiveTest,
+    "Mythic.LivingWorld.SocialGraph.PruneSelectiveDecay",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSocialGraphPruneSelectiveTest::RunTest(const FString& Parameters) {
+    const float TestDecayRate = 0.01f;
+    const float PruneThreshold = 0.05f;
+    auto* Graph = NewObject<UMythicSocialGraph>();
+    Graph->Initialize(8, PruneThreshold, TestDecayRate);
+
+    FMassEntityHandle A; A.Index = 1; A.SerialNumber = 1;
+    FMassEntityHandle B; B.Index = 2; B.SerialNumber = 1;
+    FMassEntityHandle C; C.Index = 3; C.SerialNumber = 1;
+    FMythicFactionId Faction = LivingWorldTestHelpers::MakeFactionId(0);
+
+    Graph->AddOrStrengthenEdge(A, B, EMythicSocialRelation::Friend, 0.5f, 0.0, Faction);
+    Graph->AddOrStrengthenEdge(A, C, EMythicSocialRelation::Friend, 0.5f, 290.0, Faction);
+
+    int32 Pruned = Graph->PruneStaleEdges(300.0, 100);
+    TestEqual(TEXT("Only old edge should be pruned"), Pruned, 1);
+    TestEqual(TEXT("Recent edge should survive"), Graph->GetTotalEdgeCount(), 1);
+
+    FMythicSocialEdge Edge;
+    TestTrue(TEXT("A→C should still exist"), Graph->HasEdge(A, C, 300.0, Edge));
+    TestFalse(TEXT("A→B should be pruned"), Graph->HasEdge(A, B, 300.0, Edge));
+
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SCHEME ENGINE TESTS
+// ═══════════════════════════════════════════════════════════════
+
+namespace SchemeTestHelpers {
+    UMythicFactionDatabaseSettings* CreateSchemeTestFactionSettings() {
+        auto* Settings = NewObject<UMythicFactionDatabaseSettings>();
+        Settings->MaxFactions = 20;
+        Settings->InitialFactions.SetNum(4);
+
+        for (int32 i = 0; i < 4; ++i) {
+            FMythicFactionData& F = Settings->InitialFactions[i];
+            F.DisplayName = FText::FromString(FString::Printf(TEXT("SchemeFaction_%d"), i));
+            F.bAlive = true;
+            F.Population = 100 * (i + 1);
+            F.MilitaryStrength = 0.3f + 0.2f * i;
+            F.bHasBeenPopulated = true;
+            F.bControlsTerritory = true;
+            F.bHasEconomy = true;
+            F.bHasCivilianPopulation = true;
+            F.bParticipatesInTrade = true;
+            F.bCanNegotiate = true;
+        }
+        return Settings;
+    }
+
+    UMythicLivingWorldSettings* CreateSchemeTestLivingWorldSettings() {
+        auto* Settings = LivingWorldTestHelpers::CreateLivingWorldSettings();
+        Settings->SchemeGenerationTickInterval = 1;
+        Settings->SchemeBaseProbability = 1.0f;
+        Settings->MaxSchemesPerFaction = 5;
+        Settings->MaxTotalSchemes = 50;
+        return Settings;
+    }
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSchemeEngineInitTest,
+    "Mythic.LivingWorld.SchemeEngine.Initialize",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSchemeEngineInitTest::RunTest(const FString& Parameters) {
+    auto* Engine = NewObject<UMythicSchemeEngine>();
+    auto* Fabric = NewObject<UMythicCausalFabric>();
+    Fabric->Initialize(64);
+
+    auto* FactionDB = NewObject<UMythicFactionDatabase>();
+    FactionDB->Initialize(SchemeTestHelpers::CreateSchemeTestFactionSettings());
+
+    auto* Grid = NewObject<UMythicTerritoryGrid>();
+    Grid->Initialize(LivingWorldTestHelpers::CreateGridSettings());
+
+    Engine->Initialize(FactionDB, Fabric, Grid, SchemeTestHelpers::CreateSchemeTestLivingWorldSettings());
+
+    TestEqual(TEXT("No active schemes after init"), Engine->GetActiveSchemeCount(), 0);
+    TestEqual(TEXT("GetActiveSchemes returns empty"), Engine->GetActiveSchemes().Num(), 0);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSchemeEngineGenerateTest,
+    "Mythic.LivingWorld.SchemeEngine.GenerateSchemes",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSchemeEngineGenerateTest::RunTest(const FString& Parameters) {
+    auto* Engine = NewObject<UMythicSchemeEngine>();
+    auto* Fabric = NewObject<UMythicCausalFabric>();
+    Fabric->Initialize(64);
+
+    auto* FactionSettings = SchemeTestHelpers::CreateSchemeTestFactionSettings();
+    FactionSettings->InitialFactions[0].MilitaryStrength = 0.8f;
+    FactionSettings->InitialFactions[1].MilitaryStrength = 0.8f;
+    auto* FactionDB = NewObject<UMythicFactionDatabase>();
+    FactionDB->Initialize(FactionSettings);
+
+    FactionDB->SetRelationship(LivingWorldTestHelpers::MakeFactionId(0),
+                                LivingWorldTestHelpers::MakeFactionId(1),
+                                EMythicFactionRelation::Hostile);
+
+    auto* Grid = NewObject<UMythicTerritoryGrid>();
+    Grid->Initialize(LivingWorldTestHelpers::CreateGridSettings());
+
+    Engine->Initialize(FactionDB, Fabric, Grid, SchemeTestHelpers::CreateSchemeTestLivingWorldSettings());
+
+    Engine->TickSchemes(1.0f, 0);
+
+    TestTrue(TEXT("Should have generated at least 1 scheme"), Engine->GetActiveSchemeCount() > 0);
+
+    TArray<FMythicScheme> Schemes = Engine->GetActiveSchemes();
+    if (Schemes.Num() > 0) {
+        const FMythicScheme& First = Schemes[0];
+        TestTrue(TEXT("Scheme should be active"), First.IsActive());
+        TestTrue(TEXT("SchemeId should be > 0"), First.SchemeId > 0);
+        TestTrue(TEXT("Origin != Target"), First.OriginFaction != First.TargetFaction);
+    }
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSchemeEngineProgressTest,
+    "Mythic.LivingWorld.SchemeEngine.ProgressSchemes",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSchemeEngineProgressTest::RunTest(const FString& Parameters) {
+    auto* Engine = NewObject<UMythicSchemeEngine>();
+    auto* Fabric = NewObject<UMythicCausalFabric>();
+    Fabric->Initialize(64);
+
+    auto* FactionSettings = SchemeTestHelpers::CreateSchemeTestFactionSettings();
+    FactionSettings->InitialFactions[0].MilitaryStrength = 0.8f;
+    auto* FactionDB = NewObject<UMythicFactionDatabase>();
+    FactionDB->Initialize(FactionSettings);
+    FactionDB->SetRelationship(LivingWorldTestHelpers::MakeFactionId(0),
+                                LivingWorldTestHelpers::MakeFactionId(1),
+                                EMythicFactionRelation::Hostile);
+
+    auto* Grid = NewObject<UMythicTerritoryGrid>();
+    Grid->Initialize(LivingWorldTestHelpers::CreateGridSettings());
+
+    Engine->Initialize(FactionDB, Fabric, Grid, SchemeTestHelpers::CreateSchemeTestLivingWorldSettings());
+
+    Engine->TickSchemes(1.0f, 0);
+    TArray<FMythicScheme> Before = Engine->GetActiveSchemes();
+    TestTrue(TEXT("Should have generated schemes"), Before.Num() > 0);
+
+    float InitialProgress = Before.Num() > 0 ? Before[0].Progress : 0.0f;
+    uint32 TrackId = Before.Num() > 0 ? Before[0].SchemeId : 0;
+
+    Engine->TickSchemes(10.0f, 1);
+    TArray<FMythicScheme> After = Engine->GetActiveSchemes();
+
+    for (const FMythicScheme& S : After) {
+        if (S.SchemeId == TrackId) {
+            TestTrue(TEXT("Scheme progress should increase"), S.Progress > InitialProgress);
+            break;
+        }
+    }
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSchemeEngineCompletionTest,
+    "Mythic.LivingWorld.SchemeEngine.SchemeCompletion",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSchemeEngineCompletionTest::RunTest(const FString& Parameters) {
+    auto* Engine = NewObject<UMythicSchemeEngine>();
+    auto* Fabric = NewObject<UMythicCausalFabric>();
+    Fabric->Initialize(256);
+
+    auto* FactionSettings = SchemeTestHelpers::CreateSchemeTestFactionSettings();
+    FactionSettings->InitialFactions[0].MilitaryStrength = 0.8f;
+    auto* FactionDB = NewObject<UMythicFactionDatabase>();
+    FactionDB->Initialize(FactionSettings);
+    FactionDB->SetRelationship(LivingWorldTestHelpers::MakeFactionId(0),
+                                LivingWorldTestHelpers::MakeFactionId(1),
+                                EMythicFactionRelation::Hostile);
+
+    auto* Grid = NewObject<UMythicTerritoryGrid>();
+    Grid->Initialize(LivingWorldTestHelpers::CreateGridSettings());
+
+    Engine->Initialize(FactionDB, Fabric, Grid, SchemeTestHelpers::CreateSchemeTestLivingWorldSettings());
+
+    Engine->TickSchemes(1.0f, 0);
+
+    // Tick many times with large delta to force completion
+    for (int32 i = 1; i < 200; ++i) {
+        Engine->TickSchemes(10.0f, static_cast<uint32>(i));
+    }
+
+    Fabric->CommitWrites();
+    TestTrue(TEXT("Fabric should have scheme events"), Fabric->GetTotalEventCount() > 1);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSchemeEngineByFactionTest,
+    "Mythic.LivingWorld.SchemeEngine.GetSchemesByFaction",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSchemeEngineByFactionTest::RunTest(const FString& Parameters) {
+    auto* Engine = NewObject<UMythicSchemeEngine>();
+    auto* Fabric = NewObject<UMythicCausalFabric>();
+    Fabric->Initialize(64);
+
+    auto* FactionSettings = SchemeTestHelpers::CreateSchemeTestFactionSettings();
+    FactionSettings->InitialFactions[0].MilitaryStrength = 0.8f;
+    auto* FactionDB = NewObject<UMythicFactionDatabase>();
+    FactionDB->Initialize(FactionSettings);
+    FactionDB->SetRelationship(LivingWorldTestHelpers::MakeFactionId(0),
+                                LivingWorldTestHelpers::MakeFactionId(1),
+                                EMythicFactionRelation::Hostile);
+
+    auto* Grid = NewObject<UMythicTerritoryGrid>();
+    Grid->Initialize(LivingWorldTestHelpers::CreateGridSettings());
+
+    Engine->Initialize(FactionDB, Fabric, Grid, SchemeTestHelpers::CreateSchemeTestLivingWorldSettings());
+    Engine->TickSchemes(1.0f, 0);
+
+    TArray<FMythicScheme> Faction0 = Engine->GetSchemesByFaction(LivingWorldTestHelpers::MakeFactionId(0));
+    for (const FMythicScheme& S : Faction0) {
+        TestEqual(TEXT("Origin should match query"), S.OriginFaction.Index, (uint8)0);
+    }
+
+    TArray<FMythicScheme> NoSchemes = Engine->GetSchemesByFaction(LivingWorldTestHelpers::MakeFactionId(15));
+    TestEqual(TEXT("Non-existent faction should have 0 schemes"), NoSchemes.Num(), 0);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldSchemeEngineMaxPerFactionTest,
+    "Mythic.LivingWorld.SchemeEngine.MaxSchemesPerFaction",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldSchemeEngineMaxPerFactionTest::RunTest(const FString& Parameters) {
+    auto* Engine = NewObject<UMythicSchemeEngine>();
+    auto* Fabric = NewObject<UMythicCausalFabric>();
+    Fabric->Initialize(64);
+
+    auto* FactionSettings = SchemeTestHelpers::CreateSchemeTestFactionSettings();
+    FactionSettings->InitialFactions[0].MilitaryStrength = 0.8f;
+    auto* FactionDB = NewObject<UMythicFactionDatabase>();
+    FactionDB->Initialize(FactionSettings);
+    FactionDB->SetRelationship(LivingWorldTestHelpers::MakeFactionId(0),
+                                LivingWorldTestHelpers::MakeFactionId(1),
+                                EMythicFactionRelation::Hostile);
+
+    auto* Grid = NewObject<UMythicTerritoryGrid>();
+    Grid->Initialize(LivingWorldTestHelpers::CreateGridSettings());
+
+    auto* Settings = SchemeTestHelpers::CreateSchemeTestLivingWorldSettings();
+    Settings->MaxSchemesPerFaction = 3;
+    Engine->Initialize(FactionDB, Fabric, Grid, Settings);
+
+    for (uint32 i = 0; i < 50; ++i) {
+        Engine->TickSchemes(0.001f, i);
+    }
+
+    TArray<FMythicScheme> Faction0 = Engine->GetSchemesByFaction(LivingWorldTestHelpers::MakeFactionId(0));
+    TestTrue(TEXT("Per-faction cap should be respected"),
+             Faction0.Num() <= Settings->MaxSchemesPerFaction);
 
     return true;
 }

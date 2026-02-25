@@ -12,6 +12,8 @@
 #include "Mythic/Player/Proficiency/ProficiencyComponent.h"
 #include "Mythic/GameModes/GameState/MythicGameState.h"
 #include "Mythic/Resources/MythicResourceManagerComponent.h"
+#include "World/LivingWorld/LivingWorldSubsystem.h"
+#include "AI/Party/PartySubsystem.h"
 
 FString UMythicSaveGameSubsystem::SanitizeSlotName(const FString &Input) {
     FString Safe = Input;
@@ -279,6 +281,12 @@ void UMythicSaveGameSubsystem::SaveWorld(const FString &SlotName) {
     // Saveable Actors
     FSerializedWorldActorHelper::SerializeAll(World, WorldData.SavedActors);
 
+    // Living World state → blob
+    if (UMythicLivingWorldSubsystem* LWS = GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+        FMemoryWriter LWWriter(WorldData.LivingWorldBlob);
+        LWS->SaveLivingWorld(LWWriter);
+    }
+
     // Create save object
     UMythicSaveGame *SaveObj = Cast<UMythicSaveGame>(UGameplayStatics::CreateSaveGameObject(UMythicSaveGame::StaticClass()));
     if (!SaveObj) {
@@ -370,6 +378,14 @@ void UMythicSaveGameSubsystem::HandleAsyncWorldLoadFinished(const FString &SlotN
 
         // Saveable Actors
         FSerializedWorldActorHelper::DeserializeAll(World, Data.SavedActors);
+
+        // Living World state ← blob
+        if (Data.LivingWorldBlob.Num() > 0) {
+            if (UMythicLivingWorldSubsystem* LWS = GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+                FMemoryReader LWReader(Data.LivingWorldBlob, true);
+                LWS->LoadLivingWorld(LWReader);
+            }
+        }
     }
 
     UE_LOG(MythSaveLoad, Log, TEXT("AsyncWorldLoadFinished: Success for %s"), *SlotName);

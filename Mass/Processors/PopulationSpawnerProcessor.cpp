@@ -13,6 +13,7 @@
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "World/LivingWorld/Settlements/SettlementRegistry.h"
 #include "World/LivingWorld/Settlements/MythicSettlement.h"
+#include "World/LivingWorld/NPCGeneration/NPCGenerator.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
 
@@ -179,14 +180,37 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
                     FMythicNPCPopulationSpawnData SpawnData;
                     SpawnData.Identity.Faction = Settlement->GoverningFaction;
                     SpawnData.Identity.Cell = CandidateCell;
-                    SpawnData.Identity.NameHash = GetTypeHash(CandidateCell) ^ (SpawnIdx * 2654435761u);
-                    SpawnData.Identity.VisualArchetype = static_cast<uint8>(SpawnData.Identity.NameHash % 8);
 
+                    // ─── Full NPC Generation Pipeline ───
+                    // Use the NPCGenerator for deterministic identity creation.
+                    // Same faction + cell + index = same NPC across sessions.
+
+                    SpawnData.Identity.NameHash = FMythicNPCGenerator::GenerateNameHash(
+                        Settlement->GoverningFaction.Index, CandidateCell, SpawnIdx);
+
+                    SpawnData.Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(
+                        SpawnData.Identity.NameHash, 8);
+
+                    SpawnData.Identity.DemographicFlags = FMythicNPCGenerator::GenerateDemographicFlags(
+                        SpawnData.Identity.NameHash, FactionData.Population > 50);
+
+                    // ─── Schedule — work cell offset by hash for spatial variety ───
                     SpawnData.Schedule.Phase = EMythicSchedulePhase::Idle;
                     SpawnData.Schedule.HomeCell = CandidateCell;
-                    SpawnData.Schedule.WorkCell = CandidateCell;
+                    SpawnData.Schedule.WorkCell = FMythicCellCoord(
+                        CandidateCell.X + static_cast<int32>((SpawnData.Identity.NameHash >> 4) % 3) - 1,
+                        CandidateCell.Y + static_cast<int32>((SpawnData.Identity.NameHash >> 8) % 3) - 1);
 
                     SpawnData.Significance.Tier = EMythicSignificanceTier::Tier0_Ambient;
+
+                    // Note: Personality (VentWeights) is NOT generated here for Tier 0.
+                    // Tier 0 entities have no PersonalityFragment — it's added on promotion
+                    // to Tier 1 by the SignificanceProcessor. At that point, the personality
+                    // is generated from the NameHash + faction ideology via NPCGenerator.
+                    // This ensures:
+                    //   1. Zero CPU for Tier 0 personality (no wasted generation)
+                    //   2. Ideology-dirty respawns automatically get new ideology
+                    //   3. Deterministic: same hash + faction = same personality
 
                     SpawnDataArray.Add(SpawnData);
                 }

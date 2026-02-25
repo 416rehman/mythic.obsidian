@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "World/LivingWorld/Events/ActionEventTypes.h"
+#include "World/LivingWorld/Crime/CrimeTypes.h"
 #include "ActionEventSubsystem.generated.h"
 
 class UMythicLivingWorldSubsystem;
@@ -55,6 +56,23 @@ public:
     /** Check if there are pending events or witness results to process */
     bool HasPendingWork() const { return PendingEvents.Num() > 0 || PendingWitnessResults.Num() > 0; }
 
+    // ─── Crime Report Queue ──────────────────────────────
+
+    /** Get the crime report queue (produced by WitnessProcessor, consumed by BeliefPropagation) */
+    FMythicCrimeReportQueue& GetCrimeReportQueue() { return CrimeReports; }
+
+    // ─── Perception Modifiers ────────────────────────────
+
+    /**
+     * Global perception multiplier applied to hearing range and visibility checks.
+     * Set by weather/time-of-day systems. Default 1.0.
+     * Night: *= NightPerceptionMultiplier (e.g., 0.5)
+     * Rain/fog: *= WeatherPerceptionMultiplier (e.g., 0.6)
+     * Stacked multiplicatively.
+     */
+    float GetPerceptionMultiplier() const { return PerceptionMultiplier; }
+    void SetPerceptionMultiplier(float NewMultiplier) { PerceptionMultiplier = FMath::Clamp(NewMultiplier, 0.01f, 2.0f); }
+
 private:
     /** Cached reference to the living world subsystem (GameInstance-level) */
     UPROPERTY()
@@ -66,9 +84,16 @@ private:
     /** Witness results awaiting pressure processing (produced by Witness, consumed by Pressure) */
     TArray<FMythicWitnessResult> PendingWitnessResults;
 
+    /** Crime reports from witness evaluation, pending belief propagation */
+    FMythicCrimeReportQueue CrimeReports;
+
+    /** Global perception multiplier (weather, time-of-day, stealth) */
+    float PerceptionMultiplier = 1.0f;
+
     /** Resolve an actor to a cell coordinate using the territory grid */
     FMythicCellCoord ResolveActorCell(const AActor *Actor) const;
 
     /** Resolve an actor's faction ID (from its faction component or default) */
     FMythicFactionId ResolveActorFaction(const AActor *Actor) const;
 };
+

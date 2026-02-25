@@ -28,6 +28,25 @@ DECLARE_LOG_CATEGORY_EXTERN(LogMythPopulation, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogMythSettlement, Log, All);
 
 // ─────────────────────────────────────────────────────────────
+// Action Category — High level categorization of gameplay actions
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Action category for magic/ability classification.
+ * Maps to moral axis evaluation in WitnessPerceptionProcessor.
+ */
+UENUM(BlueprintType)
+enum class EMythicActionCategory : uint8 {
+    Melee,              // Standard melee Violence axis
+    Ranged,             // Standard ranged Violence axis
+    Magic_Damage,       // Violence + high Threat (spectacle)
+    Magic_Healing,      // Mercy axis (positive for most, condemned by anti-magic)
+    Magic_Forbidden,    // Sacrilege axis
+    Environmental,      // Threat pressure only (fire, explosions)
+    COUNT UMETA(Hidden)
+};
+
+// ─────────────────────────────────────────────────────────────
 // Faction ID — Lightweight typed index
 // ─────────────────────────────────────────────────────────────
 

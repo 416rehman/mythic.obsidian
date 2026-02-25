@@ -41,6 +41,10 @@ struct MYTHIC_API FMythicActionEvent {
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action Event", meta=(Categories="World.Action"))
     FGameplayTag ActionTag;
 
+    /** Category for magic/ability classification (maps to moral axes) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action Event")
+    EMythicActionCategory ActionCategory = EMythicActionCategory::Melee;
+
     /**
      * Category bitmask for fast filtering (EMythicEventCategory).
      * Multiple categories can be OR'd together (e.g. Combat | Death).

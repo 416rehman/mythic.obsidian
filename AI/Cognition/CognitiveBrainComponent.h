@@ -1,0 +1,178 @@
+// Mythic Living World — Cognitive Brain Component
+// BDI (Beliefs-Desires-Intentions) brain for Tier 2-3 cognitive NPC actors.
+// Attaches to AMythicNPCCharacter. Think tick is staggered across actors.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "MassEntityHandle.h"
+#include "Mass/Fragments/MythicMassFragments.h"
+#include "AI/Cognition/CognitiveTypes.h"
+#include "Tasks/Task.h"
+#include "CognitiveBrainComponent.generated.h"
+
+class UMythicCausalFabric;
+class UMythicFactionDatabase;
+class UMythicSocialGraph;
+class UMythicLivingWorldSettings;
+
+/**
+ * BDI cognitive brain attached to Tier 2-3 NPC actors.
+ *
+ * Architecture:
+ * - Think() runs on a staggered timer (0.5-2.0s, configurable)
+ * - Belief layer queries the Causal Fabric with personality-weighted filtering
+ * - Desire layer scores each desire type via utility functions
+ * - Intention layer commits the highest-utility desire with hysteresis
+ * - Execution communicates to the behavior system via gameplay tags
+ *
+ * Performance:
+ * - NOT a tick component — uses FTimerHandle for staggered think
+ * - Max 30 cognitive actors at once (budgeted by LivingWorldSettings::MaxCognitiveActors)
+ * - Each Think() is O(beliefs × desires) = O(16 × 13) = ~200 operations
+ * - Total per-frame cost distributed across ~15 actors per second at 0.5s interval
+ */
+UCLASS(ClassGroup=(LivingWorld), meta=(BlueprintSpawnableComponent))
+class MYTHIC_API UMythicCognitiveBrainComponent : public UActorComponent {
+    GENERATED_BODY()
+
+public:
+    UMythicCognitiveBrainComponent();
+
+    /**
+     * Resolves the best dialogue template for the NPC's current state.
+     * Integrates faction, role, active intention, and emotional pressure.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Living World|Dialogue")
+    FText SelectDialogue(AActor* InteractingPlayer = nullptr) const;
+
+    //~ Begin UActorComponent Interface
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    //~ End UActorComponent Interface
+
+    // ─── Configuration ────────────────────────────────────
+
+    /**
+     * Initialize with the NPC's identity data (faction, personality, role).
+     * Must be called after construction and before the first think tick.
+     */
+    void InitializeBrain(
+        FMythicFactionId Faction,
+        FMythicCellCoord HomeCell,
+        const FMythicPersonalityFragment& Personality,
+        FMassEntityHandle SourceEntity,
+        FMythicFactionId TrueFaction = FMythicFactionId(),
+        FGameplayTag Role = FGameplayTag());
+
+    // ─── State Access ─────────────────────────────────────
+
+    /** Get the current intention (what the NPC is trying to do) */
+    const FMythicIntention& GetCurrentIntention() const { return CurrentIntention; }
+
+    /** Get the NPC's current beliefs */
+    const TArray<FMythicBelief>& GetBeliefs() const { return Beliefs; }
+
+    /** Get the NPC's most recent desire scores (from last think tick) */
+    const TArray<FMythicDesire>& GetLastDesires() const { return LastDesires; }
+
+    /** Get the MASS entity this NPC was promoted from */
+    FMassEntityHandle GetSourceEntity() const { return SourceEntity; }
+
+    /** Get the NPC's faction */
+    FMythicFactionId GetFaction() const { return Faction; }
+
+    /** Get the NPC's personality (VentWeights, etc.) */
+    const FMythicPersonalityFragment& GetPersonality() const { return Personality; }
+
+    // ─── External Events ──────────────────────────────────
+
+    /**
+     * Inject a belief from an external source (e.g., belief propagation from companion).
+     * Confidence is reduced per hop. Duplicate beliefs are merged (max confidence).
+     */
+    void InjectBelief(const FMythicBelief& Belief);
+
+    /**
+     * Notify the brain that a significant event occurred nearby.
+     * This forces an immediate re-think (bypasses the timer).
+     */
+    void OnSignificantEvent(const FGameplayTag& EventTag, FMythicCellCoord EventCell);
+
+private:
+    // ─── Core BDI Loop ────────────────────────────────────
+
+    /** Main think function. Called on staggered timer. */
+    void Think();
+
+    /** Update beliefs by querying the causal fabric with personality bias */
+    void UpdateBeliefs(double WorldTime);
+
+    /** Score all desire types and populate the desires array */
+    void ScoreDesires(double WorldTime);
+
+    /** Commit the best desire as the active intention (with hysteresis) */
+    void CommitIntention(double WorldTime);
+
+    /** Check if the current intention should be abandoned (timeout, invalid target) */
+    void ValidateIntention(double WorldTime);
+
+    /** Called on the game thread when the async Think task completes */
+    void OnAsyncThinkCompleted();
+
+    // ─── Utility Scoring Functions ────────────────────────
+
+    float ScoreSurvive(double WorldTime) const;
+    float ScoreDefend(double WorldTime) const;
+    float ScoreAvenge(double WorldTime) const;
+    float ScorePatrol(double WorldTime) const;
+    float ScoreTrade(double WorldTime) const;
+    float ScoreSocialize(double WorldTime) const;
+    float ScoreJoinPlayer(double WorldTime) const;
+    float ScoreFlee(double WorldTime) const;
+    float ScoreRest(double WorldTime) const;
+    float ScoreExploit(double WorldTime) const;
+    float ScoreRally(double WorldTime) const;
+    float ScoreReport(double WorldTime) const;
+    float ScoreFollowSchedule(double WorldTime) const;
+
+    // ─── Cached References ────────────────────────────────
+
+    UPROPERTY()
+    TObjectPtr<UMythicCausalFabric> CausalFabric;
+
+    UPROPERTY()
+    TObjectPtr<UMythicFactionDatabase> FactionDB;
+
+    UMythicSocialGraph* SocialGraph = nullptr;
+    const UMythicLivingWorldSettings* Settings = nullptr;
+
+    // ─── NPC Identity ─────────────────────────────────────
+
+    FMythicFactionId Faction;
+    FMythicFactionId TrueFaction; // For spies
+    FGameplayTag Role; // e.g. TAG_LivingWorld_Role_Spy
+    FMythicCellCoord HomeCell;
+    FMythicPersonalityFragment Personality;
+    FMassEntityHandle SourceEntity;
+    float PressureChannels[PressureChannelCount] = {};
+
+    // ─── BDI State ────────────────────────────────────────
+
+    TArray<FMythicBelief> Beliefs;
+    TArray<FMythicDesire> LastDesires;
+    FMythicIntention CurrentIntention;
+
+    /** Handle to the currently running async think task */
+    UE::Tasks::FTask AsyncThinkTask;
+
+    /** If true, an async think task is currently running */
+    std::atomic<bool> bIsThinkingAsync{false};
+
+    // ─── Timer ────────────────────────────────────────────
+
+    FTimerHandle ThinkTimerHandle;
+    float ThinkInterval = 1.0f;
+    bool bInitialized = false;
+};

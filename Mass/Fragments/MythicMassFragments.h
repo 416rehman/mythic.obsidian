@@ -24,6 +24,13 @@ struct MYTHIC_API FMythicIdentityFragment : public FMassFragment {
     /** Which faction this entity belongs to */
     FMythicFactionId Faction;
 
+    /**
+     * True faction identity (for spies/dual-identity NPCs).
+     * Defaults to same as Faction. When Faction != TrueFaction, this NPC is undercover.
+     * Belief routing goes to TrueFaction handler. Discovery risk from Cunning/Paranoia NPCs.
+     */
+    FMythicFactionId TrueFaction;
+
     /** Cell coordinate where this entity currently resides */
     FMythicCellCoord Cell;
 
@@ -38,6 +45,23 @@ struct MYTHIC_API FMythicIdentityFragment : public FMassFragment {
 
     /** Packed age bracket (3 bits) + gender (1 bit) + reserved (4 bits) */
     uint8 DemographicFlags = 0;
+
+    /**
+     * Visibility group for line-of-sight substitution.
+     * Entities in different visibility groups cannot see each other (byte compare, no traces).
+     * 0 = default (everyone visible). Cover/stealth systems set this to isolate the player.
+     * Night + weather stack perception multipliers but don't change groups.
+     */
+    uint8 VisibilityGroup = 0;
+
+    /**
+     * Action category for magic/ability classification.
+     * 0 = Melee, 1 = Ranged, 2 = Magic_Damage, 3 = Magic_Healing, 4 = Magic_Forbidden, 5 = Environmental
+     */
+    uint8 ActionCategory = 0;
+
+    /** Convenience: is this entity a spy (undercover in enemy faction)? */
+    bool IsSpy() const { return Faction.Index != TrueFaction.Index && TrueFaction.IsValid(); }
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -120,6 +144,20 @@ struct MYTHIC_API FMythicPsychodynamicFragment : public FMassFragment {
 
     /** World time of the last event that affected this entity's pressure */
     double LastEventTime = 0.0;
+
+    /**
+     * Entity index of the current Fight target (for mob dynamics).
+     * When N entities share the same FightTargetEntity → mob bonus applied.
+     * INDEX_NONE = no target.
+     */
+    int32 FightTargetEntity = INDEX_NONE;
+
+    /**
+     * Despair flag. Set when total accumulated unvented pressure exceeds DespairThreshold.
+     * Despaired NPCs abandon desires, become vulnerable to recruitment, and contribute
+     * to faction collapse spirals.
+     */
+    bool bDespaired = false;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -198,9 +236,21 @@ struct MYTHIC_API FMythicSocialFragment : public FMassFragment {
     /** Number of active edges (first N slots are valid) */
     uint8 EdgeCount = 0;
 
+    /**
+     * Has this NPC directly met/interacted with a player?
+     * Required for player faction reactions (REQ-BEH-008): NPCs don't have
+     * omniscient knowledge of player reputation — recognition requires either
+     * prior contact or received belief propagation about the player.
+     */
+    bool bHasMetPlayer = false;
+
+    /** Per-player loyalty values (for player property guards). Max 8 players. */
+    float PlayerLoyalty[8] = {};
+
     static constexpr uint16 InvalidEdgeIndex = 0xFFFF;
 
     FMythicSocialFragment() {
         FMemory::Memset(EdgeEntityIndices, 0xFF, sizeof(EdgeEntityIndices));
+        FMemory::Memzero(PlayerLoyalty, sizeof(PlayerLoyalty));
     }
 };

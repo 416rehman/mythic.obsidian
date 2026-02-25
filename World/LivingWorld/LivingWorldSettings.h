@@ -10,6 +10,7 @@
 #include "LivingWorldSettings.generated.h"
 
 class UMythicSettlementSettings;
+class UMythicEncounterTemplateDatabase;
 
 /**
  * Master settings for the Living World System.
@@ -24,6 +25,14 @@ class MYTHIC_API UMythicLivingWorldSettings : public UDataAsset {
 
 public:
     // ─── Shared Data ──────────────────────────────────────
+
+    /** Dialogue template database for dynamic NPC lines */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shared Configuration")
+    TSoftObjectPtr<class UMythicDialogueDatabase> DialogueDatabase;
+
+    /** Role definition database for spy, merchant, guard behaviors */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shared Configuration")
+    TSoftObjectPtr<class UMythicRoleDatabase> RoleDatabase;
 
     /** Causal Fabric ring buffer capacity. Determines how many events are in active memory. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Causal Fabric", meta = (ClampMin = "256", ClampMax = "65536"))
@@ -69,13 +78,9 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Budgets", meta = (ClampMin = "1", ClampMax = "50"))
     int32 MaxPropagationsPerFrame = 10;
 
-    /** Max cognitive NPC actors alive at any time */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Budgets", meta = (ClampMin = "1", ClampMax = "100"))
-    int32 MaxCognitiveActors = 30;
-
     // ─── Significance ─────────────────────────────────────
 
-    /** Score threshold to promote an NPC to a higher tier */
+    /** Score threshold to promote an NPC from Tier 0 to Tier 1 */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Significance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float PromotionThreshold = 0.7f;
 
@@ -528,4 +533,251 @@ public:
     /** Max herd-flee contagion propagations per ecology tick (budget cap) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "1", ClampMax = "100"))
     int32 MaxHerdContagionPerTick = 10;
+
+    // ─── Social Graph (Phase 5) ──────────────────────────
+
+    /** Max outgoing social edges per entity. Higher = richer social networks, more memory. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social Graph", meta = (ClampMin = "1", ClampMax = "32"))
+    int32 SocialMaxEdgesPerEntity = 8;
+
+    /** Interval between social graph pruning passes (seconds). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social Graph", meta = (ClampMin = "1.0", ClampMax = "30.0"))
+    float SocialPruneIntervalSeconds = 5.0f;
+
+    /** Edges with strength below this are removed during pruning. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social Graph", meta = (ClampMin = "0.001", ClampMax = "0.5"))
+    float SocialPruneStrengthThreshold = 0.05f;
+
+    /** Strength decay per second of world time. Exponential: S(t) = S₀ × e^(-rate × Δt). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social Graph", meta = (ClampMin = "0.0", ClampMax = "0.01"))
+    float SocialEdgeDecayRate = 0.001f;
+
+    /** Max entities processed per social graph prune call (budget cap). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social Graph", meta = (ClampMin = "1", ClampMax = "50"))
+    int32 SocialPruneEntitiesPerTick = 10;
+
+    // ─── Cognitive Brain (Phase 5) ───────────────────────
+
+    /** Min think interval for cognitive NPCs (seconds). Think timer randomized within [min, max]. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cognitive", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float CognitiveThinkIntervalMin = 0.5f;
+
+    /** Max think interval for cognitive NPCs (seconds). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cognitive", meta = (ClampMin = "0.5", ClampMax = "10.0"))
+    float CognitiveThinkIntervalMax = 2.0f;
+
+    /** Utility margin required to override current intention (prevents flickering). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cognitive", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float DesireHysteresis = 0.2f;
+
+    /** Max beliefs a cognitive NPC can hold. Weakest evicted on overflow. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cognitive", meta = (ClampMin = "4", ClampMax = "32"))
+    int32 MaxBeliefsPerBrain = 16;
+
+    /** Max fabric events queried per think tick (budget cap). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cognitive", meta = (ClampMin = "1", ClampMax = "20"))
+    int32 MaxFabricQueriesPerThink = 8;
+
+    /**
+     * Hard cap on simultaneous Tier 2-3 cognitive NPC actors.
+     * SignificanceProcessor will not promote beyond this count.
+     * Must be kept reasonable (<50) to guarantee per-frame budget.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cognitive", meta = (ClampMin = "1", ClampMax = "100"))
+    int32 MaxCognitiveActors = 30;
+
+    // ─── Encounter Director (Phase 5) ────────────────────
+
+    /** Interval between encounter template evaluations (seconds). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Encounters", meta = (ClampMin = "1.0", ClampMax = "30.0"))
+    float EncounterEvaluationInterval = 5.0f;
+
+    /** Max active encounters across the entire world. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Encounters", meta = (ClampMin = "1", ClampMax = "20"))
+    int32 MaxActiveEncounters = 10;
+
+    /** Default cooldown between activations of the same encounter type (seconds). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Encounters", meta = (ClampMin = "0.0"))
+    float DefaultEncounterCooldown = 300.0f;
+
+    /** Data asset containing designer-authored encounter templates. Auto-loaded on init. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Encounters")
+    TSoftObjectPtr<UMythicEncounterTemplateDatabase> EncounterTemplateDatabase;
+
+    // ─── Party System (Phase 5) ──────────────────────────
+
+    /** Max companions per player party. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "1", ClampMax = "8"))
+    int32 MaxPartySize = 4;
+
+    /** Loyalty score below which a companion voluntarily departs [0.0, 1.0]. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float LoyaltyDepartureThreshold = 0.15f;
+
+    /** Betrayal pressure above which a companion acts against the player. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "0.5", ClampMax = "20.0"))
+    float BetrayalPressureThreshold = 5.0f;
+
+    /** Confidence reduction per belief propagation hop during rest phase [0.0, 1.0]. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "0.0", ClampMax = "0.9"))
+    float BeliefPropagationDecay = 0.3f;
+
+    // ─── Schedule System ─────────────────────────────────
+
+    /**
+     * Length of one full game day in real seconds.
+     * ScheduleTransitionProcessor maps elapsed game time modulo this value to a 24-hour cycle.
+     * Default: 1200s = 20 realtime minutes per game day.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schedule", meta = (ClampMin = "60.0", ClampMax = "7200.0"))
+    float DayLengthSeconds = 1200.0f;
+
+    // ─── Belief Propagation ──────────────────────────────
+
+    /**
+     * Max belief propagations processed per tick by the BeliefPropagationProcessor.
+     * Each propagation = one entity sharing a belief with one neighbor.
+     * Budget-capped to prevent cascading propagation from consuming the frame.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social", meta = (ClampMin = "1", ClampMax = "64"))
+    int32 MaxBeliefPropagationsPerTick = 16;
+
+    /**
+     * Maximum hops a belief can propagate through the social graph.
+     * Higher = information travels further but degrades more.
+     * Each hop reduces confidence by BeliefPropagationDecay.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social", meta = (ClampMin = "1", ClampMax = "10"))
+    int32 MaxBeliefPropagationHops = 3;
+
+    // ─── Scheme Engine (Phase 5) ─────────────────────────
+
+    /** Sim ticks between scheme generation evaluations. Higher = less CPU, slower reaction. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schemes", meta = (ClampMin = "1", ClampMax = "50"))
+    int32 SchemeGenerationTickInterval = 10;
+
+    /** Base scheme generation probability per faction per generation tick [0.0, 1.0]. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schemes", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SchemeBaseProbability = 0.05f;
+
+    /** Max active schemes per faction. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schemes", meta = (ClampMin = "1", ClampMax = "10"))
+    int32 MaxSchemesPerFaction = 5;
+
+    /** Max total active schemes across all factions (global budget). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schemes", meta = (ClampMin = "1", ClampMax = "100"))
+    int32 MaxTotalSchemes = 50;
+
+    // ─── Crime & Behavioral Responses (Phase 6) ─────────
+
+    /**
+     * Total accumulated pressure across all channels that triggers the Despair state.
+     * Despaired NPCs abandon desires, become vulnerable to recruitment,
+     * and contribute to faction collapse spirals (REQ-BEH-009).
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Behavioral", meta = (ClampMin = "1.0", ClampMax = "50.0"))
+    float DespairThreshold = 8.0f;
+
+    /**
+     * Multiplier on Grief pressure from social link death.
+     * Higher = deaths have more emotional impact on connected NPCs.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Behavioral", meta = (ClampMin = "0.5", ClampMax = "5.0"))
+    float GriefMultiplier = 2.0f;
+
+    /**
+     * Loyalty threshold above which an NPC will sacrifice self-preservation.
+     * When Loyalty for a social-linked entity exceeds this, NPC overrides Flee with Defend (REQ-BEH-009).
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Behavioral", meta = (ClampMin = "0.5", ClampMax = "1.0"))
+    float SacrificeThreshold = 0.8f;
+
+    /**
+     * Cell radius for guard assist propagation (REQ-BEH-002).
+     * When a guard vents via Enforce, guards within this radius get an assist pressure boost.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Behavioral", meta = (ClampMin = "1.0", ClampMax = "5.0"))
+    float GuardAssistRadius = 2.0f;
+
+    /**
+     * Cell radius for emotional contagion (REQ-BEH-003).
+     * Flee venting spreads Threat pressure to entities within this radius.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Behavioral", meta = (ClampMin = "1.0", ClampMax = "5.0"))
+    float EmotionalContagionRadius = 2.0f;
+
+    /**
+     * Number of entities with the same Fight target needed to form a mob (REQ-BEH-005).
+     * Mob formation grants Wrath bonus and Threat reduction (safety in numbers).
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Behavioral", meta = (ClampMin = "2", ClampMax = "20"))
+    int32 MobFormationThreshold = 3;
+
+    // ─── Perception Modifiers (Phase 6) ──────────────────
+
+    /**
+     * Perception multiplier applied during night time (REQ-BEH-007).
+     * Reduces effective hearing and visibility. Stacks with weather multiplier.
+     * 1.0 = no change. 0.5 = halved perception at night.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Perception", meta = (ClampMin = "0.1", ClampMax = "1.0"))
+    float NightPerceptionMultiplier = 0.5f;
+
+    /**
+     * Perception multiplier applied during bad weather (rain, fog, storm).
+     * Stacks multiplicatively with night multiplier.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Perception", meta = (ClampMin = "0.1", ClampMax = "1.0"))
+    float WeatherPerceptionMultiplier = 0.6f;
+
+    // ─── Faction Lifecycle (Phase 6) ─────────────────────
+
+    /**
+     * Minimum surviving population to create a resistance faction from annihilation (REQ-FAC-003).
+     * Survivors below this threshold are absorbed; above creates a resistance remnant.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Faction Lifecycle", meta = (ClampMin = "1", ClampMax = "100"))
+    int32 ResistancePopulationThreshold = 10;
+
+    /**
+     * Minimum territory cells for resistance faction to restore to full faction (REQ-FAC-004).
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Faction Lifecycle", meta = (ClampMin = "1", ClampMax = "20"))
+    int32 RestorationCellThreshold = 3;
+
+    // ─── World Persistence (Phase 6) ─────────────────────
+
+    /**
+     * Delay in game-time seconds before a faction assigns a successor to a vacated shop/role.
+     * Simulates the time needed for the faction to find a replacement NPC (REQ-PER-002).
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Persistence", meta = (ClampMin = "10.0", ClampMax = "600.0"))
+    float ShopSuccessionDelaySeconds = 120.0f;
+
+    /**
+     * Strength of economic cascade debuffs when key roles are lost (REQ-PER-003/004).
+     * 1.0 = full debuff applied. 0.5 = half strength. Affects production and security modifiers.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Persistence", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float EconomicCascadeStrength = 1.0f;
+
+    // ─── Tier 2-3 Promotion (Phase 6) ────────────────────
+
+    /**
+     * Significance score required for Tier 1 → Tier 2 promotion (actor spawn).
+     * Higher than Tier0→1 threshold because actor promotion is expensive.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline | Significance", meta = (ClampMin = "0.5", ClampMax = "1.0"))
+    float Tier2PromotionThreshold = 0.9f;
+
+    // ─── Data Asset References (Phase 6) ─────────────────
+
+
+    /**
+     * Creature species × species aggression matrix (UDataTable).
+     * Rows = species A, columns = species B, value = aggression level [0.0, 1.0].
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology")
+    TSoftObjectPtr<UDataTable> CreatureAggressionMatrix;
 };
+

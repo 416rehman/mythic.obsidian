@@ -10,6 +10,9 @@
 #include "GameModes/Attributes/WorldAttributes.h"
 #include "GameModes/GameState/MythicGameState.h"
 #include "Net/UnrealNetwork.h"
+#include "MassEntitySubsystem.h"
+#include "Mass/Fragments/MythicMassFragments.h"
+#include "AI/Cognition/CognitiveBrainComponent.h"
 
 
 const FMythicNPCData AMythicNPCCharacter::GetNPCData() const {
@@ -50,6 +53,9 @@ AMythicNPCCharacter::AMythicNPCCharacter() {
     // Attributes
     LifeAttributes = CreateDefaultSubobject<UMythicAttributeSet_Life>("LifeAttributes");
     CombatAttributes = CreateDefaultSubobject<UMythicAttributeSet_NPCCombat>("CombatAttributes");
+
+    // Cognition
+    CognitiveBrain = CreateDefaultSubobject<UMythicCognitiveBrainComponent>("CognitiveBrain");
 }
 
 UAbilitySystemComponent *AMythicNPCCharacter::GetAbilitySystemComponent() const {
@@ -77,4 +83,29 @@ void AMythicNPCCharacter::BeginPlay() {
 
     InitializeASC();
     // TODO: Initialize attributes based on the NPC's data
+}
+
+void AMythicNPCCharacter::InitializeFromMassEntity(const FMassEntityHandle& InEntityHandle) {
+    if (!HasAuthority()) return;
+
+    UMassEntitySubsystem* EntitySubsystem = UWorld::GetSubsystem<UMassEntitySubsystem>(GetWorld());
+    if (!EntitySubsystem || !EntitySubsystem->GetEntityManager().IsEntityValid(InEntityHandle)) {
+        return;
+    }
+
+    const FMassEntityManager& EntityManager = EntitySubsystem->GetEntityManager();
+
+    const FMythicIdentityFragment* IdentityFrag = EntityManager.GetFragmentDataPtr<FMythicIdentityFragment>(InEntityHandle);
+    const FMythicPersonalityFragment* PersonalityFrag = EntityManager.GetFragmentDataPtr<FMythicPersonalityFragment>(InEntityHandle);
+
+    if (CognitiveBrain && IdentityFrag && PersonalityFrag) {
+        CognitiveBrain->InitializeBrain(
+            IdentityFrag->Faction,
+            IdentityFrag->Cell,
+            *PersonalityFrag,
+            InEntityHandle,
+            IdentityFrag->TrueFaction,
+            IdentityFrag->RoleTag
+        );
+    }
 }

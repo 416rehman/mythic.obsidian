@@ -30,3 +30,9 @@ USTRUCT()
 struct MYTHIC_API FMythicCognitiveTag : public FMassTag {
     GENERATED_BODY()
 };
+
+/** Marks an entity that requested an actor spawn */
+USTRUCT()
+struct MYTHIC_API FMythicActorSpawnRequestTag : public FMassTag {
+    GENERATED_BODY()
+};
