@@ -52,9 +52,13 @@ public:
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess=true))
     FGameplayTag GroupTag;
 
-    // If true, items in this tab cannot be dropped/sold/transferred by player
+    // If false, items in this tab cannot be dropped/sold/transferred by player
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess=true))
-    bool IsProtected = false;
+    bool CanPlayerTake = true;
+
+    // If false, player cannot insert items manually
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess=true))
+    bool CanPlayerPut = true;
 
     // Slots in this tab
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess=true))
@@ -66,12 +70,15 @@ public:
     UTexture2D *GetTabIcon() const;
     void SetGroupTag(FGameplayTag InGroupTag);
     FGameplayTag GetGroupTag() const;
-    void SetIsProtected(bool bInIsProtected);
-    bool GetIsProtected() const;
+    void SetCanPlayerTake(bool bInCanPlayerTake);
+    bool GetCanPlayerTake() const;
+    void SetCanPlayerPut(bool bInCanPlayerPut);
+    bool GetCanPlayerPut() const;
     void SetSlots(TArray<TObjectPtr<UItemSlotVM>> InSlots);
     TArray<TObjectPtr<UItemSlotVM>> GetSlots() const;
 
-    void Initialize(FText InTabName, UTexture2D *InTabIcon, FGameplayTag InGroupTag, bool bInIsProtected, TArray<TObjectPtr<UItemSlotVM>> InSlots);
+    void Initialize(FText InTabName, UTexture2D *InTabIcon, FGameplayTag InGroupTag, bool bInCanPlayerTake, bool bInCanPlayerPut,
+                    TArray<TObjectPtr<UItemSlotVM>> InSlots);
 };
 
 /**

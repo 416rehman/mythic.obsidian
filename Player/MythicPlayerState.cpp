@@ -6,6 +6,7 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Proficiencies.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
+#include "MythicFactionStandingComponent.h"
 #include "Net/UnrealNetwork.h"
 
 AMythicPlayerState::AMythicPlayerState() {
@@ -24,6 +25,9 @@ AMythicPlayerState::AMythicPlayerState() {
     UtilityAttributes = CreateDefaultSubobject<UMythicAttributeSet_Utility>(TEXT("UtilityAttributes"));
     ExperienceAttributes = CreateDefaultSubobject<UMythicAttributeSet_Exp>(TEXT("ExperienceAttributes"));
     ProficiencyAttributes = CreateDefaultSubobject<UMythicAttributeSet_Proficiencies>(TEXT("ProficiencyAttributes"));
+
+    // Per-player faction standing (replicated component).
+    FactionStanding = CreateDefaultSubobject<UMythicFactionStandingComponent>(TEXT("FactionStanding"));
 }
 
 UAbilitySystemComponent *AMythicPlayerState::GetAbilitySystemComponent() const {

@@ -81,6 +81,10 @@ void UMythicAttributeSet_Offense::OnRep_BonusSpearDamage(const FGameplayAttribut
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BonusSpearDamage, OldBonusSpearDamage);
 }
 
+void UMythicAttributeSet_Offense::OnRep_BonusHammerDamage(const FGameplayAttributeData &OldBonusHammerDamage) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BonusHammerDamage, OldBonusHammerDamage);
+}
+
 void UMythicAttributeSet_Offense::
 OnRep_IncreasedDamageToEnemiesUnderStatusEffects(const FGameplayAttributeData &OldIncreasedDamageToEnemiesUnderStatusEffects) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, IncreasedDamageToEnemiesUnderStatusEffects,
@@ -116,6 +120,7 @@ void UMythicAttributeSet_Offense::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusDaggerDamage, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusSickleDamage, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusSpearDamage, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusHammerDamage, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, IncreasedDamageToEnemiesUnderStatusEffects, COND_None,
                                    REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies, COND_None, REPNOTIFY_Always);

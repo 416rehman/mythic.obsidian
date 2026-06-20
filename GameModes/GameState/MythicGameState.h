@@ -47,6 +47,43 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic")
     FCurveTableRowHandle XPLevelsCurveRowHandle;
 
+    // Flat MaxHealth granted per character level (and healed immediately) when ProcessLevelUps fires. 0 = leveling
+    // grants no health. The single source for the per-level health reward.
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic")
+    float HealthPerLevel = 20.0f;
+
+    // Flat Armor (damage mitigation, consumed every hit by the damage execution) granted per character level when
+    // ProcessLevelUps fires. 0 = leveling grants no armor. The single source for the per-level armor reward.
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic")
+    float ArmorPerLevel = 2.0f;
+
+    // Raw Armor -> incoming-damage reduction fraction [0,1]. Used by the damage Application execution.
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
+    FCurveTableRowHandle ArmorMitigationCurveRowHandle;
+
+    // Post-mitigation damage floor: high Armor can never reduce a non-zero hit below this (keeps targets killable).
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
+    float MinChipDamage = 1.0f;
+
+    // Status-tag damage modifiers, consumed by the damage Application execution PRE-mitigation. Source RAGE deals
+    // more / WEAKENED deals less; target TERRIFIED takes more / FORTIFY takes less. Designer-tunable fractions.
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
+    float RageDamageBonus = 0.25f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
+    float WeakenedDamagePenalty = 0.25f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
+    float TerrifiedDamageBonus = 0.25f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
+    float FortifyDamageReduction = 0.25f;
+
+    // Bonus XP fraction while GAS.Buff.Enlighten is active, applied at the canonical XP funnel (AddExperience).
+    // Same designer-tunable shape as the four status-damage scalars above. Ex: 0.5 = +50% XP gain.
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
+    float EnlightenXpBonus = 0.5f;
+
     // Minimum Health Curve Row Handle - Used for initializing the health of the NPC's at their level
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     FCurveTableRowHandle HealthMinCurveRowHandle;

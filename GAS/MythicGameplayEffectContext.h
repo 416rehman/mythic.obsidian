@@ -68,6 +68,9 @@ struct FMythicGameplayEffectContext : public FGameplayEffectContext {
     // Will/Did this TERRIFY the target?
     MYTHIC_CONTEXT_BOOL_PROPERTY(Terrify)
 
+    // Was this attack dodged by the target? (rolled per-target in DamageApplication; drives the dodge cue)
+    MYTHIC_CONTEXT_BOOL_PROPERTY(Dodged)
+
     virtual FGameplayEffectContext *Duplicate() const override {
         FMythicGameplayEffectContext *NewContext = new FMythicGameplayEffectContext();
         *NewContext = *this;
@@ -288,6 +291,27 @@ public:
             auto MythicContext = static_cast<const FMythicGameplayEffectContext *>(ContextHandle.Get());
             if (MythicContext) {
                 return MythicContext->IsTerrify();
+            }
+        }
+        return false;
+    }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
+    static void SetDodged(UPARAM(ref) FGameplayEffectContextHandle &ContextHandle, bool bInIsDodged) {
+        if (ContextHandle.IsValid()) {
+            auto MythicContext = static_cast<FMythicGameplayEffectContext *>(ContextHandle.Get());
+            if (MythicContext) {
+                MythicContext->SetDodged(bInIsDodged);
+            }
+        }
+    }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
+    static bool GetDodged(const FGameplayEffectContextHandle &ContextHandle) {
+        if (ContextHandle.IsValid()) {
+            auto MythicContext = static_cast<const FMythicGameplayEffectContext *>(ContextHandle.Get());
+            if (MythicContext) {
+                return MythicContext->IsDodged();
             }
         }
         return false;

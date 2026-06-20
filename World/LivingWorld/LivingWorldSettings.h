@@ -202,6 +202,30 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Economy", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float ContractMilitaryThreshold = 0.6f;
 
+    // ─── Scheme Effects ─────────────────────────────────────
+    // Magnitudes a SUCCEEDED faction scheme applies (UMythicSchemeEngine::ExecuteScheme). Designer-tunable; defaults
+    // are calibrated to the economy scale (Reserves on [-100,100], RaidFraction=0.1, BaseDeathRate=0.005/tick).
+
+    /** Fraction of the target's positive Wealth + Materials reserves a successful TradeDisruption drains (mirrors RaidFraction). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schemes", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SchemeTradeDisruptionFraction = 0.1f;
+
+    /** Arms-reserve a successful MilitaryRaid burns from the target (MilitaryStrength re-derives down next economy tick; ~0.06/10 arms). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schemes", meta = (ClampMin = "0.0"))
+    float SchemeRaidArmsLoss = 10.0f;
+
+    /** Fraction of the target's Population a successful MilitaryRaid kills (vs natural BaseDeathRate 0.005/tick — a one-shot shock). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schemes", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SchemeRaidPopulationLossFraction = 0.05f;
+
+    /** Population a successful Assassination removes (the slain leader + immediate retinue). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schemes", meta = (ClampMin = "0"))
+    int32 SchemeAssassinationPopulationLoss = 3;
+
+    /** Territory cells a successful TerritoryReclaim flips from the target to the origin faction. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schemes", meta = (ClampMin = "0"))
+    int32 SchemeTerritoryReclaimCells = 1;
+
     /**
      * Max population for contract income. Prevents empires from also earning merc income.
      * Ex: ceiling=200 → 500-pop kingdom can't earn contracts, but 50-pop warband can.
@@ -755,6 +779,14 @@ public:
     float ShopSuccessionDelaySeconds = 120.0f;
 
     /**
+     * A settlement is conquered (governance flips) when a SINGLE other faction dominates more than this fraction of
+     * its territory cells. Clear-majority default (0.6) avoids flip-flapping; the transfer re-seeds the cells to the
+     * conqueror, so it then holds until another faction overruns it.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory", meta = (ClampMin = "0.5", ClampMax = "1.0"))
+    float SettlementConquestThreshold = 0.6f;
+
+    /**
      * Strength of economic cascade debuffs when key roles are lost (REQ-PER-003/004).
      * 1.0 = full debuff applied. 0.5 = half strength. Affects production and security modifiers.
      */
@@ -780,4 +812,3 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology")
     TSoftObjectPtr<UDataTable> CreatureAggressionMatrix;
 };
-

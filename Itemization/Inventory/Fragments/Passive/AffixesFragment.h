@@ -55,7 +55,10 @@ struct FAffixesRuntimeReplicatedData {
     UPROPERTY(BlueprintReadWrite, SaveGame)
     TArray<FRolledAffix> RolledAffixes = TArray<FRolledAffix>();
 
-    UPROPERTY(BlueprintReadOnly)
+    // Server-only runtime wiring. NotReplicated so the default per-property struct replication doesn't push a
+    // server ASC object reference to the owning client on every equip/unequip (it's read only on the server, where
+    // affixes are activated/rerolled). The replicated struct then carries only the rolled affix arrays.
+    UPROPERTY(NotReplicated, BlueprintReadOnly)
     UAbilitySystemComponent *ASC = nullptr;
 };
 
@@ -136,6 +139,18 @@ public:
     static void ApplyAffixes(UAbilitySystemComponent *ASC, TArray<FRolledAffix> &InRolledAffixes);
     // Removes applied affixes
     static void RemoveAffixes(UAbilitySystemComponent *ASC, TArray<FRolledAffix> &InRolledAffixes);
+
+    // SERVER: re-roll the value of every UNLOCKED random affix (locked affixes AND core affixes — which roll
+    // locked — keep their values). Authority-gated (mirrors UDurabilityFragment::ServerApplyWear). If the item is
+    // currently active on an ASC, the live GAS modifiers are reversed (with the OLD values) and re-applied (with
+    // the NEW values) so the change takes effect immediately and reversibly. ItemLevel scales the roll range.
+    // The "Refine/Forge" gameplay verb: re-roll the stats you don't like, lock the ones you do.
+    UFUNCTION(BlueprintCallable, Category = "Affixes")
+    void RerollUnlockedAffixes(int32 ItemLevel);
+
+    // SERVER: lock/unlock a random affix by index so RerollUnlockedAffixes preserves it. Authority-gated.
+    UFUNCTION(BlueprintCallable, Category = "Affixes")
+    void SetAffixLocked(int32 AffixIndex, bool bLocked);
 
     // Checks if an affix is already rolled
     static bool IsAffixRolled(const FGameplayAttribute &Affix, TArray<FRolledAffix> &InRolledAffixes);

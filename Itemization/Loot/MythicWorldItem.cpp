@@ -85,11 +85,16 @@ void AMythicWorldItem::OnHit(UPrimitiveComponent *HitComponent, AActor *OtherAct
 }
 
 void AMythicWorldItem::EmulateDropPhysics(const FVector &location, float radius) {
-    // Use the suggest projectile velocity function to get a suggested velocity to emulate a drop effect
-    // Randomize the location using navmesh
+    // Use the suggest projectile velocity function to get a suggested velocity to emulate a drop effect.
+    // Randomize the target using navmesh. Default the arc target to the drop origin: on nav failure (no nav system, or
+    // the drop point is off-navmesh — rooftops/ledges/water/caves) GetRandomPointInNavigableRadius leaves
+    // RandomizedLocation at ZeroVector, which previously got passed as the arc End and flung the loot across the map
+    // toward world origin (unrecoverable). With Start==End the arc is degenerate and the item simply drops in place.
+    FVector TargetLoc = location;
     FNavLocation RandomizedLocation;
     UNavigationSystemV1 *NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
     if (NavSys && NavSys->GetRandomPointInNavigableRadius(location, radius, RandomizedLocation, nullptr)) {
+        TargetLoc = RandomizedLocation.Location;
         UE_LOG(Myth, Warning, TEXT("Randomized location in %f radius from %s to %s"), radius, *location.ToString(), *RandomizedLocation.Location.ToString());
     }
 
@@ -98,7 +103,7 @@ void AMythicWorldItem::EmulateDropPhysics(const FVector &location, float radius)
         GetWorld(),
         SuggestedVelocity,
         location,
-        RandomizedLocation.Location);
+        TargetLoc);
 
     // Allow physics emulation on the world item
     this->StaticMesh->SetCollisionResponseToAllChannels(ECR_Block);

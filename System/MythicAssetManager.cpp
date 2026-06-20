@@ -6,6 +6,7 @@
 #include "Settings/MythicDeveloperSettings.h"
 
 const FPrimaryAssetType UMythicAssetManager::ItemDefinitionType = TEXT("ItemDefinition");
+const FPrimaryAssetType UMythicAssetManager::ConversionRecipeType = TEXT("ConversionRecipe");
 
 void UMythicAssetManager::StartInitialLoading() {
     Super::StartInitialLoading();

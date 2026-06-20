@@ -105,6 +105,14 @@ public:
     /** Commit the write buffer — swaps the read snapshot for game thread. */
     void CommitWrites();
 
+    /**
+     * Tally cells owned per faction from the (sim-thread-private) write buffer, indexed by FMythicFactionId.Index.
+     * Lets the sim reconcile each faction's authoritative ControlledCellCount with the emergent influence-driven
+     * ownership flips after PropagateInfluence(). Caller must already hold the external SimulationLock (no SnapshotLock
+     * is taken — this reads only WriteBuffer, exactly like CommitWrites' rebuild does). OutCounts is sized to 256.
+     */
+    void GetWriteCellCounts(TArray<int32> &OutCountsByFactionIndex) const;
+
     // ─── Read Interface (Game Thread — Lock-Free) ─────────
 
     /** Get the territory cell data at a grid coordinate. Returns default cell if out of bounds. */
@@ -142,7 +150,7 @@ public:
     // ─── Serialization ───────────────────────────────────
 
     /** Serialize the entire grid state for save/load. */
-    void Serialize(FArchive& Ar);
+    virtual void Serialize(FArchive &Ar) override;
 
 private:
     int32 Width = 0;
@@ -167,8 +175,16 @@ private:
     /** Lock protecting ReadBuffer during CommitWrites */
     mutable FCriticalSection SnapshotLock;
 
-    /** Dirty flags — track changed cells for network/visual updates */
+    /** Dirty flags — working set of cells changed during the current tick (set by SetCellInfluence/PropagateInfluence).
+     *  Folded into ReadDirtyCells + cleared at CommitWrites. Guarded by the EXTERNAL SimulationLock: EVERY writer holds
+     *  it — the sim thread (SimTick -> CommitAllSnapshots -> CommitWrites) AND the game-thread settlement seed/transfer
+     *  paths (RegisterSettlement / TransferSettlement / SeedTerritoryFromSettlements). NOT sim-thread-only — a future
+     *  refactor must keep SimulationLock on any DirtyCells writer. (ReadDirtyCells is the SnapshotLock-guarded snapshot.) */
     TBitArray<> DirtyCells;
+
+    /** Committed changed-cell deltas pending replication, guarded by SnapshotLock. CommitWrites (sim thread) ORs the
+     *  tick's DirtyCells in; GetChangedCells (game thread) drains it. Mutable so the const drain can clear it. */
+    mutable TBitArray<> ReadDirtyCells;
 
     /** Flatten 2D coord to 1D index */
     int32 CoordToIndex(const FMythicCellCoord &Coord) const {

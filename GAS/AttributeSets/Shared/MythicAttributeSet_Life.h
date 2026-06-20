@@ -72,4 +72,12 @@ public:
 
     // Clamp attributes to valid values
     virtual void ClampAttributes(const FGameplayAttribute &Attribute, float &NewValue);
+
+    // True once Health has hit zero (the server-authoritative death latch).
+    UFUNCTION(BlueprintPure, Category = "Attributes")
+    bool IsDead() const { return bOutOfHealth; }
+
+    // SERVER: restore to full Health and clear the death latch. Call on respawn and on NPC pool reuse so a
+    // previously-dead actor does not spawn already dead (bOutOfHealth otherwise sticks forever).
+    void ResetForRespawn();
 };

@@ -129,9 +129,3 @@ struct FMythicScheme {
         return State == EMythicSchemeState::Planning || State == EMythicSchemeState::InProgress;
     }
 };
-
-/** Max active schemes per faction. Prevents runaway scheme generation. */
-static constexpr int32 MaxSchemesPerFaction = 5;
-
-/** Max total active schemes across all factions. Global budget cap. */
-static constexpr int32 MaxTotalSchemes = 50;

@@ -104,8 +104,10 @@ class MYTHIC_API ULootReward : public URewardBase {
     GENERATED_BODY()
 
     static void RequestLootFromSource(float CommonRate, float RareRate, float EpicRate, float LegendaryRate, float MythicRate,
+                                      float GoldMultiplier,
                                       APlayerController *PlayerController,
-                                      int32 DropLevel, UMythicLootTable *LootTable, TScriptInterface<IInventoryProviderInterface> InventoryProvider, bool isPrivate, FVector SpawnLocation,
+                                      int32 DropLevel, UMythicLootTable *LootTable, TScriptInterface<IInventoryProviderInterface> InventoryProvider,
+                                      bool isPrivate, FVector SpawnLocation,
                                       UMythicLootManagerSubsystem *
                                       MythicLootManager);
 

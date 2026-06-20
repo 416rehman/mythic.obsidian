@@ -40,14 +40,24 @@ FGameplayTag UInventoryTabVM::GetGroupTag() const {
     return GroupTag;
 }
 
-void UInventoryTabVM::SetIsProtected(bool bInIsProtected) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(IsProtected, bInIsProtected)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(IsProtected);
+void UInventoryTabVM::SetCanPlayerTake(bool bInCanPlayerTake) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(CanPlayerTake, bInCanPlayerTake)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(CanPlayerTake);
     }
 }
 
-bool UInventoryTabVM::GetIsProtected() const {
-    return IsProtected;
+bool UInventoryTabVM::GetCanPlayerTake() const {
+    return CanPlayerTake;
+}
+
+void UInventoryTabVM::SetCanPlayerPut(bool bInCanPlayerPut) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(CanPlayerPut, bInCanPlayerPut)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(CanPlayerPut);
+    }
+}
+
+bool UInventoryTabVM::GetCanPlayerPut() const {
+    return CanPlayerPut;
 }
 
 void UInventoryTabVM::SetSlots(TArray<TObjectPtr<UItemSlotVM>> InSlots) {
@@ -61,12 +71,13 @@ TArray<TObjectPtr<UItemSlotVM>> UInventoryTabVM::GetSlots() const {
     return Slots;
 }
 
-void UInventoryTabVM::Initialize(FText InTabName, UTexture2D *InTabIcon, FGameplayTag InGroupTag, bool bInIsProtected,
+void UInventoryTabVM::Initialize(FText InTabName, UTexture2D *InTabIcon, FGameplayTag InGroupTag, bool bInCanPlayerTake, bool bInCanPlayerPut,
                                  TArray<TObjectPtr<UItemSlotVM>> InSlots) {
     SetTabName(InTabName);
     SetTabIcon(InTabIcon);
     SetGroupTag(InGroupTag);
-    SetIsProtected(bInIsProtected);
+    SetCanPlayerTake(bInCanPlayerTake);
+    SetCanPlayerPut(bInCanPlayerPut);
     SetSlots(InSlots);
 }
 
@@ -147,18 +158,20 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythic
             // Get group info from Profile if available
             FText GroupName = FText::FromString(Entry.GroupTag.ToString());
             UTexture2D *GroupIcon = nullptr;
-            bool bProtected = Entry.bProtectedGroup;
+            bool bCanTake = true;
+            bool bCanPut = true;
 
             if (OwningInventoryComponent && OwningInventoryComponent->InventoryProfile) {
                 const FInventorySlotGroup *Group = OwningInventoryComponent->InventoryProfile->SlotGroups.Find(Entry.GroupTag);
                 if (Group) {
                     GroupName = Group->GroupName.IsEmpty() ? GroupName : Group->GroupName;
                     GroupIcon = Group->Icon;
-                    bProtected = Group->bProtectedItems;
+                    bCanTake = Group->bCanPlayerTake;
+                    bCanPut = Group->bCanPlayerPut;
                 }
             }
 
-            NewTabVM->Initialize(GroupName, GroupIcon, Entry.GroupTag, bProtected, TArray<TObjectPtr<UItemSlotVM>>());
+            NewTabVM->Initialize(GroupName, GroupIcon, Entry.GroupTag, bCanTake, bCanPut, TArray<TObjectPtr<UItemSlotVM>>());
             GroupToTabMap.Add(Entry.GroupTag, NewTabVM);
             FoundTab = GroupToTabMap.Find(Entry.GroupTag);
         }

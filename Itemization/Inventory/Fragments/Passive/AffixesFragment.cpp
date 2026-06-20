@@ -17,10 +17,13 @@ void UAffixesFragment::RollAffixes(int ItemLevel, int Qty) {
         TArray<FGameplayAttribute> AffixKeys;
         AffixPoolMap.GetKeys(AffixKeys);
 
-        // Randomize the keys to get a random order
-        AffixKeys.Sort([](const FGameplayAttribute &A, const FGameplayAttribute &B) {
-            return FMath::RandBool();
-        });
+        // Randomize the keys to get a UNIFORM random order. (Was an AffixKeys.Sort with a RandBool comparator, which
+        // violates strict-weak-ordering — UE's introsort under a random predicate yields a strongly NON-uniform
+        // permutation, biasing which affixes land on every Rare+ item. Fisher-Yates gives a fair shuffle.)
+        for (int32 i = AffixKeys.Num() - 1; i > 0; --i) {
+            const int32 j = FMath::RandRange(0, i);
+            AffixKeys.Swap(i, j);
+        }
 
         // Loop over the keys and add the affixes to the group if not already added, if AffixesAdded >= MaxAffixes, break
         for (auto &AffixKey : AffixKeys) {
@@ -37,7 +40,15 @@ void UAffixesFragment::RollAffixes(int ItemLevel, int Qty) {
             auto Attribute = AffixKey;
             auto RollDef = AffixPoolMap[AffixKey];
 
-            this->AffixesRuntimeReplicatedData.RolledAffixes.Add(FRolledAffix(Attribute, ItemLevel, RollDef, false));
+            FRolledAffix NewAffix(Attribute, ItemLevel, RollDef, false);
+            // Mirror the reroll's invertibility guard (RerollUnlockedAffixes): a multiplicative/division affix that
+            // rolls (near) zero would make RemoveAffixes' 1/Value reciprocal inf, permanently poisoning the attribute.
+            // Keep the INITIAL magnitude invertible too (the reroll already does this; the initial roll did not).
+            if ((RollDef.Modifier == EGameplayModOp::Multiplicitive || RollDef.Modifier == EGameplayModOp::Division)
+                && FMath::IsNearlyZero(NewAffix.Value)) {
+                NewAffix.Value = KINDA_SMALL_NUMBER;
+            }
+            this->AffixesRuntimeReplicatedData.RolledAffixes.Add(NewAffix);
 
             AffixesAdded++;
         }
@@ -132,15 +143,16 @@ void UAffixesFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
         UE_LOG(Myth, Error, TEXT("AffixesInstFragment::OnActiveItem: Invalid owner."));
         return;
     }
-    auto ASC = &this->AffixesRuntimeReplicatedData.ASC;
-    *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Owner);
+    UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Owner);
     if (!ASC) {
+        // Guard the actual ASC, not the never-null address of the member (the old `if (!&member)` was dead code).
         UE_LOG(Myth, Error, TEXT("AffixesInstFragment::OnActiveItem: Invalid ASC."));
         return;
     }
+    this->AffixesRuntimeReplicatedData.ASC = ASC; // member is the single source of truth for "active on an ASC"
 
-    ApplyAffixes(*ASC, this->AffixesRuntimeReplicatedData.RolledAffixes);
-    ApplyAffixes(*ASC, this->AffixesRuntimeReplicatedData.RolledCoreAffixes);
+    ApplyAffixes(ASC, this->AffixesRuntimeReplicatedData.RolledAffixes);
+    ApplyAffixes(ASC, this->AffixesRuntimeReplicatedData.RolledCoreAffixes);
 }
 
 void UAffixesFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
@@ -155,8 +167,9 @@ void UAffixesFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
     RemoveAffixes(ASC, this->AffixesRuntimeReplicatedData.RolledAffixes);
     RemoveAffixes(ASC, this->AffixesRuntimeReplicatedData.RolledCoreAffixes);
 
-    // Clear the ASC
-    ASC = nullptr;
+    // Clear the MEMBER (not a local copy) so the item reads as inactive — otherwise RerollUnlockedAffixes would
+    // see a stale ASC and re-apply re-rolled magnitudes onto the previous wearer's attributes.
+    this->AffixesRuntimeReplicatedData.ASC = nullptr;
 }
 
 bool UAffixesFragment::CanBeStackedWith(const UItemFragment *Other) const {
@@ -181,23 +194,83 @@ bool UAffixesFragment::CanBeStackedWith(const UItemFragment *Other) const {
         return false;
     }
 
-    // Check if the affixes are the same
-    for (int i = 0; i < Affixes.Num(); i++) {
-        if (Affixes[i].Attribute != OtherAffixes[i].Attribute ||
-            Affixes[i].Value != OtherAffixes[i].Value) {
-            return false;
+    // Compare affixes ORDER-INDEPENDENTLY: roll order is randomized (Fisher-Yates in RollAffixes), so a positional
+    // compare would wrongly reject two otherwise-identical items whose affixes rolled in a different order, breaking
+    // stacking. Multiset match — every affix in ours must pair with a distinct same-(Attribute,Value) affix in theirs
+    // (counts are already equal-checked above).
+    auto AffixMultisetMatch = [](const TArray<FRolledAffix> &Ours, const TArray<FRolledAffix> &Theirs) -> bool {
+        TArray<bool> Used;
+        Used.Init(false, Theirs.Num());
+        for (const FRolledAffix &A : Ours) {
+            bool bMatched = false;
+            for (int32 j = 0; j < Theirs.Num(); ++j) {
+                if (!Used[j] && Theirs[j].Attribute == A.Attribute && Theirs[j].Value == A.Value) {
+                    Used[j] = true;
+                    bMatched = true;
+                    break;
+                }
+            }
+            if (!bMatched) {
+                return false;
+            }
         }
-    }
+        return true;
+    };
 
-    // Check if the core affixes are the same
-    for (int i = 0; i < OurCoreAffixes.Num(); i++) {
-        if (OurCoreAffixes[i].Attribute != OtherCoreAffixes[i].Attribute ||
-            OurCoreAffixes[i].Value != OtherCoreAffixes[i].Value) {
-            return false;
-        }
+    if (!AffixMultisetMatch(Affixes, OtherAffixes)) {
+        return false;
+    }
+    if (!AffixMultisetMatch(OurCoreAffixes, OtherCoreAffixes)) {
+        return false;
     }
 
     return true;
+}
+
+void UAffixesFragment::RerollUnlockedAffixes(int32 ItemLevel) {
+    const AActor *Owner = GetOwningActor();
+    if (!Owner || !Owner->HasAuthority()) {
+        return; // server-authoritative (mirrors UDurabilityFragment::ServerApplyWear)
+    }
+
+    UAbilitySystemComponent *ASC = this->AffixesRuntimeReplicatedData.ASC;
+    const bool bActive = (ASC != nullptr);
+
+    // If the item is live on an ASC, reverse the current modifiers using the CURRENT values BEFORE re-rolling —
+    // otherwise RemoveAffixes would reverse with the new (wrong) magnitudes and corrupt the attribute.
+    if (bActive) {
+        RemoveAffixes(ASC, this->AffixesRuntimeReplicatedData.RolledAffixes);
+    }
+
+    // Re-roll only the unlocked random affixes. Core affixes live in RolledCoreAffixes (and roll locked), so they
+    // are never touched here. The roll mirrors the FRolledAffix construction (RandRange over level-scaled bounds).
+    for (FRolledAffix &Affix : this->AffixesRuntimeReplicatedData.RolledAffixes) {
+        if (Affix.bIsLocked || !Affix.Attribute.IsValid()) {
+            continue;
+        }
+        Affix.Value = FMath::RandRange(Affix.Definition.GetScaledMin(ItemLevel), Affix.Definition.GetScaledMax(ItemLevel));
+        // A multiplicative/division affix that rolls (near) zero would make RemoveAffixes' 1/Value reciprocal inf,
+        // permanently poisoning the attribute on the next reroll. Keep the magnitude invertible.
+        if ((Affix.Definition.Modifier == EGameplayModOp::Multiplicitive || Affix.Definition.Modifier == EGameplayModOp::Division)
+            && FMath::IsNearlyZero(Affix.Value)) {
+            Affix.Value = KINDA_SMALL_NUMBER;
+        }
+    }
+
+    // Re-apply with the new values (locked affixes round-trip to the same value; only unlocked ones changed).
+    if (bActive) {
+        ApplyAffixes(ASC, this->AffixesRuntimeReplicatedData.RolledAffixes);
+    }
+}
+
+void UAffixesFragment::SetAffixLocked(int32 AffixIndex, bool bLocked) {
+    const AActor *Owner = GetOwningActor();
+    if (!Owner || !Owner->HasAuthority()) {
+        return;
+    }
+    if (this->AffixesRuntimeReplicatedData.RolledAffixes.IsValidIndex(AffixIndex)) {
+        this->AffixesRuntimeReplicatedData.RolledAffixes[AffixIndex].bIsLocked = bLocked;
+    }
 }
 
 void UAffixesFragment::ApplyAffixes(UAbilitySystemComponent *ASC, TArray<FRolledAffix> &InRolledAffixes) {
@@ -238,6 +311,13 @@ void UAffixesFragment::RemoveAffixes(UAbilitySystemComponent *ASC, TArray<FRolle
             ReversedValue = -ReversedValue;
         }
         else if (modifier == EGameplayModOp::Multiplicitive || modifier == EGameplayModOp::Division) {
+            if (FMath::IsNearlyZero(ReversedValue)) {
+                // 1/0 -> +inf would permanently poison the attribute. Skip the reversal for a degenerate magnitude.
+                UE_LOG(Myth, Error, TEXT("AffixesInstFragment::RemoveAffixes: zero magnitude for mult/div affix %s; skipping reciprocal to avoid inf."),
+                       *Roll.Attribute.GetName());
+                Roll.bIsApplied = false;
+                continue;
+            }
             // Multiplication and division can be reversed by taking the reciprocal
             ReversedValue = 1 / ReversedValue;
         }

@@ -5,15 +5,22 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "MassEntityHandle.h"
 #include "World/LivingWorld/CausalFabric/CausalFabric.h"
 #include "World/LivingWorld/Simulation/WorldSimThread.h"
+#include "World/LivingWorld/LivingWorldReplication.h"
 #include "LivingWorldSubsystem.generated.h"
 
+/** Fired (client-side) when the replicated faction/territory proxies change — for UI to refresh. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMythicOnLivingWorldProxiesChanged);
+
+class AMythicNPCCharacter;
 class UMythicLivingWorldSettings;
 class UMythicCausalFabric;
 class UMythicFactionDatabase;
 class UMythicTerritoryGrid;
 class UMythicSettlementRegistry;
+struct FMythicSettlementData;
 class AMythicSettlement;
 class UMythicPersistentNPCRegistry;
 class UMythicFactionDatabaseSettings;
@@ -55,6 +62,51 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Living World")
     UMythicFactionDatabase *GetFactionDatabase() const { return FactionDB; }
 
+    // ─── Client-replicated Living World proxies (faction wealth/status/population, territory control) ───
+    // The server sim isn't run on clients; these accessors read the replicated proxy snapshot instead. They work
+    // on the server too (the Replicator holds the same data). All return empty/null if no Replicator is present.
+
+    /** CLIENT-side: fired when the replicated faction/territory proxies change. UI binds this to refresh. */
+    UPROPERTY(BlueprintAssignable, Category = "Living World")
+    FMythicOnLivingWorldProxiesChanged OnLivingWorldProxiesChanged;
+
+    /** Called by AMythicLivingWorldReplicator::BeginPlay on the CLIENT to link itself (server sets it at spawn).
+     *  Pass nullptr on the replicator's EndPlay to unlink. Broadcasts OnLivingWorldProxiesChanged on link. */
+    void RegisterClientReplicator(AMythicLivingWorldReplicator *InReplicator);
+
+    /** The replicated faction proxy for a faction (wealth/status/population/strength), or null if not replicated. */
+    const FMythicFactionProxyItem *GetFactionProxy(FMythicFactionId FactionId) const;
+
+    /** The replicated territory proxy for a cell (controlling faction). Returns false if that cell isn't synced. */
+    bool GetTerritoryProxy(FMythicCellCoord Cell, FMythicTerritoryProxyItem &OutProxy) const;
+
+    /** All currently-replicated faction proxies (active factions). Empty if no Replicator. */
+    const TArray<FMythicFactionProxyItem> &GetAllFactionProxies() const;
+
+    /** All currently-replicated active encounters (type/state/cell/faction — for a client map/HUD). Empty if no
+     *  Replicator. Client reads the replicated snapshot since the EncounterDirector is server-only. */
+    const TArray<FMythicEncounterProxyItem> &GetAllEncounterProxies() const;
+
+    // ─── Blueprint-facing proxy reads ───
+    // BlueprintPure wrappers over the C++ accessors above (which return pointers / const refs UHT can't reflect).
+    // UMG binds these + OnLivingWorldProxiesChanged to drive the faction panel / territory map / encounter markers.
+
+    /** BP: the replicated faction proxy for a faction. Returns false if that faction isn't currently replicated. */
+    UFUNCTION(BlueprintPure, Category = "Living World", meta = (DisplayName = "Get Faction Proxy"))
+    bool K2_GetFactionProxy(FMythicFactionId FactionId, FMythicFactionProxyItem &OutProxy) const;
+
+    /** BP: all currently-replicated faction proxies (active factions). */
+    UFUNCTION(BlueprintPure, Category = "Living World", meta = (DisplayName = "Get All Faction Proxies"))
+    TArray<FMythicFactionProxyItem> K2_GetAllFactionProxies() const;
+
+    /** BP: the replicated territory proxy (controlling faction) for a cell. Returns false if that cell isn't synced. */
+    UFUNCTION(BlueprintPure, Category = "Living World", meta = (DisplayName = "Get Territory Proxy"))
+    bool K2_GetTerritoryProxy(FMythicCellCoord Cell, FMythicTerritoryProxyItem &OutProxy) const;
+
+    /** BP: all currently-replicated active encounters (type/state/cell/faction — for a client map/HUD). */
+    UFUNCTION(BlueprintPure, Category = "Living World", meta = (DisplayName = "Get All Encounter Proxies"))
+    TArray<FMythicEncounterProxyItem> K2_GetAllEncounterProxies() const;
+
     /** Get the territory grid for spatial queries. Lock-free read. */
     UFUNCTION(BlueprintCallable, Category = "Living World")
     UMythicTerritoryGrid *GetTerritoryGrid() const { return TerritoryGrid; }
@@ -80,6 +132,20 @@ public:
     /** Is the living world system initialized and running? */
     UFUNCTION(BlueprintCallable, Category = "Living World")
     bool IsSystemActive() const;
+
+    // Fired on the GAME THREAD after every background sim commit (the same point that re-syncs the replicated
+    // proxies). Game-thread readers (e.g. the World Chronicle) can safely query the CausalFabric here. Native
+    // (not dynamic) — bound in C++ by UMythicWorldChronicleSubsystem.
+    DECLARE_MULTICAST_DELEGATE(FMythicOnWorldSimCommitted);
+    FMythicOnWorldSimCommitted OnWorldSimCommitted;
+
+    // ─── MASS->actor bridge: entity<->embodied-actor reverse link (server-only) ───
+    // Populated by the actor-spawn bridge when an entity is embodied, used to find the actor for despawn on
+    // de-promotion. Not a UPROPERTY (FMassEntityHandle isn't a UPROPERTY-compatible key; TWeakObjectPtr already
+    // guards dangling).
+    void RegisterEmbodiedActor(FMassEntityHandle Entity, AMythicNPCCharacter *Actor);
+    void UnregisterEmbodiedActor(FMassEntityHandle Entity);
+    AMythicNPCCharacter *FindEmbodiedActor(FMassEntityHandle Entity) const;
 
     // ─── Event Writing (from Game Thread) ─────────────────
 
@@ -107,6 +173,36 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Living World")
     void TransferSettlement(int32 SettlementId, FMythicFactionId NewFaction);
 
+    /**
+     * Nominate a leadership candidate for a faction. Thread-safe (locks simulation): this is a read-modify-write of
+     * the faction WriteBuffer's leader fields, which the SIM thread also writes (succession vacancy clear +
+     * AnnihilateFaction) under the same lock. Game-thread callers (the SignificanceProcessor) MUST route through here.
+     */
+    void ReportLeaderCandidate(FMythicFactionId FactionId, uint32 EntityId, float Score);
+
+    /**
+     * Process role-vacation / shop-succession for a dead NPC. Thread-safe (locks simulation): SettlementRegistry's
+     * HandleNPCDeath WALKS the Settlements TMap, which the SIM thread concurrently rehashes/mutates under the same lock
+     * (RegisterSettlement Add, TickShopSuccession, TransferSettlement). Game-thread death callers MUST route here.
+     */
+    void HandleNPCDeathSettlements(uint32 NameHash, double WorldTime);
+
+    /**
+     * Thread-safe copy-out of the settlement at a cell. Takes SimulationLock and copies the FMythicSettlementData BY
+     * VALUE — GetSettlementAtCell returns a raw pointer into the live Settlements TMap, which the SIM thread mutates
+     * (TransferSettlement writes GoverningFaction; TickShopSuccession; RegisterSettlement rehashes) under this same lock.
+     * Game-thread readers (the population spawner) MUST snapshot through here, not hold the live pointer.
+     * @return true + fills Out if a settlement governs the cell; false otherwise.
+     */
+    bool CopySettlementAtCell(const FMythicCellCoord &Cell, FMythicSettlementData &Out);
+
+    /**
+     * Thread-safe copy-out of the settlement with a given runtime SettlementId (the by-ID sibling of CopySettlementAtCell).
+     * Takes SimulationLock + copies BY VALUE — GetSettlementData returns a raw pointer into the live Settlements TMap.
+     * @return true + fills Out if the id exists; false otherwise.
+     */
+    bool CopySettlementById(int32 SettlementId, FMythicSettlementData &Out);
+
     // ─── Save/Load ───────────────────────────────────────
 
     /**
@@ -121,7 +217,7 @@ public:
      * - SchemeEngine (active faction schemes)
      * - PartySubsystem (companion loyalty and beliefs)
      */
-    void SaveLivingWorld(FArchive& Ar);
+    void SaveLivingWorld(FArchive &Ar);
 
     /**
      * Load the Living World state from an archive.
@@ -129,7 +225,7 @@ public:
      *
      * Prerequisites: Initialize() must have been called first (systems created).
      */
-    void LoadLivingWorld(FArchive& Ar);
+    void LoadLivingWorld(FArchive &Ar);
 
 private:
     /** Load and validate the settings data asset */
@@ -149,6 +245,9 @@ private:
 
     /** Callback when the background thread completes a commit */
     void OnSimCommitted();
+
+    /** Reverse link entity->embodied cognitive actor; server-only, populated by the MASS->actor bridge. */
+    TMap<FMassEntityHandle, TWeakObjectPtr<AMythicNPCCharacter>> EmbodiedActors;
 
     // ─── Owned Data ───────────────────────────────────────
 

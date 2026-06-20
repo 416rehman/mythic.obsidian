@@ -16,6 +16,10 @@
 #include "GAS/MythicTags_GAS.h"
 #include "Physics/PhysicalMaterialWithTags.h"
 #include "Player/MythicPlayerController.h"
+#include "Itemization/Inventory/MythicItemInstance.h"
+#include "Itemization/Inventory/Fragments/ItemFragment.h"
+#include "Itemization/MythicTags_Inventory.h"
+#include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(MythicGameplayAbility)
 
@@ -80,6 +84,13 @@ FMythicDamageContainerSpec UMythicGameplayAbility::MakeDamageContainerSpec(const
         OverrideGameplayLevel = OverrideGameplayLevel = this->GetAbilityLevel(); //OwningASC->GetDefaultAbilityLevel();
     }
     auto OwningASC = GetAbilitySystemComponentFromActorInfo();
+    if (!OwningASC) {
+        // No owning ASC (stale/null actor info — e.g. this BlueprintCallable called before avatar set, or after
+        // actor-info teardown). Return the default spec; the sole consumer ApplyDamageContainerSpec already
+        // IsValid-guards both sub-specs, so this is graceful (no damage) rather than a server crash on the damage path.
+        UE_LOG(Myth, Error, TEXT("UMythicGameplayAbility::MakeDamageContainerSpec: no owning ASC (stale/null actor info)"));
+        return ReturnSpec;
+    }
     ReturnSpec.EffectContextHandle = OwningASC->MakeEffectContext();
 
     // Add the damage calculation effect
@@ -100,6 +111,34 @@ FMythicDamageContainerSpec UMythicGameplayAbility::MakeDamageContainerSpec(const
     }
     else {
         UE_LOG(Myth, Error, TEXT("UMythicGameplayAbility::MakeDamageContainerSpec: Container.DamageApplicationEffect is null"));
+    }
+
+    // Thread the designer-assigned status->GE mapping so per-target debuff application can read it later.
+    ReturnSpec.StatusEffects = Container.StatusEffects;
+
+    // Inject the WIELDING weapon's class tag (Itemization.Type.Equipment.Weapon.Sword/Axe/…) into the damage specs'
+    // source tags so MythicDamageApplication can apply the matching BonusXxxDamage. The weapon's ItemType tag lives on
+    // the item INSTANCE, not the source ASC, so it never reaches CapturedSourceTags on its own — AppendDynamicAssetTags
+    // is the engine-documented path that injects into the captured source spec tags AND survives re-capture. Injected
+    // into BOTH damage specs so it lands regardless of which one owns the execution calc (harmless on the other). The
+    // wielding weapon is the granted ability's SourceObject (same resolution as the durability check).
+    if (UObject *Src = GetCurrentSourceObject()) {
+        if (UItemFragment *SrcFragment = Cast<UItemFragment>(Src)) {
+            if (UMythicItemInstance *WeaponInst = SrcFragment->GetOwningItemInstance()) {
+                FGameplayTagContainer TypeProbe;
+                WeaponInst->GetTypeProbe(TypeProbe);
+                // Only the weapon-class subtree — never the full probe (would pollute source tags with rarity/affix tags).
+                const FGameplayTagContainer WeaponClassTags = TypeProbe.Filter(FGameplayTagContainer(ITEMIZATION_TYPE_EQUIPMENT_WEAPON));
+                if (!WeaponClassTags.IsEmpty()) {
+                    if (ReturnSpec.DamageApplicationEffectSpec.IsValid() && ReturnSpec.DamageApplicationEffectSpec.Data.IsValid()) {
+                        ReturnSpec.DamageApplicationEffectSpec.Data->AppendDynamicAssetTags(WeaponClassTags);
+                    }
+                    if (ReturnSpec.DamageCalculationEffectSpec.IsValid() && ReturnSpec.DamageCalculationEffectSpec.Data.IsValid()) {
+                        ReturnSpec.DamageCalculationEffectSpec.Data->AppendDynamicAssetTags(WeaponClassTags);
+                    }
+                }
+            }
+        }
     }
 
     return ReturnSpec;
@@ -139,12 +178,37 @@ TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainer
     if (ContainerSpec.TargetsHandle.Num() > 0) {
         SendEvent(ContainerSpec.TargetsHandle, ContainerSpec.EffectContextHandle, GAS_EVENT_DMG_PRE);
 
-        // 3. APPLY DAMAGE - This stage calculates the damage and applies it to the targets
+        // 3. APPLY DAMAGE per-target. C1 fix: each target gets its OWN duplicated context so the per-target
+        // dodge + resistance-gate writes in UMythicDamageApplication don't leak across AoE targets (the damage
+        // math is already per-target; only the context-flag writes were colliding). After the damage lands,
+        // apply any designer-mapped debuff GE for each status flag that survived this target's resistance gate.
         if (!ContainerSpec.DamageApplicationEffectSpec.IsValid()) {
             UE_LOG(Myth, Error, TEXT("UMythicGameplayAbility::ApplyDamageContainerSpec: ContainerSpec.DamageApplicationEffectSpec is null"));
         }
-        auto ApplicationEffectHandle = K2_ApplyGameplayEffectSpecToTarget(ContainerSpec.DamageApplicationEffectSpec, ContainerSpec.TargetsHandle);
-        AllEffects.Append(ApplicationEffectHandle);
+        else {
+            const float DebuffLevel = ContainerSpec.DamageApplicationEffectSpec.Data->GetLevel();
+            for (int32 i = 0; i < ContainerSpec.TargetsHandle.Data.Num(); ++i) {
+                if (!ContainerSpec.TargetsHandle.Data[i].IsValid()) {
+                    continue;
+                }
+
+                // Per-target isolated context (deep copy of the shared source-intent context).
+                FGameplayEffectContextHandle PerTargetContext = ContainerSpec.EffectContextHandle.Duplicate();
+
+                // Per-target application spec: copy the finalized spec and reseat its context.
+                FGameplayEffectSpecHandle PerTargetSpec(new FGameplayEffectSpec(*ContainerSpec.DamageApplicationEffectSpec.Data));
+                PerTargetSpec.Data->SetContext(PerTargetContext);
+
+                // A handle wrapping just this one target.
+                FGameplayAbilityTargetDataHandle SingleTarget;
+                SingleTarget.Data.Add(ContainerSpec.TargetsHandle.Data[i]);
+
+                AllEffects.Append(K2_ApplyGameplayEffectSpecToTarget(PerTargetSpec, SingleTarget));
+
+                // Apply per-target debuffs for the flags that survived resistance (skips null-mapped statuses).
+                AllEffects.Append(ApplyMappedStatusEffects(PerTargetContext, ContainerSpec.StatusEffects, SingleTarget, DebuffLevel));
+            }
+        }
     }
 
     // 4. Handle destructibles
@@ -154,6 +218,44 @@ TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainer
     }
 
     return AllEffects;
+}
+
+TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyMappedStatusEffects(const FGameplayEffectContextHandle &PerTargetContext,
+                                                                                     const FMythicStatusEffectMapping &Mapping,
+                                                                                     const FGameplayAbilityTargetDataHandle &SingleTarget, float Level) {
+    TArray<FActiveGameplayEffectHandle> Applied;
+
+    const FMythicGameplayEffectContext *Ctx = static_cast<const FMythicGameplayEffectContext *>(PerTargetContext.Get());
+    if (!Ctx) {
+        return Applied;
+    }
+    UAbilitySystemComponent *ASC = GetAbilitySystemComponentFromActorInfo();
+    if (!ASC) {
+        return Applied;
+    }
+
+    // Apply a status's mapped debuff GE only if it was rolled (survived resistance) AND the designer assigned
+    // an effect for it. A null mapping means "no debuff authored yet" - skipped, never fabricated.
+    auto ApplyOne = [&](bool bFlagSet, const TSubclassOf<UGameplayEffect> &GE) {
+        if (!bFlagSet || !GE) {
+            return;
+        }
+        FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(GE, Level, PerTargetContext);
+        if (Spec.IsValid()) {
+            Applied.Append(K2_ApplyGameplayEffectSpecToTarget(Spec, SingleTarget));
+        }
+    };
+
+    ApplyOne(Ctx->IsBleed(), Mapping.BleedEffect);
+    ApplyOne(Ctx->IsBurn(), Mapping.BurnEffect);
+    ApplyOne(Ctx->IsPoison(), Mapping.PoisonEffect);
+    ApplyOne(Ctx->IsStun(), Mapping.StunEffect);
+    ApplyOne(Ctx->IsSlow(), Mapping.SlowEffect);
+    ApplyOne(Ctx->IsFreeze(), Mapping.FreezeEffect);
+    ApplyOne(Ctx->IsWeaken(), Mapping.WeakenEffect);
+    ApplyOne(Ctx->IsTerrify(), Mapping.TerrifyEffect);
+
+    return Applied;
 }
 
 
@@ -169,6 +271,25 @@ TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainer
 
     if (TargetActors.IsEmpty() || HitResults.IsEmpty()) {
         UE_LOG(Myth, Warning, TEXT("No Targets"));
+    }
+
+    // Equipment durability: if this attack was granted by an item fragment whose item carries a durability
+    // fragment, a BROKEN weapon deals no damage (early-out), and a working one loses 1 durability per landed
+    // hit. The fragment is the granted ability's SourceObject (see UActionableItemFragment::GrantItemAbility).
+    if (!TargetActors.IsEmpty() && !HitResults.IsEmpty()) {
+        if (UObject *Src = GetCurrentSourceObject()) {
+            if (UItemFragment *SourceFragment = Cast<UItemFragment>(Src)) {
+                if (UMythicItemInstance *Inst = SourceFragment->GetOwningItemInstance()) {
+                    if (const UDurabilityFragment *Durability = Inst->GetFragment<UDurabilityFragment>()) {
+                        if (Durability->IsBroken()) {
+                            // Broken weapon: swing connects but deals no damage until repaired.
+                            return AllEffects;
+                        }
+                        const_cast<UDurabilityFragment *>(Durability)->ServerApplyWear(1);
+                    }
+                }
+            }
+        }
     }
 
     FMythicDamageContainerSpec Spec = MakeDamageContainerSpec(Container, OverrideGameplayLevel);

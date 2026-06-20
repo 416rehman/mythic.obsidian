@@ -12,6 +12,13 @@ void UMythicInteractionPromptWidget::SetInteractionData(FMythicInteractionData I
         this->VerticalBox->AddChild(InInteractionData.ComplimentaryWidget);
     }
 
+    // Both input-action bindings require the UI layer root widget. Guard once here — the secondary block previously had
+    // NO null-check (only the primary did), so a None primary + set secondary + null root dereferenced null below.
+    if (!UI_LayerRootWidget) {
+        UE_LOG(Myth, Error, TEXT("Interaction Error: UI_LayerRootWidget is nullptr"));
+        return;
+    }
+
     // Bind the primary input action
     if (InInteractionData.PrimaryInteractionName.IsNone() || InInteractionData.PrimaryInteractionName == FName("")) {
         UE_LOG(Myth, Error, TEXT("Interaction Warning: Actor %s's PrimaryInteractionName is None"), *InInteractableActor->GetName());
@@ -25,16 +32,12 @@ void UMythicInteractionPromptWidget::SetInteractionData(FMythicInteractionData I
         }
         rowhandle.RowName = InInteractionData.PrimaryInteractionName;
 
-        FBindUIActionArgs BindArgs(rowhandle, false, FSimpleDelegate::CreateLambda([this, InInteractableActor, InPlayerController]() {
-            if (InInteractableActor) {
-                IMythicInteractable::Execute_OnPrimaryInteract(InInteractableActor, InPlayerController);
+        TWeakObjectPtr<AActor> WeakInteractable(InInteractableActor);
+        FBindUIActionArgs BindArgs(rowhandle, false, FSimpleDelegate::CreateLambda([this, WeakInteractable, InPlayerController]() {
+            if (AActor *Interactable = WeakInteractable.Get()) {
+                IMythicInteractable::Execute_OnPrimaryInteract(Interactable, InPlayerController);
             }
         }));
-        
-        if (!UI_LayerRootWidget) {
-            UE_LOG(Myth, Error, TEXT("Interaction Error: UI_LayerRootWidget is nullptr"));
-            return;
-        }
 
         this->PrimaryInteractionHandle = UI_LayerRootWidget->RegisterUIActionBinding(BindArgs);
         if (this->PrimaryInteractionHandle.IsValid()) {
@@ -66,10 +69,11 @@ void UMythicInteractionPromptWidget::SetInteractionData(FMythicInteractionData I
         rowhandle.DataTable = Cast<UDataTable>(InInteractionData.InputActionDataTable);
         rowhandle.RowName = InInteractionData.SecondaryInteractionName;
 
+        TWeakObjectPtr<AActor> WeakInteractable(InInteractableActor);
         FInputActionBindingHandle _BindingHandle;
-        FBindUIActionArgs BindArgs2(rowhandle, false, FSimpleDelegate::CreateLambda([this, InInteractableActor, InPlayerController]() {
-            if (InInteractableActor) {
-                IMythicInteractable::Execute_OnSecondaryInteract(InInteractableActor, InPlayerController);
+        FBindUIActionArgs BindArgs2(rowhandle, false, FSimpleDelegate::CreateLambda([this, WeakInteractable, InPlayerController]() {
+            if (AActor *Interactable = WeakInteractable.Get()) {
+                IMythicInteractable::Execute_OnSecondaryInteract(Interactable, InPlayerController);
             }
         }));
 

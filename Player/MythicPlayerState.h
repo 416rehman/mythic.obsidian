@@ -13,6 +13,7 @@ class UMythicAttributeSet_Proficiencies;
 class UMythicAttributeSet_Exp;
 class UMythicAttributeSet_Utility;
 class UMythicAttributeSet_Defense;
+class UMythicFactionStandingComponent;
 /**
  * 
  */
@@ -56,11 +57,19 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Ability System", Replicated)
     UMythicAttributeSet_Proficiencies *ProficiencyAttributes;
 
+    // Per-player faction standing (replicated component; drives NPC attitude toward this player).
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Faction")
+    TObjectPtr<UMythicFactionStandingComponent> FactionStanding;
+
     AMythicPlayerState();
 
 public:
     virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override;
     UMythicAbilitySystemComponent *GetMythicAbilitySystemComponent() const;
+
+    // Per-player faction standing store (server-authoritative; replicated to owner).
+    UFUNCTION(BlueprintPure, Category = "Faction")
+    UMythicFactionStandingComponent *GetFactionStanding() const { return FactionStanding; }
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 

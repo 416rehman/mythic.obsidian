@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "ItemDefinition.h"
@@ -49,9 +49,13 @@ struct FMythicInventorySlotEntry : public FFastArraySerializerItem {
     UPROPERTY()
     bool bRequireUniqueInEntry = false;
 
-    // Cached from group - if true, items cannot be dropped/sold/transferred by player
+    // Cached from group - if false, items cannot be dropped/sold/transferred by player
     UPROPERTY()
-    bool bProtectedGroup = false;
+    bool bCanPlayerTake = true;
+
+    // Cached from group - if false, player cannot insert items manually
+    UPROPERTY()
+    bool bCanPlayerPut = true;
 
     // Transient client-side cache of the last item in this slot to handle deactivation
     UPROPERTY(Transient, NotReplicated)
@@ -178,6 +182,20 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Slots")
     bool CanAcceptItemType(const FGameplayTag &ItemType) const;
 
+    // Checks if a specific slot can accept an item instance, enforcing whitelists and player restrictions.
+    bool CanSlotAcceptItem(int32 SlotIndex, UMythicItemInstance *ItemInstance, bool bFromPlayer = false) const;
+
+    // Effective-type whitelist check using the item's type probe ({def ItemType} ∪ ItemTags).
+    // An empty slot whitelist accepts all types. Single source of truth for slot whitelisting so that
+    // runtime-tagged / transformed items are evaluated by their effective type, not just the base def type.
+    bool SlotWhitelistAccepts(int32 SlotIndex, const UMythicItemInstance *Inst) const;
+
+    // SERVER-ONLY: detach an instance from its slot WITHOUT destroying it. Clears the slot and the
+    // instance's OwningInventory / SlotIndex back-pointers. Returns the released (now ownerless) instance,
+    // or nullptr. Distinct from ServerRemoveItem, which destroys the instance on full removal.
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Slots")
+    UMythicItemInstance *ReleaseFromSlot(int32 SlotIndex);
+
     // Returns the item in the given slot
     UFUNCTION(BlueprintCallable, Category = "Slots")
     UMythicItemInstance *GetItem(int32 SlotIndex);
@@ -201,18 +219,23 @@ public:
     // Add item to any available slot. Will stack if possible (if a full transfer occurs through stacking, the item instance will be destroyed).
     // Removes from owner's subobject list on success. Returns the amount of items that were added.
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Slots")
-    int32 AddToAnySlot(UMythicItemInstance *ItemInstance);
+    int32 AddToAnySlot(UMythicItemInstance *ItemInstance, bool bFromPlayer = false);
 
     // Add item to the given slot. If the slot is already occupied, the item will be stacked if possible. Returns the amount of items that were added.
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Slots")
-    int32 AddToSlot(UMythicItemInstance *ItemInstance, int32 SlotIndex);
+    int32 AddToSlot(UMythicItemInstance *ItemInstance, int32 SlotIndex, bool bFromPlayer = false);
 
     // Receives an item instance. Should be invoked from the SendItem function by the other inventory. Returns the amount of items that were received. Will remove the item from
-    int32 ReceiveItem(TObjectPtr<UMythicItemInstance> ItemInstance, int32 TargetSlotIndex);
+    int32 ReceiveItem(TObjectPtr<UMythicItemInstance> ItemInstance, int32 TargetSlotIndex, bool bFromPlayer = false);
 
     // Sends an item instance to another inventory. Returns the amount of items that were sent, must set the item instance to null if all items were sent.
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Slots")
     int32 SendItem(int32 SlotIndex, UMythicInventoryComponent *TargetInventory, int32 TargetSlotIndex);
+
+    // True if a player is allowed to take the item out of SlotIndex (the slot's bCanPlayerTake flag). SendItem
+    // does NOT enforce this (only the target's bCanPlayerPut), so player-initiated transfers must check it.
+    UFUNCTION(BlueprintPure, Category = "Slots")
+    bool CanPlayerTakeFromSlot(int32 SlotIndex) const;
 
     // Drops an item instance to the ground through a WorldItem. Returns true if the item was dropped.
     // If TargetRecipient is provided, only they can interact with the item. Otherwise, all players can interact with the item.
@@ -249,8 +272,9 @@ public:
     UFUNCTION(BlueprintPure, Category = "ViewModel")
     UInventoryVM *GetViewModel() const;
 
-    // Count the number of items in the inventory that match the given item definition
-    // Aggregates all slots
+    // Count the number of items in the inventory that match the given item definition (aggregates all slots).
+    // BlueprintPure so HUD/vendor widgets can read a currency balance, e.g. GetItemCount(GoldDef).
+    UFUNCTION(BlueprintPure, Category = "Inventory")
     int32 GetItemCount(UItemDefinition *RequiredItem) const;
 
     // Remove the given amount of stacks of an item from the inventory. Returns the amount of item stacks that were removed.

@@ -1,19 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameplayTagContainer.h"
 #include "SavedWorldActor.h"
 #include "SavedDestructible.h"
 #include "WorldData.generated.h"
-
-UENUM(BlueprintType)
-enum class EMythicWorldSaveVersion : uint8 {
-    InitialVersion = 0,
-    LatestVersion,
-    VersionPlusOne
-};
-
-constexpr EMythicWorldSaveVersion CurrentWorldSaveVersion = EMythicWorldSaveVersion::LatestVersion;
 
 /**
  * World Data (Host Only).
@@ -22,11 +12,9 @@ USTRUCT(BlueprintType)
 struct FSerializedWorldData {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite)
-    float TimeOfDay = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite)
-    FGameplayTag CurrentWeatherTag;
+    // NOTE: time-of-day + weather are NOT stored here — they persist via AMythicEnvironmentController's own SaveGame
+    // fields (the SavedActors path). The former TimeOfDay (saved-but-never-loaded) + CurrentWeatherTag (wholly unused)
+    // dead fields were removed, along with the unversioned-and-unused EMythicWorldSaveVersion enum above.
 
     // All saveable actors (both placed and runtime-spawned)
     UPROPERTY(BlueprintReadWrite)

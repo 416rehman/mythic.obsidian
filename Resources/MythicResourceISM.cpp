@@ -72,9 +72,8 @@ void UMythicResourceISM::DestroyResource(int32 InstanceId) {
     FTransform CurrentTransform;
     GetInstanceTransform(InstanceIndex, CurrentTransform, true);
 
-    // Draw Debug sphere at current location
-    auto World = this->GetWorld();
-    DrawDebugSphere(World, CurrentTransform.GetTranslation(), 4, 12, FColor::Red, true);
+    // (Removed a persistent DrawDebugSphere here: bPersistentLines=true leaked debug primitives on every
+    //  resource destruction in shipping multiplayer.)
 
     // Move it under landscape
     FTransform HiddenTransform = CurrentTransform;
@@ -88,17 +87,27 @@ void UMythicResourceISM::DestroyResource(int32 InstanceId) {
            InstanceIndex, DestroyedInstances.Num());
 }
 
-void UMythicResourceISM::RestoreResource(int32 InstanceIndex, FTransform OriginalTransform, bool MarkRenderStateDirty) {
+void UMythicResourceISM::RestoreResource(int32 InstanceId, FTransform OriginalTransform, bool MarkRenderStateDirty) {
+    // Convert InstanceId -> InstanceIndex. The caller passes the network-stable Id (FTrackedDestructibleData.InstanceId);
+    // DestroyResource converts the same way, but RestoreResource previously used the Id directly as an index — once
+    // Id != index (after any ISM instance add/remove) that un-hid the WRONG instance AND left the real destroyed INDEX
+    // leaked in DestroyedInstances forever (so it could never be re-destroyed).
+    int32 InstanceIndex = GetInstanceIndexForId(FPrimitiveInstanceId(InstanceId));
+    if (InstanceIndex < 0) {
+        UE_LOG(Myth, Warning, TEXT("RestoreResource: Invalid InstanceId %d"), InstanceId);
+        return;
+    }
+
     // Restore the transform
     UpdateInstanceTransform(InstanceIndex, OriginalTransform, true, MarkRenderStateDirty);
 
     // Remove from destroyed tracking
     if (DestroyedInstances.Remove(InstanceIndex)) {
-        UE_LOG(Myth, Log, TEXT("RestoreResource: Restored InstanceIndex %d. Total destroyed: %d"),
-               InstanceIndex, DestroyedInstances.Num());
+        UE_LOG(Myth, Log, TEXT("RestoreResource: Restored InstanceIndex %d (InstanceId=%d). Total destroyed: %d"),
+               InstanceIndex, InstanceId, DestroyedInstances.Num());
     }
     else {
-        UE_LOG(Myth, Warning, TEXT("RestoreResource: InstanceIndex %d was not in destroyed tracking"), InstanceIndex);
+        UE_LOG(Myth, Warning, TEXT("RestoreResource: InstanceIndex %d (InstanceId=%d) was not in destroyed tracking"), InstanceIndex, InstanceId);
     }
 }
 

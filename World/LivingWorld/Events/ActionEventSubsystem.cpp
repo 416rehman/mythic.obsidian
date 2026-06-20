@@ -7,6 +7,7 @@
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "AI/Cognition/CognitiveBrainComponent.h" // ResolveActorFaction reads the NPC faction from the brain
 
 DEFINE_LOG_CATEGORY_STATIC(LogMythActionEvent, Log, All);
 
@@ -62,9 +63,13 @@ void UMythicActionEventSubsystem::SubmitAction(const FMythicActionEvent &Action)
         return;
     }
 
-    // Resolve factions
-    const FMythicFactionId PerpFaction = PerpActor ? ResolveActorFaction(PerpActor) : FMythicFactionId();
-    const FMythicFactionId VictimFaction = VictimActor ? ResolveActorFaction(VictimActor) : FMythicFactionId();
+    // Resolve factions — prefer the submit-site override (which knows the real faction) over the stub resolver.
+    const FMythicFactionId PerpFaction = Action.PerpFactionOverride.IsValid()
+        ? Action.PerpFactionOverride
+        : (PerpActor ? ResolveActorFaction(PerpActor) : FMythicFactionId());
+    const FMythicFactionId VictimFaction = Action.VictimFactionOverride.IsValid()
+        ? Action.VictimFactionOverride
+        : (VictimActor ? ResolveActorFaction(VictimActor) : FMythicFactionId());
 
     // Build the world event for the causal fabric
     FMythicWorldEvent WorldEvent;
@@ -115,8 +120,15 @@ FMythicCellCoord UMythicActionEventSubsystem::ResolveActorCell(const AActor *Act
 }
 
 FMythicFactionId UMythicActionEventSubsystem::ResolveActorFaction(const AActor *Actor) const {
-    // Phase 4 default: return invalid faction for actors without faction components.
-    // Phase 5 will integrate with the NPC/player faction component system.
-    // For now, gameplay systems should set faction on the action event directly if needed.
+    // Resolve an actor's faction from its cognitive brain — the canonical NPC faction source (the same one the kill
+    // submit site reads). Players carry no NPC-style faction membership (their allegiance is the per-faction standing
+    // on the PlayerState), so they resolve to invalid, and callers needing a player "faction" pass an explicit
+    // override (PerpFactionOverride / VictimFactionOverride). Replaces the Phase-4 stub that always returned invalid.
+    if (!Actor) {
+        return FMythicFactionId();
+    }
+    if (UMythicCognitiveBrainComponent *Brain = Actor->FindComponentByClass<UMythicCognitiveBrainComponent>()) {
+        return Brain->GetFaction();
+    }
     return FMythicFactionId();
 }

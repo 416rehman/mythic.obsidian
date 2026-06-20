@@ -3,6 +3,8 @@
 
 #include "World/LivingWorld/Social/SocialGraph.h"
 
+#include "Misc/ScopeRWLock.h" // FReadScopeLock / FWriteScopeLock
+
 DEFINE_LOG_CATEGORY(LogMythSocialGraph);
 
 // ─────────────────────────────────────────────────────────────
@@ -33,14 +35,16 @@ void UMythicSocialGraph::AddOrStrengthenEdge(
     FMythicFactionId TargetFaction) {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicSocialGraph_AddOrStrengthen);
 
+    FWriteScopeLock Lock(GraphLock);
+
     if (!Source.IsValid() || !Target.IsValid() || Source == Target) {
         return;
     }
 
-    TArray<FMythicSocialEdge>& Edges = AdjacencyMap.FindOrAdd(Source);
+    TArray<FMythicSocialEdge> &Edges = AdjacencyMap.FindOrAdd(Source);
 
     // Check if edge already exists — strengthen it
-    for (FMythicSocialEdge& Edge : Edges) {
+    for (FMythicSocialEdge &Edge : Edges) {
         if (Edge.TargetEntity == Target) {
             // Refresh interaction time and boost strength (clamped to 1.0)
             Edge.Strength = FMath::Min(Edge.Strength + InitStrength, 1.0f);
@@ -68,7 +72,7 @@ void UMythicSocialGraph::AddOrStrengthenEdge(
     }
 
     // Add new edge
-    FMythicSocialEdge& NewEdge = Edges.AddDefaulted_GetRef();
+    FMythicSocialEdge &NewEdge = Edges.AddDefaulted_GetRef();
     NewEdge.TargetEntity = Target;
     NewEdge.Relation = Relation;
     NewEdge.Strength = FMath::Clamp(InitStrength, 0.0f, 1.0f);
@@ -77,7 +81,8 @@ void UMythicSocialGraph::AddOrStrengthenEdge(
 }
 
 bool UMythicSocialGraph::RemoveEdge(FMassEntityHandle Source, FMassEntityHandle Target) {
-    TArray<FMythicSocialEdge>* Edges = AdjacencyMap.Find(Source);
+    FWriteScopeLock Lock(GraphLock);
+    TArray<FMythicSocialEdge> *Edges = AdjacencyMap.Find(Source);
     if (!Edges) {
         return false;
     }
@@ -97,14 +102,16 @@ bool UMythicSocialGraph::RemoveEdge(FMassEntityHandle Source, FMassEntityHandle 
     return false;
 }
 
-void UMythicSocialGraph::RemoveAllEdges(FMassEntityHandle Entity, TArray<FMassEntityHandle>& OutSeveredConnections) {
+void UMythicSocialGraph::RemoveAllEdges(FMassEntityHandle Entity, TArray<FMassEntityHandle> &OutSeveredConnections) {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicSocialGraph_RemoveAllEdges);
+
+    FWriteScopeLock Lock(GraphLock);
 
     OutSeveredConnections.Reset();
 
     // Remove outgoing edges
-    if (TArray<FMythicSocialEdge>* Edges = AdjacencyMap.Find(Entity)) {
-        for (const FMythicSocialEdge& Edge : *Edges) {
+    if (TArray<FMythicSocialEdge> *Edges = AdjacencyMap.Find(Entity)) {
+        for (const FMythicSocialEdge &Edge : *Edges) {
             OutSeveredConnections.Add(Edge.TargetEntity);
         }
         AdjacencyMap.Remove(Entity);
@@ -115,7 +122,7 @@ void UMythicSocialGraph::RemoveAllEdges(FMassEntityHandle Entity, TArray<FMassEn
     // - Only called on entity death (rare)
     // - Typical graph is sparse (100 entities × 8 edges = 800 checks)
     for (auto It = AdjacencyMap.CreateIterator(); It; ++It) {
-        TArray<FMythicSocialEdge>& Edges = It->Value;
+        TArray<FMythicSocialEdge> &Edges = It->Value;
         for (int32 i = Edges.Num() - 1; i >= 0; --i) {
             if (Edges[i].TargetEntity == Entity) {
                 // This source entity lost a connection — notify for Grief
@@ -137,16 +144,17 @@ void UMythicSocialGraph::RemoveAllEdges(FMassEntityHandle Entity, TArray<FMassEn
 // Queries
 // ─────────────────────────────────────────────────────────────
 
-int32 UMythicSocialGraph::GetEdges(FMassEntityHandle Source, double WorldTime, TArray<FMythicSocialEdge>& OutEdges) const {
+int32 UMythicSocialGraph::GetEdges(FMassEntityHandle Source, double WorldTime, TArray<FMythicSocialEdge> &OutEdges) const {
+    FReadScopeLock Lock(GraphLock);
     OutEdges.Reset();
 
-    const TArray<FMythicSocialEdge>* Edges = AdjacencyMap.Find(Source);
+    const TArray<FMythicSocialEdge> *Edges = AdjacencyMap.Find(Source);
     if (!Edges) {
         return 0;
     }
 
     OutEdges.Reserve(Edges->Num());
-    for (const FMythicSocialEdge& Edge : *Edges) {
+    for (const FMythicSocialEdge &Edge : *Edges) {
         FMythicSocialEdge DecayedEdge = Edge;
         DecayedEdge.Strength = ApplyDecay(Edge, WorldTime, EdgeDecayRate);
         OutEdges.Add(DecayedEdge);
@@ -159,15 +167,16 @@ int32 UMythicSocialGraph::GetEdgesByRelation(
     FMassEntityHandle Source,
     EMythicSocialRelation Relation,
     double WorldTime,
-    TArray<FMythicSocialEdge>& OutEdges) const {
+    TArray<FMythicSocialEdge> &OutEdges) const {
+    FReadScopeLock Lock(GraphLock);
     OutEdges.Reset();
 
-    const TArray<FMythicSocialEdge>* Edges = AdjacencyMap.Find(Source);
+    const TArray<FMythicSocialEdge> *Edges = AdjacencyMap.Find(Source);
     if (!Edges) {
         return 0;
     }
 
-    for (const FMythicSocialEdge& Edge : *Edges) {
+    for (const FMythicSocialEdge &Edge : *Edges) {
         if (Edge.Relation == Relation) {
             FMythicSocialEdge DecayedEdge = Edge;
             DecayedEdge.Strength = ApplyDecay(Edge, WorldTime, EdgeDecayRate);
@@ -178,13 +187,14 @@ int32 UMythicSocialGraph::GetEdgesByRelation(
     return OutEdges.Num();
 }
 
-bool UMythicSocialGraph::HasEdge(FMassEntityHandle Source, FMassEntityHandle Target, double WorldTime, FMythicSocialEdge& OutEdge) const {
-    const TArray<FMythicSocialEdge>* Edges = AdjacencyMap.Find(Source);
+bool UMythicSocialGraph::HasEdge(FMassEntityHandle Source, FMassEntityHandle Target, double WorldTime, FMythicSocialEdge &OutEdge) const {
+    FReadScopeLock Lock(GraphLock);
+    const TArray<FMythicSocialEdge> *Edges = AdjacencyMap.Find(Source);
     if (!Edges) {
         return false;
     }
 
-    for (const FMythicSocialEdge& Edge : *Edges) {
+    for (const FMythicSocialEdge &Edge : *Edges) {
         if (Edge.TargetEntity == Target) {
             OutEdge = Edge;
             OutEdge.Strength = ApplyDecay(Edge, WorldTime, EdgeDecayRate);
@@ -196,8 +206,9 @@ bool UMythicSocialGraph::HasEdge(FMassEntityHandle Source, FMassEntityHandle Tar
 }
 
 int32 UMythicSocialGraph::GetTotalEdgeCount() const {
+    FReadScopeLock Lock(GraphLock);
     int32 Total = 0;
-    for (const auto& Pair : AdjacencyMap) {
+    for (const auto &Pair : AdjacencyMap) {
         Total += Pair.Value.Num();
     }
     return Total;
@@ -209,6 +220,8 @@ int32 UMythicSocialGraph::GetTotalEdgeCount() const {
 
 int32 UMythicSocialGraph::PruneStaleEdges(double WorldTime, int32 MaxEntitiesPerCall) {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicSocialGraph_PruneStaleEdges);
+
+    FWriteScopeLock Lock(GraphLock);
 
     if (AdjacencyMap.Num() == 0) {
         return 0;
@@ -230,9 +243,9 @@ int32 UMythicSocialGraph::PruneStaleEdges(double WorldTime, int32 MaxEntitiesPer
 
     for (int32 i = 0; i < Keys.Num() && EntitiesProcessed < MaxEntitiesPerCall; ++i) {
         const int32 CurrentIndex = (PruneIteratorIndex + i) % Keys.Num();
-        const FMassEntityHandle& Key = Keys[CurrentIndex];
+        const FMassEntityHandle &Key = Keys[CurrentIndex];
 
-        TArray<FMythicSocialEdge>* Edges = AdjacencyMap.Find(Key);
+        TArray<FMythicSocialEdge> *Edges = AdjacencyMap.Find(Key);
         if (!Edges) {
             continue;
         }
@@ -243,7 +256,8 @@ int32 UMythicSocialGraph::PruneStaleEdges(double WorldTime, int32 MaxEntitiesPer
             if (DecayedStrength < PruneStrengthThreshold) {
                 Edges->RemoveAtSwap(j);
                 ++TotalPruned;
-            } else {
+            }
+            else {
                 // Write back decayed strength (lazy decay materialization)
                 (*Edges)[j].Strength = DecayedStrength;
                 (*Edges)[j].LastInteractionTime = WorldTime;
@@ -268,7 +282,7 @@ int32 UMythicSocialGraph::PruneStaleEdges(double WorldTime, int32 MaxEntitiesPer
 // Internals
 // ─────────────────────────────────────────────────────────────
 
-float UMythicSocialGraph::ApplyDecay(const FMythicSocialEdge& Edge, double WorldTime, float DecayRate) {
+float UMythicSocialGraph::ApplyDecay(const FMythicSocialEdge &Edge, double WorldTime, float DecayRate) {
     if (DecayRate <= 0.0f || WorldTime <= Edge.LastInteractionTime) {
         return Edge.Strength;
     }

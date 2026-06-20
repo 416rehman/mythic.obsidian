@@ -115,4 +115,30 @@ void FSerializedWorldActorHelper::DeserializeAll(UWorld *World, const TArray<FSe
             }
         }
     }
+
+    // Subtractive reconciliation: destroy runtime-spawned saveable actors present in the live world but ABSENT from the
+    // save, so the loaded world exactly matches what was serialized. The load is in-place (no map reset), so without
+    // this an in-place load over a populated world leaves orphan runtime actors (a non-deterministic superset of the
+    // save). Level-placed (RF_WasLoaded) actors are never removed; actors just spawned FROM this save are in SavedIds.
+    TSet<FString> SavedIds;
+    SavedIds.Reserve(InActors.Num());
+    for (const FSerializedWorldActorData &Data : InActors) {
+        SavedIds.Add(Data.ActorId);
+    }
+
+    TArray<AActor *> ToDestroy;
+    for (TActorIterator<AActor> It(World); It; ++It) {
+        AActor *Actor = *It;
+        if (!Actor || Actor->HasAnyFlags(RF_WasLoaded)) {
+            continue; // level-placed actor — not runtime-spawned, never remove
+        }
+        IMythicSaveableActor *Saveable = Cast<IMythicSaveableActor>(Actor);
+        if (Saveable && !SavedIds.Contains(Saveable->GetSaveableActorId())) {
+            ToDestroy.Add(Actor);
+        }
+    }
+    for (AActor *Actor : ToDestroy) {
+        UE_LOG(MythSaveLoad, Log, TEXT("DeserializeAll: Destroying stale runtime actor %s (absent from save)"), *Actor->GetName());
+        Actor->Destroy();
+    }
 }

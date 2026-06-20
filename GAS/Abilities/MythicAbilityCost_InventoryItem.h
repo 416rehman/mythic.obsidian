@@ -4,6 +4,7 @@
 
 #include "MythicAbilityCost.h"
 #include "ScalableFloat.h"
+#include "GameplayTagContainer.h"
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Templates/SubclassOf.h"
 
@@ -43,4 +44,8 @@ protected:
     /** Which item to consume */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=AbilityCost)
     UItemDefinition *ItemDefinition;
+
+    /** Tag sent back when the cost cannot be paid (drives "out of item" feedback). Mirrors the Stamina/ItemStack siblings. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=AbilityCost)
+    FGameplayTag FailureTag;
 };

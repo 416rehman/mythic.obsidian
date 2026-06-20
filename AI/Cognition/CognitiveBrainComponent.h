@@ -16,6 +16,7 @@ class UMythicCausalFabric;
 class UMythicFactionDatabase;
 class UMythicSocialGraph;
 class UMythicLivingWorldSettings;
+enum class EMythicSchedulePhase : uint8;
 
 /**
  * BDI cognitive brain attached to Tier 2-3 NPC actors.
@@ -45,7 +46,7 @@ public:
      * Integrates faction, role, active intention, and emotional pressure.
      */
     UFUNCTION(BlueprintCallable, Category = "Living World|Dialogue")
-    FText SelectDialogue(AActor* InteractingPlayer = nullptr) const;
+    FText SelectDialogue(AActor *InteractingPlayer = nullptr) const;
 
     //~ Begin UActorComponent Interface
     virtual void BeginPlay() override;
@@ -61,7 +62,7 @@ public:
     void InitializeBrain(
         FMythicFactionId Faction,
         FMythicCellCoord HomeCell,
-        const FMythicPersonalityFragment& Personality,
+        const FMythicPersonalityFragment &Personality,
         FMassEntityHandle SourceEntity,
         FMythicFactionId TrueFaction = FMythicFactionId(),
         FGameplayTag Role = FGameplayTag());
@@ -69,13 +70,17 @@ public:
     // ─── State Access ─────────────────────────────────────
 
     /** Get the current intention (what the NPC is trying to do) */
-    const FMythicIntention& GetCurrentIntention() const { return CurrentIntention; }
+    const FMythicIntention &GetCurrentIntention() const { return CurrentIntention; }
 
-    /** Get the NPC's current beliefs */
-    const TArray<FMythicBelief>& GetBeliefs() const { return Beliefs; }
+    /** Get the NPC's current beliefs. ONLY safe on the think worker itself — from any OTHER thread (e.g. party belief
+     *  propagation reading a foreign brain while it may be mid-think) use GetBeliefsCopy() instead. */
+    const TArray<FMythicBelief> &GetBeliefs() const { return Beliefs; }
+
+    /** Thread-safe snapshot of the NPC's beliefs (taken under BeliefsLock). Use from other threads. */
+    TArray<FMythicBelief> GetBeliefsCopy() const;
 
     /** Get the NPC's most recent desire scores (from last think tick) */
-    const TArray<FMythicDesire>& GetLastDesires() const { return LastDesires; }
+    const TArray<FMythicDesire> &GetLastDesires() const { return LastDesires; }
 
     /** Get the MASS entity this NPC was promoted from */
     FMassEntityHandle GetSourceEntity() const { return SourceEntity; }
@@ -83,22 +88,34 @@ public:
     /** Get the NPC's faction */
     FMythicFactionId GetFaction() const { return Faction; }
 
+    /** The NPC's deterministic generated display name (reconstructed from its identity-fragment NameHash + faction —
+     *  the SAME source SelectDialogue's {npc_name} uses). Empty if the source entity/identity is unavailable. */
+    FText GetDisplayName() const;
+
     /** Get the NPC's personality (VentWeights, etc.) */
-    const FMythicPersonalityFragment& GetPersonality() const { return Personality; }
+    const FMythicPersonalityFragment &GetPersonality() const { return Personality; }
 
     // ─── External Events ──────────────────────────────────
 
     /**
-     * Inject a belief from an external source (e.g., belief propagation from companion).
-     * Confidence is reduced per hop. Duplicate beliefs are merged (max confidence).
+     * Inject a belief from an external source (e.g., belief propagation from companion). THREAD-SAFE: takes BeliefsLock
+     * (game-thread callers race the async think worker). Confidence is reduced per hop. Duplicates merge (max confidence).
      */
-    void InjectBelief(const FMythicBelief& Belief);
+    void InjectBelief(const FMythicBelief &Belief);
 
     /**
      * Notify the brain that a significant event occurred nearby.
      * This forces an immediate re-think (bypasses the timer).
      */
-    void OnSignificantEvent(const FGameplayTag& EventTag, FMythicCellCoord EventCell);
+    void OnSignificantEvent(const FGameplayTag &EventTag, FMythicCellCoord EventCell);
+
+    /**
+     * SERVER: halt the think loop immediately (used when the embodied NPC dies, before its corpse is destroyed).
+     * Clears the think timer so no new ticks fire and flips bInitialized=false so any already-queued tick
+     * early-returns, then JOINS the in-flight async think task (AsyncThinkTask.Wait()) so the background worker is
+     * guaranteed to have finished dereferencing `this` before destruction (EndPlay does the same).
+     */
+    void StopThinking();
 
 private:
     // ─── Core BDI Loop ────────────────────────────────────
@@ -109,6 +126,11 @@ private:
     /** Update beliefs by querying the causal fabric with personality bias */
     void UpdateBeliefs(double WorldTime);
 
+    /** Lock-free belief insertion (dedup-merge / evict-weakest / add). The CALLER must hold BeliefsLock — the public
+     *  InjectBelief() wraps this with the lock for game-thread callers; the think worker calls it under the coarse
+     *  BeliefsLock it already holds around UpdateBeliefs/ScoreDesires. */
+    void InjectBeliefInternal(const FMythicBelief &Belief);
+
     /** Score all desire types and populate the desires array */
     void ScoreDesires(double WorldTime);
 
@@ -118,8 +140,10 @@ private:
     /** Check if the current intention should be abandoned (timeout, invalid target) */
     void ValidateIntention(double WorldTime);
 
-    /** Called on the game thread when the async Think task completes */
-    void OnAsyncThinkCompleted();
+    /** Called on the game thread when the async Think task completes. Runs Validate+Commit (which write
+     *  CurrentIntention) here so that struct is only ever touched on the game thread. WorldTime is the Think-time
+     *  stamp, threaded through so commit hysteresis/timeout match the scoring pass. */
+    void OnAsyncThinkCompleted(double WorldTime);
 
     // ─── Utility Scoring Functions ────────────────────────
 
@@ -145,8 +169,8 @@ private:
     UPROPERTY()
     TObjectPtr<UMythicFactionDatabase> FactionDB;
 
-    UMythicSocialGraph* SocialGraph = nullptr;
-    const UMythicLivingWorldSettings* Settings = nullptr;
+    UMythicSocialGraph *SocialGraph = nullptr;
+    const UMythicLivingWorldSettings *Settings = nullptr;
 
     // ─── NPC Identity ─────────────────────────────────────
 
@@ -158,9 +182,23 @@ private:
     FMassEntityHandle SourceEntity;
     float PressureChannels[PressureChannelCount] = {};
 
+    // Cached schedule phase, copied from the entity's FMythicScheduleFragment on the GAME thread in Think() (same
+    // cross-thread-safe pattern as PressureChannels above) so the async scorers (ScoreRest/ScoreFollowSchedule) can
+    // read it without racing the MASS ScheduleTransitionProcessor that writes it every sim tick. Defaults to the
+    // first enumerator for non-embodied NPCs (no schedule); Think() overwrites it for embodied ones.
+    EMythicSchedulePhase CachedSchedulePhase{};
+
+    // Cached work destination, copied from the entity's FMythicScheduleFragment alongside the phase in Think(). The
+    // FollowSchedule desire targets this during the Work phase (HomeCell — the brain's own member — covers Rest).
+    FMythicCellCoord CachedWorkCell;
+
     // ─── BDI State ────────────────────────────────────────
 
     TArray<FMythicBelief> Beliefs;
+    // Guards ALL Beliefs access. The async think worker decays/adds + iterates Beliefs (UpdateBeliefs/ScoreDesires),
+    // while the GAME thread mutates it via InjectBelief (party belief propagation + betrayal) and reads it via
+    // GetBeliefsCopy. Without this, a TArray realloc on one thread collides with an iterator on the other (crash).
+    mutable FCriticalSection BeliefsLock;
     TArray<FMythicDesire> LastDesires;
     FMythicIntention CurrentIntention;
 

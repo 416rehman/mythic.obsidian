@@ -82,7 +82,13 @@ public:
     void RemoveItems(const TArrayView<int32> &RemovedIndices) {
         PreReplicatedRemove(RemovedIndices, Items.Num() - RemovedIndices.Num());
 
-        for (int32 Index : RemovedIndices) {
+        // Remove in DESCENDING index order: RemoveAt(i) shifts every later element down by one, so removing ascending
+        // indices in-order deletes the WRONG elements once 2+ indices are given (the batch-respawn case — multiple nodes
+        // due at the same time). Sorting a local copy descending makes each removal independent. (PreReplicatedRemove
+        // above already received the original index set against the still-intact array.)
+        TArray<int32> SortedIndices(RemovedIndices.GetData(), RemovedIndices.Num());
+        SortedIndices.Sort([](int32 A, int32 B) { return A > B; });
+        for (int32 Index : SortedIndices) {
             if (Items.IsValidIndex(Index)) {
                 Items.RemoveAt(Index);
             }
@@ -143,15 +149,18 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Resource", BlueprintAuthorityOnly)
     void AddOrUpdateResource(FTransform Transform, int32 DamageAmount, APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32 index);
 
-    // Load destroyed resources from save data
+    // Load destroyed resources from save data.
+    // RemainingSeconds = seconds-until-respawn (clock-independent), NOT an absolute world-time deadline.
     UFUNCTION(BlueprintCallable, Category = "Resource", BlueprintAuthorityOnly)
-    void LoadDestroyedResource(UMythicResourceISM *ResourceISM, int32 InstanceId, FTransform Transform, double RespawnTime);
+    void LoadDestroyedResource(UMythicResourceISM *ResourceISM, int32 InstanceId, FTransform Transform, double RemainingSeconds);
 
 private:
-    // Helper functions
-    void ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount, APlayerController *PlayerController);
-    void AddNewResource(FTransform Transform, int32 DamageAmount, APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32
-                        Index);
+    // Helper functions. Both return the resulting HitsTillDestruction (0 = depleted this hit, >0 = hits remaining),
+    // or -1 for an error / already-destroyed branch with nothing to surface — so AddOrUpdateResource can emit the
+    // gather feedback ONCE for every branch (existing hit, new-tracked, one-shot destroy).
+    int32 ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount, APlayerController *PlayerController);
+    int32 AddNewResource(FTransform Transform, int32 DamageAmount, APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32
+                         Index);
     void AddToDestroyedResources(FTrackedDestructibleData DestroyedResource, APlayerController *PlayerController);
 
 protected:

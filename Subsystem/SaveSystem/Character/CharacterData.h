@@ -42,6 +42,15 @@ struct FSerializedCharacterData {
 
     // Note: Attributes are NOT saved - they are derived from proficiencies + items on load
 
+    // Last world transform of the player's pawn, so a reload restores position/rotation instead of respawning at
+    // the default PlayerStart. Gated by bHasSavedTransform so saves written before this field existed (which would
+    // deserialize to Identity) don't teleport the player to the world origin.
+    UPROPERTY(BlueprintReadWrite)
+    FTransform SavedTransform = FTransform::Identity;
+
+    UPROPERTY(BlueprintReadWrite)
+    bool bHasSavedTransform = false;
+
     UPROPERTY(BlueprintReadWrite)
     TMap<FString, FString> CustomData;
 

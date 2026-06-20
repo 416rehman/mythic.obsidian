@@ -10,10 +10,13 @@
 #include "Materials/Material.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
+#include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
 
 AMythicCharacter_Player::AMythicCharacter_Player() {
     // Set size for player capsule
     GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
+
+    LifeComponent = CreateDefaultSubobject<UMythicLifeComponent>(TEXT("LifeComponent"));
 
     // Don't rotate character to camera direction
     bUseControllerRotationPitch = false;
@@ -41,7 +44,6 @@ AMythicCharacter_Player::AMythicCharacter_Player() {
 }
 
 
-
 void AMythicCharacter_Player::InitializeASC() {
     // Cast the controller so we get the ability system component
     auto OwningController = GetController();
@@ -49,7 +51,14 @@ void AMythicCharacter_Player::InitializeASC() {
     if (ASCInterface) {
         this->ASC_Ref = ASCInterface->GetAbilitySystemComponent();
         if (ASC_Ref && ASC_Ref->HasBeenInitialized()) {
-            ASC_Ref->InitAbilityActorInfo(OwningController, this);
+            // Owner = PlayerState (the ASC's real owning subobject), NOT the PlayerController — controllers don't
+            // replicate to non-owning clients, so using the controller here made the ASC's OwnerActor machine-dependent
+            // (PC on server/owner, PlayerState on proxies) and stamped player-originated effects with the PC as
+            // Instigator. Match the PlayerState branch below (canonical owner=PlayerState, avatar=Pawn).
+            ASC_Ref->InitAbilityActorInfo(GetPlayerState<AMythicPlayerState>(), this);
+            if (LifeComponent && !LifeComponent->IsInitialized()) {
+                LifeComponent->InitializeWithAbilitySystem(ASC_Ref);
+            }
         }
         return;
     }
@@ -60,6 +69,9 @@ void AMythicCharacter_Player::InitializeASC() {
         this->ASC_Ref = ASCInterface->GetAbilitySystemComponent();
         if (ASC_Ref && ASC_Ref->HasBeenInitialized()) {
             ASC_Ref->InitAbilityActorInfo(GetPlayerState<AMythicPlayerState>(), this);
+            if (LifeComponent && !LifeComponent->IsInitialized()) {
+                LifeComponent->InitializeWithAbilitySystem(ASC_Ref);
+            }
         }
     }
 }

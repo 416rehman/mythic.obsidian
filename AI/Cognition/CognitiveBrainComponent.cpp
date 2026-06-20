@@ -9,12 +9,19 @@
 #include "World/LivingWorld/Social/SocialGraph.h"
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "Mass/Fragments/MythicMassFragments.h"
+#include "MassEntitySubsystem.h"
+#include "World/LivingWorld/NPCGeneration/NPCGenerator.h"
+#include "Player/MythicPlayerState.h"
+#include "Player/MythicFactionStandingComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
 #include "AbilitySystemInterface.h"
 #include "AbilitySystemComponent.h"
 #include "World/LivingWorld/MythicTags_LivingWorld.h"
 #include "World/LivingWorld/Dialogue/DialogueSelector.h"
 #include "World/LivingWorld/Dialogue/MythicDialogueTypes.h"
+#include "World/LivingWorld/Chronicle/MythicWorldChronicleSubsystem.h" // EventTagToReadable for the {recent_event} var
+#include "World/LivingWorld/Settlements/MythicSettlement.h" // FMythicSettlementData for the {settlement_name} var
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY(LogMythCognition);
@@ -26,6 +33,9 @@ DEFINE_LOG_CATEGORY(LogMythCognition);
 UMythicCognitiveBrainComponent::UMythicCognitiveBrainComponent() {
     PrimaryComponentTick.bCanEverTick = false; // Uses timer, not tick
     bWantsInitializeComponent = false;
+    // Default to Idle (NOT the enum's first value Work) so a not-yet-thought / non-embodied brain never scores the
+    // Work-phase boost in ScoreFollowSchedule and routes to a default (0,0) WorkCell. Think() overwrites it.
+    CachedSchedulePhase = EMythicSchedulePhase::Idle;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -36,8 +46,8 @@ void UMythicCognitiveBrainComponent::BeginPlay() {
     Super::BeginPlay();
 
     // Cache shared data references
-    if (UGameInstance* GI = GetWorld()->GetGameInstance()) {
-        if (UMythicLivingWorldSubsystem* LW = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+    if (UGameInstance *GI = GetWorld()->GetGameInstance()) {
+        if (UMythicLivingWorldSubsystem *LW = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
             CausalFabric = LW->GetCausalFabric();
             FactionDB = LW->GetFactionDatabase();
             SocialGraph = LW->GetSocialGraph();
@@ -72,11 +82,46 @@ void UMythicCognitiveBrainComponent::BeginPlay() {
 }
 
 void UMythicCognitiveBrainComponent::EndPlay(const EEndPlayReason::Type EndPlayReason) {
-    if (GetWorld()) {
-        GetWorld()->GetTimerManager().ClearTimer(ThinkTimerHandle);
+    if (UWorld *World = GetWorld()) {
+        World->GetTimerManager().ClearTimer(ThinkTimerHandle);
+
+        // Remove the entity->actor reverse link on ANY actor teardown path (combat death, level/world teardown,
+        // seamless travel, explicit Destroy) — not just the demotion despawn loop, which is the only OTHER site
+        // that unregisters. SourceEntity is only set on the server (the brain inits authority-side), so this is a
+        // no-op on clients. Without this the map accumulates stale FMassEntityHandle keys over a long session.
+        if (SourceEntity.IsSet()) {
+            if (UGameInstance *GI = World->GetGameInstance()) {
+                if (UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+                    LWS->UnregisterEmbodiedActor(SourceEntity);
+                }
+            }
+        }
+    }
+
+    // Join the in-flight background BDI task before destruction. Its body dereferences raw `this`
+    // (PressureChannels[], Settings, Beliefs, Personality) on a worker thread; without this wait the component
+    // can be GC'd mid-think on a no-delay teardown path → cross-thread use-after-free. Wait() is safe on the game
+    // thread and the body is ~hundreds of ops, so the stall is negligible.
+    if (AsyncThinkTask.IsValid() && !AsyncThinkTask.IsCompleted()) {
+        AsyncThinkTask.Wait();
     }
 
     Super::EndPlay(EndPlayReason);
+}
+
+void UMythicCognitiveBrainComponent::StopThinking() {
+    if (UWorld *World = GetWorld()) {
+        World->GetTimerManager().ClearTimer(ThinkTimerHandle);
+    }
+    // Double-guard: any think tick already queued for this frame will see bInitialized=false and early-return.
+    bInitialized = false;
+
+    // Join any in-flight background BDI task so the worker is done touching `this` before the corpse is destroyed
+    // (StopThinking is the documented pre-corpse-destroy halt). A weak-pointer check alone is insufficient — the
+    // object can be freed mid-body — so we block here on the game thread.
+    if (AsyncThinkTask.IsValid() && !AsyncThinkTask.IsCompleted()) {
+        AsyncThinkTask.Wait();
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -86,7 +131,7 @@ void UMythicCognitiveBrainComponent::EndPlay(const EEndPlayReason::Type EndPlayR
 void UMythicCognitiveBrainComponent::InitializeBrain(
     FMythicFactionId InFaction,
     FMythicCellCoord InHomeCell,
-    const FMythicPersonalityFragment& InPersonality,
+    const FMythicPersonalityFragment &InPersonality,
     FMassEntityHandle InSourceEntity,
     FMythicFactionId InTrueFaction,
     FGameplayTag InRole) {
@@ -107,18 +152,50 @@ void UMythicCognitiveBrainComponent::InitializeBrain(
 // External Events
 // ─────────────────────────────────────────────────────────────
 
-FText UMythicCognitiveBrainComponent::SelectDialogue(AActor* InteractingPlayer) const {
+FText UMythicCognitiveBrainComponent::GetDisplayName() const {
+    // Server-side read of the source entity's identity fragment → the deterministic generated name (real, not
+    // fabricated). The single source for {npc_name} (SelectDialogue) AND the companion party display name.
+    if (SourceEntity.IsSet()) {
+        if (UMassEntitySubsystem *Ess = UWorld::GetSubsystem<UMassEntitySubsystem>(GetWorld())) {
+            if (Ess->GetEntityManager().IsEntityValid(SourceEntity)) {
+                if (const FMythicIdentityFragment *Id = Ess->GetEntityManager().GetFragmentDataPtr<FMythicIdentityFragment>(SourceEntity)) {
+                    return FText::FromName(FMythicNPCGenerator::ReconstructNameFromHash(Id->NameHash, Faction.Index));
+                }
+            }
+        }
+    }
+    return FText::GetEmpty();
+}
+
+FText UMythicCognitiveBrainComponent::SelectDialogue(AActor *InteractingPlayer) const {
+    // A brain that was never InitializeBrain'd (e.g. a pooled/designer NPC, or a client where the brain inits
+    // server-side only) has default Role/Faction/pressure — scoring against that empty context would silently
+    // return a generic line. Return the honest fallback deterministically instead. (Callers should pick the line
+    // on the SERVER where the brain is initialized — see AMythicPlayerController::ServerRequestNpcDialogue.)
+    if (!bInitialized) {
+        return FText::FromString(TEXT("..."));
+    }
     if (!Settings || Settings->DialogueDatabase.IsNull()) {
         return FText::FromString(TEXT("..."));
     }
 
-    UMythicDialogueDatabase* Database = Settings->DialogueDatabase.LoadSynchronous();
-    if (!Database) return FText::FromString(TEXT("..."));
+    UMythicDialogueDatabase *Database = Settings->DialogueDatabase.LoadSynchronous();
+    if (!Database) {
+        return FText::FromString(TEXT("..."));
+    }
 
     FMythicDialogueContext Context;
     Context.RoleTag = Role;
-    // Context.FactionTag = (Would extract FactionTag from FactionDB if available)
-    
+
+    // Resolve the faction's gameplay tag from the faction DB BEFORE template selection — otherwise Context.FactionTag
+    // stays empty and SelectTemplate hard-filters out EVERY faction-gated template (RequiredFaction never matches an
+    // empty tag), so faction-specific dialogue could never be chosen. The data is reused below for FactionName.
+    FMythicFactionData FactionData;
+    const bool bHasFactionData = (FactionDB && FactionDB->GetFaction(Faction, FactionData));
+    if (bHasFactionData) {
+        Context.FactionTag = FactionData.FactionTag;
+    }
+
     // Determine dominant emotion from pressure
     float MaxPressure = 0.0f;
     for (int32 i = 0; i < PressureChannelCount; ++i) {
@@ -136,23 +213,105 @@ FText UMythicCognitiveBrainComponent::SelectDialogue(AActor* InteractingPlayer) 
     }
 
     FMythicDialogueVariables Vars;
-    if (FactionDB) {
-        FMythicFactionData FData;
-        if (FactionDB->GetFaction(Faction, FData)) {
-            Vars.FactionName = FData.DisplayName.ToString();
+    if (bHasFactionData) {
+        Vars.FactionName = FactionData.DisplayName.ToString();
+    }
+
+    // {speaker_mood}: derive a mood word from the dominant pressure channel (interpreting each channel's real
+    // meaning — not invented lore). Replaces the old hardcoded "Emotional".
+    if (Context.DominantPressureChannel >= 0 && Context.DominantPressureChannel < PressureChannelCount) {
+        switch (static_cast<EMythicPressureChannel>(Context.DominantPressureChannel)) {
+        case EMythicPressureChannel::Threat:
+            Vars.SpeakerMood = TEXT("afraid");
+            break;
+        case EMythicPressureChannel::Injustice:
+            Vars.SpeakerMood = TEXT("indignant");
+            break;
+        case EMythicPressureChannel::Grief:
+            Vars.SpeakerMood = TEXT("grieving");
+            break;
+        case EMythicPressureChannel::Shame:
+            Vars.SpeakerMood = TEXT("ashamed");
+            break;
+        case EMythicPressureChannel::Desire:
+            Vars.SpeakerMood = TEXT("yearning");
+            break;
+        case EMythicPressureChannel::Wrath:
+            Vars.SpeakerMood = TEXT("furious");
+            break;
+        default:
+            break;
         }
     }
-    if (Context.DominantPressureChannel != -1) {
-        // Fallback or explicit mapping can be placed here
-        Vars.SpeakerMood = FString("Emotional"); 
+
+    // {player_reputation_descriptor}: bucket the interacting player's standing toward THIS NPC's faction using the
+    // existing Hostile/Friendly thresholds (single source of truth — same buckets as the AI attitude routing).
+    if (const APlayerController *PC = Cast<APlayerController>(InteractingPlayer)) {
+        if (const AMythicPlayerState *PS = Cast<AMythicPlayerState>(PC->PlayerState)) {
+            if (const UMythicFactionStandingComponent *Standing = PS->GetFactionStanding()) {
+                const float Rep = Standing->GetStanding(Faction);
+                if (Rep <= Standing->GetHostileThreshold()) {
+                    Vars.PlayerReputationDescriptor = TEXT("hostile");
+                }
+                else if (Rep >= Standing->GetFriendlyThreshold()) {
+                    Vars.PlayerReputationDescriptor = TEXT("friendly");
+                }
+                else {
+                    Vars.PlayerReputationDescriptor = TEXT("neutral");
+                }
+            }
+        }
     }
-    
+
+    // {npc_name}: the NPC's deterministic generated name (single source — see GetDisplayName).
+    Vars.NPCName = GetDisplayName().ToString();
+
+    // {recent_event}: the readable leaf of the NPC's single STRONGEST belief — the most salient event it witnessed —
+    // via the SAME Chronicle transform the world news feed uses (single source: EventTagToReadable). Beliefs are formed
+    // from real fabric events (UpdateBeliefs); GetBeliefsCopy() snapshots under BeliefsLock since this dialogue read
+    // runs on the game thread while the brain may be mid async-think. Empty stays empty (template var just blanks).
+    {
+        const TArray<FMythicBelief> BeliefSnapshot = GetBeliefsCopy();
+        float BestConfidence = 0.0f;
+        for (const FMythicBelief &B : BeliefSnapshot) {
+            if (B.EventTag.IsValid() && B.Confidence > BestConfidence) {
+                BestConfidence = B.Confidence;
+                Vars.RecentEvent = UMythicWorldChronicleSubsystem::EventTagToReadable(B.EventTag);
+            }
+        }
+    }
+
+    // {settlement_name}: the NPC's HOME-cell settlement display name. Snapshotted under SimulationLock via the
+    // subsystem copy-out accessor (CopySettlementAtCell) — the sim thread mutates Settlements during conquest, so a
+    // raw GetSettlementAtCell read here would race it. GetSubsystem returns a non-const ptr even from this const method.
+    // Empty stays empty (an NPC whose home cell is not governed by a settlement just blanks the var).
+    if (const UGameInstance *GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr) {
+        if (UMythicLivingWorldSubsystem *LW = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+            FMythicSettlementData HomeSettlement;
+            if (LW->CopySettlementAtCell(HomeCell, HomeSettlement)) {
+                Vars.SettlementName = HomeSettlement.DisplayName.ToString();
+            }
+        }
+    }
+
     return FMythicDialogueSelector::ResolveVariables(Result.Template->DialogueText, Vars);
 }
 
-void UMythicCognitiveBrainComponent::InjectBelief(const FMythicBelief& Belief) {
-    // Check for duplicate — merge by taking max confidence
-    for (FMythicBelief& Existing : Beliefs) {
+void UMythicCognitiveBrainComponent::InjectBelief(const FMythicBelief &Belief) {
+    // Thread-safe entry for game-thread callers (party propagation / betrayal): serialize against the async think
+    // worker, which mutates + iterates Beliefs under this same lock.
+    FScopeLock Lock(&BeliefsLock);
+    InjectBeliefInternal(Belief);
+}
+
+TArray<FMythicBelief> UMythicCognitiveBrainComponent::GetBeliefsCopy() const {
+    FScopeLock Lock(&BeliefsLock);
+    return Beliefs;
+}
+
+void UMythicCognitiveBrainComponent::InjectBeliefInternal(const FMythicBelief &Belief) {
+    // Caller must hold BeliefsLock. Check for duplicate — merge by taking max confidence
+    for (FMythicBelief &Existing : Beliefs) {
         if (Existing.SourceEventId == Belief.SourceEventId && Existing.SourceEventId != 0) {
             Existing.Confidence = FMath::Max(Existing.Confidence, Belief.Confidence);
             return;
@@ -175,7 +334,7 @@ void UMythicCognitiveBrainComponent::InjectBelief(const FMythicBelief& Belief) {
     Beliefs.Add(Belief);
 }
 
-void UMythicCognitiveBrainComponent::OnSignificantEvent(const FGameplayTag& EventTag, FMythicCellCoord EventCell) {
+void UMythicCognitiveBrainComponent::OnSignificantEvent(const FGameplayTag &EventTag, FMythicCellCoord EventCell) {
     // Force immediate re-think
     if (GetWorld()) {
         GetWorld()->GetTimerManager().ClearTimer(ThinkTimerHandle);
@@ -209,76 +368,120 @@ void UMythicCognitiveBrainComponent::Think() {
 
     const double WorldTime = GetWorld()->GetTimeSeconds();
 
+    // Pull the live psychodynamic pressure from MASS into the brain's working array — on the GAME THREAD, BEFORE
+    // the async BDI task launches below. The lambda (UpdateBeliefs/ScoreDesires) reads PressureChannels[] off a
+    // background task, so the MASS EntityManager read must happen here (reading it inside the task would be an
+    // unsafe cross-thread access). The PressureProcessor writes FMythicPsychodynamicFragment::Pressure[] every sim
+    // tick; without this copy the entire emotional model (Fear/Grief/Despair -> desire utilities + the despair
+    // penalty) scores against all-zeros. Indexed by the shared PressureChannelCount so the arrays are guaranteed
+    // compatible (single source of truth). If the entity/fragment is absent (non-embodied), pressure stays zero —
+    // the legitimate empty state, not a fabricated value.
+    if (SourceEntity.IsSet()) {
+        if (UMassEntitySubsystem *Ess = UWorld::GetSubsystem<UMassEntitySubsystem>(GetWorld())) {
+            if (Ess->GetEntityManager().IsEntityValid(SourceEntity)) {
+                if (const FMythicPsychodynamicFragment *Psyche =
+                    Ess->GetEntityManager().GetFragmentDataPtr<FMythicPsychodynamicFragment>(SourceEntity)) {
+                    for (int32 i = 0; i < PressureChannelCount; ++i) {
+                        PressureChannels[i] = Psyche->Pressure[i];
+                    }
+                }
+                // Cache the schedule phase the SAME cross-thread-safe way (game-thread read here; the async scorer
+                // ScoreRest consumes it). The ScheduleTransitionProcessor writes Phase every sim tick.
+                if (const FMythicScheduleFragment *Schedule =
+                    Ess->GetEntityManager().GetFragmentDataPtr<FMythicScheduleFragment>(SourceEntity)) {
+                    CachedSchedulePhase = Schedule->Phase;
+                    CachedWorkCell = Schedule->WorkCell;
+                }
+            }
+        }
+    }
+
     // Launch background task for heavy BDI evaluation
     TWeakObjectPtr<UMythicCognitiveBrainComponent> WeakThis(this);
     AsyncThinkTask = UE::Tasks::Launch(
         TEXT("BDI_Think"),
         [this, WorldTime, WeakThis]() {
-            // Step 1: Update beliefs from causal fabric (lock-free read)
-            UpdateBeliefs(WorldTime);
+            {
+                // Hold BeliefsLock across the whole belief-touching pass: UpdateBeliefs decays/adds + ScoreDesires
+                // iterates Beliefs here on the worker, while the GAME thread may InjectBelief / GetBeliefsCopy. One
+                // coarse lock (contention is rare — only party rest-phase/betrayal) avoids a TArray realloc racing an
+                // iterator. UpdateBeliefs calls the lock-free InjectBeliefInternal (no recursion on this non-recursive lock).
+                FScopeLock BeliefsScope(&BeliefsLock);
 
-            // Step 2: Score all desires
-            ScoreDesires(WorldTime);
+                // Step 1: Update beliefs from causal fabric (lock-free read)
+                UpdateBeliefs(WorldTime);
 
-            // Step 3: Validate current intention
-            ValidateIntention(WorldTime);
+                // Step 2: Score all desires
+                ScoreDesires(WorldTime);
+            }
 
-            // Step 4: Commit best desire as intention (with hysteresis)
-            CommitIntention(WorldTime);
-
-            // Chain a lightweight completion task back to the GameThread to apply tags
-            AsyncTask(ENamedThreads::GameThread, [WeakThis]() {
-                if (UMythicCognitiveBrainComponent* StrongThis = WeakThis.Get()) {
-                    StrongThis->OnAsyncThinkCompleted();
+            // Steps 3-4 (Validate + Commit) are deliberately NOT done here: they write CurrentIntention, which the
+            // game thread reads (AIController flee gate + the emotion-tag logic). Doing them on this worker would be
+            // a data race on CurrentIntention. They run in OnAsyncThinkCompleted on the game thread instead, so
+            // CurrentIntention is only ever touched on the game thread. LastDesires (written above) is read there
+            // too, safely, because this worker has finished before the completion task runs.
+            AsyncTask(ENamedThreads::GameThread, [WeakThis, WorldTime]() {
+                if (UMythicCognitiveBrainComponent *StrongThis = WeakThis.Get()) {
+                    StrongThis->OnAsyncThinkCompleted(WorldTime);
                 }
             });
         },
         UE::Tasks::ETaskPriority::BackgroundNormal
-    );
+        );
 }
 
-void UMythicCognitiveBrainComponent::OnAsyncThinkCompleted() {
+void UMythicCognitiveBrainComponent::OnAsyncThinkCompleted(double WorldTime) {
+    // Steps 3-4 on the GAME THREAD: validate + commit the intention here (not on the worker) so CurrentIntention is
+    // only ever written on the game thread — the AIController + emotion-tag logic read it here. Do this BEFORE
+    // clearing bIsThinkingAsync, so a new Think() can't launch a worker that writes LastDesires while we read it.
+    ValidateIntention(WorldTime);
+    CommitIntention(WorldTime);
+
     bIsThinkingAsync.store(false);
 
     // Step 5: Emit Behavioral Emotion Tags based on pressure
     if (Settings) {
-        AActor* Owner = GetOwner();
-        IAbilitySystemInterface* ASI = Cast<IAbilitySystemInterface>(Owner);
+        AActor *Owner = GetOwner();
+        IAbilitySystemInterface *ASI = Cast<IAbilitySystemInterface>(Owner);
         if (ASI && ASI->GetAbilitySystemComponent()) {
-            UAbilitySystemComponent* ASC = ASI->GetAbilitySystemComponent();
+            UAbilitySystemComponent *ASC = ASI->GetAbilitySystemComponent();
 
             const float TotalPressure = PressureChannels[0] + PressureChannels[1] +
-                                        PressureChannels[2] + PressureChannels[3] +
-                                        PressureChannels[4] + PressureChannels[5];
+                PressureChannels[2] + PressureChannels[3] +
+                PressureChannels[4] + PressureChannels[5];
 
             // Despair check
             if (TotalPressure >= Settings->DespairThreshold) {
                 ASC->AddLooseGameplayTag(TAG_LIVINGWORLD_EMOTION_DESPAIR);
-            } else {
+            }
+            else {
                 ASC->RemoveLooseGameplayTag(TAG_LIVINGWORLD_EMOTION_DESPAIR);
             }
 
             // Fear check (high Threat)
             if (PressureChannels[static_cast<int32>(EMythicPressureChannel::Threat)] > 3.0f) {
                 ASC->AddLooseGameplayTag(TAG_LIVINGWORLD_EMOTION_FEAR);
-            } else {
+            }
+            else {
                 ASC->RemoveLooseGameplayTag(TAG_LIVINGWORLD_EMOTION_FEAR);
             }
 
             // Grief check (high Grief)
             if (PressureChannels[static_cast<int32>(EMythicPressureChannel::Grief)] > 3.0f) {
                 ASC->AddLooseGameplayTag(TAG_LIVINGWORLD_EMOTION_GRIEF);
-            } else {
+            }
+            else {
                 ASC->RemoveLooseGameplayTag(TAG_LIVINGWORLD_EMOTION_GRIEF);
             }
 
             // Joy check (zero pressure + socializing or high baseline utility)
-            if (TotalPressure < 1.0f && CurrentIntention.bValid && 
+            if (TotalPressure < 1.0f && CurrentIntention.bValid &&
                 (CurrentIntention.Desire.Type == EMythicDesireType::Socialize ||
-                 CurrentIntention.Desire.Type == EMythicDesireType::Rest)) {
-                 
+                    CurrentIntention.Desire.Type == EMythicDesireType::Rest)) {
+
                 ASC->AddLooseGameplayTag(TAG_LIVINGWORLD_EMOTION_JOY);
-            } else {
+            }
+            else {
                 ASC->RemoveLooseGameplayTag(TAG_LIVINGWORLD_EMOTION_JOY);
             }
         }
@@ -293,7 +496,7 @@ void UMythicCognitiveBrainComponent::UpdateBeliefs(double WorldTime) {
     }
 
     // Query recent events near home cell (personality biases which events are noticed)
-    TArray<const FMythicWorldEvent*> NearbyEvents;
+    TArray<FMythicWorldEvent> NearbyEvents;
     CausalFabric->QueryEventsByCell(
         HomeCell,
         WorldTime - 120.0, // Look back 2 minutes
@@ -301,8 +504,8 @@ void UMythicCognitiveBrainComponent::UpdateBeliefs(double WorldTime) {
         8, // Budget: max 8 events per think
         NearbyEvents);
 
-    for (const FMythicWorldEvent* Event : NearbyEvents) {
-        if (!Event) continue;
+    for (const FMythicWorldEvent &EventRef : NearbyEvents) {
+        const FMythicWorldEvent *Event = &EventRef; // value copies (no ReadBuffer aliasing); ptr alias keeps body unchanged
 
         // Personality bias: skip events that don't match this NPC's personality
         // Fight-heavy personality notices combat; Tend-heavy notices healing
@@ -331,6 +534,7 @@ void UMythicCognitiveBrainComponent::UpdateBeliefs(double WorldTime) {
         NewBelief.InvolvedFaction = Event->PrimaryFaction;
         NewBelief.Confidence = FMath::Clamp(Event->Significance * RelevanceWeight, 0.1f, 1.0f);
         NewBelief.FormationTime = WorldTime;
+        NewBelief.LastDecayTime = WorldTime; // decay against the delta since this, NOT the full age (see the decay loop)
         NewBelief.PropagationHops = 0;
         NewBelief.SourceEventId = Event->EventId;
 
@@ -340,13 +544,22 @@ void UMythicCognitiveBrainComponent::UpdateBeliefs(double WorldTime) {
             NewBelief.InvolvedFaction = TrueFaction;
         }
 
-        InjectBelief(NewBelief);
+        InjectBeliefInternal(NewBelief); // already under BeliefsLock (held across the whole think on the worker)
     }
 
-    // Decay old beliefs
+    // Decay old beliefs by the time DELTA since their last decay, NOT the full age — otherwise the per-tick exp(-rate*age)
+    // multipliers compound (Σ ages grows quadratically) and beliefs evaporate in ~tens of seconds instead of the intended
+    // ~10 min half-life. Telescoping: Π exp(-rate*Δᵢ) = exp(-rate*Σ Δᵢ) = exp(-rate*totalAge), the intended single curve.
     for (int32 i = Beliefs.Num() - 1; i >= 0; --i) {
-        const double Age = WorldTime - Beliefs[i].FormationTime;
-        Beliefs[i].Confidence *= FMath::Exp(-0.005f * static_cast<float>(Age));
+        double &Last = Beliefs[i].LastDecayTime;
+        if (Last <= 0.0) {
+            // Seed for beliefs injected without LastDecayTime set (InjectBelief/InjectBeliefInternal callers) — use the
+            // formation time so the first decay uses a correct delta, not a huge one-shot age.
+            Last = Beliefs[i].FormationTime > 0.0 ? Beliefs[i].FormationTime : WorldTime;
+        }
+        const double Delta = FMath::Max(0.0, WorldTime - Last);
+        Beliefs[i].Confidence *= FMath::Exp(-0.005f * static_cast<float>(Delta));
+        Last = WorldTime;
 
         if (Beliefs[i].Confidence < 0.05f) {
             Beliefs.RemoveAtSwap(i);
@@ -400,13 +613,51 @@ void UMythicCognitiveBrainComponent::ScoreDesires(double WorldTime) {
     LastDesires[static_cast<int32>(EMythicDesireType::FollowSchedule)].Type = EMythicDesireType::FollowSchedule;
     LastDesires[static_cast<int32>(EMythicDesireType::FollowSchedule)].Utility = ScoreFollowSchedule(WorldTime);
 
+    // Give the HOME-ANCHORED desires a concrete move target so the AI controller's idle dispatch can act on them
+    // (Defend = engage the threat near home, Rest = return home). HomeCell is the NPC's real home cell.
+    // Report/Rally/Patrol/etc. have no authored cell source yet, so they stay target-less (the controller's idle
+    // dispatch only moves on Defend/Rest/FollowSchedule, never on a defaulted (0,0) cell).
+    //
+    // Defend routes to the witnessed THREAT cell — the highest-confidence belief near home (same within-2-cells
+    // predicate ScoreDefend scores from) — so the NPC moves to WHERE the threat is rather than passively retreating
+    // home; it falls back to HomeCell when no belief sits near home. Beliefs are formed from real fabric events
+    // (UpdateBeliefs), so this is a grounded producer, and Beliefs is read here on the same async think pass that
+    // updated it — no cross-thread access.
+    FMythicCellCoord DefendCell = HomeCell;
+    float BestThreatConfidence = 0.0f;
+    for (const FMythicBelief &B : Beliefs) {
+        if (FMath::Abs(B.Cell.X - HomeCell.X) <= 2 && FMath::Abs(B.Cell.Y - HomeCell.Y) <= 2 && B.Confidence > BestThreatConfidence) {
+            BestThreatConfidence = B.Confidence;
+            DefendCell = B.Cell;
+        }
+    }
+    LastDesires[static_cast<int32>(EMythicDesireType::Defend)].TargetCell = DefendCell;
+    LastDesires[static_cast<int32>(EMythicDesireType::Rest)].TargetCell = HomeCell;
+    // FollowSchedule heads to the WorkCell (set high only during the Work phase, which only an embodied brain with a
+    // real cached WorkCell reaches — see ScoreFollowSchedule).
+    LastDesires[static_cast<int32>(EMythicDesireType::FollowSchedule)].TargetCell = CachedWorkCell;
+
+    // Avenge routes to the GRIEVANCE cell — the single highest-confidence belief, wherever it is (NO near-home
+    // restriction like Defend: a vengeful NPC travels to the site of the wrong). Falls back to HomeCell when the brain
+    // holds no beliefs. Drives OUT-OF-COMBAT movement only (in combat the AIController's engage logic owns Avenge); the
+    // controller's TickIdleBehavior accepts Avenge alongside Defend/Rest/FollowSchedule.
+    FMythicCellCoord AvengeCell = HomeCell;
+    float BestGrievanceConfidence = 0.0f;
+    for (const FMythicBelief &B : Beliefs) {
+        if (B.Confidence > BestGrievanceConfidence) {
+            BestGrievanceConfidence = B.Confidence;
+            AvengeCell = B.Cell;
+        }
+    }
+    LastDesires[static_cast<int32>(EMythicDesireType::Avenge)].TargetCell = AvengeCell;
+
     // Despair Penalty: if pressure is too high, wipe all active intentions except Flee and Rest
     float TotalPressure = 0.0f;
     for (int32 i = 0; i < PressureChannelCount; ++i) {
         TotalPressure += PressureChannels[i];
     }
     if (Settings && TotalPressure > Settings->DespairThreshold) {
-        for (FMythicDesire& D : LastDesires) {
+        for (FMythicDesire &D : LastDesires) {
             if (D.Type != EMythicDesireType::Flee && D.Type != EMythicDesireType::Rest) {
                 D.Utility *= 0.1f;
             }
@@ -487,7 +738,7 @@ float UMythicCognitiveBrainComponent::ScoreSurvive(double WorldTime) const {
 float UMythicCognitiveBrainComponent::ScoreDefend(double WorldTime) const {
     // Count combat beliefs near home cell
     float CombatNearHome = 0.0f;
-    for (const FMythicBelief& B : Beliefs) {
+    for (const FMythicBelief &B : Beliefs) {
         if (FMath::Abs(B.Cell.X - HomeCell.X) <= 2 && FMath::Abs(B.Cell.Y - HomeCell.Y) <= 2) {
             CombatNearHome += B.Confidence * 0.5f;
         }
@@ -553,13 +804,14 @@ float UMythicCognitiveBrainComponent::ScoreJoinPlayer(double WorldTime) const {
 
     float BestPlayerRelationStrength = 0.0f;
     bool bHasLifeDebt = false;
-    for (const FMythicSocialEdge& Edge : AllEdges) {
+    for (const FMythicSocialEdge &Edge : AllEdges) {
         // In a full implementation, we'd check if Edge.TargetEntity is a player.
         // For now, Debt edges and strong Friend edges contribute.
         if (Edge.Relation == EMythicSocialRelation::Debt) {
             bHasLifeDebt = true;
             BestPlayerRelationStrength = FMath::Max(BestPlayerRelationStrength, Edge.Strength);
-        } else if (Edge.Relation == EMythicSocialRelation::Friend && Edge.Strength > 0.6f) {
+        }
+        else if (Edge.Relation == EMythicSocialRelation::Friend && Edge.Strength > 0.6f) {
             BestPlayerRelationStrength = FMath::Max(BestPlayerRelationStrength, Edge.Strength);
         }
     }
@@ -578,7 +830,8 @@ float UMythicCognitiveBrainComponent::ScoreJoinPlayer(double WorldTime) const {
         // Faction losing territory or about to be annihilated
         if (FactionData.ControlledCellCount <= 1) {
             Utility += 0.3f; // Faction is collapsing
-        } else if (FactionData.Population < 10) {
+        }
+        else if (FactionData.Population < 10) {
             Utility += 0.2f; // Faction is tiny
         }
     }
@@ -610,9 +863,15 @@ float UMythicCognitiveBrainComponent::ScoreFlee(double WorldTime) const {
     // Sacrifice override: if loyalty to a nearby entity is high, we might sacrifice self-preservation
     if (Settings && SocialGraph) {
         TArray<FMythicSocialEdge> SocialEdges;
-        if (SocialGraph->GetEdges(SourceEntity, GetWorld()->GetTimeSeconds(), SocialEdges)) {
-            for (const FMythicSocialEdge& Edge : SocialEdges) {
-                if (Edge.Relation == static_cast<EMythicSocialRelation>(1) /*LifeDebt/Family*/ || Edge.Relation == EMythicSocialRelation::Friend) {
+        // Use the game-thread-captured WorldTime param — NOT GetWorld()->GetTimeSeconds(), which would read UWorld
+        // state off the BDI worker thread (a non-atomic cross-thread read / UB). Matches ScoreJoinPlayer.
+        if (SocialGraph->GetEdges(SourceEntity, WorldTime, SocialEdges)) {
+            for (const FMythicSocialEdge &Edge : SocialEdges) {
+                // Suppress flee to defend kin, life-debtors, and friends. (The prior static_cast<EMythicSocialRelation>(1)
+                // "LifeDebt" was a magic-ordinal bug: 1 is Family, while a life debt is Debt(=3) — so debtors never
+                // triggered self-sacrifice, unlike the companion scorer above which correctly uses the named Debt.)
+                if (Edge.Relation == EMythicSocialRelation::Debt || Edge.Relation == EMythicSocialRelation::Family ||
+                    Edge.Relation == EMythicSocialRelation::Friend) {
                     if (Edge.Strength > Settings->SacrificeThreshold) {
                         FleeScore *= 0.1f; // Suppress flee to defend the friend
                         break;
@@ -626,7 +885,13 @@ float UMythicCognitiveBrainComponent::ScoreFlee(double WorldTime) const {
 }
 
 float UMythicCognitiveBrainComponent::ScoreRest(double WorldTime) const {
-    // Low urgency baseline — becomes relevant during rest schedule phases
+    // Rises sharply during the Rest schedule phase (night) so an idle NPC commits to Rest — the AI controller's idle
+    // dispatch then routes it to its HomeCell (Rest's TargetCell, populated in ScoreDesires). A real combat/threat
+    // desire (Survive/Flee/Defend) still scores higher and overrides it. CachedSchedulePhase is copied on the game
+    // thread in Think(). Low baseline outside the Rest phase.
+    if (CachedSchedulePhase == EMythicSchedulePhase::Rest) {
+        return 0.8f;
+    }
     return 0.1f;
 }
 
@@ -636,13 +901,19 @@ float UMythicCognitiveBrainComponent::ScoreExploit(double WorldTime) const {
 
     // Opportunistic exploitation — higher when nearby events create opportunity
     float Opportunity = 0.0f;
-    for (const FMythicBelief& B : Beliefs) {
+    for (const FMythicBelief &B : Beliefs) {
         if (B.Confidence > 0.5f) {
             Opportunity += 0.1f;
         }
     }
 
-    return (ExploitWeight * 0.5f + Desire * 0.3f) * (1.0f + Opportunity);
+    // Routine opportunism is a BASELINE desire, but the (1 + Opportunity) multiplier is unbounded (up to ~2.6 in a
+    // belief-dense cell), which would let a high-Exploit NPC silently outscore the daily schedule (FollowSchedule=0.7,
+    // Rest=0.8) and never walk to work/home. Clamp it below the schedule anchors so only ACUTE threat desires
+    // (Survive/Flee/Defend/Avenge — intentionally unbounded) outscore the schedule. The other routine scorers
+    // (Patrol/Trade/Socialize) already top out ≤0.6, so this single clamp restores the band.
+    constexpr float RoutineDesireCeiling = 0.65f;
+    return FMath::Min((ExploitWeight * 0.5f + Desire * 0.3f) * (1.0f + Opportunity), RoutineDesireCeiling);
 }
 
 float UMythicCognitiveBrainComponent::ScoreRally(double WorldTime) const {
@@ -662,12 +933,9 @@ float UMythicCognitiveBrainComponent::ScoreReport(double WorldTime) const {
 }
 
 float UMythicCognitiveBrainComponent::ScoreFollowSchedule(double WorldTime) const {
-    // Default low-priority fallback. Always available.
-    // Adjusted down when other desires are more urgent.
-    const float TotalPressure = PressureChannels[0] + PressureChannels[1] +
-                                PressureChannels[2] + PressureChannels[3] +
-                                PressureChannels[4] + PressureChannels[5];
-
-    // Schedule becomes less attractive as pressure rises
-    return FMath::Max(0.05f, 0.4f - TotalPressure * 0.1f);
+    // Rises during the Work schedule phase so an idle NPC commits to it + the AI controller routes it to its WorkCell
+    // (FollowSchedule's TargetCell, populated in ScoreDesires). A real threat (Survive/Flee/Defend) still outscores it.
+    // Outside the Work phase it stays a near-zero baseline so it never wins idle arbitration with a stale/unset
+    // WorkCell (which would steer to (0,0)). CachedSchedulePhase is copied on the game thread in Think().
+    return (CachedSchedulePhase == EMythicSchedulePhase::Work) ? 0.7f : 0.05f;
 }

@@ -18,14 +18,15 @@ void UGA_GenericConsumable::ActivateAbility(const FGameplayAbilitySpecHandle Han
     if (CommitAbility(Handle, ActorInfo, ActivationInfo)) {
         // Get the Fragment from Source Object (GrantItemAbility sets 'this' as SourceObject)
         if (UActionableItemFragment *Fragment = Cast<UActionableItemFragment>(GetCurrentSourceObject())) {
-            // We need the ItemInstance. Assuming Fragment is owned by ItemInstance.
-            if (UMythicItemInstance *ItemInstance = Cast<UMythicItemInstance>(Fragment->GetOuter())) {
+            // Resolve the owning ItemInstance via the canonical owner pointer (single source of truth), NOT the UObject
+            // outer chain — GetOwningItemInstance() returns UItemFragment::ParentItemInstance, set on both the live
+            // (AddFragment) and deserialize paths, and is what every other fragment consumer reads.
+            if (UMythicItemInstance *ItemInstance = Fragment->GetOwningItemInstance()) {
                 Fragment->ExecuteGenericAction(ItemInstance);
             }
             else {
-                // Fallback: Try to get it from the Avator or Owner if GetOuter fails (e.g. if Fragments are not instanced properly)
-                // But in Mythic, Fragments SHOULD be instanced.
-                UE_LOG(Myth, Error, TEXT("GA_GenericConsumable: Fragment Outer is not MythicItemInstance! SourceObject: %s"),
+                // Owner pointer unset — the fragment was not instanced/owned properly (should never happen in Mythic).
+                UE_LOG(Myth, Error, TEXT("GA_GenericConsumable: Fragment has no owning MythicItemInstance! SourceObject: %s"),
                        *GetNameSafe(GetCurrentSourceObject()));
             }
         }

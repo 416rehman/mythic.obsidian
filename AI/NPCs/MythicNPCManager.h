@@ -90,7 +90,4 @@ public:
 
     // Remove an NPC from the tracked NPCs, when the NPC dies.
     void RemoveCachedNPC(FGuid NPCId);
-
-    // Get tracked NPCs for the given location
-    TArray<FMythicCachedNPCData> GetCachedNPCsAtLocation(FVector Location, float Radius);
 };

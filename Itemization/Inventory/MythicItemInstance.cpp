@@ -95,10 +95,9 @@ void UMythicItemInstance::Initialize(UItemDefinition *ItemDef, const int32 quant
     checkf(this->GetOwningActor()->HasAuthority(), TEXT("Only the server can initialize an item instance"));
 
     this->ItemDefinition = ItemDef;
-    this->randomSeed = FMath::Rand();
     this->ItemLevel = level;
     this->Quantity = ItemDef->StackSizeMax > 1 ? quantityIfStackable : 1;
-    UE_LOG(Myth, Verbose, TEXT("Level %d item %s has random seed %d"), level, *GetName(), this->randomSeed);
+    UE_LOG(Myth, Verbose, TEXT("Initialized level %d item %s"), level, *GetName());
 
     // Create fragments for this item from the item definition
     for (int i = 0; i < ItemDef->Fragments.Num(); i++) {
@@ -141,7 +140,6 @@ void UMythicItemInstance::OnActiveItem() {
         if (ItemFragments[i] == nullptr) { continue; }
         ItemFragments[i]->OnItemActivated(this);
     }
-    UE_LOG(Myth, Verbose, TEXT("ItemInstance %s has random seed %d"), *GetName(), this->randomSeed);
 }
 
 void UMythicItemInstance::OnInactiveItem() {
@@ -233,8 +231,56 @@ bool UMythicItemInstance::HasTag(const FGameplayTag &Tag) const {
     return ItemTags.HasTag(Tag);
 }
 
+void UMythicItemInstance::GetTypeProbe(FGameplayTagContainer &Out) const {
+    Out.Reset();
+    if (ItemDefinition) {
+        Out.AddTag(ItemDefinition->ItemType);
+    }
+    Out.AppendTags(ItemTags);
+}
+
+void UMythicItemInstance::ServerApplyTransform(const FGameplayTag &NewItemType,
+                                               const FGameplayTagContainer &TagsToAdd,
+                                               const FGameplayTagContainer &TagsToRemove,
+                                               UItemDefinition *OptionalNewDef) {
+    checkf(GetOwningActor() && GetOwningActor()->HasAuthority(), TEXT("ServerApplyTransform: authority only"));
+
+    for (const FGameplayTag &T : TagsToRemove) {
+        ItemTags.RemoveTag(T);
+    }
+    for (const FGameplayTag &T : TagsToAdd) {
+        if (!ItemTags.HasTag(T)) {
+            ItemTags.AddTag(T);
+        }
+    }
+    // The base ItemType lives on the (shared) definition and is immutable; the effective type is the
+    // union of the definition type and the runtime tags (see GetTypeProbe), so a type change is expressed
+    // by adding the new type as a runtime tag (and/or swapping the definition below).
+    if (NewItemType.IsValid() && !ItemTags.HasTag(NewItemType)) {
+        ItemTags.AddTag(NewItemType);
+    }
+    if (OptionalNewDef) {
+        ItemDefinition = OptionalNewDef; // replicated (ReplicatedUsing=OnRep_ItemDefinition)
+    }
+
+    // ItemTags has no OnRep, so a tag-only transform must explicitly drive the UI refresh. Notify exactly
+    // once when slotted; when detached (mid-route) the routing slot-insert fires the refresh instead.
+    if (OwningInventory) {
+        OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
+    }
+}
+
 bool UMythicItemInstance::isStackableWith(const UMythicItemInstance *Other) const {
     if (ItemDefinition && ItemDefinition->StackSizeMax <= 0) {
+        return false;
+    }
+
+    // Guard against null Other and fragment-count mismatch before indexing Other->ItemFragments[i].
+    // (Transformed-definition items carry a different fragment schema and are correctly non-stackable.)
+    if (!Other) {
+        return false;
+    }
+    if (ItemFragments.Num() != Other->ItemFragments.Num()) {
         return false;
     }
 
@@ -250,7 +296,7 @@ bool UMythicItemInstance::isStackableWith(const UMythicItemInstance *Other) cons
 
 void UMythicItemInstance::ConsumeItem(int32 StackQty) {
     if (auto Inventory = this->GetInventoryComponent()) {
-        Inventory->ServerRemoveItem(this, 1);
+        Inventory->ServerRemoveItem(this, StackQty);
         return;
     }
 

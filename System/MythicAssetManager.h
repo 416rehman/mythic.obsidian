@@ -6,6 +6,7 @@
 
 class UCraftableFragment;
 class UItemDefinition;
+class UConversionRecipe;
 
 /**
  * Game implementation of asset manager with async loading utilities.
@@ -66,6 +67,9 @@ public:
 
     /** Static types for items */
     static const FPrimaryAssetType ItemDefinitionType;
+
+    /** Static type for conversion recipes (crafting / smelting / cooking / alchemy / ... ). */
+    static const FPrimaryAssetType ConversionRecipeType;
 
 private:
     /** Active load handles to keep assets in memory */

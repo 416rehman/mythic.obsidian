@@ -77,6 +77,8 @@ struct FRewardsToGive {
     // Default helper to give reward to player. Uses default for each reward's context.
     // IsPrivateItem: if set, any items dropped will be private to the player
     // ItemLevel: if not ZERO, any items dropped will be at this level (otherwise, uses player's level)
+    // SpawnLocation: world location to drop items/loot at (e.g. the destroyed resource node). ZeroVector = fall back
+    //   to the player's pawn location (backward-compatible default).
     // Returns false if any error occured.
-    bool Give(APlayerController *PlayerController, bool IsPrivateItem = true, int32 ItemLevel = 0) const;
+    bool Give(APlayerController *PlayerController, bool IsPrivateItem = true, int32 ItemLevel = 0, FVector SpawnLocation = FVector::ZeroVector) const;
 };

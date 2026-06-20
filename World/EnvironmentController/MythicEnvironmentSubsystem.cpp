@@ -4,6 +4,7 @@
 #include "MythicEnvironmentSubsystem.h"
 
 #include "Mythic.h"
+#include "EnvironmentTags.h" // Environment.Time.* / Environment.Season.* world-state tags
 
 void UMythicEnvironmentSubsystem::SetEnvironmentController(AMythicEnvironmentController *Controller) {
     this->EnvironmentController = Controller;
@@ -59,6 +60,44 @@ EDayTime UMythicEnvironmentSubsystem::GetDayTime() const {
     }
 
     return HourAsDayTime(this->EnvironmentController->GetTimespan().GetHours());
+}
+
+FGameplayTag UMythicEnvironmentSubsystem::GetDayTimeTag() const {
+    // Controller-gated (unlike GetDayTime, NO fail-unsafe Night default): an absent clock yields an empty tag, so a
+    // world-state consumer reads the time as "unknown" rather than wrongly "night".
+    if (!this->EnvironmentController) {
+        return FGameplayTag::EmptyTag;
+    }
+    switch (GetDayTime()) {
+    case EDayTime::Morning:
+        return Environment_Time_Morning;
+    case EDayTime::Afternoon:
+        return Environment_Time_Afternoon;
+    case EDayTime::Evening:
+        return Environment_Time_Evening;
+    case EDayTime::Night:
+        return Environment_Time_Night;
+    default:
+        return FGameplayTag::EmptyTag;
+    }
+}
+
+FGameplayTag UMythicEnvironmentSubsystem::GetSeasonTag() const {
+    if (!this->EnvironmentController) {
+        return FGameplayTag::EmptyTag;
+    }
+    switch (GetSeason()) {
+    case ESeason::Spring:
+        return Environment_Season_Spring;
+    case ESeason::Summer:
+        return Environment_Season_Summer;
+    case ESeason::Autumn:
+        return Environment_Season_Autumn;
+    case ESeason::Winter:
+        return Environment_Season_Winter;
+    default:
+        return FGameplayTag::EmptyTag;
+    }
 }
 
 UWeatherType *UMythicEnvironmentSubsystem::GetWeatherTypeByTag(FGameplayTag Tag) {

@@ -9,6 +9,8 @@
 #include "Mythic/Mythic.h"
 #include "Mythic/Itemization/Loot/MythicLootManagerSubsystem.h"
 #include "ViewModels/InventoryVM.h"
+#include "ItemDefinition.h"
+#include "Mythic/Player/MythicPlayerController.h"
 
 UMythicInventoryComponent::UMythicInventoryComponent(const FObjectInitializer &OI) :
     Super(OI) {
@@ -197,7 +199,8 @@ void UMythicInventoryComponent::InitializeSlots() {
                 SlotEntry.GroupTag = GroupTag;
                 SlotEntry.EntryIndex = EntryIndex;
                 SlotEntry.bRequireUniqueInEntry = Entry.bRequireUniqueItems;
-                SlotEntry.bProtectedGroup = Group.bProtectedItems;
+                SlotEntry.bCanPlayerTake = Group.bCanPlayerTake;
+                SlotEntry.bCanPlayerPut = Group.bCanPlayerPut;
 
                 Slots.AddSlot(SlotEntry);
             }
@@ -229,6 +232,71 @@ bool UMythicInventoryComponent::CanAcceptItemType(const FGameplayTag &ItemType) 
         }
     }
     return false;
+}
+
+bool UMythicInventoryComponent::CanSlotAcceptItem(int32 SlotIndex, UMythicItemInstance *ItemInstance, bool bFromPlayer) const {
+    if (!Slots.IsValidIndex(SlotIndex) || !ItemInstance) {
+        return false;
+    }
+    const FMythicInventorySlotEntry &Slot = Slots.Items[SlotIndex];
+
+    if (bFromPlayer && !Slot.bCanPlayerPut) {
+        return false;
+    }
+
+    if (!SlotWhitelistAccepts(SlotIndex, ItemInstance)) {
+        return false;
+    }
+
+    if (Slot.bRequireUniqueInEntry && ItemInstance->GetItemDefinition()) {
+        for (int32 i = 0; i < Slots.Num(); ++i) {
+            if (i == SlotIndex) {
+                continue;
+            }
+            const FMythicInventorySlotEntry &OtherSlot = Slots.Items[i];
+            if (OtherSlot.GroupTag == Slot.GroupTag && OtherSlot.EntryIndex == Slot.EntryIndex && OtherSlot.SlottedItemInstance && OtherSlot.SlottedItemInstance
+                ->GetItemDefinition() == ItemInstance->GetItemDefinition()) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+bool UMythicInventoryComponent::SlotWhitelistAccepts(int32 SlotIndex, const UMythicItemInstance *Inst) const {
+    if (!Slots.IsValidIndex(SlotIndex) || !Inst) {
+        return false;
+    }
+    const FMythicInventorySlotEntry &Slot = Slots.Items[SlotIndex];
+
+    // No definition / no whitelist => accepts all.
+    if (!Slot.SlotDefinition || Slot.SlotDefinition->WhitelistedItemTypes.Num() == 0) {
+        return true;
+    }
+
+    FGameplayTagContainer Probe;
+    Inst->GetTypeProbe(Probe);
+    return Probe.HasAny(Slot.SlotDefinition->WhitelistedItemTypes);
+}
+
+UMythicItemInstance *UMythicInventoryComponent::ReleaseFromSlot(int32 SlotIndex) {
+    checkf(GetOwner() && GetOwner()->HasAuthority(), TEXT("ReleaseFromSlot is server-only."));
+
+    if (!Slots.IsValidIndex(SlotIndex)) {
+        return nullptr;
+    }
+
+    UMythicItemInstance *Inst = Slots.Items[SlotIndex].SlottedItemInstance;
+    if (!Inst) {
+        return nullptr;
+    }
+
+    // Clear the slot (deactivates equipment, fires the UI notify) without touching the instance object,
+    // then detach the instance's back-pointers so it is owned by the caller / loot graph, NOT destroyed.
+    SetItemInSlot(SlotIndex, nullptr);
+    Inst->SetInventory(nullptr, INDEX_NONE);
+    return Inst;
 }
 
 UMythicItemInstance *UMythicInventoryComponent::GetItem(int32 SlotIndex) {
@@ -291,14 +359,14 @@ bool UMythicInventoryComponent::SetItemInSlotInternal(int32 SlotIndex, UMythicIt
         return false;
     }
 
-    // Whitelist check
+    // Whitelist check (effective type: {def ItemType} ∪ ItemTags).
     if (Slot.SlotDefinition && (Slot.SlotDefinition->WhitelistedItemTypes.Num() > 0)) {
         if (!NewItemInstance->GetItemDefinition()) {
             UE_LOG(Myth, Error, TEXT("SetItemInSlotInternal: ItemDefinition is null for item %s"), *NewItemInstance->GetName());
             return false;
         }
-        if (!NewItemInstance->GetItemDefinition()->ItemType.MatchesAny(Slot.SlotDefinition->WhitelistedItemTypes)) {
-            UE_LOG(Myth, Error, TEXT("SetItemInSlotInternal: Item %s of type %s is not whitelisted for slot %d"),
+        if (!SlotWhitelistAccepts(SlotIndex, NewItemInstance)) {
+            UE_LOG(Myth, Verbose, TEXT("SetItemInSlotInternal: Item %s of type %s is not whitelisted for slot %d"),
                    *NewItemInstance->GetName(),
                    *NewItemInstance->GetItemDefinition()->ItemType.ToString(),
                    SlotIndex);
@@ -350,7 +418,18 @@ bool UMythicInventoryComponent::SetItemInSlotInternal(int32 SlotIndex, UMythicIt
 
 AMythicWorldItem *UMythicInventoryComponent::AddItem(UMythicItemInstance *ItemInstance, AController *TargetRecipient) {
     auto OriginalQty = ItemInstance->GetStacks();
+    // Capture name + rarity BEFORE the add: AddToAnySlot can Destroy() ItemInstance on a full stack-merge.
+    auto PickupDef = ItemInstance->GetItemDefinition();
     auto AmountAdded = AddToAnySlot(ItemInstance);
+
+    // Genuine acquisition callout: fire ONLY when stacks were actually gained (AmountAdded > 0), player-owned inventory
+    // only (the guarded Cast no-ops for container/merchant inventories). This entry is a true grant (quest/loot/craft) —
+    // inventory MOVES go through SendItem, not here, so they never fire a pickup callout.
+    if (AmountAdded > 0 && PickupDef) {
+        if (AMythicPlayerController *OwningPC = Cast<AMythicPlayerController>(GetOwner())) {
+            OwningPC->ClientNotifyLootPickup(PickupDef->Name, AmountAdded, UItemDefinition::GetRarityColor(PickupDef->Rarity));
+        }
+    }
 
     if (AmountAdded != OriginalQty) {
         // Create a world item and return it
@@ -365,7 +444,7 @@ AMythicWorldItem *UMythicInventoryComponent::AddItem(UMythicItemInstance *ItemIn
     return nullptr;
 }
 
-int32 UMythicInventoryComponent::AddToAnySlot(UMythicItemInstance *ItemInstance) {
+int32 UMythicInventoryComponent::AddToAnySlot(UMythicItemInstance *ItemInstance, bool bFromPlayer) {
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("GetItem:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("AddToAnySlot:: Called without Authority!"));
@@ -373,11 +452,18 @@ int32 UMythicInventoryComponent::AddToAnySlot(UMythicItemInstance *ItemInstance)
 
     const int32 original_qty = ItemInstance->GetStacks();
 
-    // Can be stacked?
-    if (ItemInstance->GetItemDefinition()->StackSizeMax > ItemInstance->GetStacks()) {
+    // Can be stacked? Guard GetItemDefinition() — ItemDefinition is a replicated + SaveGame UPROPERTY that can resolve
+    // to null on load (an unresolvable data-asset ref); a raw deref here would crash, so treat a null def as
+    // non-stackable and fall through to fresh-slot placement (mirrors the sibling add paths' null-checks).
+    const UItemDefinition *StackDef = ItemInstance->GetItemDefinition();
+    if (StackDef && StackDef->StackSizeMax > ItemInstance->GetStacks()) {
         // Add to existing stack
         for (int32 i = 0; i < Slots.Num(); ++i) {
             auto ItemInSlot = Slots.Items[i].SlottedItemInstance;
+            if (bFromPlayer && !Slots.Items[i].bCanPlayerPut) {
+                continue;
+            }
+
             // Check if the item can be stacked with the existing item
             if (ItemInSlot != nullptr && ItemInSlot->GetItemDefinition() == ItemInstance->GetItemDefinition() && ItemInstance->isStackableWith(ItemInSlot)) {
                 // Update existing stack
@@ -399,6 +485,10 @@ int32 UMythicInventoryComponent::AddToAnySlot(UMythicItemInstance *ItemInstance)
     // Find the first empty slot and add the rest of the item there
     for (int32 i = 0; i < Slots.Num(); ++i) {
         if (Slots.Items[i].SlottedItemInstance == nullptr) {
+            if (!CanSlotAcceptItem(i, ItemInstance, bFromPlayer)) {
+                continue;
+            }
+
             if (TryTransferToSlot(ItemInstance, i)) {
                 return original_qty; // The entire item was moved.
             }
@@ -408,16 +498,23 @@ int32 UMythicInventoryComponent::AddToAnySlot(UMythicItemInstance *ItemInstance)
     return original_qty - ItemInstance->GetStacks();
 }
 
-int32 UMythicInventoryComponent::AddToSlot(UMythicItemInstance *ItemInstance, int32 SlotIndex) {
+int32 UMythicInventoryComponent::AddToSlot(UMythicItemInstance *ItemInstance, int32 SlotIndex, bool bFromPlayer) {
     if (!ItemInstance) {
         UE_LOG(Myth, Verbose, TEXT("AddToSlot: ItemInstance is null"));
         return 0;
     }
     const int32 OriginalQty = ItemInstance->GetStacks();
     if (Slots.IsValidIndex(SlotIndex)) {
+        if (bFromPlayer && !Slots.Items[SlotIndex].bCanPlayerPut) {
+            return 0;
+        }
+
         auto SlottedItem = Slots.Items[SlotIndex].SlottedItemInstance;
         // If the target slot is empty, move the entire item there
         if (SlottedItem == nullptr) {
+            if (!CanSlotAcceptItem(SlotIndex, ItemInstance, bFromPlayer)) {
+                return 0;
+            }
             if (TryTransferToSlot(ItemInstance, SlotIndex)) {
                 return OriginalQty;
             }
@@ -440,17 +537,17 @@ int32 UMythicInventoryComponent::AddToSlot(UMythicItemInstance *ItemInstance, in
     return OriginalQty - ItemInstance->GetStacks();
 }
 
-int32 UMythicInventoryComponent::ReceiveItem(TObjectPtr<UMythicItemInstance> ItemInstance, int32 TargetSlotIndex) {
+int32 UMythicInventoryComponent::ReceiveItem(TObjectPtr<UMythicItemInstance> ItemInstance, int32 TargetSlotIndex, bool bFromPlayer) {
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("GetItem:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("AddToAnySlot:: Called without Authority!"));
     checkf(ItemInstance != nullptr, TEXT("AddToAnySlot:: Invalid ItemInstance!"));
 
     if (TargetSlotIndex == INDEX_NONE) {
-        return AddToAnySlot(ItemInstance);
+        return AddToAnySlot(ItemInstance, bFromPlayer);
     }
 
-    return AddToSlot(ItemInstance, TargetSlotIndex);
+    return AddToSlot(ItemInstance, TargetSlotIndex, bFromPlayer);
 }
 
 int32 UMythicInventoryComponent::SendItem(int32 SlotIndex, UMythicInventoryComponent *TargetInventory, int32 TargetSlotIndex) {
@@ -470,7 +567,7 @@ int32 UMythicInventoryComponent::SendItem(int32 SlotIndex, UMythicInventoryCompo
     }
 
     // ItemInstance could be destroyed by the ReceiveItem function if it is fully consumed so we need to store the quantity before calling it.
-    int32 amountSent = TargetInventory->ReceiveItem(itemInstance, TargetSlotIndex);
+    int32 amountSent = TargetInventory->ReceiveItem(itemInstance, TargetSlotIndex, true);
 
     // Clear source slot if item was fully consumed
     if (!IsValid(itemInstance) || itemInstance->GetStacks() == 0) {
@@ -478,6 +575,10 @@ int32 UMythicInventoryComponent::SendItem(int32 SlotIndex, UMythicInventoryCompo
     }
 
     return amountSent;
+}
+
+bool UMythicInventoryComponent::CanPlayerTakeFromSlot(int32 SlotIndex) const {
+    return Slots.IsValidIndex(SlotIndex) && Slots.Items[SlotIndex].bCanPlayerTake;
 }
 
 bool UMythicInventoryComponent::DropItem(int32 SlotIndex, const FVector &location, const float radius, AController *TargetRecipient) {
@@ -492,7 +593,7 @@ bool UMythicInventoryComponent::DropItem(int32 SlotIndex, const FVector &locatio
     const FMythicInventorySlotEntry &Slot = Slots.Items[SlotIndex];
 
     // Check if slot is protected
-    if (Slot.bProtectedGroup) {
+    if (!Slot.bCanPlayerTake) {
         UE_LOG(Myth, Warning, TEXT("DropItem: Cannot drop item from protected group"));
         return false;
     }
@@ -552,6 +653,8 @@ void UMythicInventoryComponent::PickupItem_Implementation(AMythicWorldItem *worl
 
     // If not all items could be added, AddItem will return a pointer to the dropped item
     auto OriginalQty = copied_item_instance->GetStacks();
+    // Capture name + rarity BEFORE the add: AddToAnySlot can Destroy() copied_item_instance on a full pickup.
+    auto PickupDef = copied_item_instance->GetItemDefinition();
     auto AmountAdded = AddToAnySlot(copied_item_instance);
 
     if (AmountAdded >= OriginalQty) {
@@ -567,6 +670,13 @@ void UMythicInventoryComponent::PickupItem_Implementation(AMythicWorldItem *worl
         // Nothing was picked up - clean up the copied instance
         if (IsValid(copied_item_instance)) {
             copied_item_instance->Destroy();
+        }
+    }
+
+    // Genuine world-item pickup callout: fire ONLY when stacks were actually gained, player-owned inventory only.
+    if (AmountAdded > 0 && PickupDef) {
+        if (AMythicPlayerController *OwningPC = Cast<AMythicPlayerController>(GetOwner())) {
+            OwningPC->ClientNotifyLootPickup(PickupDef->Name, AmountAdded, UItemDefinition::GetRarityColor(PickupDef->Rarity));
         }
     }
 }

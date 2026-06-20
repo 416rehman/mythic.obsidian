@@ -38,10 +38,10 @@ public:
      * Must be called before first tick.
      */
     void Initialize(
-        UMythicFactionDatabase* InFactionDB,
-        UMythicCausalFabric* InFabric,
-        UMythicTerritoryGrid* InTerritoryGrid,
-        const UMythicLivingWorldSettings* InSettings);
+        UMythicFactionDatabase *InFactionDB,
+        UMythicCausalFabric *InFabric,
+        UMythicTerritoryGrid *InTerritoryGrid,
+        const UMythicLivingWorldSettings *InSettings);
 
     // ─── Background Thread Interface ──────────────────────
 
@@ -73,7 +73,7 @@ public:
     // ─── Serialization ───────────────────────────────────
 
     /** Serialize active schemes and state for save/load. */
-    void Serialize(FArchive& Ar);
+    virtual void Serialize(FArchive &Ar) override;
 
 private:
     // ─── Scheme Generation ────────────────────────────────
@@ -89,34 +89,43 @@ private:
      * @param FactionIndex Index into the faction database
      * @param OutEligibleTypes Populated with eligible scheme types
      */
-    void GetEligibleSchemeTypes(int32 FactionIndex, TArray<EMythicSchemeType>& OutEligibleTypes) const;
+    void GetEligibleSchemeTypes(int32 FactionIndex, TArray<EMythicSchemeType> &OutEligibleTypes) const;
 
     /**
      * Calculate progress rate for a scheme based on faction resources and military strength.
      */
-    float CalculateProgressRate(const FMythicScheme& Scheme, int32 FactionIndex) const;
+    float CalculateProgressRate(const FMythicScheme &Scheme, int32 FactionIndex) const;
 
     /**
      * Calculate detection risk based on target faction's intelligence/strength.
      */
-    float CalculateDetectionRisk(const FMythicScheme& Scheme, int32 TargetFactionIndex) const;
+    float CalculateDetectionRisk(const FMythicScheme &Scheme, int32 TargetFactionIndex) const;
 
     // ─── Scheme Progression ───────────────────────────────
 
     /**
      * Progress a single scheme and handle state transitions.
      */
-    void ProgressScheme(FMythicScheme& Scheme, float SimDeltaTime);
+    void ProgressScheme(FMythicScheme &Scheme, float SimDeltaTime);
 
     /**
      * Execute a completed scheme — write event to causal fabric and apply effects.
      */
-    void ExecuteScheme(FMythicScheme& Scheme);
+    void ExecuteScheme(FMythicScheme &Scheme);
+
+    /**
+     * Apply the REAL faction-state consequences of a SUCCEEDED scheme — the "AND apply effects" half ExecuteScheme
+     * long promised but skipped (the intrigue engine was previously cosmetic). Sim-thread-safe: runs under the held
+     * SimulationLock and mutates the FactionDB write buffer exactly like TickEconomy. Magnitudes come from the
+     * designer-tunable Scheme settings (never hardcoded). SpyInfiltration + CompanionRecruitment are intentionally
+     * effect-less (their real effects are game-thread/MASS contracts the sim thread can't reach — deferred, not faked).
+     */
+    void ApplySchemeEffects(const FMythicScheme &Scheme);
 
     /**
      * Handle scheme discovery — notify target faction, may escalate conflict.
      */
-    void OnSchemeDiscovered(FMythicScheme& Scheme);
+    void OnSchemeDiscovered(FMythicScheme &Scheme);
 
     // ─── Shared Data References ───────────────────────────
 
@@ -129,7 +138,7 @@ private:
     UPROPERTY()
     TObjectPtr<UMythicTerritoryGrid> TerritoryGrid;
 
-    const UMythicLivingWorldSettings* Settings = nullptr;
+    const UMythicLivingWorldSettings *Settings = nullptr;
 
     // ─── Scheme State ─────────────────────────────────────
 

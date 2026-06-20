@@ -57,6 +57,7 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         REP_IsWeaken,
         REP_IsFreeze,
         REP_IsTerrify,
+        REP_IsDodged,
         REP_MAX
     };
     uint32 RepBits = 0;
@@ -108,6 +109,9 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         }
         if (bTerrify) {
             RepBits |= 1 << REP_IsTerrify;
+        }
+        if (bDodged) {
+            RepBits |= 1 << REP_IsDodged;
         }
     }
 
@@ -169,6 +173,9 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
     }
     if (RepBits & (1 << REP_IsTerrify)) {
         Ar << bTerrify;
+    }
+    if (RepBits & (1 << REP_IsDodged)) {
+        Ar << bDodged;
     }
 
     if (Ar.IsLoading()) {

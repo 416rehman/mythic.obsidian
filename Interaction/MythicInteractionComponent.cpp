@@ -15,7 +15,7 @@
 /// All input actions will be bound to the UI_LayerRootWidget, which is the HUD widget
 
 // Sets default values for this component's properties
-UMythicInteractionComponent::UMythicInteractionComponent(): UI_LayerRootWidget(nullptr) {
+UMythicInteractionComponent::UMythicInteractionComponent() : UI_LayerRootWidget(nullptr) {
     // Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
     // off to improve performance if you don't need them.
     PrimaryComponentTick.bCanEverTick = true;
@@ -126,6 +126,24 @@ void UMythicInteractionComponent::ScanForInteractableActors() {
                 }
             }
         }
+    }
+
+    // Detect a destroyed/stale focused actor before resolving focus this scan.
+    // CurrentFocusedActor is a UPROPERTY raw pointer, so GC may have nulled it after the actor's
+    // destruction (e.g. an NPC corpse calling Destroy()); in that case the normal focus-change
+    // logic below would take no branch and never run EndInteraction -> Clear(), leaking the HUD
+    // input bindings and leaving the prompt-widget lambdas pointing at freed memory.
+    if (CurrentFocusedActor && !IsValid(CurrentFocusedActor)) {
+        // Pointer still present but the actor is being destroyed: tear it down fully while we can
+        // still reference it, then forget it.
+        EndInteraction(CurrentFocusedActor);
+        CurrentFocusedActor = nullptr;
+    }
+    else if (!CurrentFocusedActor && IsCurrentActorReadyForInteraction) {
+        // GC already nulled the focused actor while we still believed we were focused: we no longer
+        // have the actor pointer (its attached widget component died with it), so clear only the
+        // prompt-widget bindings and reset the ready flag.
+        EndStaleInteraction();
     }
 
     // If we found an actor to focus on
@@ -250,6 +268,19 @@ void UMythicInteractionComponent::EndInteraction(AActor *OldFocusedActor) {
     this->IsCurrentActorReadyForInteraction = false;
 
     // Clear the prompt widget
+    if (this->InteractionPromptWidget) {
+        this->InteractionPromptWidget->Clear();
+    }
+}
+
+void UMythicInteractionComponent::EndStaleInteraction() {
+    // The focused actor was destroyed and its pointer is gone (GC nulled CurrentFocusedActor).
+    // Its attached InteractionWidget component and OnUnfocused state died with it, so there is
+    // nothing to deref. We only need to unregister the HUD input bindings and clear the prompt.
+    UE_LOG(Myth, Warning, TEXT("Ending stale interaction: focused actor was destroyed while focused"));
+
+    this->IsCurrentActorReadyForInteraction = false;
+
     if (this->InteractionPromptWidget) {
         this->InteractionPromptWidget->Clear();
     }

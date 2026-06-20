@@ -62,6 +62,9 @@ UE_DEFINE_GAMEPLAY_TAG(ITEMIZATION_TYPE_EXPLORATION, "Itemization.Type.Explorati
 /* Misc */
 UE_DEFINE_GAMEPLAY_TAG(ITEMIZATION_TYPE_MISC, "Itemization.Type.Misc");
 
+/* Currency */
+UE_DEFINE_GAMEPLAY_TAG(ITEMIZATION_TYPE_CURRENCY, "Itemization.Type.Currency");
+
 /* ----------------------------- RARITY ---------------------------- */
 UE_DEFINE_GAMEPLAY_TAG(ITEMIZATION_RARITY_COMMON, "Itemization.Rarity.Common");
 UE_DEFINE_GAMEPLAY_TAG(ITEMIZATION_RARITY_RARE, "Itemization.Rarity.Rare");

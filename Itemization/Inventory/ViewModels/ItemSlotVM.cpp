@@ -8,6 +8,7 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
+#include "Itemization/Inventory/ItemDefinition.h"
 
 void UItemSlotVM::SetIcon(UTexture2D *InIcon) {
     if (UE_MVVM_SET_PROPERTY_VALUE(Icon, InIcon)) {
@@ -122,38 +123,13 @@ void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *
             return;
         }
 
-        SetIcon(ItemDef->Icon2d.Get());
+        // LoadSynchronous (not .Get()): Icon2d is a soft ref, so .Get() returns null until the texture happens to be
+        // resident — the slot rendered icon-less on an item type's first appearance. Matches ConversionViewModels::LoadIcon.
+        SetIcon(ItemDef->Icon2d.IsNull() ? nullptr : ItemDef->Icon2d.LoadSynchronous());
         SetIsJunk(/*InItemInstance->bIsJunk*/ false);
-        switch (ItemDef->Rarity) {
-        case Common: {
-            auto Gray = FColor::FromHex("#808080");
-            SetBackgroundColor(FLinearColor::FromSRGBColor(Gray));
-        }
-        break;
-        case Rare: {
-            auto Blue = FColor::FromHex("#15c965");
-            SetBackgroundColor(FLinearColor::FromSRGBColor(Blue));
-        }
-        break;
-        case Epic: {
-            auto Purple = FColor::FromHex("#732BD2FF");
-            SetBackgroundColor(FLinearColor::FromSRGBColor(Purple));
-        }
-        break;
-        case Legendary: {
-            auto Orange = FColor::FromHex("#BE6009FF");
-            SetBackgroundColor(FLinearColor::FromSRGBColor(Orange));
-        }
-        break;
-        case Mythic: {
-            auto Gold = FColor::FromHex("#FF3F36FF");
-            SetBackgroundColor(FLinearColor::FromSRGBColor(Gold));
-        }
-        break;
-        default:
-            SetBackgroundColor(FLinearColor::Black);
-            break;
-        }
+        // Single-source the rarity tint (was an inline hex switch here; now centralized so the slot background and the
+        // loot-pickup callout share one mapping — UItemDefinition::GetRarityColor).
+        SetBackgroundColor(UItemDefinition::GetRarityColor(ItemDef->Rarity));
         SetQuantity(InItemInstance->GetStacks());
     }
 }

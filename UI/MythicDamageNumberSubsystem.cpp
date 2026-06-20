@@ -64,7 +64,21 @@ void UMythicDamageNumberSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
     DrawDamageNumbers(Canvas, PC);
 }
 
+// Swap-remove every expired entry. Declared in the header but previously never defined — the ONLY pruning was inside
+// DrawDamageNumbers, which the engine stops calling when the HUD is hidden (AHUD::PostRender gates on bShowHUD), so the
+// pool grew unbounded while hidden. Called on every Add (the sole growth source) so the array stays bounded regardless
+// of whether the HUD is currently rendering.
+void UMythicDamageNumberSubsystem::CleanupExpired() {
+    const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    for (int32 i = ActiveDamageNumbers.Num() - 1; i >= 0; --i) {
+        if (ActiveDamageNumbers[i].IsExpired(CurrentTime)) {
+            ActiveDamageNumbers.RemoveAtSwap(i, EAllowShrinking::No);
+        }
+    }
+}
+
 void UMythicDamageNumberSubsystem::AddDamageNumber(FVector WorldLocation, float Magnitude, const FGameplayEffectContextHandle &EffectContext, bool bIsHeal) {
+    CleanupExpired(); // bound the pool even when the HUD isn't rendering
     FMythicDamageNumberData NewData;
     NewData.WorldLocation = WorldLocation;
     NewData.CachedText = FText::FromString(FormatMagnitude(Magnitude)); // Cache FText at creation, not per-frame
@@ -89,7 +103,15 @@ void UMythicDamageNumberSubsystem::AddDamageNumber(FVector WorldLocation, float 
     UE_LOG(LogMythicDamageNumbers, Verbose, TEXT("Added damage number at %s (Type: %d)"), *WorldLocation.ToString(), (int32)NewData.DamageType);
 }
 
+void UMythicDamageNumberSubsystem::AddDodgeNumber(FVector WorldLocation) {
+    // Reuse the configured DodgeColor (designer-tunable data asset) — single source, no duplicated literal; the named
+    // FLinearColor::Gray is only a degenerate fallback when no config asset is set. "DODGE" is the conventional miss label.
+    const FLinearColor DodgeColor = Config ? Config->DodgeColor : FLinearColor::Gray;
+    AddDamageNumberCustom(WorldLocation, TEXT("DODGE"), DodgeColor, 1.0f);
+}
+
 void UMythicDamageNumberSubsystem::AddDamageNumberCustom(FVector WorldLocation, const FString &Text, FLinearColor Color, float Lifetime) {
+    CleanupExpired(); // bound the pool even when the HUD isn't rendering (AddDodgeNumber routes through here too)
     FMythicDamageNumberData NewData;
     NewData.WorldLocation = WorldLocation;
     NewData.CachedText = FText::FromString(Text);
@@ -269,22 +291,49 @@ EMythicDamageNumberType UMythicDamageNumberSubsystem::DetermineDamageType(const 
         return EMythicDamageNumberType::Default;
     }
 
-    // Only check for critical hit
-    if (MythicContext->IsCriticalHit()) {
-        return EMythicDamageNumberType::Critical;
-    }
+    // Priority: Critical (the headline) > Dodge (a miss) > status effects > plain hit. A single hit can flag several
+    // statuses at once; we surface the most salient one for the number's color, in a fixed precedence — damage-over-time
+    // (Burn/Poison/Bleed), then hard CC (Freeze/Stun), then debuffs (Terrify/Weaken/Slow).
+    if (MythicContext->IsCriticalHit()) { return EMythicDamageNumberType::Critical; }
+    if (MythicContext->IsDodged()) { return EMythicDamageNumberType::Dodge; }
+    if (MythicContext->IsBurn()) { return EMythicDamageNumberType::Burn; }
+    if (MythicContext->IsPoison()) { return EMythicDamageNumberType::Poison; }
+    if (MythicContext->IsBleed()) { return EMythicDamageNumberType::Bleed; }
+    if (MythicContext->IsFreeze()) { return EMythicDamageNumberType::Freeze; }
+    if (MythicContext->IsStun()) { return EMythicDamageNumberType::Stun; }
+    if (MythicContext->IsTerrify()) { return EMythicDamageNumberType::Terrify; }
+    if (MythicContext->IsWeaken()) { return EMythicDamageNumberType::Weaken; }
+    if (MythicContext->IsSlow()) { return EMythicDamageNumberType::Slow; }
 
     return EMythicDamageNumberType::Default;
 }
 
 FLinearColor UMythicDamageNumberSubsystem::GetColorForType(EMythicDamageNumberType Type) const {
     if (!Config) {
-        // Fallback colors when no config
+        // Fallback colors when no config (mirror the config defaults so behavior is identical sans data asset).
         switch (Type) {
         case EMythicDamageNumberType::Critical:
             return FLinearColor::Yellow;
         case EMythicDamageNumberType::Heal:
             return FLinearColor(0.0f, 1.0f, 0.3f);
+        case EMythicDamageNumberType::Bleed:
+            return FLinearColor(0.7f, 0.0f, 0.0f);
+        case EMythicDamageNumberType::Burn:
+            return FLinearColor(1.0f, 0.45f, 0.0f);
+        case EMythicDamageNumberType::Poison:
+            return FLinearColor(0.4f, 0.85f, 0.1f);
+        case EMythicDamageNumberType::Stun:
+            return FLinearColor(1.0f, 0.9f, 0.4f);
+        case EMythicDamageNumberType::Slow:
+            return FLinearColor(0.4f, 0.6f, 0.9f);
+        case EMythicDamageNumberType::Weaken:
+            return FLinearColor(0.6f, 0.45f, 0.7f);
+        case EMythicDamageNumberType::Freeze:
+            return FLinearColor(0.5f, 0.9f, 1.0f);
+        case EMythicDamageNumberType::Terrify:
+            return FLinearColor(0.7f, 0.2f, 0.7f);
+        case EMythicDamageNumberType::Dodge:
+            return FLinearColor(0.8f, 0.8f, 0.85f);
         default:
             return FLinearColor::White;
         }
@@ -295,6 +344,24 @@ FLinearColor UMythicDamageNumberSubsystem::GetColorForType(EMythicDamageNumberTy
         return Config->CriticalHitColor;
     case EMythicDamageNumberType::Heal:
         return Config->HealColor;
+    case EMythicDamageNumberType::Bleed:
+        return Config->BleedColor;
+    case EMythicDamageNumberType::Burn:
+        return Config->BurnColor;
+    case EMythicDamageNumberType::Poison:
+        return Config->PoisonColor;
+    case EMythicDamageNumberType::Stun:
+        return Config->StunColor;
+    case EMythicDamageNumberType::Slow:
+        return Config->SlowColor;
+    case EMythicDamageNumberType::Weaken:
+        return Config->WeakenColor;
+    case EMythicDamageNumberType::Freeze:
+        return Config->FreezeColor;
+    case EMythicDamageNumberType::Terrify:
+        return Config->TerrifyColor;
+    case EMythicDamageNumberType::Dodge:
+        return Config->DodgeColor;
     default:
         return Config->DefaultColor;
     }
@@ -308,6 +375,17 @@ EMythicDamageNumberAnimStyle UMythicDamageNumberSubsystem::GetAnimStyleForType(E
             return EMythicDamageNumberAnimStyle::Bounce;
         case EMythicDamageNumberType::Heal:
             return EMythicDamageNumberAnimStyle::Pulse;
+        case EMythicDamageNumberType::Dodge:
+            return EMythicDamageNumberAnimStyle::FloatUpSlow;
+        case EMythicDamageNumberType::Bleed:
+        case EMythicDamageNumberType::Burn:
+        case EMythicDamageNumberType::Poison:
+        case EMythicDamageNumberType::Stun:
+        case EMythicDamageNumberType::Slow:
+        case EMythicDamageNumberType::Weaken:
+        case EMythicDamageNumberType::Freeze:
+        case EMythicDamageNumberType::Terrify:
+            return EMythicDamageNumberAnimStyle::Shake;
         default:
             return EMythicDamageNumberAnimStyle::FloatUp;
         }
@@ -318,6 +396,17 @@ EMythicDamageNumberAnimStyle UMythicDamageNumberSubsystem::GetAnimStyleForType(E
         return Config->CriticalAnimStyle;
     case EMythicDamageNumberType::Heal:
         return Config->HealAnimStyle;
+    case EMythicDamageNumberType::Dodge:
+        return Config->DodgeAnimStyle;
+    case EMythicDamageNumberType::Bleed:
+    case EMythicDamageNumberType::Burn:
+    case EMythicDamageNumberType::Poison:
+    case EMythicDamageNumberType::Stun:
+    case EMythicDamageNumberType::Slow:
+    case EMythicDamageNumberType::Weaken:
+    case EMythicDamageNumberType::Freeze:
+    case EMythicDamageNumberType::Terrify:
+        return Config->StatusAnimStyle;
     default:
         return Config->DefaultAnimStyle;
     }

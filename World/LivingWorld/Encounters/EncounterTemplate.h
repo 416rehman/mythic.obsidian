@@ -57,8 +57,13 @@ struct MYTHIC_API FMythicEncounterTemplate {
 
     /**
      * World state prerequisites (tag query).
-     * Encounter only spawns when the query matches the current world state tags.
-     * Example: RequiredWorldState matches "Faction.AtWar" AND NOT "Weather.Blizzard"
+     * Encounter only spawns when the query matches the current world state. The world state is composed of the live
+     * Environment.Weather.* , Environment.Time.* , and Environment.Season.* tags (built in
+     * EncounterDirector::EvaluateTemplate). An EMPTY query (the default) imposes no constraint.
+     * Example: matches Environment.Time.Night AND NOT Environment.Weather.Snow
+     *          (a night-only ambush that holds off during snow).
+     * NOTE: only the env tags above are currently produced — do NOT author terms that REQUIRE faction/other tags
+     * (e.g. an ALL-match on a Faction.* tag) here, as nothing adds them to the container and the query would never match.
      */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     FGameplayTagQuery RequiredWorldState;
@@ -136,7 +141,9 @@ struct FMythicActiveEncounter {
 
     /** Whether this encounter has timed out */
     bool HasTimedOut(double CurrentWorldTime) const {
-        if (MaxDurationSeconds <= 0.0f) return false;
+        if (MaxDurationSeconds <= 0.0f) {
+            return false;
+        }
         return (CurrentWorldTime - ActivationTime) > static_cast<double>(MaxDurationSeconds);
     }
 };

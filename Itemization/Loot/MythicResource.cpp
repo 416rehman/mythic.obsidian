@@ -87,6 +87,10 @@ void AMythicResource::BeginPlay() {
         UE_LOG(Myth, Warning, TEXT("AMythicResource::BeginPlay: Successfully replaced ISM"));
         // If server, initialize default abilities and effects
         if (GetLocalRole() == ROLE_Authority) {
+            // Initialize the ASC's actor info before granting/applying — every other ASC owner (GameState/NPC/Player)
+            // does this; without it the granted abilities have null Owner/Avatar actor info.
+            this->AbilitySystemComponent->InitAbilityActorInfo(this, this);
+
             for (TSubclassOf<UGameplayEffect> Effect : DefaultGameplayEffects) {
                 if (Effect) {
                     FGameplayEffectContextHandle EffectContext = this->AbilitySystemComponent->MakeEffectContext();

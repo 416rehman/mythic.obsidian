@@ -9,6 +9,24 @@ UItemDefinition::UItemDefinition() {
     StackSizeMax = 1;
 }
 
+FLinearColor UItemDefinition::GetRarityColor(EItemRarity InRarity) {
+    // Single source of truth for rarity coloring (was inline in UItemSlotVM::Initialize before centralization).
+    switch (InRarity) {
+    case Common:
+        return FLinearColor::FromSRGBColor(FColor::FromHex("#808080"));
+    case Rare:
+        return FLinearColor::FromSRGBColor(FColor::FromHex("#15c965"));
+    case Epic:
+        return FLinearColor::FromSRGBColor(FColor::FromHex("#732BD2FF"));
+    case Legendary:
+        return FLinearColor::FromSRGBColor(FColor::FromHex("#BE6009FF"));
+    case Mythic:
+        return FLinearColor::FromSRGBColor(FColor::FromHex("#FF3F36FF"));
+    default:
+        return FLinearColor::Black;
+    }
+}
+
 #if WITH_EDITOR
 #include "UObject/ObjectSaveContext.h"
 #include "Fragments/Actionable/AttackFragment.h"

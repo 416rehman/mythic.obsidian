@@ -13,6 +13,7 @@
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "World/LivingWorld/Morality/MoralSignature.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
+#include "World/EnvironmentController/MythicEnvironmentSubsystem.h" // GetDayTime for REQ-BEH-007 night perception
 #include "Engine/World.h"
 
 UMythicWitnessPerceptionProcessor::UMythicWitnessPerceptionProcessor() {
@@ -77,6 +78,23 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
         return;
     }
 
+    // REQ-BEH-007: NPC perception (hearing range) degrades at NIGHT. Drive the ActionEventSubsystem's perception
+    // multiplier from the real time-of-day (the env subsystem owns the clock) — SetPerceptionMultiplier was previously
+    // NEVER called, so the multiplier sat at 1.0 regardless of the clock, and NightPerceptionMultiplier was dead.
+    // (Weather-based degradation is deferred: UWeatherType exposes only visual fog ranges, not a gameplay perception
+    // scalar — a per-weather perception multiplier should be designer-authored before WeatherPerceptionMultiplier is
+    // wired, rather than baking in a fog-density threshold here.)
+    float EnvPerceptionMul = 1.0f;
+    if (const UMythicEnvironmentSubsystem *Env = GI->GetSubsystem<UMythicEnvironmentSubsystem>()) {
+        // Gate on a REGISTERED controller: GetDayTime() FAIL-UNSAFE-returns Night (and logs) when the controller is
+        // absent (a startup/teardown transient), which would wrongly halve hearing AND spam a per-frame log. Only
+        // degrade when the clock is genuinely known; "no clock yet" means full daylight perception.
+        if (Env->GetEnvironmentController() != nullptr && Env->GetDayTime() == EDayTime::Night) {
+            EnvPerceptionMul = Settings->NightPerceptionMultiplier;
+        }
+    }
+    ActionSub->SetPerceptionMultiplier(EnvPerceptionMul);
+
     // Apply perception multiplier — weather/night/stealth reduce effective hearing range
     const float PerceptionMul = ActionSub->GetPerceptionMultiplier();
     const int32 BaseHearingRadius = Settings->WitnessHearingRadius;
@@ -126,40 +144,45 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
                     continue; // Line-of-sight blocked (different visibility groups)
                 }
 
-                --WitnessBudget;
-                ++PendingEvent.WitnessesProcessed;
-
-                // Moral evaluation — dot product of action vs witness's faction ideology
+                // Reject entities that can contribute no witness/crime output BEFORE spending budget — a
+                // faction-less entity (e.g. an unaffiliated creature) or one whose faction isn't in the DB produces
+                // nothing downstream, so charging it budget only starves real witnesses (e.g. a crowd near a kill).
                 if (!Identity.Faction.IsValid()) {
                     continue;
                 }
-
                 FMythicFactionData FactionData;
                 if (!FactionDB->GetFaction(Identity.Faction, FactionData)) {
                     continue;
                 }
 
+                --WitnessBudget;
+                ++PendingEvent.WitnessesProcessed;
+
+                // Moral evaluation — dot product of action vs witness's faction ideology
                 FMythicMoralAction EvaluatedVector = Event.MoralVector;
 
                 // Category-specific moral axis mapping (REQ-BEH-010)
                 // Inject additional moral dimensions based on the action type
                 switch (Event.ActionCategory) {
-                    case EMythicActionCategory::Magic_Damage:
-                        // Destructive magic is viewed through both Violence and Arcane lenses
-                        EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Arcane)] += 0.5f;
-                        break;
-                    case EMythicActionCategory::Magic_Healing:
-                        // Healing magic is Mercy + Arcane
-                        EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Arcane)] += 0.3f;
-                        EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Mercy)] += 0.5f;
-                        break;
-                    case EMythicActionCategory::Magic_Forbidden:
-                        // Forbidden magic directly impacts Sacrilege and Arcane
-                        EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Sanctity)] += 1.0f;
-                        EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Arcane)] += 0.8f;
-                        break;
-                    default:
-                        break;
+                case EMythicActionCategory::Magic_Damage:
+                    // Destructive magic is viewed through both Violence and Arcane lenses
+                    EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Arcane)] += 0.5f;
+                    break;
+                case EMythicActionCategory::Magic_Healing:
+                    // Healing magic is Mercy + Arcane
+                    EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Arcane)] += 0.3f;
+                    EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Mercy)] += 0.5f;
+                    break;
+                case EMythicActionCategory::Magic_Forbidden:
+                    // Forbidden magic DESECRATES — negative Sanctity (the absence of sanctity, exactly as a kill is
+                    // negative Mercy) — and transgresses anti-magic ideology (positive Arcane). Severity = -dot, so a
+                    // sanctity-protecting faction (Ideology.Sanctity = +1) only condemns a NEGATIVE-Sanctity action.
+                    // The prior += 1.0f inverted the sign, so protector factions never condemned necromancy.
+                    EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Sanctity)] -= 1.0f;
+                    EvaluatedVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Arcane)] += 0.8f;
+                    break;
+                default:
+                    break;
                 }
 
                 const EMythicMoralSeverity Severity = FMythicMoralSignature::EvaluateActionSeverity(
@@ -177,7 +200,8 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
                 // Dirty the significance score — this entity is now contextually relevant
                 FMythicSignificanceFragment &Significance = SignificanceView[i];
                 Significance.bDirty = true;
-                Significance.RelevantEventCount = FMath::Min<uint16>(Significance.RelevantEventCount + 1, 0xFFFF);
+                // Saturate in 32-bit before narrowing (FMath::Min<uint16> truncates the +1 sum first: at 65535 -> 65536 -> 0).
+                Significance.RelevantEventCount = static_cast<uint16>(FMath::Min<uint32>(static_cast<uint32>(Significance.RelevantEventCount) + 1u, 0xFFFFu));
 
                 // Produce witness result for the pressure processor
                 FMythicWitnessResult Result;

@@ -36,11 +36,11 @@ protected:
     FGameplayAttributeData SlowResistance;
     // Reduces chance to be frozen - Cannot move or attack
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_FreezeResistance)
-    FGameplayAttributeData FreezeResistance;    
+    FGameplayAttributeData FreezeResistance;
     // Reduces chance to be stunned - Cannot move or attack
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_StunResistance)
-    FGameplayAttributeData StunResistance;    
-    
+    FGameplayAttributeData StunResistance;
+
     // Reduces incoming damage from enemies under status effects
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_DecreasedDamageFromEnemiesUnderStatusEffects)
     FGameplayAttributeData DecreasedDamageFromEnemiesUnderStatusEffects;
@@ -89,35 +89,45 @@ public:
 
     // Replication
     UFUNCTION()
-    virtual void OnRep_Armor(const FGameplayAttributeData& OldArmor);
+    virtual void OnRep_Armor(const FGameplayAttributeData &OldArmor);
     UFUNCTION()
-    virtual void OnRep_DodgeChance(const FGameplayAttributeData& OldDodgeChance);
+    virtual void OnRep_DodgeChance(const FGameplayAttributeData &OldDodgeChance);
     UFUNCTION()
-    virtual void OnRep_BurnResistance(const FGameplayAttributeData& OldBurnResistance);
+    virtual void OnRep_BurnResistance(const FGameplayAttributeData &OldBurnResistance);
     UFUNCTION()
-    virtual void OnRep_BleedResistance(const FGameplayAttributeData& OldBleedResistance);
+    virtual void OnRep_BleedResistance(const FGameplayAttributeData &OldBleedResistance);
     UFUNCTION()
-    virtual void OnRep_PoisonResistance(const FGameplayAttributeData& OldPoisonResistance);
+    virtual void OnRep_PoisonResistance(const FGameplayAttributeData &OldPoisonResistance);
     UFUNCTION()
-    virtual void OnRep_SlowResistance(const FGameplayAttributeData& OldSlowResistance);
+    virtual void OnRep_SlowResistance(const FGameplayAttributeData &OldSlowResistance);
     UFUNCTION()
-    virtual void OnRep_FreezeResistance(const FGameplayAttributeData& OldFreezeResistance);
+    virtual void OnRep_FreezeResistance(const FGameplayAttributeData &OldFreezeResistance);
     UFUNCTION()
-    virtual void OnRep_StunResistance(const FGameplayAttributeData& OldStunResistance);
+    virtual void OnRep_StunResistance(const FGameplayAttributeData &OldStunResistance);
     UFUNCTION()
-    virtual void OnRep_DecreasedDamageFromEnemiesUnderStatusEffects(const FGameplayAttributeData& OldDecreasedDamageFromEnemiesUnderStatusEffects);
+    virtual void OnRep_DecreasedDamageFromEnemiesUnderStatusEffects(const FGameplayAttributeData &OldDecreasedDamageFromEnemiesUnderStatusEffects);
     UFUNCTION()
-    virtual void OnRep_HealthRegenRate(const FGameplayAttributeData& OldHealthRegenRate);
+    virtual void OnRep_HealthRegenRate(const FGameplayAttributeData &OldHealthRegenRate);
     UFUNCTION()
-    virtual void OnRep_MaxShield(const FGameplayAttributeData& OldMaxShield);
+    virtual void OnRep_MaxShield(const FGameplayAttributeData &OldMaxShield);
     UFUNCTION()
-    virtual void OnRep_Shield(const FGameplayAttributeData& OldShield);
+    virtual void OnRep_Shield(const FGameplayAttributeData &OldShield);
     UFUNCTION()
-    virtual void OnRep_ShieldRegenRate(const FGameplayAttributeData& OldShieldRegenRate);
+    virtual void OnRep_ShieldRegenRate(const FGameplayAttributeData &OldShieldRegenRate);
     UFUNCTION()
-    virtual void OnRep_LifePerHit(const FGameplayAttributeData& OldLifePerHit);
+    virtual void OnRep_LifePerHit(const FGameplayAttributeData &OldLifePerHit);
     UFUNCTION()
-    virtual void OnRep_LifePerKill(const FGameplayAttributeData& OldLifePerKill);
+    virtual void OnRep_LifePerKill(const FGameplayAttributeData &OldLifePerKill);
 
-    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
+
+    // Clamp Shield to [0, MaxShield], and Armor / DodgeChance / resistances to >= 0.
+    virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
+    // Re-clamp Shield when MaxShield drops below current Shield.
+    virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) override;
+
+private:
+    // The Shield value BEFORE the most recent change (cached in PreAttributeChange) — lets PostGameplayEffectExecute
+    // compute the EXACT amount of damage the shield absorbed (post-clamp) before firing the feedback RPC.
+    float ShieldBeforeChange = 0.0f;
 };

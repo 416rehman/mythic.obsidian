@@ -5,3 +5,15 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Weather_Clear, "Environment.Weather.C
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Weather_Overcast, "Environment.Weather.Overcast", "Overcast, no rain, no snow, completely shadowed");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Weather_Rain, "Environment.Weather.Rain", "Rain, its raining, and its overcast. High winds = storm");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Weather_Snow, "Environment.Weather.Snow", "Snow, its snowing, and its overcast. High winds = blizzard");
+
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Time, "Environment.Time", "Time of day (mirrors EDayTime)");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Time_Morning, "Environment.Time.Morning", "06:00 - 12:00");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Time_Afternoon, "Environment.Time.Afternoon", "12:00 - 17:00");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Time_Evening, "Environment.Time.Evening", "17:00 - 20:00");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Time_Night, "Environment.Time.Night", "20:00 - 06:00");
+
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Season, "Environment.Season", "Season of year (mirrors ESeason)");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Season_Spring, "Environment.Season.Spring", "Months 3, 4, 5");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Season_Summer, "Environment.Season.Summer", "Months 6, 7, 8");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Season_Autumn, "Environment.Season.Autumn", "Months 9, 10, 11");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(Environment_Season_Winter, "Environment.Season.Winter", "Months 12, 1, 2");

@@ -50,6 +50,15 @@ public:
     UFUNCTION(BlueprintCallable, Category="Environment")
     EDayTime GetDayTime() const;
 
+    // Returns the current time-of-day as an Environment.Time.* tag (the tag sibling of GetWeather), or an empty tag
+    // when the controller is absent. Lets world-state consumers (e.g. encounter gating) query the clock via a tag.
+    UFUNCTION(BlueprintCallable, Category="Environment")
+    FGameplayTag GetDayTimeTag() const;
+
+    // Returns the current season as an Environment.Season.* tag, or an empty tag when the controller is absent.
+    UFUNCTION(BlueprintCallable, Category="Environment")
+    FGameplayTag GetSeasonTag() const;
+
     // Get Weather Type by Tag
     UFUNCTION(BlueprintCallable, Category="Environment")
     UWeatherType *GetWeatherTypeByTag(FGameplayTag Tag);

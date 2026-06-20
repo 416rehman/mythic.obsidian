@@ -41,6 +41,12 @@ struct FMythicNPCData {
     UPROPERTY(BlueprintReadOnly)
     FGuid NPCFamilyId = FGuid();
 
+    // Rolled base-attribute specs seeded onto this NPC's ASC on spawn (copied from the source
+    // UNPCDefinition::Proficiencies). Applied authority-side in AMythicNPCCharacter::SeedAttributesFromData.
+    // Carried on the runtime struct (not via a UNPCDefinition* backpointer) so pooled reuse retains them.
+    UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
+    TArray<FRolledAttributeSpec> Proficiencies;
+
     void ClearAll() {
         NPCId.Invalidate();
         NPCName.Empty();
@@ -49,6 +55,7 @@ struct FMythicNPCData {
         AffiliationOverrides.Empty();
         FlightOrFightOverrides.Empty();
         NPCFamilyId.Invalidate();
+        Proficiencies.Empty();
     }
 
     // Default Constructor
@@ -64,6 +71,7 @@ struct FMythicNPCData {
         this->TagsRequiredToRecruit = NPCDef->TagsRequiredToRecruit;
         this->AffiliationOverrides = NPCDef->AffiliationOverrides;
         this->FlightOrFightOverrides = NPCDef->FlightOrFightOverrides;
+        this->Proficiencies = NPCDef->Proficiencies;
         auto FamilyDef = NPCDef->FamilyDef.Get();
         if (FamilyDef) {
             this->NPCFamilyId = FamilyDef->FamilyId;

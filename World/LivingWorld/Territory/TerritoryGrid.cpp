@@ -16,6 +16,7 @@ void UMythicTerritoryGrid::Initialize(const UMythicTerritoryGridSettings *Settin
     WriteBuffer.SetNum(TotalCells);
     ReadBuffer.SetNum(TotalCells);
     DirtyCells.Init(false, TotalCells);
+    ReadDirtyCells.Init(false, TotalCells);
 
     // 256 max factions per FMythicFactionId (uint8 index)
     WriteFactionCells.SetNum(256);
@@ -74,7 +75,7 @@ void UMythicTerritoryGrid::PropagateInfluence() {
     for (int32 Y = 0; Y < Height; ++Y) {
         for (int32 X = 0; X < Width; ++X) {
             const int32 Index = Y * Width + X;
-            const FMythicTerritoryCell& Cell = WriteBuffer[Index];
+            const FMythicTerritoryCell &Cell = WriteBuffer[Index];
 
             // Track incoming influence from each faction via neighbors
             // Max 4 neighbors → max 4 distinct factions (use inline allocation)
@@ -87,13 +88,13 @@ void UMythicTerritoryGrid::PropagateInfluence() {
 
             const int32 Neighbors[4][2] = {{X - 1, Y}, {X + 1, Y}, {X, Y - 1}, {X, Y + 1}};
 
-            for (const auto& N : Neighbors) {
+            for (const auto &N : Neighbors) {
                 if (N[0] < 0 || N[0] >= Width || N[1] < 0 || N[1] >= Height) {
                     continue;
                 }
 
                 const int32 NIdx = N[1] * Width + N[0];
-                const FMythicTerritoryCell& Neighbor = WriteBuffer[NIdx];
+                const FMythicTerritoryCell &Neighbor = WriteBuffer[NIdx];
 
                 if (!Neighbor.DominantFaction.IsValid() || Neighbor.Influence <= 0.0f) {
                     continue;
@@ -132,7 +133,8 @@ void UMythicTerritoryGrid::PropagateInfluence() {
 
                 Updates[Index].Faction = BestFaction;
                 Updates[Index].Influence = BestInfluence;
-            } else {
+            }
+            else {
                 // ─── Owned cell: reinforce from allies, erode from enemies ───
                 float Reinforcement = 0.0f;
                 float Erosion = 0.0f;
@@ -140,7 +142,8 @@ void UMythicTerritoryGrid::PropagateInfluence() {
                 for (int32 b = 0; b < BleedCount; ++b) {
                     if (FactionBleeds[b].Faction == Cell.DominantFaction) {
                         Reinforcement += FactionBleeds[b].TotalInfluence;
-                    } else {
+                    }
+                    else {
                         Erosion += FactionBleeds[b].TotalInfluence;
                     }
                 }
@@ -184,12 +187,27 @@ void UMythicTerritoryGrid::PropagateInfluence() {
     }
 }
 
+void UMythicTerritoryGrid::GetWriteCellCounts(TArray<int32> &OutCountsByFactionIndex) const {
+    // Mirror WriteFactionCells' 256-index space. Scan the write buffer (sim-thread-private; the same access CommitWrites
+    // uses to rebuild WriteFactionCells) and count cells per dominant faction.
+    OutCountsByFactionIndex.Reset();
+    OutCountsByFactionIndex.AddZeroed(256);
+
+    const int32 TotalCells = Width * Height;
+    for (int32 i = 0; i < TotalCells; ++i) {
+        const FMythicFactionId Faction = WriteBuffer[i].DominantFaction;
+        if (Faction.IsValid()) {
+            ++OutCountsByFactionIndex[Faction.Index];
+        }
+    }
+}
+
 void UMythicTerritoryGrid::CommitWrites() {
     // Rebuild the cached faction cells list for O(1) queries
     for (int32 i = 0; i < 256; ++i) {
         WriteFactionCells[i].Reset();
     }
-    
+
     const int32 TotalCells = Width * Height;
     for (int32 i = 0; i < TotalCells; ++i) {
         const FMythicFactionId Faction = WriteBuffer[i].DominantFaction;
@@ -201,7 +219,17 @@ void UMythicTerritoryGrid::CommitWrites() {
     FScopeLock Lock(&SnapshotLock);
     FMemory::Memcpy(ReadBuffer.GetData(), WriteBuffer.GetData(), WriteBuffer.Num() * sizeof(FMythicTerritoryCell));
     ReadFactionCells = WriteFactionCells;
-    // DirtyCells preserved until GetChangedCells is called
+
+    // Fold this tick's dirty cells into the replication snapshot (accumulates across commits until the game-thread
+    // GetChangedCells drains it — so no delta is lost if commits outpace the replicator), then CLEAR DirtyCells.
+    // DirtyCells is consistently SimulationLock-guarded (this fold + the game-thread settlement seed/transfer writers
+    // all hold SimulationLock); the game thread reads replication deltas ONLY via ReadDirtyCells under SnapshotLock —
+    // closing the old unlocked GetChangedCells/Serialize race. Clearing also fixes the old unbounded growth (DirtyCells
+    // was never reset, so GetChangedCells used to re-emit every cell ever dirtied).
+    for (TConstSetBitIterator<> It(DirtyCells); It; ++It) {
+        ReadDirtyCells[It.GetIndex()] = true;
+    }
+    DirtyCells.Init(false, Width * Height);
 }
 
 FMythicTerritoryCell UMythicTerritoryGrid::GetCell(const FMythicCellCoord &Coord) const {
@@ -248,8 +276,8 @@ void UMythicTerritoryGrid::GetFactionCells(FMythicFactionId Faction, int32 MaxRe
     }
 
     FScopeLock Lock(&SnapshotLock);
-    const TArray<FMythicCellCoord>& CachedCells = ReadFactionCells[Faction.Index];
-    
+    const TArray<FMythicCellCoord> &CachedCells = ReadFactionCells[Faction.Index];
+
     const int32 Count = FMath::Min(MaxResults, CachedCells.Num());
     if (Count > 0) {
         // Fast bulk copy to output
@@ -259,17 +287,24 @@ void UMythicTerritoryGrid::GetFactionCells(FMythicFactionId Faction, int32 MaxRe
 
 void UMythicTerritoryGrid::GetChangedCells(TArray<FMythicCellCoord> &OutChangedCells) const {
     OutChangedCells.Reset();
-    for (TConstSetBitIterator<> It(DirtyCells); It; ++It) {
+    // Drain the committed-delta snapshot under SnapshotLock (the same lock CommitWrites holds when folding deltas in) —
+    // never touch the sim-thread DirtyCells from here. Consuming (clearing) means each replicator pass gets exactly the
+    // cells changed since its last pass.
+    FScopeLock Lock(&SnapshotLock);
+    for (TConstSetBitIterator<> It(ReadDirtyCells); It; ++It) {
         const int32 Index = It.GetIndex();
         OutChangedCells.Add(FMythicCellCoord(
             Index % Width,
             Index / Width
             ));
     }
+    ReadDirtyCells.Init(false, ReadDirtyCells.Num()); // consumed — clear for the next pass
 }
 
-void UMythicTerritoryGrid::Serialize(FArchive& Ar) {
-    int32 Version = 1;
+void UMythicTerritoryGrid::Serialize(FArchive &Ar) {
+    // v2: serialize bPlayerOwned + the FULL uint8 OwningPlayerIndex separately (v1 packed both into one byte, truncating
+    // any player index >= 128 on round-trip).
+    int32 Version = 2;
     Ar << Version;
 
     Ar << Width;
@@ -286,18 +321,31 @@ void UMythicTerritoryGrid::Serialize(FArchive& Ar) {
         WriteBuffer.SetNum(TotalCells);
         ReadBuffer.SetNum(TotalCells);
         DirtyCells.Init(false, TotalCells);
+        ReadDirtyCells.Init(false, TotalCells);
     }
 
     for (int32 i = 0; i < TotalCells; ++i) {
-        FMythicTerritoryCell& Cell = WriteBuffer[i];
+        FMythicTerritoryCell &Cell = WriteBuffer[i];
         Ar << Cell.DominantFaction.Index;
         Ar << Cell.Influence;
 
-        uint8 PlayerData = (Cell.bPlayerOwned ? 1 : 0) | (Cell.OwningPlayerIndex << 1);
-        Ar << PlayerData;
-        if (Ar.IsLoading()) {
-            Cell.bPlayerOwned = (PlayerData & 1) != 0;
-            Cell.OwningPlayerIndex = PlayerData >> 1;
+        // v2: two separate fields so the full uint8 OwningPlayerIndex (0-255) round-trips. v1 saves load via the old
+        // packed byte (which only carried a 7-bit index — the bug this fixes).
+        if (Version >= 2) {
+            uint8 PlayerOwnedByte = Cell.bPlayerOwned ? 1 : 0;
+            Ar << PlayerOwnedByte;
+            Ar << Cell.OwningPlayerIndex;
+            if (Ar.IsLoading()) {
+                Cell.bPlayerOwned = PlayerOwnedByte != 0;
+            }
+        }
+        else {
+            uint8 PlayerData = (Cell.bPlayerOwned ? 1 : 0) | (Cell.OwningPlayerIndex << 1);
+            Ar << PlayerData;
+            if (Ar.IsLoading()) {
+                Cell.bPlayerOwned = (PlayerData & 1) != 0;
+                Cell.OwningPlayerIndex = PlayerData >> 1;
+            }
         }
     }
 
@@ -305,4 +353,3 @@ void UMythicTerritoryGrid::Serialize(FArchive& Ar) {
         CommitWrites();
     }
 }
-

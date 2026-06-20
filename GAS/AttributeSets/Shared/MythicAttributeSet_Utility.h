@@ -23,7 +23,7 @@ protected:
     // This is the only resource in the game and is used in combat, exploration, and other activities.
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_MaxStamina)
     FGameplayAttributeData MaxStamina;
-    
+
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_CurrentStamina)
     FGameplayAttributeData CurrentStamina;
 
@@ -34,7 +34,7 @@ protected:
     // Stamina Cost Reduction is a percentage that reduces the cost of stamina for actions.
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_StaminaCostReduction)
     FGameplayAttributeData StaminaCostReduction;
-    
+
     // Reduces cooldown of all abilities (Q/E)
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_CooldownReduction)
     FGameplayAttributeData CooldownReduction;
@@ -48,6 +48,14 @@ protected:
     FGameplayAttributeData BonusSprintSpeed;
 
 public:
+    UMythicAttributeSet_Utility();
+
+    // Clamp CurrentStamina to [0, MaxStamina] and StaminaCostReduction to [0, 1].
+    virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
+
+    // Re-clamp CurrentStamina down when a GE changes MaxStamina (PreAttributeChange fires only for the written attr).
+    virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) override;
+
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, Resolve)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, MaxStamina)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, CurrentStamina)
@@ -59,21 +67,21 @@ public:
 
     // Replication
     UFUNCTION()
-    virtual void OnRep_Resolve(const FGameplayAttributeData& OldValue);
+    virtual void OnRep_Resolve(const FGameplayAttributeData &OldValue);
     UFUNCTION()
-    virtual void OnRep_MaxStamina(const FGameplayAttributeData& OldValue);
+    virtual void OnRep_MaxStamina(const FGameplayAttributeData &OldValue);
     UFUNCTION()
-    virtual void OnRep_CurrentStamina(const FGameplayAttributeData& OldValue);
+    virtual void OnRep_CurrentStamina(const FGameplayAttributeData &OldValue);
     UFUNCTION()
-    virtual void OnRep_StaminaRegenRate(const FGameplayAttributeData& OldValue);
+    virtual void OnRep_StaminaRegenRate(const FGameplayAttributeData &OldValue);
     UFUNCTION()
-    virtual void OnRep_StaminaCostReduction(const FGameplayAttributeData& OldValue);
+    virtual void OnRep_StaminaCostReduction(const FGameplayAttributeData &OldValue);
     UFUNCTION()
-    virtual void OnRep_CooldownReduction(const FGameplayAttributeData& OldValue);
+    virtual void OnRep_CooldownReduction(const FGameplayAttributeData &OldValue);
     UFUNCTION()
-    virtual void OnRep_ExperienceBonus(const FGameplayAttributeData& OldValue);
+    virtual void OnRep_ExperienceBonus(const FGameplayAttributeData &OldValue);
     UFUNCTION()
-    virtual void OnRep_BonusSprintSpeed(const FGameplayAttributeData& OldValue);
+    virtual void OnRep_BonusSprintSpeed(const FGameplayAttributeData &OldValue);
 
-    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 };

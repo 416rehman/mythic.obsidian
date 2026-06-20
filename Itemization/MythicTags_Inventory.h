@@ -62,6 +62,9 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(ITEMIZATION_TYPE_EXPLORATION); // Maps, keys, let
 /* Misc */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(ITEMIZATION_TYPE_MISC); // Crafting, alchemy, or other items that don’t fit above
 
+/* Currency */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(ITEMIZATION_TYPE_CURRENCY); // Gold and other stackable player currencies (item-based)
+
 /* ----------------------------- RARITY ---------------------------- */
 /*ITEMIZATION.RARITY*/
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(ITEMIZATION_RARITY_COMMON); // COMMON

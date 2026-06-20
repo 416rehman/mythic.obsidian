@@ -83,6 +83,7 @@ namespace EMythicEventCategory {
     constexpr uint16 Environment = 1 << 7;
     constexpr uint16 Magic = 1 << 8;
     constexpr uint16 Scheme = 1 << 9;
+    constexpr uint16 Encounter = 1 << 10; // a spawned world threat/event (raid, monster pack, …) — its own beat
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -135,30 +136,33 @@ public:
     /** Get an event by ID. Returns nullptr if the event has been overwritten (outside ring). */
     const FMythicWorldEvent *GetEvent(uint32 EventId) const;
 
-    /** Get the most recent N events (up to buffer capacity). */
-    TArrayView<const FMythicWorldEvent> GetRecentEvents(int32 MaxCount) const;
+    /** Get the most recent N events (up to buffer capacity), oldest-first. Returns a COPY taken under the read
+     *  lock — safe to use off the sim thread (the previous TArrayView aliased ReadBuffer, which CommitWrites
+     *  overwrites on the sim thread; it also dropped the wrapped tail on a wrap-straddling window). */
+    TArray<FMythicWorldEvent> GetRecentEvents(int32 MaxCount) const;
 
     /**
-     * Query events in a specific cell within a time range.
-     * Returns indices into the read buffer. Budget-capped by MaxResults.
+     * Query events in a specific cell within a time range. Budget-capped by MaxResults. Returns value COPIES taken
+     * under the read lock (NOT pointers into ReadBuffer, which CommitWrites memcpy-overwrites on the sim thread — the
+     * off-thread BDI consumer would otherwise read torn data). Mirrors GetRecentEvents/QueryEventsByFaction.
      */
     void QueryEventsByCell(
         const FMythicCellCoord &Cell,
         double MinWorldTime,
         double MaxWorldTime,
         int32 MaxResults,
-        TArray<const FMythicWorldEvent *> &OutEvents) const;
+        TArray<FMythicWorldEvent> &OutEvents) const;
 
     /**
-     * Query events matching a category bitmask within a time range.
-     * Fast path for processors that need "all combat events in the last N seconds."
+     * Query events matching a category bitmask within a time range. Fast path for processors that need "all combat
+     * events in the last N seconds." Returns value COPIES under the read lock (see QueryEventsByCell).
      */
     void QueryEventsByCategory(
         uint16 CategoryMask,
         double MinWorldTime,
         double MaxWorldTime,
         int32 MaxResults,
-        TArray<const FMythicWorldEvent *> &OutEvents) const;
+        TArray<FMythicWorldEvent> &OutEvents) const;
 
     /** Get the total number of events ever recorded (monotonically increasing) */
     uint32 GetTotalEventCount() const { return NextEventId.load(std::memory_order_relaxed); }
@@ -179,8 +183,8 @@ public:
      * @param MaxResults    Budget cap on results
      */
     void QueryEventsByFaction(
-        const FMythicFactionId& Faction,
-        TArray<FMythicWorldEvent>& OutEvents,
+        const FMythicFactionId &Faction,
+        TArray<FMythicWorldEvent> &OutEvents,
         int32 MaxResults) const;
 
     // ─── Serialization ───────────────────────────────────
@@ -189,7 +193,7 @@ public:
      * Serialize the fabric's event ring buffer for save/load.
      * Writes all valid events in the current buffer to the archive.
      */
-    void Serialize(FArchive& Ar);
+    virtual void Serialize(FArchive &Ar) override;
 
 private:
     /** Ring buffer capacity — set once at init, configurable via data asset */
@@ -227,6 +231,15 @@ private:
      * Used to translate EventId → ring index.
      */
     uint32 BaseEventId = 1;
+
+    /**
+     * Committed (read-side) snapshot of the EventId-translation basis, captured in CommitWrites under the write lock
+     * so EventIdToIndex stays consistent with the read buffer. Reading the LIVE BaseEventId/NextEventId from the game
+     * thread raced the lock-free sim-thread AppendEvent (which advances them between a commit and a read), returning
+     * the wrong event or nullptr for a live one — and BaseEventId is non-atomic, so that was also a torn read.
+     */
+    uint32 ReadBaseEventId = 1;
+    uint32 ReadNewestEventId = 0;
 
     /** Translate an EventId to a ring buffer index. Returns -1 if outside current ring. */
     int32 EventIdToIndex(uint32 EventId, int32 HeadPos, int32 Count) const;

@@ -53,7 +53,7 @@ struct MYTHIC_API FMythicMoralAxisStats {
         return Count >= 2 ? M2 / static_cast<float>(Count) : 0.0f;
     }
 
-    bool NetSerialize(FArchive& Ar, class UPackageMap* Map, bool& bOutSuccess) {
+    bool NetSerialize(FArchive &Ar, class UPackageMap *Map, bool &bOutSuccess) {
         Ar << Count;
         Ar << Mean;
         Ar << M2;
@@ -62,7 +62,7 @@ struct MYTHIC_API FMythicMoralAxisStats {
     }
 };
 
-template<>
+template <>
 struct TStructOpsTypeTraits<FMythicMoralAxisStats> : public TStructOpsTypeTraitsBase2<FMythicMoralAxisStats> {
     enum { WithNetSerializer = true };
 };
@@ -184,6 +184,21 @@ struct MYTHIC_API FMythicMoralSignature {
         return EMythicMoralSeverity::Ignore;
     }
 
+    /**
+     * The canonical moral vector of a lethal-violence / kill action. SINGLE SOURCE (Rule 3) for BOTH the live kill
+     * path (MythicLifeComponent) and the persistent-NPC death record (PersistentNPCRegistry) so the sign can never
+     * drift between them again. CONVENTION (FactionDatabase.h:66 "+1.0 glorifies combat / -1.0 total pacifism";
+     * NPCGenerator Fight=+Violence; the whole test suite): a harmful act is POSITIVE on the Violence axis, so an
+     * anti-violence faction (Ideology.Violence < 0) yields a POSITIVE Severity (= -DotProduct) → condemnation. Mercy
+     * is NEGATIVE because a kill is the absence of mercy.
+     */
+    static FMythicMoralAction MakeKillActionMoralVector() {
+        FMythicMoralAction V;
+        V.AxisValues[static_cast<int32>(EMythicMoralAxis::Violence)] = 0.9f;
+        V.AxisValues[static_cast<int32>(EMythicMoralAxis::Mercy)] = -0.5f;
+        return V;
+    }
+
     /** Get the mean moral vector for signatures comparison / trajectory */
     void GetMeanVector(float OutVector[MoralAxisCount]) const {
         for (int32 i = 0; i < MoralAxisCount; ++i) {
@@ -202,7 +217,7 @@ struct MYTHIC_API FMythicMoralSignature {
         TotalActions = 0;
     }
 
-    bool NetSerialize(FArchive& Ar, class UPackageMap* Map, bool& bOutSuccess) {
+    bool NetSerialize(FArchive &Ar, class UPackageMap *Map, bool &bOutSuccess) {
         for (int32 i = 0; i < MoralAxisCount; ++i) {
             Axes[i].NetSerialize(Ar, Map, bOutSuccess);
         }
@@ -215,7 +230,7 @@ struct MYTHIC_API FMythicMoralSignature {
     }
 };
 
-template<>
+template <>
 struct TStructOpsTypeTraits<FMythicMoralSignature> : public TStructOpsTypeTraitsBase2<FMythicMoralSignature> {
     enum { WithNetSerializer = true };
 };

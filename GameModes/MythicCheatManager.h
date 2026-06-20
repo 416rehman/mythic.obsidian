@@ -28,22 +28,26 @@ public:
     // Save character to slot
     // Example: SaveCharacter MyCharacter
     UFUNCTION(Exec)
-    void MythSaveCharacter(const FString &SlotName = TEXT("DebugCharacter"));
+    void MythSaveCharacter(
+        const FString &SlotName = TEXT("DebugCharacter") /* == UMythicSaveGameSubsystem::DebugCharacterSlot; UHT requires a literal default on Exec params */);
 
     // Load character from slot
     // Example: LoadCharacter MyCharacter
     UFUNCTION(Exec)
-    void MythLoadCharacter(const FString &SlotName = TEXT("DebugCharacter"));
+    void MythLoadCharacter(
+        const FString &SlotName = TEXT("DebugCharacter") /* == UMythicSaveGameSubsystem::DebugCharacterSlot; UHT requires a literal default on Exec params */);
 
     // Save world state
     // Example: SaveWorld MyWorld
     UFUNCTION(Exec)
-    void MythSaveWorld(const FString &SlotName = TEXT("DebugWorld"));
+    void MythSaveWorld(
+        const FString &SlotName = TEXT("DebugWorld") /* == UMythicSaveGameSubsystem::DebugWorldSlot; UHT requires a literal default on Exec params */);
 
     // Load world state
     // Example: LoadWorld MyWorld
     UFUNCTION(Exec)
-    void MythLoadWorld(const FString &SlotName = TEXT("DebugWorld"));
+    void MythLoadWorld(
+        const FString &SlotName = TEXT("DebugWorld") /* == UMythicSaveGameSubsystem::DebugWorldSlot; UHT requires a literal default on Exec params */);
 
     // List all save files
     // Example: ListSaves

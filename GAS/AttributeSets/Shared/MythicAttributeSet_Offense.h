@@ -23,7 +23,7 @@ protected:
     // Minimum Damage per Hit
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_DamagePerHit)
     FGameplayAttributeData DamagePerHit;
-    
+
     // Attack Speed
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_AttackSpeed)
     FGameplayAttributeData AttackSpeed;
@@ -92,6 +92,10 @@ protected:
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BonusSpearDamage)
     FGameplayAttributeData BonusSpearDamage;
 
+    // Increase damage from hammers
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BonusHammerDamage)
+    FGameplayAttributeData BonusHammerDamage;
+
     // Increase damage to enemies under status effects
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_IncreasedDamageToEnemiesUnderStatusEffects)
     FGameplayAttributeData IncreasedDamageToEnemiesUnderStatusEffects;
@@ -103,7 +107,7 @@ protected:
     // - Bosses: The strongest enemies in the game, requiring the player to use all their skills to defeat them - Solo 1v1 encounters. I.e a mercenary sent to kill the player
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BonusDamageToSuperiorEnemies)
     FGameplayAttributeData BonusDamageToSuperiorEnemies;
-    
+
 public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, Power);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, DamagePerHit);
@@ -124,51 +128,54 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusDaggerDamage);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusSickleDamage);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusSpearDamage);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusHammerDamage);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, IncreasedDamageToEnemiesUnderStatusEffects);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies);
 
     UFUNCTION()
-    virtual void OnRep_Power(const FGameplayAttributeData& OldPower);
+    virtual void OnRep_Power(const FGameplayAttributeData &OldPower);
     UFUNCTION()
-    virtual void OnRep_DamagePerHit(const FGameplayAttributeData& OldDamagePerHit);
+    virtual void OnRep_DamagePerHit(const FGameplayAttributeData &OldDamagePerHit);
     UFUNCTION()
-    virtual void OnRep_AttackSpeed(const FGameplayAttributeData& OldAttackSpeed);
+    virtual void OnRep_AttackSpeed(const FGameplayAttributeData &OldAttackSpeed);
     UFUNCTION()
-    virtual void OnRep_CriticalHitChance(const FGameplayAttributeData& OldCriticalHitChance);
+    virtual void OnRep_CriticalHitChance(const FGameplayAttributeData &OldCriticalHitChance);
     UFUNCTION()
-    virtual void OnRep_CriticalHitDamage(const FGameplayAttributeData& OldCriticalHitDamage);
+    virtual void OnRep_CriticalHitDamage(const FGameplayAttributeData &OldCriticalHitDamage);
     UFUNCTION()
-    virtual void OnRep_ApplyBurnOnHitChance(const FGameplayAttributeData& OldApplyBurnOnHitChance);
+    virtual void OnRep_ApplyBurnOnHitChance(const FGameplayAttributeData &OldApplyBurnOnHitChance);
     UFUNCTION()
-    virtual void OnRep_ApplyBleedOnHitChance(const FGameplayAttributeData& OldApplyBleedOnHitChance);
+    virtual void OnRep_ApplyBleedOnHitChance(const FGameplayAttributeData &OldApplyBleedOnHitChance);
     UFUNCTION()
-    virtual void OnRep_ApplyPoisonOnHitChance(const FGameplayAttributeData& OldApplyPoisonOnHitChance);
+    virtual void OnRep_ApplyPoisonOnHitChance(const FGameplayAttributeData &OldApplyPoisonOnHitChance);
     UFUNCTION()
-    virtual void OnRep_ApplySlowOnHitChance(const FGameplayAttributeData& OldApplySlowOnHitChance);
+    virtual void OnRep_ApplySlowOnHitChance(const FGameplayAttributeData &OldApplySlowOnHitChance);
     UFUNCTION()
-    virtual void OnRep_ApplyFreezeOnHitChance(const FGameplayAttributeData& OldApplyFreezeOnHitChance);
+    virtual void OnRep_ApplyFreezeOnHitChance(const FGameplayAttributeData &OldApplyFreezeOnHitChance);
     UFUNCTION()
-    virtual void OnRep_ApplyStunOnHitChance(const FGameplayAttributeData& OldApplyStunOnHitChance);
+    virtual void OnRep_ApplyStunOnHitChance(const FGameplayAttributeData &OldApplyStunOnHitChance);
     UFUNCTION()
-    virtual void OnRep_ApplyWeakenOnHitChance(const FGameplayAttributeData& OldApplyWeakenOnHitChance);
+    virtual void OnRep_ApplyWeakenOnHitChance(const FGameplayAttributeData &OldApplyWeakenOnHitChance);
     UFUNCTION()
-    virtual void OnRep_ApplyTerrifyOnHitChance(const FGameplayAttributeData& OldApplyTerrifyOnHitChance);
+    virtual void OnRep_ApplyTerrifyOnHitChance(const FGameplayAttributeData &OldApplyTerrifyOnHitChance);
     UFUNCTION()
-    virtual void OnRep_BonusSkillDamage(const FGameplayAttributeData& OldBonusSkillDamage);
+    virtual void OnRep_BonusSkillDamage(const FGameplayAttributeData &OldBonusSkillDamage);
     UFUNCTION()
-    virtual void OnRep_BonusSwordDamage(const FGameplayAttributeData& OldBonusSwordDamage);
+    virtual void OnRep_BonusSwordDamage(const FGameplayAttributeData &OldBonusSwordDamage);
     UFUNCTION()
-    virtual void OnRep_BonusAxeDamage(const FGameplayAttributeData& OldBonusAxeDamage);
+    virtual void OnRep_BonusAxeDamage(const FGameplayAttributeData &OldBonusAxeDamage);
     UFUNCTION()
-    virtual void OnRep_BonusDaggerDamage(const FGameplayAttributeData& OldBonusDaggerDamage);
+    virtual void OnRep_BonusDaggerDamage(const FGameplayAttributeData &OldBonusDaggerDamage);
     UFUNCTION()
-    virtual void OnRep_BonusSickleDamage(const FGameplayAttributeData& OldBonusSickleDamage);
+    virtual void OnRep_BonusSickleDamage(const FGameplayAttributeData &OldBonusSickleDamage);
     UFUNCTION()
-    virtual void OnRep_BonusSpearDamage(const FGameplayAttributeData& OldBonusSpearDamage);
+    virtual void OnRep_BonusSpearDamage(const FGameplayAttributeData &OldBonusSpearDamage);
     UFUNCTION()
-    virtual void OnRep_IncreasedDamageToEnemiesUnderStatusEffects(const FGameplayAttributeData& OldIncreasedDamageToEnemiesUnderStatusEffects);
+    virtual void OnRep_BonusHammerDamage(const FGameplayAttributeData &OldBonusHammerDamage);
     UFUNCTION()
-    virtual void OnRep_BonusDamageToSuperiorEnemies(const FGameplayAttributeData& OldBonusDamageToSuperiorEnemies);
-    
-    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+    virtual void OnRep_IncreasedDamageToEnemiesUnderStatusEffects(const FGameplayAttributeData &OldIncreasedDamageToEnemiesUnderStatusEffects);
+    UFUNCTION()
+    virtual void OnRep_BonusDamageToSuperiorEnemies(const FGameplayAttributeData &OldBonusDamageToSuperiorEnemies);
+
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 };

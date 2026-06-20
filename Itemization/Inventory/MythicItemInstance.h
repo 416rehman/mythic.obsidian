@@ -28,9 +28,6 @@ protected:
     UPROPERTY(ReplicatedUsing=OnRep_Quantity, BlueprintReadOnly, Category = "Item", meta = (ClampMin = "1"), SaveGame)
     int32 Quantity = 1;
 
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item", SaveGame)
-    int randomSeed;
-
     UPROPERTY(ReplicatedUsing=OnRep_OwningInventory, BlueprintReadOnly, Category = "Item")
     TObjectPtr<UMythicInventoryComponent> OwningInventory;
 
@@ -67,8 +64,9 @@ public:
         DOREPLIFETIME(UMythicItemInstance, OwningInventory);
         DOREPLIFETIME(UMythicItemInstance, SlotIndex);
         DOREPLIFETIME(UMythicItemInstance, ItemFragments);
-        DOREPLIFETIME(UMythicItemInstance, randomSeed);
         DOREPLIFETIME(UMythicItemInstance, ItemLevel);
+        DOREPLIFETIME(UMythicItemInstance, ItemTags);
+        // was flagged Replicated but never registered → runtime tags (e.g. ore→ingot transforms) never reached clients, and it tripped the "marked for replication but not registered" validation
     }
 
     // Set the quantity of the item, clamped to the max stack size - Should be called via LootSubsystem
@@ -124,6 +122,21 @@ public:
 
     // Check if the item has a tag
     bool HasTag(const FGameplayTag &Tag) const;
+
+    // Read-only access to the item's runtime tags (used by conversion ingredient matching + slot whitelisting).
+    const FGameplayTagContainer &GetItemTags() const { return ItemTags; }
+
+    // Centralized "effective type" probe: {Definition->ItemType} ∪ ItemTags.
+    // Single source of truth for type matching (conversion ingredients) and slot whitelisting.
+    void GetTypeProbe(FGameplayTagContainer &Out) const;
+
+    // SERVER-ONLY: transform THIS instance in place, preserving fragments / level / seed / quantity.
+    // Adds/removes runtime type tags (and optionally swaps the definition), then notifies the owning slot
+    // exactly once if currently slotted. Used by conversion "Transform" products.
+    void ServerApplyTransform(const FGameplayTag &NewItemType,
+                              const FGameplayTagContainer &TagsToAdd,
+                              const FGameplayTagContainer &TagsToRemove,
+                              UItemDefinition *OptionalNewDef);
 
     bool isStackableWith(const UMythicItemInstance *Other) const;
 

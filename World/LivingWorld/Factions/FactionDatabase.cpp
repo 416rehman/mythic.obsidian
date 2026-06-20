@@ -38,7 +38,7 @@ void UMythicFactionDatabase::Initialize(const UMythicFactionDatabaseSettings *Se
     CommitWrites();
 
     UE_LOG(LogMythFaction, Log, TEXT("Faction Database initialized: %d factions loaded, max capacity %d"),
-           RegisteredCount, MaxFactions);
+           RegisteredCount.load(), MaxFactions);
 }
 
 void UMythicFactionDatabase::BeginDestroy() {
@@ -109,29 +109,29 @@ FMythicFactionId UMythicFactionDatabase::CreateFactionFromConquest(FMythicFactio
     if (!OriginalFaction.IsValid() || OriginalFaction.Index >= RegisteredCount) {
         return FMythicFactionId();
     }
-    
+
     if (RegisteredCount >= MaxFactions) {
         return FMythicFactionId();
     }
 
-    const FMythicFactionData& Original = WriteFactions[OriginalFaction.Index];
-    
+    const FMythicFactionData &Original = WriteFactions[OriginalFaction.Index];
+
     FMythicFactionData Resistance;
     Resistance.DisplayName = FText::Format(NSLOCTEXT("LivingWorld", "ResistanceFmt", "{0} Resistance"), Original.DisplayName);
-    
+
     // Append .Resistance to the tag
     FString NewTagStr = Original.FactionTag.ToString() + TEXT(".Resistance");
     Resistance.FactionTag = FGameplayTag::RequestGameplayTag(FName(*NewTagStr), false);
-    
+
     Resistance.bAlive = true;
     Resistance.Status = EMythicFactionStatus::Resistance;
     Resistance.Population = SurvivorCount;
     Resistance.Ideology = Original.Ideology; // Inherit ideology
-    
+
     // Resistance factions start with zero territory but can grow
     Resistance.ControlledCellCount = 0;
     Resistance.MilitaryStrength = 0.1f;
-    
+
     // Register the new faction
     return RegisterFaction(Resistance);
 }
@@ -144,6 +144,7 @@ void UMythicFactionDatabase::AnnihilateFaction(FMythicFactionId Id) {
 
     Faction->bAlive = false;
     Faction->Status = EMythicFactionStatus::Annihilated;
+    Faction->LastAlivePopulation = Faction->Population; // preserve for the one-shot refugee-absorption pass before zeroing
     Faction->Population = 0;
     Faction->MilitaryStrength = 0.0f;
     Faction->ControlledCellCount = 0;
@@ -237,6 +238,9 @@ EMythicFactionRelation UMythicFactionDatabase::GetRelationship(FMythicFactionId 
 }
 
 int32 UMythicFactionDatabase::GetActiveFactionCount() const {
+    // Guard the ReadFactions iteration against CommitWrites' `ReadFactions = WriteFactions` reassignment on the sim
+    // thread — every sibling Read-snapshot accessor takes this lock; this method was the lone omission.
+    FScopeLock Lock(&SnapshotLock);
     int32 Count = 0;
     for (int32 i = 0; i < RegisteredCount; ++i) {
         if (ReadFactions[i].bAlive) {
@@ -262,10 +266,11 @@ void UMythicFactionDatabase::ReportLeaderCandidate(FMythicFactionId FactionId, u
         return;
     }
 
-    // This is a game-thread write to the write buffer. Safe because:
-    // 1. Background thread reads leader data but doesn't write to it
-    // 2. CommitWrites copies the entire struct atomically under lock
-    FMythicFactionData& Faction = WriteFactions[FactionId.Index];
+    // Read-modify-write of the leader fields. The CALLER must hold SimulationLock — the sim thread ALSO writes these
+    // fields (succession vacancy clear in SimTick + AnnihilateFaction), so an unlocked game-thread RMW here would race
+    // them + the CommitWrites snapshot. Game-thread callers go through UMythicLivingWorldSubsystem::ReportLeaderCandidate
+    // (which takes the lock); the sim thread already holds it during its tick.
+    FMythicFactionData &Faction = WriteFactions[FactionId.Index];
 
     // Only accept if the candidate has a higher significance score than the current leader
     if (Score > Faction.LeaderSignificanceScore) {
@@ -280,13 +285,19 @@ void UMythicFactionDatabase::ReportLeaderCandidate(FMythicFactionId FactionId, u
     }
 }
 
-void UMythicFactionDatabase::Serialize(FArchive& Ar) {
-    // Version for forward compatibility
-    int32 Version = 1;
+void UMythicFactionDatabase::Serialize(FArchive &Ar) {
+    // Version for forward compatibility (v2: + 5 runtime-mutated faction behavior flags; v3: + BaseProduction + the
+    // 3 moral reaction thresholds, so runtime-created schism/conquest factions round-trip their economy + reactions).
+    int32 Version = 3;
     Ar << Version;
 
     Ar << MaxFactions;
-    Ar << RegisteredCount;
+    // FArchive has no operator<< for std::atomic — round-trip through an int32 temp. The store sets RegisteredCount
+    // BEFORE the loading block + the faction loop below (line ~302) read it. Stream format is byte-identical to the
+    // pre-atomic int32, so saved games + the round-trip test stay compatible.
+    int32 RegCountTmp = RegisteredCount.load();
+    Ar << RegCountTmp;
+    RegisteredCount.store(RegCountTmp);
 
     if (Ar.IsLoading()) {
         WriteFactions.SetNum(MaxFactions);
@@ -298,12 +309,12 @@ void UMythicFactionDatabase::Serialize(FArchive& Ar) {
 
     // Serialize each faction's data
     for (int32 i = 0; i < RegisteredCount; ++i) {
-        FMythicFactionData& F = WriteFactions[i];
+        FMythicFactionData &F = WriteFactions[i];
 
         Ar << F.DisplayName;
         Ar << F.FactionTag;
         Ar << F.bAlive;
-        
+
         // Serialize Status as uint8
         uint8 StatusVal = static_cast<uint8>(F.Status);
         Ar << StatusVal;
@@ -313,6 +324,18 @@ void UMythicFactionDatabase::Serialize(FArchive& Ar) {
 
         Ar << F.bHasBeenPopulated;
         Ar << F.bIdeologyDirty;
+
+        // Behavior flags (v2) — runtime-mutated by TickFactionEvolution (territorial evolution flips bControlsTerritory/
+        // bHasCivilianPopulation/bParticipatesInTrade; devolution clears bControlsTerritory). Without these, an evolved/
+        // devolved faction snapped back to its designer defaults on reload and the sim diverged from the saved world.
+        if (Version >= 2) {
+            Ar << F.bControlsTerritory;
+            Ar << F.bHasEconomy;
+            Ar << F.bHasCivilianPopulation;
+            Ar << F.bParticipatesInTrade;
+            Ar << F.bCanNegotiate;
+        }
+
         Ar << F.Population;
         Ar << F.MilitaryStrength;
         Ar << F.ControlledCellCount;
@@ -334,6 +357,14 @@ void UMythicFactionDatabase::Serialize(FArchive& Ar) {
         Ar << F.Demand.Food << F.Demand.Materials << F.Demand.Arms << F.Demand.Wealth;
         Ar << F.Reserves.Food << F.Reserves.Materials << F.Reserves.Arms << F.Reserves.Wealth;
         Ar << F.Prices.Food << F.Prices.Materials << F.Prices.Arms << F.Prices.Wealth;
+
+        // v3: BaseProduction (per-cell territory production input — runtime-scaled by TerritoryRatio for schism
+        // splinters) + the per-faction moral reaction thresholds. Without these a runtime-created faction reloaded with
+        // BaseProduction={0,0,0,0} (zero territory production -> starves) and default thresholds, diverging from the save.
+        if (Version >= 3) {
+            Ar << F.BaseProduction.Food << F.BaseProduction.Materials << F.BaseProduction.Arms << F.BaseProduction.Wealth;
+            Ar << F.DisapproveThreshold << F.CondemnThreshold << F.HostileThreshold;
+        }
     }
 
     // Serialize relationships
@@ -351,4 +382,3 @@ void UMythicFactionDatabase::Serialize(FArchive& Ar) {
         CommitWrites();
     }
 }
-

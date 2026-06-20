@@ -49,6 +49,17 @@ public:
     UPROPERTY()
     UAbilitySystemComponent *ASC;
 
+    /**
+     * SERVER: apply staged FProficiency::SavedXP to the ASC for every proficiency (Instantiate ->
+     * ConfigureProgressionAttribute -> clamp -> SetNumericAttributeBase -> ReapplyRewardsForLevel), guarded by
+     * bIsRestoring. Authority only. Called from BeginPlay (cold start) AND from the save-load finished path
+     * (CharacterData::Deserialize) — the latter is required because async character load completes AFTER BeginPlay,
+     * so without a re-apply the loaded XP would stage into the struct but never reach the ASC. Idempotent:
+     * SetNumericAttributeBase is an absolute set and only CanReapplyOnLoad rewards are re-Given.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Proficiency")
+    void ApplyLoadedProficiencies();
+
 protected:
     // When true, skip normal reward logic in OnAttributeChanged (used during restore)
     bool bIsRestoring = false;

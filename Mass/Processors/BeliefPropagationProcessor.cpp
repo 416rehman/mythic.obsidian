@@ -126,11 +126,15 @@ void UMythicBeliefPropagationProcessor::Execute(FMassEntityManager &EntityManage
             TArray<FMythicSocialEdge> SocialEdges;
             SocialGraph->GetEdges(ChunkContext.GetEntity(i), World->GetTimeSeconds(), SocialEdges);
 
-            for (const FMythicSocialEdge& Edge : SocialEdges) {
-                if (PropagationBudget <= 0) break;
+            for (const FMythicSocialEdge &Edge : SocialEdges) {
+                if (PropagationBudget <= 0) {
+                    break;
+                }
 
-                // Only propagate to friendly/neutral neighbors (Strength/Relation check)
-                if (Edge.Relation == static_cast<EMythicSocialRelation>(5) /*Hostile*/ || Edge.Relation == EMythicSocialRelation::Rival) {
+                // Don't share info with enemies — Rival is the only antagonistic relation. (The prior
+                // static_cast<EMythicSocialRelation>(5) "Hostile" was a magic-ordinal bug: 5 is Subordinate and no
+                // Hostile relation exists, so it wrongly muted gossip down authority/mentorship chains.)
+                if (Edge.Relation == EMythicSocialRelation::Rival) {
                     continue; // Don't share info with enemies
                 }
 
@@ -139,7 +143,7 @@ void UMythicBeliefPropagationProcessor::Execute(FMassEntityManager &EntityManage
 
                 // Calculate propagated event count with hop decay
                 const uint16 PropagatedEventCount = FMath::Max<uint16>(1,
-                    static_cast<uint16>(static_cast<float>(Sig.RelevantEventCount) * (1.0f - DecayPerHop)));
+                                                                       static_cast<uint16>(static_cast<float>(Sig.RelevantEventCount) * (1.0f - DecayPerHop)));
 
                 Context.Defer().PushCommand<FMassDeferredChangeCompositionCommand>(
                     [NeighborEntity, PropagatedEventCount](FMassEntityManager &Manager) {
@@ -154,10 +158,11 @@ void UMythicBeliefPropagationProcessor::Execute(FMassEntityManager &EntityManage
                             // Mark as dirty so significance is recalculated
                             NeighborSig->bDirty = true;
 
-                            // Add propagated event count (capped at max)
-                            NeighborSig->RelevantEventCount = FMath::Min<uint16>(
-                                NeighborSig->RelevantEventCount + PropagatedEventCount,
-                                0xFFFF);
+                            // Add propagated event count (saturate at 0xFFFF). Clamp in 32-bit BEFORE narrowing:
+                            // FMath::Min<uint16> would truncate the int sum to uint16 first (e.g. 131070 -> 65534),
+                            // wrapping instead of pinning at the ceiling.
+                            const uint32 NewCount = static_cast<uint32>(NeighborSig->RelevantEventCount) + PropagatedEventCount;
+                            NeighborSig->RelevantEventCount = static_cast<uint16>(FMath::Min<uint32>(NewCount, 0xFFFFu));
                         }
                     });
 

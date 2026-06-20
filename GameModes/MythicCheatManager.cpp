@@ -814,28 +814,30 @@ void UMythicCheatManager::MythLivingWorldSettlements() {
     UE_LOG(Myth, Warning, TEXT("=== SETTLEMENTS (%d) ==="), Registry->GetSettlementCount());
 
     for (const int32 Id : SettlementIds) {
-        const FMythicSettlementData *Data = Registry->GetSettlementData(Id);
-        if (!Data) {
+        // Snapshot the settlement under SimulationLock (copy-out) — never hold a live Settlements-map pointer while the
+        // sim thread may rehash/mutate it (matches the population spawner's iter-114 fix).
+        FMythicSettlementData Data;
+        if (!LW->CopySettlementById(Id, Data)) {
             continue;
         }
 
         FString FactionName = TEXT("Unknown");
-        if (FDB && Data->GoverningFaction.IsValid()) {
+        if (FDB && Data.GoverningFaction.IsValid()) {
             FMythicFactionData FactionData;
-            if (FDB->GetFaction(Data->GoverningFaction, FactionData)) {
+            if (FDB->GetFaction(Data.GoverningFaction, FactionData)) {
                 FactionName = FactionData.DisplayName.ToString();
             }
         }
 
         UE_LOG(Myth, Warning, TEXT("  [ID=%d] %s%s"),
                Id,
-               *Data->DisplayName.ToString(),
-               Data->bIsCapital ? TEXT(" (CAPITAL)") : TEXT(""));
+               *Data.DisplayName.ToString(),
+               Data.bIsCapital ? TEXT(" (CAPITAL)") : TEXT(""));
         UE_LOG(Myth, Warning, TEXT("       Faction: %s (ID=%d) | MaxDensity: %d/cell | Cells: %d"),
                *FactionName,
-               Data->GoverningFaction.Index,
-               Data->MaxPopulationDensity,
-               Data->RasterizedCells.Num());
+               Data.GoverningFaction.Index,
+               Data.MaxPopulationDensity,
+               Data.RasterizedCells.Num());
     }
 
     if (SettlementIds.Num() == 0) {
@@ -858,15 +860,16 @@ void UMythicCheatManager::MythLivingWorldTransferSettlement(int32 SettlementId, 
     UMythicSettlementRegistry *Registry = LW->GetSettlementRegistry();
     UMythicTerritoryGrid *Grid = LW->GetTerritoryGrid();
     UMythicFactionDatabase *FDB = LW->GetFactionDatabase();
-    UMythicCausalFabric *Fabric = LW->GetCausalFabric();
 
     if (!Registry || !Grid || !FDB) {
         UE_LOG(Myth, Error, TEXT(">>> Missing required subsystems (Registry, Grid, or FactionDB)"));
         return;
     }
 
-    const FMythicSettlementData *Data = Registry->GetSettlementData(SettlementId);
-    if (!Data) {
+    // Snapshot the settlement under SimulationLock (copy-out) — the unlocked reads below (OldFactionName, DisplayName)
+    // would otherwise hold a live Settlements-map pointer racing the sim thread's conquest/succession writes.
+    FMythicSettlementData Data;
+    if (!LW->CopySettlementById(SettlementId, Data)) {
         UE_LOG(Myth, Error, TEXT(">>> Settlement ID %d not found. Use MythLivingWorldSettlements."), SettlementId);
         return;
     }
@@ -880,15 +883,17 @@ void UMythicCheatManager::MythLivingWorldTransferSettlement(int32 SettlementId, 
     }
 
     FMythicFactionData OldFactionData;
-    const FString OldFactionName = FDB->GetFaction(Data->GoverningFaction, OldFactionData)
+    const FString OldFactionName = FDB->GetFaction(Data.GoverningFaction, OldFactionData)
         ? OldFactionData.DisplayName.ToString()
         : TEXT("Unknown");
     const FString NewFactionName = NewFactionData.DisplayName.ToString();
 
-    Registry->TransferSettlement(SettlementId, NewFaction, Grid, FDB, Fabric);
+    // Route through the subsystem's TransferSettlement, which holds SimulationLock — calling the registry's directly
+    // here (game thread) would race the sim-thread single-writer CausalFabric inside TransferSettlement's event write.
+    LW->TransferSettlement(SettlementId, NewFaction);
 
     UE_LOG(Myth, Warning, TEXT(">>> Settlement '%s' (ID=%d) transferred: %s -> %s"),
-           *Data->DisplayName.ToString(),
+           *Data.DisplayName.ToString(),
            SettlementId,
            *OldFactionName,
            *NewFactionName);

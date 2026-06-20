@@ -15,10 +15,10 @@ DEFINE_LOG_CATEGORY(LogMythScheme);
 // ─────────────────────────────────────────────────────────────
 
 void UMythicSchemeEngine::Initialize(
-    UMythicFactionDatabase* InFactionDB,
-    UMythicCausalFabric* InFabric,
-    UMythicTerritoryGrid* InTerritoryGrid,
-    const UMythicLivingWorldSettings* InSettings) {
+    UMythicFactionDatabase *InFactionDB,
+    UMythicCausalFabric *InFabric,
+    UMythicTerritoryGrid *InTerritoryGrid,
+    const UMythicLivingWorldSettings *InSettings) {
     FactionDB = InFactionDB;
     Fabric = InFabric;
     TerritoryGrid = InTerritoryGrid;
@@ -59,7 +59,7 @@ void UMythicSchemeEngine::TickSchemes(float SimDeltaTime, uint32 SimTickIndex) {
         FScopeLock Lock(&SchemeLock);
 
         for (int32 i = ActiveSchemes.Num() - 1; i >= 0; --i) {
-            FMythicScheme& Scheme = ActiveSchemes[i];
+            FMythicScheme &Scheme = ActiveSchemes[i];
 
             if (!Scheme.IsActive()) {
                 // Clean up completed/failed schemes
@@ -93,7 +93,7 @@ void UMythicSchemeEngine::GenerateSchemes(float SimDeltaTime, uint32 SimTickInde
         FactionId.Index = static_cast<uint8>(FIdx);
 
         int32 FactionSchemeCount = 0;
-        for (const FMythicScheme& S : ActiveSchemes) {
+        for (const FMythicScheme &S : ActiveSchemes) {
             if (S.OriginFaction == FactionId) {
                 ++FactionSchemeCount;
             }
@@ -104,11 +104,11 @@ void UMythicSchemeEngine::GenerateSchemes(float SimDeltaTime, uint32 SimTickInde
         }
 
         // Get faction data to evaluate eligibility (background thread uses write buffer)
-        FMythicFactionData* FactionDataPtr = FactionDB->GetFactionMutableByIndex(FIdx);
+        FMythicFactionData *FactionDataPtr = FactionDB->GetFactionMutableByIndex(FIdx);
         if (!FactionDataPtr) {
             continue;
         }
-        const FMythicFactionData& FactionData = *FactionDataPtr;
+        const FMythicFactionData &FactionData = *FactionDataPtr;
 
         // Skip dead factions
         if (!FactionData.bAlive) {
@@ -138,7 +138,19 @@ void UMythicSchemeEngine::GenerateSchemes(float SimDeltaTime, uint32 SimTickInde
         // Find a valid target faction (hostile or unfriendly)
         FMythicFactionId TargetFaction;
         for (int32 TIdx = 0; TIdx < FactionCount; ++TIdx) {
-            if (TIdx == FIdx) continue;
+            if (TIdx == FIdx) {
+                continue;
+            }
+
+            // Skip dead candidates — symmetric with the origin's bAlive gate above. AnnihilateFaction zeroes a
+            // faction's stats and sets bAlive=false but intentionally leaves its relationship rows intact (indices
+            // are never recycled), so a living faction's stale Hostile/Unfriendly relation toward an annihilated one
+            // would otherwise make the corpse a scheme target — wasting the per-faction/global scheme budget and
+            // emitting nonsensical diplomacy/chronicle events against a faction with Population=0, bAlive=false.
+            const FMythicFactionData *CandidateData = FactionDB->GetFactionMutableByIndex(TIdx);
+            if (!CandidateData || !CandidateData->bAlive) {
+                continue;
+            }
 
             FMythicFactionId Candidate;
             Candidate.Index = static_cast<uint8>(TIdx);
@@ -167,6 +179,17 @@ void UMythicSchemeEngine::GenerateSchemes(float SimDeltaTime, uint32 SimTickInde
         NewScheme.DetectionRisk = CalculateDetectionRisk(NewScheme, TargetFaction.Index);
         NewScheme.StartGameTime = 0.0; // Will be set by sim thread's world time
 
+        // TerritoryReclaim flips a REAL contested cell at execution — pick one the TARGET actually controls now. Without
+        // this, TargetCell defaults to (0,0) and a reclaim would overwrite whatever faction holds the grid corner. (The
+        // ApplySchemeEffects guard re-checks ownership at execution, so a target that loses the cell meanwhile is safe.)
+        if (SchemeType == EMythicSchemeType::TerritoryReclaim && TerritoryGrid) {
+            TArray<FMythicCellCoord> TargetCells;
+            TerritoryGrid->GetFactionCells(TargetFaction, 1, TargetCells);
+            if (TargetCells.Num() > 0) {
+                NewScheme.TargetCell = TargetCells[0];
+            }
+        }
+
         ActiveSchemes.Add(NewScheme);
 
         UE_LOG(LogMythScheme, Log,
@@ -184,14 +207,14 @@ void UMythicSchemeEngine::GenerateSchemes(float SimDeltaTime, uint32 SimTickInde
     }
 }
 
-void UMythicSchemeEngine::GetEligibleSchemeTypes(int32 FactionIndex, TArray<EMythicSchemeType>& OutEligibleTypes) const {
+void UMythicSchemeEngine::GetEligibleSchemeTypes(int32 FactionIndex, TArray<EMythicSchemeType> &OutEligibleTypes) const {
     OutEligibleTypes.Reset();
 
-    FMythicFactionData* DataPtr = FactionDB->GetFactionMutableByIndex(FactionIndex);
+    FMythicFactionData *DataPtr = FactionDB->GetFactionMutableByIndex(FactionIndex);
     if (!DataPtr) {
         return;
     }
-    const FMythicFactionData& Data = *DataPtr;
+    const FMythicFactionData &Data = *DataPtr;
 
     // Assassination — requires some military strength
     if (Data.MilitaryStrength > 0.2f) {
@@ -230,12 +253,12 @@ void UMythicSchemeEngine::GetEligibleSchemeTypes(int32 FactionIndex, TArray<EMyt
     }
 }
 
-float UMythicSchemeEngine::CalculateProgressRate(const FMythicScheme& Scheme, int32 FactionIndex) const {
-    FMythicFactionData* DataPtr = FactionDB->GetFactionMutableByIndex(FactionIndex);
+float UMythicSchemeEngine::CalculateProgressRate(const FMythicScheme &Scheme, int32 FactionIndex) const {
+    FMythicFactionData *DataPtr = FactionDB->GetFactionMutableByIndex(FactionIndex);
     if (!DataPtr) {
         return 0.01f;
     }
-    const FMythicFactionData& Data = *DataPtr;
+    const FMythicFactionData &Data = *DataPtr;
 
     // Base rate scaled by scheme type difficulty
     float BaseRate = 0.02f;
@@ -270,12 +293,12 @@ float UMythicSchemeEngine::CalculateProgressRate(const FMythicScheme& Scheme, in
     return BaseRate * MilitaryMod * PopulationMod;
 }
 
-float UMythicSchemeEngine::CalculateDetectionRisk(const FMythicScheme& Scheme, int32 TargetFactionIndex) const {
-    FMythicFactionData* TargetDataPtr = FactionDB->GetFactionMutableByIndex(TargetFactionIndex);
+float UMythicSchemeEngine::CalculateDetectionRisk(const FMythicScheme &Scheme, int32 TargetFactionIndex) const {
+    FMythicFactionData *TargetDataPtr = FactionDB->GetFactionMutableByIndex(TargetFactionIndex);
     if (!TargetDataPtr) {
         return 0.05f;
     }
-    const FMythicFactionData& TargetData = *TargetDataPtr;
+    const FMythicFactionData &TargetData = *TargetDataPtr;
 
     // Base detection risk per scheme type
     float BaseRisk = 0.03f;
@@ -313,7 +336,7 @@ float UMythicSchemeEngine::CalculateDetectionRisk(const FMythicScheme& Scheme, i
 // Scheme Progression
 // ─────────────────────────────────────────────────────────────
 
-void UMythicSchemeEngine::ProgressScheme(FMythicScheme& Scheme, float SimDeltaTime) {
+void UMythicSchemeEngine::ProgressScheme(FMythicScheme &Scheme, float SimDeltaTime) {
     // Progress toward completion
     Scheme.Progress += Scheme.ProgressRate * SimDeltaTime;
 
@@ -329,9 +352,94 @@ void UMythicSchemeEngine::ProgressScheme(FMythicScheme& Scheme, float SimDeltaTi
     }
 }
 
-void UMythicSchemeEngine::ExecuteScheme(FMythicScheme& Scheme) {
+// Move a faction relationship one step toward Hostile (Allied→Friendly→Neutral→Unfriendly→Hostile), clamped.
+static EMythicFactionRelation WorsenRelation(EMythicFactionRelation R) {
+    const uint8 Cur = static_cast<uint8>(R);
+    const uint8 Worst = static_cast<uint8>(EMythicFactionRelation::Hostile);
+    return static_cast<EMythicFactionRelation>(Cur < Worst ? Cur + 1 : Worst);
+}
+
+void UMythicSchemeEngine::ApplySchemeEffects(const FMythicScheme &Scheme) {
+    // Runs on the sim thread under the already-held SimulationLock (same context as TickEconomy), so direct FactionDB
+    // write-buffer mutation is safe and needs no extra lock. All magnitudes come from designer-tunable settings.
+    if (!FactionDB || !Settings) {
+        return;
+    }
+    FMythicFactionData *Target = Scheme.TargetFaction.IsValid()
+        ? FactionDB->GetFactionMutableByIndex(Scheme.TargetFaction.Index)
+        : nullptr;
+    FMythicFactionData *Origin = Scheme.OriginFaction.IsValid()
+        ? FactionDB->GetFactionMutableByIndex(Scheme.OriginFaction.Index)
+        : nullptr;
+    if (!Target) {
+        return; // every implemented effect mutates the target faction
+    }
+
+    switch (Scheme.Type) {
+    case EMythicSchemeType::TradeDisruption: {
+        // Drain a fraction of the target's POSITIVE liquid reserves (inverse of raid income). Only positive stocks can
+        // be looted — disrupting a faction already in deficit must not paradoxically reduce its deficit.
+        const float F = Settings->SchemeTradeDisruptionFraction;
+        Target->Reserves.Wealth -= FMath::Max(0.0f, Target->Reserves.Wealth) * F;
+        Target->Reserves.Materials -= FMath::Max(0.0f, Target->Reserves.Materials) * F;
+        break;
+    }
+    case EMythicSchemeType::MilitaryRaid: {
+        // Burn arms (MilitaryStrength re-derives down next economy tick) + kill a fraction of the target's population.
+        Target->Reserves.Arms = FMath::Max(0.0f, Target->Reserves.Arms - Settings->SchemeRaidArmsLoss);
+        Target->Population = FMath::Max(0, Target->Population -
+                                        FMath::RoundToInt(Target->Population * Settings->SchemeRaidPopulationLossFraction));
+        break;
+    }
+    case EMythicSchemeType::DiplomaticPressure: {
+        // A successful pressure campaign hardens the target against the schemer — one step toward Hostile (symmetric).
+        FactionDB->SetRelationship(Scheme.OriginFaction, Scheme.TargetFaction,
+                                   WorsenRelation(FactionDB->GetWriteRelationship(Scheme.OriginFaction, Scheme.TargetFaction)));
+        break;
+    }
+    case EMythicSchemeType::Assassination: {
+        // Behead the target faction: vacate its leader slot (sim-thread-safe — identical to the vacancy clear the sim
+        // already performs in TickCrystallization) + a small population loss. The MASS leader-entity kill + the
+        // succession spawn are GAME-THREAD contracts and are deferred (logged follow-up), NOT faked here.
+        Target->LeaderEntityId = 0;
+        Target->LeaderSignificanceScore = 0.0f;
+        Target->Population = FMath::Max(0, Target->Population - Settings->SchemeAssassinationPopulationLoss);
+        break;
+    }
+    case EMythicSchemeType::TerritoryReclaim: {
+        // Flip the contested cell to the origin + move the cell tally — ONLY if the TARGET still actually dominates
+        // that cell. The cell is chosen at generation from the target's territory, but it may default to (0,0) or have
+        // changed hands since; without this guard a reclaim could overwrite an UNRELATED faction's cell and desync the
+        // tallies (review MEDIUM). A full settlement handoff needs the SettlementRegistry (not held here) — deferred.
+        if (Origin && TerritoryGrid &&
+            TerritoryGrid->GetDominantFaction(Scheme.TargetCell).Index == Scheme.TargetFaction.Index) {
+            TerritoryGrid->SetCellInfluence(Scheme.TargetCell, Scheme.OriginFaction, 1.0f);
+            const int32 N = Settings->SchemeTerritoryReclaimCells;
+            Target->ControlledCellCount = FMath::Max(0, Target->ControlledCellCount - N);
+            Origin->ControlledCellCount += N;
+        }
+        break;
+    }
+    case EMythicSchemeType::SpyInfiltration:
+    case EMythicSchemeType::CompanionRecruitment:
+        // Intentionally effect-less: a spy-NPC placement and a player-party defection are GAME-THREAD / MASS /
+        // PartySubsystem contracts the sim thread cannot reach. Chronicle-event-only BY DESIGN (deferred, logged) —
+        // they apply no mechanical effect and do not pretend to.
+        break;
+    default:
+        break;
+    }
+
+    UE_LOG(LogMythScheme, Verbose, TEXT("ApplySchemeEffects: Type=%d Origin=%d Target=%d"),
+           static_cast<int32>(Scheme.Type), Scheme.OriginFaction.Index, Scheme.TargetFaction.Index);
+}
+
+void UMythicSchemeEngine::ExecuteScheme(FMythicScheme &Scheme) {
     Scheme.State = EMythicSchemeState::Succeeded;
     Scheme.Progress = 1.0f;
+
+    // Apply the REAL faction-state consequences (the half this function long promised but skipped).
+    ApplySchemeEffects(Scheme);
 
     // Write event to Causal Fabric
     if (Fabric) {
@@ -341,6 +449,7 @@ void UMythicSchemeEngine::ExecuteScheme(FMythicScheme& Scheme) {
         Event.Cell = Scheme.TargetCell;
         Event.Significance = 0.8f;
         Event.CategoryFlags = EMythicEventCategory::Scheme;
+        Event.EventTag = TAG_LIVINGWORLD_EVENT_SCHEME_COMPLETED; // chronicle now reads "Scheme Completed", not "World Event"
 
         // Set event-specific significance and categories
         switch (Scheme.Type) {
@@ -380,8 +489,15 @@ void UMythicSchemeEngine::ExecuteScheme(FMythicScheme& Scheme) {
            static_cast<int32>(Scheme.Type));
 }
 
-void UMythicSchemeEngine::OnSchemeDiscovered(FMythicScheme& Scheme) {
+void UMythicSchemeEngine::OnSchemeDiscovered(FMythicScheme &Scheme) {
     Scheme.State = EMythicSchemeState::Discovered;
+
+    // Getting caught is itself a diplomatic incident: the target now trusts the schemer one step less (symmetric).
+    // A discovered scheme is a real outcome, not just a chronicle line.
+    if (FactionDB && Scheme.OriginFaction.IsValid() && Scheme.TargetFaction.IsValid()) {
+        FactionDB->SetRelationship(Scheme.OriginFaction, Scheme.TargetFaction,
+                                   WorsenRelation(FactionDB->GetWriteRelationship(Scheme.OriginFaction, Scheme.TargetFaction)));
+    }
 
     // Write discovery event to Causal Fabric
     if (Fabric) {
@@ -391,6 +507,7 @@ void UMythicSchemeEngine::OnSchemeDiscovered(FMythicScheme& Scheme) {
         Event.Cell = Scheme.TargetCell;
         Event.Significance = 0.6f;
         Event.CategoryFlags = EMythicEventCategory::Scheme | EMythicEventCategory::Diplomacy;
+        Event.EventTag = TAG_LIVINGWORLD_EVENT_SCHEME_DISCOVERED; // chronicle now reads "Scheme Discovered", not "World Event"
 
         Fabric->AppendEvent(Event);
     }
@@ -416,7 +533,7 @@ TArray<FMythicScheme> UMythicSchemeEngine::GetSchemesByFaction(FMythicFactionId 
     FScopeLock Lock(&SchemeLock);
 
     TArray<FMythicScheme> Result;
-    for (const FMythicScheme& S : ActiveSchemes) {
+    for (const FMythicScheme &S : ActiveSchemes) {
         if (S.OriginFaction == Faction) {
             Result.Add(S);
         }
@@ -429,7 +546,7 @@ int32 UMythicSchemeEngine::GetActiveSchemeCount() const {
     return ActiveSchemes.Num();
 }
 
-void UMythicSchemeEngine::Serialize(FArchive& Ar) {
+void UMythicSchemeEngine::Serialize(FArchive &Ar) {
     int32 Version = 1;
     Ar << Version;
 
@@ -439,22 +556,34 @@ void UMythicSchemeEngine::Serialize(FArchive& Ar) {
     Ar << SchemeCount;
 
     if (Ar.IsLoading()) {
+        // Bound-check before SetNum: a desynced/corrupted stream (e.g. a differing optional-subsystem set upstream in
+        // LoadLivingWorld) can yield a garbage count; an unbounded SetNum would then attempt a massive allocation
+        // (OOM/crash). 1,000,000 is far above any legitimate scheme count (the real cap is MaxTotalSchemes — dozens).
+        if (SchemeCount < 0 || SchemeCount > 1000000) {
+            UE_LOG(LogMythScheme, Error, TEXT("SchemeEngine::Serialize: implausible SchemeCount %d — aborting load"), SchemeCount);
+            Ar.SetError();
+            return;
+        }
         ActiveSchemes.SetNum(SchemeCount);
     }
 
     for (int32 i = 0; i < SchemeCount; ++i) {
-        FMythicScheme& S = ActiveSchemes[i];
+        FMythicScheme &S = ActiveSchemes[i];
         Ar << S.SchemeId;
         Ar << S.OriginFaction.Index;
         Ar << S.TargetFaction.Index;
 
         uint8 TypeVal = static_cast<uint8>(S.Type);
         Ar << TypeVal;
-        if (Ar.IsLoading()) S.Type = static_cast<EMythicSchemeType>(TypeVal);
+        if (Ar.IsLoading()) {
+            S.Type = static_cast<EMythicSchemeType>(TypeVal);
+        }
 
         uint8 StateVal = static_cast<uint8>(S.State);
         Ar << StateVal;
-        if (Ar.IsLoading()) S.State = static_cast<EMythicSchemeState>(StateVal);
+        if (Ar.IsLoading()) {
+            S.State = static_cast<EMythicSchemeState>(StateVal);
+        }
 
         Ar << S.Progress;
         Ar << S.ProgressRate;
@@ -464,4 +593,3 @@ void UMythicSchemeEngine::Serialize(FArchive& Ar) {
         Ar << S.TargetCell.Y;
     }
 }
-

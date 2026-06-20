@@ -57,6 +57,12 @@ struct MYTHIC_API FMythicActionEvent {
 
     /** Override cell coordinate — if set (X >= 0), used instead of deriving from Perpetrator position */
     FMythicCellCoord OverrideCell = FMythicCellCoord(-1, -1);
+
+    /** Faction overrides — when valid, used instead of ResolveActorFaction (currently a stub). Lets the submit
+     *  site supply factions it already knows (e.g. read from the actors' cognitive brains), so crime records carry
+     *  real perpetrator/victim attribution. */
+    FMythicFactionId PerpFactionOverride;
+    FMythicFactionId VictimFactionOverride;
 };
 
 // ─────────────────────────────────────────────────────────────

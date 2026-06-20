@@ -32,6 +32,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
     virtual void SetLabel(FText InLabel) {
         Label = InLabel;
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Label); // FText has no usable operator== for the equality-checked macro
     };
 
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
@@ -42,6 +43,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
     virtual void SetDescription(FText InDescription) {
         Description = InDescription;
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Description); // FText has no usable operator== for the equality-checked macro
     };
 
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
@@ -51,20 +53,16 @@ public:
 
 
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
-    virtual void Apply() {
-    };
+    virtual void Apply() {};
 
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
-    virtual void Reset() {
-    };
+    virtual void Reset() {};
 
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
-    virtual void NextOption() {
-    };
+    virtual void NextOption() {};
 
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
-    virtual void PreviousOption() {
-    };
+    virtual void PreviousOption() {};
 
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
     virtual bool IsDisabled(APlayerController *inPlayerController, FText &Reason) { return false; };

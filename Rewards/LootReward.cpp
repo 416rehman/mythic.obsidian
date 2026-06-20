@@ -12,6 +12,7 @@
 #include "Itemization/InventoryProviderInterface.h"
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
+#include "Itemization/MythicTags_Inventory.h"
 
 bool ULootReward::Give(FRewardContext &Context) const {
     // Cast the context to the correct type
@@ -54,6 +55,9 @@ bool ULootReward::Give(FRewardContext &Context) const {
     const float EpicRate = GameState->EpicLootChanceCurveRowHandle.Eval(PlayerLevel, "");
     const float LegendaryRate = GameState->LegendaryLootChanceCurveRowHandle.Eval(PlayerLevel, "") * WorldTierAttributes->GetLegendaryDropRateMultiplier();
     const float MythicRate = GameState->MythicLootChanceCurveRowHandle.Eval(PlayerLevel, "") * WorldTierAttributes->GetMythicDropRateMultiplier();
+    // Scales the rolled stack size of CURRENCY-tagged loot entries (the only live reader of this attribute, which
+    // was previously dead). Non-currency loot is unaffected — the multiplier is applied per-entry below.
+    const float GoldMult = WorldTierAttributes->GetGoldDropRateMultiplier();
 
     UE_LOG(Myth, Log, TEXT("LootReward::Give - Rarities for Level %d = Common: %f, Rare: %f, Epic: %f, Legendary: %f, Mythic: %f"), PlayerLevel, CommonRate,
            RareRate, EpicRate, LegendaryRate, MythicRate);
@@ -61,7 +65,7 @@ bool ULootReward::Give(FRewardContext &Context) const {
     // Check if we have a loot source
     for (auto LootTable : OverridenLootSource.LootTables) {
         UE_LOG(Myth, Log, TEXT("LootReward::Give - Using loot source %s"), *LootTable->GetName());
-        RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, MythicRate, PlayerController, LootContext->ItemLevel, LootTable,
+        RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, MythicRate, GoldMult, PlayerController, LootContext->ItemLevel, LootTable,
                               LootContext->PutInInventory, OverridenLootSource.IsPrivate, LootContext->SpawnLocation, MythicLootManager);
     }
     if (OverridenLootSource.bSkipGlobal) {
@@ -84,7 +88,7 @@ bool ULootReward::Give(FRewardContext &Context) const {
 
     // If we made it here, we didn't skip the global loot source, so we should use it
     UE_LOG(Myth, Log, TEXT("LootReward::Give - Using global loot source"));
-    RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, MythicRate, PlayerController, LootContext->ItemLevel,
+    RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, MythicRate, GoldMult, PlayerController, LootContext->ItemLevel,
                           LootTable, LootContext->PutInInventory, OverridenLootSource.IsPrivate, LootContext->SpawnLocation,
                           MythicLootManager);
 
@@ -92,6 +96,7 @@ bool ULootReward::Give(FRewardContext &Context) const {
 }
 
 void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float EpicRate, float LegendaryRate, float MythicRate,
+                                        float GoldMultiplier,
                                         APlayerController *PlayerController, int32 DropLevel,
                                         UMythicLootTable *LootTable, TScriptInterface<IInventoryProviderInterface> InventoryProvider, bool isPrivate,
                                         FVector SpawnLocation,
@@ -123,8 +128,12 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
     auto TargetRecipient = isPrivate ? PlayerController : nullptr;
     auto SpawnLoc = SpawnLocation.IsZero() ? PlayerController->GetPawn()->GetActorLocation() : SpawnLocation;
 
-    // First, build array of valid entries that pass the drop chance check
-    static TArray<int32> ValidIndices;
+    // First, build array of valid entries that pass the drop chance check.
+    // NOT static: RequestLootFromSource is a STATIC member, so a function-local static is one process-wide instance
+    // shared across every call — it accumulated stale indices (Reserve doesn't clear Num, and Add appended on top of
+    // the previous call's entries), inflating drop counts, indexing Entries[] out of bounds when a later table was
+    // smaller, and duplicating drops. A plain local is correct + thread-safe.
+    TArray<int32> ValidIndices;
     ValidIndices.Reserve(LootTable->Entries.Num());
 
     UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Checking drop chances for items in table %s"), *LootTable->GetName());
@@ -160,8 +169,8 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
     UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Will drop %d items from %d eligible items"),
            NumItemsToDrop, ValidIndices.Num());
 
-    // Track used indices
-    static TBitArray<> UsedIndices;
+    // Track used indices (plain local — same static-carryover hazard as ValidIndices above).
+    TBitArray<> UsedIndices;
     UsedIndices.Init(false, ValidIndices.Num());
 
     int32 SuccessfulDrops = 0;
@@ -197,6 +206,24 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
 
         // Calculate stack size
         int32 StackSize = SelectedEntry.Item->StackSizeMax > 1 ? FMath::RandRange(SelectedEntry.StackRange.Min, SelectedEntry.StackRange.Max) : 1;
+
+        // Currency loot scales by the world-tier GoldDropRateMultiplier (previously a dead attribute). The base
+        // amount is the designer-authored StackRange; the multiplier only tunes it. Clamp to [1, StackSizeMax]
+        // (the mint produces a single instance clamped to StackSizeMax — no overflow loop).
+        if (SelectedEntry.Item->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY)) {
+            const int32 ScaledStack = FMath::RoundToInt(StackSize * GoldMultiplier);
+            const int32 MaxStack = FMath::Max(1, SelectedEntry.Item->StackSizeMax);
+            // A single loot mint produces one instance clamped to StackSizeMax (no overflow carry), so a scaled
+            // amount above the cap is discarded. Surface that as a Warning so a misconfigured currency
+            // StackSizeMax (too small for the tier multiplier) is visible rather than silently losing gold.
+            if (ScaledStack > MaxStack) {
+                UE_LOG(Myth, Warning,
+                       TEXT("LootReward: currency %s scaled to %d exceeds StackSizeMax %d; clamping (excess discarded). "
+                           "Raise its StackSizeMax to capture the full gold drop."),
+                       *SelectedEntry.Item->GetName(), ScaledStack, MaxStack);
+            }
+            StackSize = FMath::Clamp(ScaledStack, 1, MaxStack);
+        }
 
         UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Selected item: %s (Rarity: %d) with stack size: %d"),
                *SelectedEntry.Item->GetName(),

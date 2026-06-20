@@ -5,6 +5,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/CriticalSection.h" // FRWLock (GraphLock)
 #include "MassEntityHandle.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "SocialGraph.generated.h"
@@ -73,8 +74,9 @@ struct FMythicSocialEdge {
  * Owned by UMythicLivingWorldSubsystem.
  *
  * Threading:
- * - Game thread reads and writes (edge creation from events is game-thread)
- * - No background thread access — all social operations are event-driven
+ * - Guarded by GraphLock (FRWLock): read-lock on the query path, write-lock on mutation. The BDI cognition worker
+ *   thread calls GetEdges/GetEdgesByRelation off the game thread, so the lock IS required for safe concurrent access
+ *   (mirrors UMythicCausalFabric's FabricLock). Game-thread event processors take the write lock.
  *
  * Performance:
  * - TMap<FMassEntityHandle, TArray<FMythicSocialEdge>> — O(1) entity lookup
@@ -139,7 +141,7 @@ public:
      * @param Entity       The entity being removed
      * @param OutSeveredConnections  Entities that lost a connection (for Grief pressure)
      */
-    void RemoveAllEdges(FMassEntityHandle Entity, TArray<FMassEntityHandle>& OutSeveredConnections);
+    void RemoveAllEdges(FMassEntityHandle Entity, TArray<FMassEntityHandle> &OutSeveredConnections);
 
     // ─── Queries ──────────────────────────────────────────
 
@@ -152,7 +154,7 @@ public:
      * @param OutEdges  Output array of edges (copied, safe to iterate)
      * @return Number of edges found
      */
-    int32 GetEdges(FMassEntityHandle Source, double WorldTime, TArray<FMythicSocialEdge>& OutEdges) const;
+    int32 GetEdges(FMassEntityHandle Source, double WorldTime, TArray<FMythicSocialEdge> &OutEdges) const;
 
     /**
      * Get edges of a specific relation type FROM a source entity.
@@ -162,14 +164,14 @@ public:
         FMassEntityHandle Source,
         EMythicSocialRelation Relation,
         double WorldTime,
-        TArray<FMythicSocialEdge>& OutEdges) const;
+        TArray<FMythicSocialEdge> &OutEdges) const;
 
     /**
      * Check if a specific edge exists between two entities.
      * @param OutEdge  If found, filled with the edge data (with decay applied)
      * @return true if edge exists
      */
-    bool HasEdge(FMassEntityHandle Source, FMassEntityHandle Target, double WorldTime, FMythicSocialEdge& OutEdge) const;
+    bool HasEdge(FMassEntityHandle Source, FMassEntityHandle Target, double WorldTime, FMythicSocialEdge &OutEdge) const;
 
     /**
      * Get total edge count across all entities.
@@ -195,6 +197,10 @@ private:
     /** Sparse adjacency: entity → outgoing edges. TArray per entity (small, cache-friendly). */
     TMap<FMassEntityHandle, TArray<FMythicSocialEdge>> AdjacencyMap;
 
+    /** Guards AdjacencyMap — the BDI cognition worker reads (GetEdges) off the game thread while game-thread
+     *  processors mutate. Read-locked on queries, write-locked on mutation. mutable so const queries can lock. */
+    mutable FRWLock GraphLock;
+
     /** Max outgoing edges per entity */
     int32 MaxEdgesPerEntity = 8;
 
@@ -208,5 +214,5 @@ private:
     int32 PruneIteratorIndex = 0;
 
     /** Apply lazy decay to an edge's strength. Returns the new strength. */
-    static float ApplyDecay(const FMythicSocialEdge& Edge, double WorldTime, float DecayRate);
+    static float ApplyDecay(const FMythicSocialEdge &Edge, double WorldTime, float DecayRate);
 };

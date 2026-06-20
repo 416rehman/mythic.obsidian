@@ -12,6 +12,10 @@ class UMythicFactionDatabase;
 class UMythicTerritoryGrid;
 class UMythicLivingWorldSettings;
 class UMythicSchemeEngine;
+// Used only as TArray<FMythicWorldEvent>* members below; forward-declared so this header is self-contained
+// (the full definition lives in CausalFabric/CausalFabric.h and is included by the .cpp). A unity-build
+// regrouping otherwise leaves FMythicWorldEvent undeclared here.
+struct FMythicWorldEvent;
 
 DECLARE_MULTICAST_DELEGATE(FOnWorldSimCommitted);
 
@@ -50,11 +54,11 @@ public:
         class UMythicSettlementRegistry *InSettlementRegistry,
         const UMythicLivingWorldSettings *InSettings,
         float InTickIntervalSeconds,
-        FCriticalSection* InSimulationLock,
-        UMythicSchemeEngine* InSchemeEngine = nullptr,
-        TArray<FMythicWorldEvent>* InPendingEvents = nullptr,
-        FCriticalSection* InPendingEventsMutex = nullptr
-    );
+        FCriticalSection *InSimulationLock,
+        UMythicSchemeEngine *InSchemeEngine = nullptr,
+        TArray<FMythicWorldEvent> *InPendingEvents = nullptr,
+        FCriticalSection *InPendingEventsMutex = nullptr
+        );
 
     /** Start the background thread */
     void StartThread();
@@ -112,10 +116,10 @@ private:
     UMythicTerritoryGrid *TerritoryGrid = nullptr;
     class UMythicSettlementRegistry *SettlementRegistry = nullptr;
     const UMythicLivingWorldSettings *Settings = nullptr;
-    FCriticalSection* SimulationLock = nullptr;
-    UMythicSchemeEngine* SchemeEngine = nullptr;
-    TArray<FMythicWorldEvent>* PendingEvents = nullptr;
-    FCriticalSection* PendingEventsMutex = nullptr;
+    FCriticalSection *SimulationLock = nullptr;
+    UMythicSchemeEngine *SchemeEngine = nullptr;
+    TArray<FMythicWorldEvent> *PendingEvents = nullptr;
+    FCriticalSection *PendingEventsMutex = nullptr;
 
     /**
      * Pairwise trade volume accumulator for economic dependency.

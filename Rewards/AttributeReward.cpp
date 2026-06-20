@@ -20,7 +20,12 @@ bool UAttributeReward::Give(FRewardContext &Context) const {
 
     // If the attributeset is not on the ASC, give it first
     if (!ASC->HasAttributeSetForAttribute(Attribute)) {
-        auto AttributeSet = Attribute.GetAttributeSetClass()->GetDefaultObject<UAttributeSet>();
+        // Create an owner-Outered per-instance attribute set (the engine idiom — same as the protected
+        // GetOrCreateAttributeSubobject does internally) — NOT GetDefaultObject<>(), which returns the shared class CDO:
+        // AddSpawnedAttribute would register the CDO as this ASC's live set, so the SetNumericAttributeBase below would
+        // corrupt the attribute defaults for EVERY actor/ASC of the class (and the CDO, Outered to its package, cannot
+        // replicate as a per-actor subobject).
+        UAttributeSet *AttributeSet = NewObject<UAttributeSet>(ASC->GetOwner(), Attribute.GetAttributeSetClass());
         ASC->AddSpawnedAttribute(AttributeSet);
         UE_LOG(Myth, Log, TEXT("Added attribute set for attribute %s"), *Attribute.GetName());
     }

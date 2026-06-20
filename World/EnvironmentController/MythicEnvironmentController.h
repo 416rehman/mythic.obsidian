@@ -1,4 +1,4 @@
-﻿// 
+// 
 
 #pragma once
 
@@ -42,23 +42,28 @@ static FDateTime AsDateTime(FTimespan timespan) {
     auto minute = timespan.GetMinutes();
     auto second = timespan.GetSeconds();
 
+    // The synthetic 30-day-per-month game calendar can yield a day-of-month that exceeds the REAL calendar month length
+    // (e.g. day 29/30 in February, day 31 in a 30-day month). FDateTime's ctor calls Validate(), which FATAL-logs — a
+    // HARD CRASH even in Shipping — on an out-of-range day. Clamp to the real month length so no caller can crash.
+    day = FMath::Min(day, FDateTime::DaysInMonth(year, month));
+
     return FDateTime(year, month, day, hour, minute, second);
 }
 
 static ESeason MonthAsSeason(int32 Month) {
     // Spring: March, April, May
     if (Month == 3 || Month == 4 || Month == 5) {
-        return ESeason::Spring;
+        return Spring;
     }
 
     // Summer: June, July, August
     if (Month == 6 || Month == 7 || Month == 8) {
-        return ESeason::Summer;
+        return Summer;
     }
 
     // Autumn: September, October, November
     if (Month == 9 || Month == 10 || Month == 11) {
-        return ESeason::Autumn;
+        return Autumn;
     }
 
     if (Month < 1 || Month > 12) {
@@ -66,7 +71,7 @@ static ESeason MonthAsSeason(int32 Month) {
     }
 
     // Winter: December, January, February
-    return ESeason::Winter;
+    return Winter;
 }
 
 // Returns the DayTime based on the current hour
@@ -76,18 +81,18 @@ static ESeason MonthAsSeason(int32 Month) {
 // Night: 20-6:59
 static EDayTime HourAsDayTime(uint8 CurrentHour) {
     if (CurrentHour >= 7 && CurrentHour < 12) {
-        return EDayTime::Morning;
+        return Morning;
     }
 
     if (CurrentHour >= 12 && CurrentHour < 17) {
-        return EDayTime::Afternoon;
+        return Afternoon;
     }
 
     if (CurrentHour >= 17 && CurrentHour < 20) {
-        return EDayTime::Evening;
+        return Evening;
     }
 
-    return EDayTime::Night;
+    return Night;
 }
 
 // Delegate signature
@@ -120,7 +125,6 @@ UCLASS(Blueprintable, BlueprintType)
 class MYTHIC_API AMythicEnvironmentController : public AActor, public IMythicSaveableActor {
     GENERATED_BODY()
 
-private:
     FTimerHandle TimeOfDayTimerHandle;
     FTimerHandle WeatherTimerHandle;
 
@@ -275,8 +279,11 @@ public:
     void OnRep_WeatherTransition();
 
     ///~ RPCs ---------------------------------------------------------------
-    // multicast to all clients to sync the time of day
-    UFUNCTION(NetMulticast, Unreliable)
+    // multicast to all clients to sync the time of day.
+    // Reliable: this is the SOLE source of the Hour/Day/Month/Year/Season change delegates on clients, and the
+    // day/month/year/season rollovers are one-shot edges — a dropped Unreliable packet permanently lost that rollover
+    // (Time replicates COND_InitialOnly, so there is no backup correction). The sibling multicasts below are Reliable.
+    UFUNCTION(NetMulticast, Reliable)
     void MulticastSyncGameWorldTimer(const FTimespan &NewTimespan, const FTimespan &OldTimespan);
 
     // Multicast to all clients to sync wind direction
@@ -292,7 +299,7 @@ public:
 
     FTimespan GetTimespan() const { return this->Time; }
     FDateTime GetDateTime() const { return AsDateTime(this->Time); }
-    bool IsWeatherPaused() const { return this->WeatherTimerHandle.IsValid(); }
+    bool IsWeatherPaused() const; // queries the timer's actual paused state (defined in the .cpp; see note there)
 
     UFUNCTION(BlueprintCallable, Category = "Time of Day Controller")
     UWeatherType *GetCurrentWeather() const { return this->CurrentWeather; }

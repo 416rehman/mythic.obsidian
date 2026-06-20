@@ -4,6 +4,9 @@
 #include "GameModes/Attributes/WorldAttributes.h"
 #include "Net/UnrealNetwork.h"
 #include "Resources/MythicResourceManagerComponent.h"
+#include "Engine/World.h"
+#include "Engine/GameInstance.h"
+#include "Subsystem/SaveSystem/MythicSaveGameSubsystem.h"
 
 AMythicGameState::AMythicGameState(const FObjectInitializer &ObjectInitializer) {
     PrimaryActorTick.bCanEverTick = true;
@@ -78,6 +81,25 @@ void AMythicGameState::BeginPlay() {
     Super::BeginPlay();
 
     SetWorldTier(WorldTier);
+
+    // Fail loud (once, at startup) if combat tuning data is missing - mitigation fails open (0 reduction), so a
+    // silent miss would just make Armor do nothing with no indication why.
+    if (ArmorMitigationCurveRowHandle.IsNull()) {
+        UE_LOG(Myth, Error, TEXT("MythicGameState: ArmorMitigationCurveRowHandle is unset - Armor will provide no mitigation."));
+    }
+
+    // SERVER: restore saved world state. GameState::BeginPlay is the verified-safe "world ready" point -
+    // it runs on authority after the level's saveable actors have begun (later than GameMode::BeginPlay), and
+    // the world-load handler resolves this same GameState. LoadWorld self-guards via DoesSaveGameExist, so a
+    // fresh world is a no-op. The DebugWorld slot matches the autosave write path + cheat default
+    // (single source: UMythicSaveGameSubsystem::DebugWorldSlot).
+    if (HasAuthority()) {
+        UWorld *World = GetWorld();
+        UGameInstance *GI = World ? World->GetGameInstance() : nullptr;
+        if (UMythicSaveGameSubsystem *SaveSys = GI ? GI->GetSubsystem<UMythicSaveGameSubsystem>() : nullptr) {
+            SaveSys->LoadWorld(UMythicSaveGameSubsystem::DebugWorldSlot);
+        }
+    }
 }
 
 UAbilitySystemComponent *AMythicGameState::GetAbilitySystemComponent() const {

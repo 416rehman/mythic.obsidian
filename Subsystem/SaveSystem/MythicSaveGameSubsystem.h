@@ -32,6 +32,13 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Save System | Events")
     FOnSaveGameActionFinished OnSaveGameActionFinished;
 
+    // --- Canonical save-slot names (single source of truth) ---
+    // Shared by the GameMode autosave write, the GameState world-load, and the MythicCheatManager Myth{Save,Load}
+    // {World,Character} defaults so every path uses one slot identity. (A per-account/EOS-keyed slot is a deferred
+    // follow-up that will replace these debug defaults — see BACKLOG.)
+    static constexpr const TCHAR *DebugWorldSlot = TEXT("DebugWorld");
+    static constexpr const TCHAR *DebugCharacterSlot = TEXT("DebugCharacter");
+
     // --- Character Save/Load (Async) ---
 
     // Asynchronously saves character data. Validates source actor on GameThread, then writes to disk on background thread.
@@ -83,6 +90,11 @@ private:
     // Tracks pending load target actors to ensure valid references when async load finishes
     // Map<SlotName, WeakPointer<Actor>>
     TMap<FString, TWeakObjectPtr<AActor>> PendingLoadTargets;
+
+    // Slots with a background save write currently in flight. A second save to a slot already in this set is
+    // skipped, so two background threads never write the same .sav file concurrently (torn-save race). Covers
+    // both SaveCharacter and SaveWorld; cleared in HandleAsyncSaveFinished.
+    TSet<FString> InFlightSaveSlots;
 
     // --- Security Utilities ---
 

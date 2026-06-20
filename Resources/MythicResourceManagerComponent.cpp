@@ -6,6 +6,11 @@
 #include "Mythic.h"
 #include "MythicResourceISM.h"
 #include "Net/UnrealNetwork.h"
+#include "Player/MythicPlayerController.h" // per-hit gather feedback callout
+#if ENABLE_DRAW_DEBUG
+#include "DrawDebugHelpers.h"
+#include "HAL/IConsoleManager.h"
+#endif
 
 // Called on clients before resources are removed on the server - cosmetic only
 // To get here:
@@ -141,16 +146,17 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
         return;
     }
 
-    if (ResourceISM) {
+#if ENABLE_DRAW_DEBUG
+    static const auto CVarResourceDebugDraw = IConsoleManager::Get().RegisterConsoleVariable(
+        TEXT("Mythic.Resources.DebugDraw"), 0, TEXT("Draw a marker on each resource hit (dev only)."), ECVF_Default);
+    if (ResourceISM && CVarResourceDebugDraw->GetInt() > 0) {
         auto Trans = FTransform();
         ResourceISM->GetInstanceTransform(index, Trans, true);
-        // Draw
-        auto start = Trans.GetLocation();
-        auto end = start + FVector3d(0, 0, 1000);
-        const auto color = FColor::Black;
-        constexpr auto thickness = 5.0f;
-        DrawDebugLine(GetWorld(), start, end, color, false, 20, 1, thickness);
+        const auto start = Trans.GetLocation();
+        const auto end = start + FVector3d(0, 0, 1000);
+        DrawDebugLine(GetWorld(), start, end, FColor::Black, false, 20, 1, 5.0f);
     }
+#endif
 
     // Try to find existing resource
     FTrackedDestructibleData *ExistingResource = TrackedResources.FindByPredicate([&](const FTrackedDestructibleData &TrackedResource) {
@@ -158,15 +164,30 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
         // return TrackedResource.ResourceISMCClass == ISMClass && TrackedResource.Transform.GetLocation().Equals(Transform.GetLocation(), 1.0f);
     });
 
+    int32 HitsRemaining;
     if (ExistingResource) {
-        ApplyDamageToResource(*ExistingResource, DamageAmount, PlayerController);
+        HitsRemaining = ApplyDamageToResource(*ExistingResource, DamageAmount, PlayerController);
     }
     else {
-        AddNewResource(Transform, DamageAmount, PlayerController, ResourceISM, index);
+        HitsRemaining = AddNewResource(Transform, DamageAmount, PlayerController, ResourceISM, index);
+    }
+
+    // Player-facing gather feedback — SINGLE source for ALL branches (existing hit, new-tracked, one-shot destroy), so
+    // the FIRST swing and one-shot kills are no longer silently skipped. "N left" floats per hit (Unreliable — a
+    // droppable cosmetic); "Depleted!" is the terminal callout (Reliable). HitsRemaining < 0 = error/already-destroyed.
+    if (HitsRemaining >= 0) {
+        if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PlayerController)) {
+            if (HitsRemaining > 0) {
+                MythicPC->ClientShowGatherProgress(Transform.GetLocation(), HitsRemaining);
+            }
+            else {
+                MythicPC->ClientShowGatherDepleted(Transform.GetLocation());
+            }
+        }
     }
 }
 
-void UMythicResourceManagerComponent::LoadDestroyedResource(UMythicResourceISM *ResourceISM, int32 InstanceId, FTransform Transform, double RespawnTime) {
+void UMythicResourceManagerComponent::LoadDestroyedResource(UMythicResourceISM *ResourceISM, int32 InstanceId, FTransform Transform, double RemainingSeconds) {
     if (!GetOwner()->HasAuthority()) {
         return;
     }
@@ -179,7 +200,12 @@ void UMythicResourceManagerComponent::LoadDestroyedResource(UMythicResourceISM *
     NewDestructible.ResourceISM = ResourceISM;
     NewDestructible.InstanceId = InstanceId;
     NewDestructible.Transform = Transform;
-    NewDestructible.RespawnTime = RespawnTime;
+    // The saved value is remaining seconds until respawn (clock-independent). Rebuild the absolute deadline
+    // against the CURRENT world clock so respawn timing survives a session / world-time reset.
+    {
+        const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+        NewDestructible.RespawnTime = Now + FMath::Max(0.0, RemainingSeconds);
+    }
     NewDestructible.HitsTillDestruction = 0; // It's destroyed
 
     // Check if already in list?
@@ -195,9 +221,12 @@ void UMythicResourceManagerComponent::LoadDestroyedResource(UMythicResourceISM *
     }
 }
 
-void UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount, APlayerController *PlayerController) {
+int32 UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount, APlayerController *PlayerController) {
     int32 PreviousHits = Resource.HitsTillDestruction;
     Resource.HitsTillDestruction = FMath::Max(0, Resource.HitsTillDestruction - DamageAmount);
+    // Capture BEFORE the RemoveAll below — destroying the resource dangles the `Resource` reference (it lives in the
+    // array RemoveAll mutates), so reading HitsTillDestruction afterward would be a use-after-free.
+    const int32 HitsRemaining = Resource.HitsTillDestruction;
 
     UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent::ApplyDamageToResource: Applied %d damage, HitsTillDestruction: %d -> %d"),
            DamageAmount, PreviousHits, Resource.HitsTillDestruction);
@@ -213,16 +242,17 @@ void UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructible
 
         if (NumRemoved <= 0) {
             UE_LOG(Myth, Error, TEXT("UMythicResourceManagerComponent::ApplyDamageToResource: Could not remove resource from tracked resources"));
-            return;
+            return HitsRemaining;
         }
 
         // Create destroyed resource with respawn time
         AddToDestroyedResources(Resource, PlayerController);
     }
+    return HitsRemaining;
 }
 
-void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, int32 DamageAmount,
-                                                     APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32 Index) {
+int32 UMythicResourceManagerComponent::AddNewResource(FTransform Transform, int32 DamageAmount,
+                                                      APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32 Index) {
     FTrackedDestructibleData NewResource = FTrackedDestructibleData();
     NewResource.ResourceISM = ResourceISM;
     NewResource.Transform = Transform;
@@ -233,7 +263,7 @@ void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, int32
     auto ISMComponent = NewResource.ResourceISM;
     if (!ISMComponent) {
         UE_LOG(Myth, Error, TEXT("UMythicResourceManagerComponent::AddNewResource: Could not find ISM component for class %s"), *ISMComponent->GetName());
-        return;
+        return -1;
     }
 
     // Get max health for this destructible type
@@ -241,7 +271,7 @@ void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, int32
     if (MaxHealth <= 0) {
         UE_LOG(Myth, Error, TEXT("UMythicResourceManagerComponent::AddNewResource: Calculated MaxHealth is <= 0 for ISM %s at location %s"),
                *ISMComponent->GetName(), *Transform.GetLocation().ToString());
-        return;
+        return -1;
     }
 
     NewResource.InstanceId = ISMComponent->InstanceIndexToId(Index).Id;
@@ -256,7 +286,7 @@ void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, int32
     });
     if (AlreadyDestroyed) {
         UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent::AddNewResource: Resource already destroyed, ignoring"));
-        return;
+        return -1; // nothing to surface — it was already gone
     }
 
     // If the health is <= 0, no need to add to tracked resources and we can just add to destroyed resources
@@ -267,6 +297,7 @@ void UMythicResourceManagerComponent::AddNewResource(FTransform Transform, int32
         TrackedResources.Add(NewResource);
         UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent::AddNewResource: Added to tracked resources"));
     }
+    return NewResource.HitsTillDestruction; // 0 → "Depleted!" (one-shot), >0 → "N left" (first swing)
 }
 
 // Authority only - Make sure the resource is removed from tracked resources
@@ -281,8 +312,8 @@ void UMythicResourceManagerComponent::AddToDestroyedResources(FTrackedDestructib
            TEXT("UMythicResourceManagerComponent::AddToDestroyedResources: Resource %d added to destroyed resources, will respawn in %.1f seconds"),
            DestroyedResource.InstanceId, DefaultRespawnDelay);
 
-    // Give rewards
-    DestroyedResource.ResourceISM->OnKillRewards.Give(PlayerController, false);
+    // Give rewards — drop them at the destroyed node's world location (its tracked Transform), not the player's feet.
+    DestroyedResource.ResourceISM->OnKillRewards.Give(PlayerController, false, 0, DestroyedResource.Transform.GetLocation());
 }
 
 // Called when the game starts

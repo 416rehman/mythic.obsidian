@@ -8,12 +8,15 @@
 #include "Mass/Fragments/MythicMassFragments.h"
 #include "Mass/Tags/MythicMassTags.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h"
+#include "AI/Party/PartySubsystem.h" // companion far-despawn exemption
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "World/LivingWorld/Settlements/SettlementRegistry.h"
 #include "World/LivingWorld/Settlements/MythicSettlement.h"
 #include "World/LivingWorld/NPCGeneration/NPCGenerator.h"
+#include "AI/NPCs/MythicNPCCharacter.h" // despawn tears down any embodied actor before freeing its entity
+#include "World/LivingWorld/Persistence/PersistentNPCRegistry.h" // R18-M7: global spawn-serial allocator (collision-free identity)
 #include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
 
@@ -37,6 +40,9 @@ void UMythicPopulationSpawnerProcessor::ConfigureQueries(const TSharedRef<FMassE
     ExistingNPCQuery.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
     ExistingNPCQuery.AddRequirement<FMythicSignificanceFragment>(EMassFragmentAccess::ReadOnly);
     ExistingNPCQuery.AddTagRequirement<FMythicNPCTag>(EMassFragmentPresence::All);
+    // Encounter-owned entities are managed solely by the EncounterDirector — exclude them from BOTH this query's uses
+    // (the per-cell density count + the far-from-player despawn) so the population system never counts or destroys them.
+    ExistingNPCQuery.AddTagRequirement<FMythicEncounterEntityTag>(EMassFragmentPresence::None);
 }
 
 void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FMassExecutionContext &Context) {
@@ -63,6 +69,12 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
         return;
     }
 
+    // Party companions are EXEMPT from the far-from-player despawn below (Step 4) — a companion follows its player out
+    // of its spawn zone, and its Identity.Cell is frozen at spawn, so it would otherwise be culled the moment the
+    // player travels > PopulationDespawnDistance cells (leaking an unrefillable party slot). Game-thread-safe query
+    // (bRequiresGameThreadExecution), mirroring the SignificanceProcessor exemption.
+    const UMythicPartySubsystem *PartySubsystem = World->GetSubsystem<UMythicPartySubsystem>();
+
     // Throttle: only run at configured interval
     TimeSinceLastTick += Context.GetDeltaTimeSeconds();
     if (TimeSinceLastTick < Settings->PopulationSpawnIntervalSeconds) {
@@ -78,6 +90,13 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
     UMythicFactionDatabase *FactionDB = LWS->GetFactionDatabase();
 
     if (!Grid || !Registry || !FactionDB) {
+        return;
+    }
+
+    // R18-M7: the persistent NPC registry owns the global spawn-serial allocator that guarantees collision-free
+    // NameHash identity. Without it we cannot guarantee unique identities — do not spawn aliasable NPCs.
+    UMythicPersistentNPCRegistry *PersistentRegistry = LWS->GetPersistentNPCRegistry();
+    if (!PersistentRegistry) {
         return;
     }
 
@@ -140,9 +159,12 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
                     continue;
                 }
 
-                // Only populate cells that belong to a settlement
-                const FMythicSettlementData *Settlement = Registry->GetSettlementAtCell(CandidateCell);
-                if (!Settlement || !Settlement->GoverningFaction.IsValid()) {
+                // Only populate cells that belong to a settlement. Snapshot it under SimulationLock (copy-out) — NEVER
+                // hold a live Settlements-map pointer on this game thread: the sim thread writes GoverningFaction during
+                // a conquest TransferSettlement under that lock, so an unlocked read here tears (NPCs stamped to the
+                // wrong faction) or dangles across a RegisterSettlement rehash.
+                FMythicSettlementData Settlement;
+                if (!LWS->CopySettlementAtCell(CandidateCell, Settlement) || !Settlement.GoverningFaction.IsValid()) {
                     continue;
                 }
 
@@ -152,7 +174,7 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
                 CellsToPopulate.Add(CandidateCell);
 
                 FMythicFactionData FactionData;
-                if (!FactionDB->GetFaction(Settlement->GoverningFaction, FactionData)) {
+                if (!FactionDB->GetFaction(Settlement.GoverningFaction, FactionData)) {
                     continue;
                 }
 
@@ -160,7 +182,7 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
                 const int32 FactionCapacity = FactionData.ControlledCellCount * Settings->PopulationPerCell;
 
                 const int32 TargetCount = ComputeTargetDensity(
-                    Settlement->MaxPopulationDensity,
+                    Settlement.MaxPopulationDensity,
                     Settings->MaxEntitiesPerCell,
                     FactionData.Population,
                     FactionCapacity
@@ -178,15 +200,20 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
 
                 for (int32 SpawnIdx = 0; SpawnIdx < ToSpawn; ++SpawnIdx) {
                     FMythicNPCPopulationSpawnData SpawnData;
-                    SpawnData.Identity.Faction = Settlement->GoverningFaction;
+                    SpawnData.Identity.Faction = Settlement.GoverningFaction;
                     SpawnData.Identity.Cell = CandidateCell;
 
                     // ─── Full NPC Generation Pipeline ───
-                    // Use the NPCGenerator for deterministic identity creation.
-                    // Same faction + cell + index = same NPC across sessions.
+                    // Identity is GLOBALLY UNIQUE (R18-M7), not reproducible-from-cell: feed a PERSISTED, never-reused
+                    // monotonic serial — NOT the wave-local SpawnIdx, which restarted at 0 each refill wave so two waves
+                    // in the same faction+cell aliased one NameHash, poisoning the perma-death registry (a collision
+                    // permanently zombie-locks a living NPC + misattributes death/chronicle events). Mirrors
+                    // AMythicEncounterDirector's NextEncounterId. The serial still feeds the same Wang-hash mix, so the
+                    // hash stays a varied, decodable value (name/demographics/archetype render unchanged).
+                    const int32 SpawnSerial = PersistentRegistry->AllocateSpawnSerial();
 
                     SpawnData.Identity.NameHash = FMythicNPCGenerator::GenerateNameHash(
-                        Settlement->GoverningFaction.Index, CandidateCell, SpawnIdx);
+                        Settlement.GoverningFaction.Index, CandidateCell, SpawnSerial);
 
                     SpawnData.Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(
                         SpawnData.Identity.NameHash, 8);
@@ -219,7 +246,7 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
 
                 UE_LOG(LogMythLivingWorld, Verbose, TEXT("PopulationSpawner: cell (%d,%d) — target=%d, current=%d, spawned=%d (faction=%d, pop=%d, cap=%d)"),
                        CandidateCell.X, CandidateCell.Y, TargetCount, CurrentCount, ToSpawn,
-                       Settlement->GoverningFaction.Index, FactionData.Population, FactionCapacity);
+                       Settlement.GoverningFaction.Index, FactionData.Population, FactionCapacity);
             }
         }
     }
@@ -279,7 +306,22 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
             }
 
             if (!bNearPlayer) {
-                Context.Defer().DestroyEntity(ChunkContext.GetEntity(i));
+                const FMassEntityHandle DespawnEntity = ChunkContext.GetEntity(i);
+                // Never far-despawn a party companion (it follows its player; its entity cell is frozen at spawn).
+                if (PartySubsystem && PartySubsystem->IsCompanionEntity(DespawnEntity)) {
+                    continue;
+                }
+                // Tear down any embodied cognitive actor FIRST. A Tier2-promoted NPC that drifts into the despawn band
+                // before the significance pass demotes it still has an AMythicNPCCharacter in EmbodiedActors; a bare
+                // DestroyEntity would orphan that actor (dangling CognitiveBrain SourceEntity + live think timer) and
+                // leak the EmbodiedActors[Entity] key — the same hole the EncounterDirector cleanup fixed on its path.
+                // Safe to call directly: this processor is bRequiresGameThreadExecution (ctor), so we are on the game
+                // thread; LWS is captured from Execute.
+                if (AMythicNPCCharacter *Actor = LWS->FindEmbodiedActor(DespawnEntity)) {
+                    Actor->Destroy();
+                }
+                LWS->UnregisterEmbodiedActor(DespawnEntity); // idempotent — also clears a stale key if no actor
+                Context.Defer().DestroyEntity(DespawnEntity);
                 --DespawnBudget;
             }
         }

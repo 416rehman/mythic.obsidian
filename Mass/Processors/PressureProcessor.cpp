@@ -110,6 +110,7 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
         FMythicFactionId Faction;
         int32 PressureChannel;
         float Amount;
+        int32 Radius; // cell radius — from the designer-tunable GuardAssist/EmotionalContagion settings, not a hardcoded 2
     };
     TArray<FDeferredPressureBoost> DeferredBoosts;
     DeferredBoosts.Reserve(16);
@@ -247,6 +248,7 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
                     Boost.Faction = Identity.Faction;
                     Boost.PressureChannel = InjusticeIdx;
                     Boost.Amount = MaxPressure * 0.3f; // 30% of enforcer's pressure
+                    Boost.Radius = FMath::RoundToInt(GuardAssistRadius); // REQ-BEH-002 designer-tunable radius (was hardcoded 2)
                     DeferredBoosts.Add(Boost);
                 }
 
@@ -258,6 +260,7 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
                     Boost.Faction = FMythicFactionId(); // Any faction — contagion crosses faction lines
                     Boost.PressureChannel = ThreatIdx;
                     Boost.Amount = MaxPressure * 0.2f; // 20% contagion transfer
+                    Boost.Radius = FMath::RoundToInt(EmotionalContagionRadius); // REQ-BEH-003 designer-tunable radius (was hardcoded 2)
                     DeferredBoosts.Add(Boost);
                 }
 
@@ -323,7 +326,7 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
                     // Check cell radius
                     const int32 Dist = FMath::Abs(Identity.Cell.X - Boost.Cell.X)
                         + FMath::Abs(Identity.Cell.Y - Boost.Cell.Y);
-                    if (Dist > 2) { // ~2 cell radius for secondary effects
+                    if (Dist > Boost.Radius) { // designer-tunable per-boost radius (GuardAssist/EmotionalContagion settings)
                         continue;
                     }
                     // Faction check (if specified — contagion is faction-agnostic)
@@ -340,4 +343,3 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
     // Flush consumed witness results
     ActionSub->FlushProcessedWitnessResults();
 }
-

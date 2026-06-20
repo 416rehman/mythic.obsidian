@@ -48,6 +48,20 @@ enum class EMythicDamageNumberType : uint8 {
     Default,
     Critical,
     Heal,
+    // Status-effect hits — each gets a distinct config-driven color so the player reads the effect at a glance.
+    // Mirrors the FMythicGameplayEffectContext status flags (set in DamageCalculation, resistance-gated in
+    // DamageApplication, replicated via NetSerialize), so this is pure consumption of a built+replicated contract.
+    Bleed,
+    Burn,
+    Poison,
+    Stun,
+    Slow,
+    Weaken,
+    Freeze,
+    Terrify,
+    // A dodged (missed) attack. The enum/color/anim land here; spawning the "DODGE" pop is a follow-up slice
+    // (the dodge path early-returns in DamageApplication before the damage cue fires).
+    Dodge,
 };
 
 /**
@@ -199,6 +213,35 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Colors")
     FLinearColor HealColor = FLinearColor(0.0f, 1.0f, 0.3f); // Bright Green
 
+    // Status-effect colors — one per status so each effect reads at a glance. Author-time visual defaults
+    // (designers can retune in the data asset); no gameplay magnitudes here.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Colors|Status")
+    FLinearColor BleedColor = FLinearColor(0.7f, 0.0f, 0.0f); // Dark red
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Colors|Status")
+    FLinearColor BurnColor = FLinearColor(1.0f, 0.45f, 0.0f); // Orange
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Colors|Status")
+    FLinearColor PoisonColor = FLinearColor(0.4f, 0.85f, 0.1f); // Sickly green
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Colors|Status")
+    FLinearColor StunColor = FLinearColor(1.0f, 0.9f, 0.4f); // Pale yellow
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Colors|Status")
+    FLinearColor SlowColor = FLinearColor(0.4f, 0.6f, 0.9f); // Steel blue
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Colors|Status")
+    FLinearColor WeakenColor = FLinearColor(0.6f, 0.45f, 0.7f); // Muted purple
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Colors|Status")
+    FLinearColor FreezeColor = FLinearColor(0.5f, 0.9f, 1.0f); // Cyan
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Colors|Status")
+    FLinearColor TerrifyColor = FLinearColor(0.7f, 0.2f, 0.7f); // Dark magenta
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Colors|Status")
+    FLinearColor DodgeColor = FLinearColor(0.8f, 0.8f, 0.85f); // Light gray
+
     // Animation style per damage type
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Styles")
     EMythicDamageNumberAnimStyle DefaultAnimStyle = EMythicDamageNumberAnimStyle::FloatUp;
@@ -208,6 +251,14 @@ public:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Styles")
     EMythicDamageNumberAnimStyle HealAnimStyle = EMythicDamageNumberAnimStyle::Pulse;
+
+    // Shared style for all status-effect numbers (Shake reads as a lingering "status" hit).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Styles")
+    EMythicDamageNumberAnimStyle StatusAnimStyle = EMythicDamageNumberAnimStyle::Shake;
+
+    // Style for a dodged attack (a gentle drift — it's a miss, not a hit).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Styles")
+    EMythicDamageNumberAnimStyle DodgeAnimStyle = EMythicDamageNumberAnimStyle::FloatUpSlow;
 
     // Number formatting
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Formatting")
@@ -249,6 +300,12 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "Mythic|DamageNumbers")
     void AddDamageNumberCustom(FVector WorldLocation, const FString &Text, FLinearColor Color, float Lifetime = 1.0f);
+
+    // Float a "DODGE" callout using the configured DodgeColor (single source — no duplicated literal). Used by the
+    // dodge feedback path, which must fire from the authority damage execution because a dodge negates the hit BEFORE
+    // the normal damage cue runs, so the built Dodge color would otherwise never appear.
+    UFUNCTION(BlueprintCallable, Category = "Mythic|DamageNumbers")
+    void AddDodgeNumber(FVector WorldLocation);
 
     /**
      * Set the configuration data asset.

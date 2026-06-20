@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
+#include <atomic>
 #include "FactionDatabase.generated.h"
 
 // ─────────────────────────────────────────────────────────────
@@ -346,10 +347,21 @@ struct MYTHIC_API FMythicFactionData {
     int32 Population = 0;
 
     /**
-     * Runtime flag set by the sim when Population first goes above 0.
-     * Prevents annihilation of newly registered factions that haven't been
-     * populated yet (e.g., territory grid hasn't assigned cells).
-     * Transient: not saved to disk, re-derived at runtime.
+     * The faction's Population at the instant it was annihilated, captured by AnnihilateFaction BEFORE Population is
+     * zeroed, so the TickFactionEvolution refugee-absorption pass can grant a fraction of it to the nearest ally.
+     * Transient + within-tick: set on annihilation, consumed (cleared to 0) by the same tick's absorption pass, so it
+     * is always 0 between ticks and is NOT serialized. Without it the absorption pass was dead (the collector's
+     * `!bAlive && Population>0` predicate is mutually exclusive with AnnihilateFaction zeroing Population in one call).
+     */
+    UPROPERTY(Transient)
+    int32 LastAlivePopulation = 0;
+
+    /**
+     * Sticky latch set by the sim when Population first goes above 0 (and seeded from Population>0 at registration).
+     * Prevents annihilation of newly registered factions that haven't been populated yet (e.g., territory grid hasn't
+     * assigned cells). It is a one-way latch (never cleared), so it IS persisted via the custom Serialize() — a faction
+     * that lost its population but still holds territory must stay annihilation-eligible across reload. UPROPERTY(Transient)
+     * only suppresses UE's reflection-based serialization; it does NOT affect this class's explicit FArchive override.
      */
     UPROPERTY(Transient)
     bool bHasBeenPopulated = false;
@@ -362,6 +374,18 @@ struct MYTHIC_API FMythicFactionData {
      */
     UPROPERTY(Transient)
     bool bIdeologyDirty = false;
+
+    /**
+     * Edge-trigger latches for the distress chronicle beats (famine / military weakness). Set when the faction ENTERS
+     * the distress condition so TickHistoryAppend emits the chronicle event exactly ONCE per episode (not every tick),
+     * cleared when the condition resolves. Transient (not serialized) — a still-distressed faction re-logs once on
+     * reload, which is acceptable.
+     */
+    UPROPERTY(Transient)
+    bool bFamineActive = false;
+
+    UPROPERTY(Transient)
+    bool bWeaknessActive = false;
 
     /** Index of the current leader NPC entity (0 = no leader). Set by crystallization (Phase 6). */
     UPROPERTY(BlueprintReadOnly, Category = "Population")
@@ -498,7 +522,7 @@ public:
      * Includes ideology profiles, resources, population, relationships,
      * leader tracking, and dirty flags.
      */
-    void Serialize(FArchive& Ar);
+    virtual void Serialize(FArchive &Ar) override;
 
 private:
     int32 MaxFactions = 0;
@@ -518,8 +542,10 @@ private:
     UPROPERTY(Transient)
     TArray<EMythicFactionRelation> ReadRelationships;
 
-    /** Number of factions currently registered */
-    int32 RegisteredCount = 0;
+    /** Number of factions currently registered. Atomic: the sim thread increments it under SimulationLock (RegisterFaction,
+     *  SpawnSplinterFaction), while game-thread accessors (GetFaction/GetActiveFactionCount/ForEachAliveFaction) read it
+     *  lock-free — a plain int32 there is a data race (benign-bounded, but real UB). Atomic load/store removes it. */
+    std::atomic<int32> RegisteredCount = 0;
 
     /** Lock protecting the Read snapshots from concurrent modification by CommitWrites */
     mutable FCriticalSection SnapshotLock;

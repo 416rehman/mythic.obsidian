@@ -13,6 +13,7 @@ class UMythicCausalFabric;
 class UMythicFactionDatabase;
 class UMythicTerritoryGrid;
 class UMythicLivingWorldSettings;
+class UMythicLivingWorldSubsystem;
 
 /**
  * Encounter Director — reads cached world state and spawns encounters.
@@ -35,9 +36,9 @@ class MYTHIC_API UMythicEncounterDirector : public UWorldSubsystem {
 
 public:
     //~ Begin USubsystem Interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Initialize(FSubsystemCollectionBase &Collection) override;
     virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+    virtual bool ShouldCreateSubsystem(UObject *Outer) const override;
     //~ End USubsystem Interface
 
     // ─── Configuration ────────────────────────────────────
@@ -46,18 +47,18 @@ public:
      * Register an encounter template. Templates are evaluated periodically
      * against world state. Call during setup (e.g., from data asset loading).
      */
-    void RegisterTemplate(const FMythicEncounterTemplate& Template);
+    void RegisterTemplate(const FMythicEncounterTemplate &Template);
 
     // ─── Queries ──────────────────────────────────────────
 
     /** Get all currently active encounters */
-    const TArray<FMythicActiveEncounter>& GetActiveEncounters() const { return ActiveEncounters; }
+    const TArray<FMythicActiveEncounter> &GetActiveEncounters() const { return ActiveEncounters; }
 
     /** Get active encounter count */
     int32 GetActiveEncounterCount() const { return ActiveEncounters.Num(); }
 
     /** Check if any encounter is active in the given cell */
-    bool HasEncounterInCell(const FMythicCellCoord& Cell) const;
+    bool HasEncounterInCell(const FMythicCellCoord &Cell) const;
 
     // ─── Encounter Lifecycle ──────────────────────────────
 
@@ -74,10 +75,10 @@ private:
     void EvaluationTick();
 
     /** Evaluate a template against current world state */
-    bool EvaluateTemplate(const FMythicEncounterTemplate& Template, FMythicCellCoord& OutCell, FMythicFactionId& OutFaction) const;
+    bool EvaluateTemplate(const FMythicEncounterTemplate &Template, FMythicCellCoord &OutCell, FMythicFactionId &OutFaction) const;
 
     /** Spawn a new encounter from a template */
-    void SpawnEncounter(const FMythicEncounterTemplate& Template, const FMythicCellCoord& Cell, FMythicFactionId Faction);
+    void SpawnEncounter(const FMythicEncounterTemplate &Template, const FMythicCellCoord &Cell, FMythicFactionId Faction);
 
     /** Update active encounter lifecycle (timeout, completion) */
     void UpdateActiveEncounters();
@@ -85,16 +86,21 @@ private:
     /** Clean up a completed encounter */
     void CleanupEncounter(int32 Index);
 
+    /** Submit the ENCOUNTER_COMPLETED chronicle beat (mirror of the spawn beat). Single source — called from BOTH the
+     *  UpdateActiveEncounters timeout/completion path AND ForceCompleteEncounter, so it fires exactly once per completed
+     *  encounter regardless of which path completes it. NOT called from CleanupEncounter (which is also the deinit path). */
+    void EmitEncounterCompletedEvent(const FMythicActiveEncounter &Encounter) const;
+
     // ─── Cooldown Tracking ────────────────────────────────
 
     /** Track template cooldowns — TemplateTag → last activation world time */
     TMap<FGameplayTag, double> TemplateCooldowns;
 
     /** Check if a template is on cooldown */
-    bool IsOnCooldown(const FGameplayTag& TemplateTag, double WorldTime, float CooldownSeconds) const;
+    bool IsOnCooldown(const FGameplayTag &TemplateTag, double WorldTime, float CooldownSeconds) const;
 
     /** Count active instances of a template */
-    int32 CountActiveInstances(const FGameplayTag& TemplateTag) const;
+    int32 CountActiveInstances(const FGameplayTag &TemplateTag) const;
 
     // ─── State ────────────────────────────────────────────
 
@@ -127,5 +133,11 @@ private:
     UPROPERTY()
     TObjectPtr<UMythicTerritoryGrid> TerritoryGrid;
 
-    const UMythicLivingWorldSettings* Settings = nullptr;
+    const UMythicLivingWorldSettings *Settings = nullptr;
+
+    /** Owning subsystem. Game-thread event writes MUST go through its thread-safe SubmitWorldEvent queue — the
+     *  CausalFabric is a lock-free SINGLE-writer drained by the sim thread, so a direct game-thread AppendEvent races
+     *  it and corrupts the shared world log. */
+    UPROPERTY()
+    TObjectPtr<UMythicLivingWorldSubsystem> LivingWorld;
 };

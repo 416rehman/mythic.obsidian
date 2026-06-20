@@ -19,7 +19,7 @@ public:
 
 protected:
     void UpdateUILayerRootWidget(ACommonPlayerController *CommonPlayerController);
-    
+
     // Called when the game starts
     virtual void BeginPlay() override;
 
@@ -40,27 +40,32 @@ protected:
     FTimerHandle InteractionScanTimerHandle;
 
     UPROPERTY()
-    UMythicActivatableWidget * UI_LayerRootWidget;
+    UMythicActivatableWidget *UI_LayerRootWidget;
 
     UPROPERTY()
-    ACommonPlayerController * OwningController;
+    ACommonPlayerController *OwningController;
 
     UPROPERTY()
-    UMythicInteractionPromptWidget * InteractionPromptWidget;
+    UMythicInteractionPromptWidget *InteractionPromptWidget;
 
 public:
     // The UI Layer responsible for input handling during interaction
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Interaction")
     FGameplayTag GameUILayerName = FGameplayTag::RequestGameplayTag("UI.Layer.Game");
-    
+
     // The class of the widget to display when interacting with an actor
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Interaction")
     TSubclassOf<UMythicInteractionPromptWidget> InteractionPromptWidgetClass;
-    
+
     UFUNCTION(BlueprintCallable)
     void PauseInteractions(bool bPause);
     void InitializeInteraction(AActor *NewFocusedActor);
     void EndInteraction(AActor *OldFocusedActor);
+
+    // Teardown when the focused actor has been destroyed and its pointer is no longer available
+    // (GC nulled CurrentFocusedActor). Clears the prompt-widget input bindings and resets the
+    // ready flag without dereferencing the dead actor (its attached widget component died with it).
+    void EndStaleInteraction();
 
     UFUNCTION(BlueprintCallable, Client, Reliable)
     void OnFocusedActorChanged(AActor *NewFocusedActor, AActor *OldFocusedActor);

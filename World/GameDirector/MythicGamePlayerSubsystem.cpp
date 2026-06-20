@@ -27,6 +27,14 @@ void UMythicGamePlayerSubsystem::Initialize(FSubsystemCollectionBase &Collection
 }
 
 void UMythicGamePlayerSubsystem::Deinitialize() {
+    // Remove the process-global FLevelStreamingDelegates binds added in Initialize. These statics outlive this
+    // ULocalPlayerSubsystem (recreated per local-player / PIE / seamless travel), so leaving them bound accumulates
+    // stale invocation-list entries forever (+ a type-confused dispatch window on GC slot reuse). Mirrors the RemoveAll
+    // UMythicGameInstance already does for the same delegate.
+    FLevelStreamingDelegates::OnLevelBeginMakingInvisible.RemoveAll(this);
+    FLevelStreamingDelegates::OnLevelBeginMakingVisible.RemoveAll(this);
+    FLevelStreamingDelegates::OnLevelStreamingStateChanged.RemoveAll(this);
+
     Super::Deinitialize();
 }
 

@@ -25,11 +25,11 @@ void FMythicWorldSimThread::Setup(
     UMythicSettlementRegistry *InSettlementRegistry,
     const UMythicLivingWorldSettings *InSettings,
     float InTickIntervalSeconds,
-    FCriticalSection* InSimulationLock,
-    UMythicSchemeEngine* InSchemeEngine,
-    TArray<FMythicWorldEvent>* InPendingEvents,
-    FCriticalSection* InPendingEventsMutex
-) {
+    FCriticalSection *InSimulationLock,
+    UMythicSchemeEngine *InSchemeEngine,
+    TArray<FMythicWorldEvent> *InPendingEvents,
+    FCriticalSection *InPendingEventsMutex
+    ) {
     Fabric = InFabric;
     FactionDB = InFactionDB;
     TerritoryGrid = InTerritoryGrid;
@@ -139,8 +139,13 @@ void FMythicWorldSimThread::SimTick() {
         // Use true platform time for accurate shop succession
         const double CurrentSimTime = FPlatformTime::Seconds();
         SettlementRegistry->TickShopSuccession(CurrentSimTime, Settings->ShopSuccessionDelaySeconds);
+
+        // Territorial conquest: hand a settlement to whichever faction has overrun a clear majority of its cells.
+        // GetDominantFaction reads the COMMITTED (previous-tick) territory snapshot, so detection lags this tick's
+        // propagation by one tick — benign for conquest. Re-seeds on transfer (stable, no flip-flap).
+        SettlementRegistry->TickConquest(TerritoryGrid, FactionDB, Fabric, Settings->SettlementConquestThreshold);
     }
-    
+
     // Drain pending events submitted from the game thread
     if (PendingEvents && PendingEventsMutex && Fabric) {
         TArray<FMythicWorldEvent> EventsToProcess;
@@ -149,7 +154,7 @@ void FMythicWorldSimThread::SimTick() {
             EventsToProcess = *PendingEvents;
             PendingEvents->Reset();
         }
-        for (const FMythicWorldEvent& Event : EventsToProcess) {
+        for (const FMythicWorldEvent &Event : EventsToProcess) {
             Fabric->AppendEvent(Event);
         }
     }
@@ -418,7 +423,7 @@ void FMythicWorldSimThread::TickPopulation() {
         // Only annihilate factions that previously had population —
         // newly registered factions waiting for territory/population seeding are spared.
         if (F->bHasBeenPopulated && F->Population <= 0 && F->ControlledCellCount <= 0) {
-            
+
             // Re-fetch index as FMythicFactionId
             FMythicFactionId DeadId;
             DeadId.Index = static_cast<uint8>(i);
@@ -432,13 +437,15 @@ void FMythicWorldSimThread::TickPopulation() {
                 // Form a resistance!
                 FMythicFactionId ResistanceId = FactionDB->CreateFactionFromConquest(DeadId, Survivors);
                 if (ResistanceId.IsValid()) {
-                    UE_LOG(LogMythWorldSim, Log, TEXT("Faction '%s' destroyed, but %d survivors formed a Resistance! (New ID: %d)"), 
+                    UE_LOG(LogMythWorldSim, Log, TEXT("Faction '%s' destroyed, but %d survivors formed a Resistance! (New ID: %d)"),
                            *F->DisplayName.ToString(), Survivors, ResistanceId.Index);
-                           
+
                     // Log resistance formation event
                     if (Fabric) {
                         FMythicWorldEvent ResEvent;
-                        ResEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_SCHISM; // Close enough for now
+                        // A resistance forming from a destroyed faction's survivors is NOT a schism (an ideological split
+                        // of a living faction) — it has its own leaf so the chronicle renders "Resistance — ..." truthfully.
+                        ResEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_RESISTANCE;
                         ResEvent.PrimaryFaction = ResistanceId;
                         ResEvent.SecondaryFaction = DeadId;
                         ResEvent.Significance = 0.9f;
@@ -510,7 +517,7 @@ void FMythicWorldSimThread::TickDiplomacy() {
             // ── Recent event score ──
             float EventScore = 0.0f;
             if (Fabric) {
-                TArray<const FMythicWorldEvent *> RecentEvents;
+                TArray<FMythicWorldEvent> RecentEvents;
                 const double CurrentTime = FPlatformTime::Seconds();
                 Fabric->QueryEventsByCategory(
                     EMythicEventCategory::Combat | EMythicEventCategory::Trade | EMythicEventCategory::Diplomacy,
@@ -519,10 +526,8 @@ void FMythicWorldSimThread::TickDiplomacy() {
                     RecentEvents
                     );
 
-                for (const FMythicWorldEvent *Event : RecentEvents) {
-                    if (!Event) {
-                        continue;
-                    }
+                for (const FMythicWorldEvent &EventRef : RecentEvents) {
+                    const FMythicWorldEvent *Event = &EventRef;
                     const bool bInvolvesBoth =
                         (Event->PrimaryFaction == IdA && Event->SecondaryFaction == IdB) ||
                         (Event->PrimaryFaction == IdB && Event->SecondaryFaction == IdA);
@@ -586,6 +591,23 @@ void FMythicWorldSimThread::TickTerritoryPropagation() {
 
     if (TerritoryGrid) {
         TerritoryGrid->PropagateInfluence();
+
+        // Reconcile each faction's ControlledCellCount with the emergent grid ownership — the grid is the single source
+        // of truth for territory. ControlledCellCount drives economy supply, population capacity, spawn rates, and the
+        // annihilation gate (ControlledCellCount<=0), but is otherwise only mutated by discrete settlement/scheme events;
+        // influence-driven flips (conquest, erosion, unowning) in PropagateInfluence never reached it. Before this, a
+        // faction whose cells were conquered kept an inflated count (kept producing + could never be annihilated) and an
+        // emergently-expanding faction got zero credit. Re-derive from the fresh write buffer each territory tick.
+        if (FactionDB) {
+            TArray<int32> CellCounts;
+            TerritoryGrid->GetWriteCellCounts(CellCounts);
+            const int32 FactionCount = FactionDB->GetRegisteredCount();
+            for (int32 i = 0; i < FactionCount && i < CellCounts.Num(); ++i) {
+                if (FMythicFactionData *F = FactionDB->GetFactionMutableByIndex(i)) {
+                    F->ControlledCellCount = CellCounts[i];
+                }
+            }
+        }
     }
 }
 
@@ -613,7 +635,7 @@ void FMythicWorldSimThread::TickIdeologyMetabolism() {
         FId.Index = static_cast<uint8>(i);
 
         // Query recent significant events involving this faction
-        TArray<const FMythicWorldEvent *> RecentEvents;
+        TArray<FMythicWorldEvent> RecentEvents;
         Fabric->QueryEventsByCategory(
             0xFFFF, // All categories
             CurrentTime - 30.0, CurrentTime,
@@ -625,10 +647,8 @@ void FMythicWorldSimThread::TickIdeologyMetabolism() {
         float AccumulatedVector[MoralAxisCount] = {};
         int32 RelevantEventCount = 0;
 
-        for (const FMythicWorldEvent *Event : RecentEvents) {
-            if (!Event) {
-                continue;
-            }
+        for (const FMythicWorldEvent &EventRef : RecentEvents) {
+            const FMythicWorldEvent *Event = &EventRef;
             if (Event->Significance < Settings->DriftMinSignificance) {
                 continue;
             }
@@ -703,8 +723,10 @@ void FMythicWorldSimThread::TickFactionEvolution() {
     for (int32 i = 0; i < FactionCount; ++i) {
         FMythicFactionData *F = FactionDB->GetFactionMutableByIndex(i);
         if (!F || !F->bAlive) {
-            // Collect annihilated factions for absorption pass
-            if (F && !F->bAlive && F->Population > 0) {
+            // Collect annihilated factions with refugees still pending absorption. Keyed on LastAlivePopulation (the
+            // population captured at annihilation) — Population itself is already 0 by then, which is why this pass was
+            // dead before. Cleared to 0 by the absorption pass below, so each annihilation is collected one-shot.
+            if (F && !F->bAlive && F->LastAlivePopulation > 0) {
                 AnnihilatedIndices.Add(i);
             }
             continue;
@@ -760,232 +782,237 @@ void FMythicWorldSimThread::TickFactionEvolution() {
         }
 
         // ── Schism detection ──
-            // Complete schism check: Geographic fragmentation OR severe ideological tension
-            
-            // 1. Geographic Fragmentation (Disconnected clusters using BFS)
-            int32 SecondLargestCluster = 0;
-            if (TerritoryGrid) {
-                TArray<FMythicCellCoord> FactionCells;
-                TerritoryGrid->GetFactionCells(FId, 10000, FactionCells);
-                
-                if (FactionCells.Num() > 0) {
-                    int32 MaxCluster = 0;
-                    TSet<int32> VisitedIdx;
-                    for (const FMythicCellCoord& Cell : FactionCells) {
-                        int32 CIdx = Cell.Y * TerritoryGrid->GetWidth() + Cell.X;
-                        if (VisitedIdx.Contains(CIdx)) continue;
-                        
-                        int32 ClusterSize = 0;
-                        TArray<FMythicCellCoord> Queue;
-                        Queue.Add(Cell);
-                        VisitedIdx.Add(CIdx);
-                        
-                        while (Queue.Num() > 0) {
-                            FMythicCellCoord Curr = Queue.Pop(false);
-                            ClusterSize++;
-                            
-                            FMythicCellCoord Neighbors[4] = {
-                                FMythicCellCoord(Curr.X + 1, Curr.Y), FMythicCellCoord(Curr.X - 1, Curr.Y),
-                                FMythicCellCoord(Curr.X, Curr.Y + 1), FMythicCellCoord(Curr.X, Curr.Y - 1)
-                            };
-                            for (const FMythicCellCoord& N : Neighbors) {
-                                if (TerritoryGrid->IsValidCoord(N) && TerritoryGrid->GetDominantFaction(N) == FId) {
-                                    int32 NIdx = N.Y * TerritoryGrid->GetWidth() + N.X;
-                                    if (!VisitedIdx.Contains(NIdx)) {
-                                        VisitedIdx.Add(NIdx);
-                                        Queue.Add(N);
-                                    }
+        // Complete schism check: Geographic fragmentation OR severe ideological tension
+
+        // 1. Geographic Fragmentation (Disconnected clusters using BFS)
+        int32 SecondLargestCluster = 0;
+        if (TerritoryGrid) {
+            TArray<FMythicCellCoord> FactionCells;
+            TerritoryGrid->GetFactionCells(FId, 10000, FactionCells);
+
+            if (FactionCells.Num() > 0) {
+                int32 MaxCluster = 0;
+                TSet<int32> VisitedIdx;
+                for (const FMythicCellCoord &Cell : FactionCells) {
+                    int32 CIdx = Cell.Y * TerritoryGrid->GetWidth() + Cell.X;
+                    if (VisitedIdx.Contains(CIdx)) {
+                        continue;
+                    }
+
+                    int32 ClusterSize = 0;
+                    TArray<FMythicCellCoord> Queue;
+                    Queue.Add(Cell);
+                    VisitedIdx.Add(CIdx);
+
+                    while (Queue.Num() > 0) {
+                        FMythicCellCoord Curr = Queue.Pop(EAllowShrinking::No);
+                        ClusterSize++;
+
+                        FMythicCellCoord Neighbors[4] = {
+                            FMythicCellCoord(Curr.X + 1, Curr.Y), FMythicCellCoord(Curr.X - 1, Curr.Y),
+                            FMythicCellCoord(Curr.X, Curr.Y + 1), FMythicCellCoord(Curr.X, Curr.Y - 1)
+                        };
+                        for (const FMythicCellCoord &N : Neighbors) {
+                            if (TerritoryGrid->IsValidCoord(N) && TerritoryGrid->GetDominantFaction(N) == FId) {
+                                int32 NIdx = N.Y * TerritoryGrid->GetWidth() + N.X;
+                                if (!VisitedIdx.Contains(NIdx)) {
+                                    VisitedIdx.Add(NIdx);
+                                    Queue.Add(N);
                                 }
                             }
                         }
-                        
-                        if (ClusterSize > MaxCluster) {
-                            SecondLargestCluster = MaxCluster;
-                            MaxCluster = ClusterSize;
-                        } else if (ClusterSize > SecondLargestCluster) {
-                            SecondLargestCluster = ClusterSize;
-                        }
-                    }
-                }
-            }
-            
-            const bool bGeographicSchism = (SecondLargestCluster >= Settings->MinSchismSize / 2);
-
-            // 2. Internal tension check (variance in recent fabric events)
-
-            float InternalDivergence = 0.0f;
-            if (Fabric) {
-                TArray<const FMythicWorldEvent *> FactionEvents;
-                const double CurrentTime = FPlatformTime::Seconds();
-                Fabric->QueryEventsByCategory(
-                    0xFFFF, CurrentTime - 60.0, CurrentTime,
-                    Settings->IdeologyEventScanCap,
-                    FactionEvents
-                    );
-
-                // Measure variance of moral vectors in events involving this faction
-                float MeanVector[MoralAxisCount] = {};
-                int32 EventCount = 0;
-                for (const FMythicWorldEvent *Event : FactionEvents) {
-                    if (!Event) {
-                        continue;
-                    }
-                    if (Event->PrimaryFaction != FId) {
-                        continue;
-                    }
-                    for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
-                        MeanVector[Axis] += Event->MoralVector.AxisValues[Axis];
-                    }
-                    ++EventCount;
-                }
-
-                if (EventCount > 1) {
-                    const float InvCount = 1.0f / static_cast<float>(EventCount);
-                    for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
-                        MeanVector[Axis] *= InvCount;
                     }
 
-                    // Compute distance between event mean and faction ideology
-                    for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
-                        const EMythicMoralAxis AxisEnum = static_cast<EMythicMoralAxis>(Axis);
-                        const float Delta = MeanVector[Axis] - F->Ideology.GetAxis(AxisEnum);
-                        InternalDivergence += Delta * Delta;
+                    if (ClusterSize > MaxCluster) {
+                        SecondLargestCluster = MaxCluster;
+                        MaxCluster = ClusterSize;
                     }
-                    InternalDivergence = FMath::Sqrt(InternalDivergence);
-                }
-            }
-
-            // Schism occurs if internal divergence is high enough OR geographically fragmented
-            if ((InternalDivergence > Settings->SchismIdeologyThreshold || bGeographicSchism) &&
-                F->Population >= Settings->MinSchismPopulation * 2) {
-
-                // ── Procedural faction generation ──
-                FMythicFactionData NewFaction;
-
-                // Display name: derived from parent
-                const int32 NewIndex = FactionDB->GetRegisteredCount();
-                NewFaction.DisplayName = FText::FromString(
-                    FString::Printf(TEXT("%s Separatists"), *F->DisplayName.ToString())
-                    );
-
-                // Gameplay tag
-                // Procedurally generated factions do not get a gameplay tag — they are identified by FMythicFactionId
-                NewFaction.FactionTag = FGameplayTag();
-
-                // Ideology: parent's ideology with random mutation per axis
-                NewFaction.Ideology = F->Ideology;
-                for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
-                    const EMythicMoralAxis AxisEnum = static_cast<EMythicMoralAxis>(Axis);
-                    const float Mutation = FMath::FRandRange(
-                        -Settings->SchismIdeologyMutation,
-                        Settings->SchismIdeologyMutation
-                        );
-                    NewFaction.Ideology.GetAxisMutable(AxisEnum) = FMath::Clamp(
-                        F->Ideology.GetAxis(AxisEnum) + Mutation, -1.0f, 1.0f
-                        );
-                }
-
-                // Transfer half population
-                const int32 SplitPop = F->Population / 2;
-                NewFaction.Population = SplitPop;
-                F->Population -= SplitPop;
-
-                // Transfer half territory
-                const int32 SplitCells = F->ControlledCellCount / 2;
-                NewFaction.ControlledCellCount = SplitCells;
-                F->ControlledCellCount -= SplitCells;
-
-                // Inherit behavior flags
-                NewFaction.bControlsTerritory = F->bControlsTerritory;
-                NewFaction.bHasEconomy = F->bHasEconomy;
-                NewFaction.bHasCivilianPopulation = F->bHasCivilianPopulation;
-                NewFaction.bParticipatesInTrade = F->bParticipatesInTrade;
-                NewFaction.bCanNegotiate = F->bCanNegotiate;
-
-                // BaseProduction scaled by territory ratio
-                const float TerritoryRatio = (F->ControlledCellCount + SplitCells > 0)
-                    ? static_cast<float>(SplitCells) / static_cast<float>(F->ControlledCellCount + SplitCells)
-                    : 0.5f;
-                NewFaction.BaseProduction = F->BaseProduction;
-                NewFaction.BaseProduction *= TerritoryRatio;
-
-                // Split reserves proportionally
-                const float PopRatio = static_cast<float>(SplitPop) / static_cast<float>(FMath::Max(F->Population + SplitPop, 1));
-                NewFaction.Reserves = F->Reserves;
-                NewFaction.Reserves *= PopRatio;
-                F->Reserves *= (1.0f - PopRatio);
-
-                // Thresholds from parent
-                NewFaction.DisapproveThreshold = F->DisapproveThreshold;
-                NewFaction.CondemnThreshold = F->CondemnThreshold;
-                NewFaction.HostileThreshold = F->HostileThreshold;
-
-                // Register the new faction
-                FMythicFactionId NewId = FactionDB->RegisterFaction(NewFaction);
-
-                if (NewId.IsValid()) {
-                    // New faction starts Hostile to parent
-                    FactionDB->SetRelationship(FId, NewId, EMythicFactionRelation::Hostile);
-
-                    // Inherit parent's other relationships, decayed by one tier
-                    for (int32 k = 0; k < FactionCount; ++k) {
-                        if (k == i) {
-                            continue;
-                        }
-                        FMythicFactionId OtherId;
-                        OtherId.Index = static_cast<uint8>(k);
-                        const EMythicFactionRelation ParentRel = FactionDB->GetWriteRelationship(FId, OtherId);
-
-                        EMythicFactionRelation InheritedRel = EMythicFactionRelation::Neutral;
-                        switch (ParentRel) {
-                        case EMythicFactionRelation::Allied:
-                            InheritedRel = EMythicFactionRelation::Friendly;
-                            break;
-                        case EMythicFactionRelation::Friendly:
-                            InheritedRel = EMythicFactionRelation::Neutral;
-                            break;
-                        case EMythicFactionRelation::Neutral:
-                            InheritedRel = EMythicFactionRelation::Neutral;
-                            break;
-                        case EMythicFactionRelation::Unfriendly:
-                            InheritedRel = EMythicFactionRelation::Unfriendly;
-                            break;
-                        case EMythicFactionRelation::Hostile:
-                            InheritedRel = EMythicFactionRelation::Hostile;
-                            break;
-                        }
-                        FactionDB->SetRelationship(NewId, OtherId, InheritedRel);
+                    else if (ClusterSize > SecondLargestCluster) {
+                        SecondLargestCluster = ClusterSize;
                     }
-
-                    if (Fabric) {
-                        FMythicWorldEvent SchismEvent;
-                        SchismEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_SCHISM;
-                        SchismEvent.PrimaryFaction = FId;
-                        SchismEvent.SecondaryFaction = NewId;
-                        SchismEvent.Significance = 1.0f;
-                        SchismEvent.CategoryFlags = EMythicEventCategory::Diplomacy;
-                        Fabric->AppendEvent(SchismEvent);
-                    }
-
-                    UE_LOG(LogMythWorldSim, Log, TEXT("Faction '%s' schism → new faction '%s' (pop=%d, cells=%d)"),
-                           *F->DisplayName.ToString(), *NewFaction.DisplayName.ToString(), SplitPop, SplitCells);
                 }
             }
         }
 
-    // ── Absorption: annihilated factions' refugees go to nearest ally ──
+        const bool bGeographicSchism = (SecondLargestCluster >= Settings->MinSchismSize / 2);
+
+        // 2. Internal tension check (variance in recent fabric events)
+
+        float InternalDivergence = 0.0f;
+        if (Fabric) {
+            TArray<FMythicWorldEvent> FactionEvents;
+            const double CurrentTime = FPlatformTime::Seconds();
+            Fabric->QueryEventsByCategory(
+                0xFFFF, CurrentTime - 60.0, CurrentTime,
+                Settings->IdeologyEventScanCap,
+                FactionEvents
+                );
+
+            // Measure variance of moral vectors in events involving this faction
+            float MeanVector[MoralAxisCount] = {};
+            int32 EventCount = 0;
+            for (const FMythicWorldEvent &EventRef : FactionEvents) {
+                const FMythicWorldEvent *Event = &EventRef;
+                if (Event->PrimaryFaction != FId) {
+                    continue;
+                }
+                for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
+                    MeanVector[Axis] += Event->MoralVector.AxisValues[Axis];
+                }
+                ++EventCount;
+            }
+
+            if (EventCount > 1) {
+                const float InvCount = 1.0f / static_cast<float>(EventCount);
+                for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
+                    MeanVector[Axis] *= InvCount;
+                }
+
+                // Compute distance between event mean and faction ideology
+                for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
+                    const EMythicMoralAxis AxisEnum = static_cast<EMythicMoralAxis>(Axis);
+                    const float Delta = MeanVector[Axis] - F->Ideology.GetAxis(AxisEnum);
+                    InternalDivergence += Delta * Delta;
+                }
+                InternalDivergence = FMath::Sqrt(InternalDivergence);
+            }
+        }
+
+        // Schism occurs if internal divergence is high enough OR geographically fragmented
+        if ((InternalDivergence > Settings->SchismIdeologyThreshold || bGeographicSchism) &&
+            F->Population >= Settings->MinSchismPopulation * 2) {
+
+            // ── Procedural faction generation ──
+            FMythicFactionData NewFaction;
+
+            // Display name: derived from parent
+            const int32 NewIndex = FactionDB->GetRegisteredCount();
+            NewFaction.DisplayName = FText::FromString(
+                FString::Printf(TEXT("%s Separatists"), *F->DisplayName.ToString())
+                );
+
+            // Gameplay tag
+            // Procedurally generated factions do not get a gameplay tag — they are identified by FMythicFactionId
+            NewFaction.FactionTag = FGameplayTag();
+
+            // Ideology: parent's ideology with random mutation per axis
+            NewFaction.Ideology = F->Ideology;
+            for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
+                const EMythicMoralAxis AxisEnum = static_cast<EMythicMoralAxis>(Axis);
+                const float Mutation = FMath::FRandRange(
+                    -Settings->SchismIdeologyMutation,
+                    Settings->SchismIdeologyMutation
+                    );
+                NewFaction.Ideology.GetAxisMutable(AxisEnum) = FMath::Clamp(
+                    F->Ideology.GetAxis(AxisEnum) + Mutation, -1.0f, 1.0f
+                    );
+            }
+
+            // Transfer half population
+            const int32 SplitPop = F->Population / 2;
+            NewFaction.Population = SplitPop;
+            F->Population -= SplitPop;
+
+            // Transfer half territory
+            const int32 SplitCells = F->ControlledCellCount / 2;
+            NewFaction.ControlledCellCount = SplitCells;
+            F->ControlledCellCount -= SplitCells;
+
+            // Inherit behavior flags
+            NewFaction.bControlsTerritory = F->bControlsTerritory;
+            NewFaction.bHasEconomy = F->bHasEconomy;
+            NewFaction.bHasCivilianPopulation = F->bHasCivilianPopulation;
+            NewFaction.bParticipatesInTrade = F->bParticipatesInTrade;
+            NewFaction.bCanNegotiate = F->bCanNegotiate;
+
+            // BaseProduction scaled by territory ratio
+            const float TerritoryRatio = (F->ControlledCellCount + SplitCells > 0)
+                ? static_cast<float>(SplitCells) / static_cast<float>(F->ControlledCellCount + SplitCells)
+                : 0.5f;
+            NewFaction.BaseProduction = F->BaseProduction;
+            NewFaction.BaseProduction *= TerritoryRatio;
+
+            // Split reserves proportionally
+            const float PopRatio = static_cast<float>(SplitPop) / static_cast<float>(FMath::Max(F->Population + SplitPop, 1));
+            NewFaction.Reserves = F->Reserves;
+            NewFaction.Reserves *= PopRatio;
+            F->Reserves *= (1.0f - PopRatio);
+
+            // Thresholds from parent
+            NewFaction.DisapproveThreshold = F->DisapproveThreshold;
+            NewFaction.CondemnThreshold = F->CondemnThreshold;
+            NewFaction.HostileThreshold = F->HostileThreshold;
+
+            // Register the new faction
+            FMythicFactionId NewId = FactionDB->RegisterFaction(NewFaction);
+
+            if (NewId.IsValid()) {
+                // New faction starts Hostile to parent
+                FactionDB->SetRelationship(FId, NewId, EMythicFactionRelation::Hostile);
+
+                // Inherit parent's other relationships, decayed by one tier
+                for (int32 k = 0; k < FactionCount; ++k) {
+                    if (k == i) {
+                        continue;
+                    }
+                    FMythicFactionId OtherId;
+                    OtherId.Index = static_cast<uint8>(k);
+                    const EMythicFactionRelation ParentRel = FactionDB->GetWriteRelationship(FId, OtherId);
+
+                    EMythicFactionRelation InheritedRel = EMythicFactionRelation::Neutral;
+                    switch (ParentRel) {
+                    case EMythicFactionRelation::Allied:
+                        InheritedRel = EMythicFactionRelation::Friendly;
+                        break;
+                    case EMythicFactionRelation::Friendly:
+                        InheritedRel = EMythicFactionRelation::Neutral;
+                        break;
+                    case EMythicFactionRelation::Neutral:
+                        InheritedRel = EMythicFactionRelation::Neutral;
+                        break;
+                    case EMythicFactionRelation::Unfriendly:
+                        InheritedRel = EMythicFactionRelation::Unfriendly;
+                        break;
+                    case EMythicFactionRelation::Hostile:
+                        InheritedRel = EMythicFactionRelation::Hostile;
+                        break;
+                    }
+                    FactionDB->SetRelationship(NewId, OtherId, InheritedRel);
+                }
+
+                if (Fabric) {
+                    FMythicWorldEvent SchismEvent;
+                    SchismEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_SCHISM;
+                    SchismEvent.PrimaryFaction = FId;
+                    SchismEvent.SecondaryFaction = NewId;
+                    SchismEvent.Significance = 1.0f;
+                    SchismEvent.CategoryFlags = EMythicEventCategory::Diplomacy;
+                    Fabric->AppendEvent(SchismEvent);
+                }
+
+                UE_LOG(LogMythWorldSim, Log, TEXT("Faction '%s' schism → new faction '%s' (pop=%d, cells=%d)"),
+                       *F->DisplayName.ToString(), *NewFaction.DisplayName.ToString(), SplitPop, SplitCells);
+            }
+        }
+    }
+
+    // ── Absorption: an annihilated faction's refugees join its strongest surviving ally ──
     for (int32 DeadIdx : AnnihilatedIndices) {
         FMythicFactionData *Dead = FactionDB->GetFactionMutableByIndex(DeadIdx);
-        if (!Dead || Dead->Population <= 0) {
+        if (!Dead || Dead->LastAlivePopulation <= 0) {
             continue;
         }
 
         FMythicFactionId DeadId;
         DeadId.Index = static_cast<uint8>(DeadIdx);
 
-        // Find the closest Allied or Friendly alive faction
+        // Pick the best surviving ally to take in the refugees: prefer an Allied faction over a merely Friendly one,
+        // and within the same relation tier prefer the LARGEST faction (most able to absorb a population). Deterministic.
+        // (No geographic proximity: AnnihilateFaction already cleared the dead faction's territory, so there is no
+        // centroid to measure from — a true nearest-ally rule would need a preserved last-territory snapshot; deferred.)
         int32 BestAbsorber = -1;
-        EMythicFactionRelation BestRel = EMythicFactionRelation::Hostile;
+        int32 BestTier = 0; // 0 = none, 1 = Friendly, 2 = Allied
+        int32 BestPop = -1;
 
         for (int32 j = 0; j < FactionCount; ++j) {
             FMythicFactionData *Candidate = FactionDB->GetFactionMutableByIndex(j);
@@ -996,21 +1023,28 @@ void FMythicWorldSimThread::TickFactionEvolution() {
             FMythicFactionId CandId;
             CandId.Index = static_cast<uint8>(j);
             const EMythicFactionRelation Rel = FactionDB->GetWriteRelationship(DeadId, CandId);
+            const int32 Tier = (Rel == EMythicFactionRelation::Allied)
+                ? 2
+                : (Rel == EMythicFactionRelation::Friendly)
+                ? 1
+                : 0;
+            if (Tier == 0) {
+                continue; // only allies (Allied/Friendly) take in refugees
+            }
 
-            if (Rel == EMythicFactionRelation::Allied ||
-                (Rel == EMythicFactionRelation::Friendly && BestRel != EMythicFactionRelation::Allied)) {
+            if (Tier > BestTier || (Tier == BestTier && Candidate->Population > BestPop)) {
                 BestAbsorber = j;
-                BestRel = Rel;
+                BestTier = Tier;
+                BestPop = Candidate->Population;
             }
         }
 
         if (BestAbsorber >= 0) {
             FMythicFactionData *Absorber = FactionDB->GetFactionMutableByIndex(BestAbsorber);
             const int32 Refugees = static_cast<int32>(
-                static_cast<float>(Dead->Population) * Settings->AbsorptionFraction
+                static_cast<float>(Dead->LastAlivePopulation) * Settings->AbsorptionFraction
             );
             Absorber->Population += Refugees;
-            Dead->Population = 0;
 
             if (Fabric) {
                 FMythicFactionId AbsorberId;
@@ -1027,6 +1061,10 @@ void FMythicWorldSimThread::TickFactionEvolution() {
             UE_LOG(LogMythWorldSim, Log, TEXT("Faction '%s' absorbed %d refugees from '%s'"),
                    *Absorber->DisplayName.ToString(), Refugees, *Dead->DisplayName.ToString());
         }
+
+        // One-shot: consume the refugee pool whether or not an absorber was found (no ally → the refugees disperse),
+        // so this dead faction is never re-collected on a later tick.
+        Dead->LastAlivePopulation = 0;
     }
 }
 
@@ -1066,7 +1104,7 @@ void FMythicWorldSimThread::TickCrystallization() {
     const int32 FactionCount = FactionDB->GetRegisteredCount();
 
     for (int32 i = 0; i < FactionCount; ++i) {
-        FMythicFactionData* F = FactionDB->GetFactionMutableByIndex(i);
+        FMythicFactionData *F = FactionDB->GetFactionMutableByIndex(i);
         if (!F || !F->bAlive) {
             continue;
         }
@@ -1091,7 +1129,7 @@ void FMythicWorldSimThread::TickCrystallization() {
             float CombatMoralSum[MoralAxisCount] = {};
             float EconomyMoralSum[MoralAxisCount] = {};
 
-            for (const FMythicWorldEvent& Event : RecentEvents) {
+            for (const FMythicWorldEvent &Event : RecentEvents) {
                 if ((Event.CategoryFlags & EMythicEventCategory::Combat) != 0) {
                     ++CombatCount;
                     for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
@@ -1186,7 +1224,7 @@ void FMythicWorldSimThread::TickHistoryAppend() {
 
     // Scan factions for notable state changes that should become world events
     for (int32 i = 0; i < FactionCount; ++i) {
-        FMythicFactionData* F = FactionDB->GetFactionMutableByIndex(i);
+        FMythicFactionData *F = FactionDB->GetFactionMutableByIndex(i);
         if (!F || !F->bAlive) {
             continue;
         }
@@ -1194,27 +1232,39 @@ void FMythicWorldSimThread::TickHistoryAppend() {
         FMythicFactionId FId;
         FId.Index = static_cast<uint8>(i);
 
-        // ─── Economic distress event ─────────────────────────
-        // When a faction's food reserves go negative, emit a famine event
-        // so that NPCs in that faction's territory form "famine" beliefs
-        if (F->Reserves.GetResource(EMythicResourceType::Food) < -50.0f) {
+        // ─── Economic distress event (famine) ────────────────
+        // Edge-triggered: emit ONCE when the faction's food reserves go critically negative (re-arm on recovery), so
+        // the World Chronicle reports the famine as a single faction-distress beat instead of spamming it every tick.
+        // Tagged Faction.Famine (its own leaf — was mis-tagged Devolution) + Diplomacy so it passes the Chronicle mask.
+        const bool bFamineNow = F->Reserves.GetResource(EMythicResourceType::Food) < -50.0f;
+        if (bFamineNow && !F->bFamineActive) {
+            F->bFamineActive = true;
             FMythicWorldEvent FamineEvent;
-            FamineEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_DEVOLUTION;
+            FamineEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_FAMINE;
             FamineEvent.PrimaryFaction = FId;
             FamineEvent.Significance = 0.4f;
-            FamineEvent.CategoryFlags = EMythicEventCategory::Trade;
+            FamineEvent.CategoryFlags = EMythicEventCategory::Diplomacy;
             Fabric->AppendEvent(FamineEvent);
+        }
+        else if (!bFamineNow) {
+            F->bFamineActive = false; // recovered — re-arm for the next episode
         }
 
         // ─── Military weakness event ─────────────────────────
-        // When military strength drops critically, emit a vulnerability event
-        if (F->MilitaryStrength < 0.1f && F->Population > 10) {
+        // Edge-triggered like famine. Keeps Combat (so fight-personality NPCs still form a vulnerability belief via
+        // UpdateBeliefs) AND adds Diplomacy so the collapse reaches the chronicle. Tagged Faction.Weakness.
+        const bool bWeakNow = (F->MilitaryStrength < 0.1f && F->Population > 10);
+        if (bWeakNow && !F->bWeaknessActive) {
+            F->bWeaknessActive = true;
             FMythicWorldEvent WeaknessEvent;
-            WeaknessEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_DEVOLUTION;
+            WeaknessEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_WEAKNESS;
             WeaknessEvent.PrimaryFaction = FId;
             WeaknessEvent.Significance = 0.3f;
-            WeaknessEvent.CategoryFlags = EMythicEventCategory::Combat;
+            WeaknessEvent.CategoryFlags = EMythicEventCategory::Diplomacy | EMythicEventCategory::Combat;
             Fabric->AppendEvent(WeaknessEvent);
+        }
+        else if (!bWeakNow) {
+            F->bWeaknessActive = false;
         }
     }
 }

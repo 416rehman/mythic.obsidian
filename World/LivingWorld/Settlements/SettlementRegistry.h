@@ -12,7 +12,6 @@ class UMythicTerritoryGrid;
 class UMythicFactionDatabase;
 
 
-
 /**
  * Central registry for all active settlements in the world.
  *
@@ -94,6 +93,20 @@ public:
         UMythicCausalFabric *CausalFabric
         );
 
+    /**
+     * SIM THREAD: detect + apply territorial conquest. For each settlement, tally which faction dominates its
+     * RasterizedCells (via the territory grid). If a SINGLE faction other than the governing one controls more than
+     * ConquestThreshold of the cells, hand the settlement to that faction via TransferSettlement (which re-seeds the
+     * cells, updating faction cell counts + logging a Territory fabric event the World Chronicle surfaces).
+     * Consumes the emergent territory-influence state; produces no conquests without real territorial pressure.
+     */
+    void TickConquest(
+        UMythicTerritoryGrid *TerritoryGrid,
+        UMythicFactionDatabase *FactionDB,
+        UMythicCausalFabric *CausalFabric,
+        float ConquestThreshold
+        );
+
     // ─── Territory Seeding ───────────────────────────────
 
     /**
@@ -102,6 +115,17 @@ public:
      * Called once during initialization after all settlements are registered.
      */
     void SeedTerritoryFromSettlements(UMythicTerritoryGrid *TerritoryGrid, UMythicFactionDatabase *FactionDB);
+
+    // ─── Save / Load ─────────────────────────────────────
+    /**
+     * Serialize the registry's MUTABLE runtime state (currently the per-settlement GoverningFaction, mutated by
+     * territory conquest). Keyed by the STABLE CenterCell — the SettlementId is runtime-assigned at registration and
+     * is NOT stable across sessions. The static data (cells/name/shops layout) is re-established when settlement
+     * actors register; the saved governance is applied as an override on registration (order-independent), so it works
+     * whether settlements register before or after LoadLivingWorld. Territory + faction cell-counts are restored
+     * independently by TerritoryGrid::Serialize + FactionDatabase::Serialize, so no re-seed is needed here.
+     */
+    virtual void Serialize(FArchive &Ar) override;
 
 private:
     /** Map of settlement ID → settlement data */
@@ -118,6 +142,12 @@ private:
 
     /** Next settlement ID to assign */
     int32 NextSettlementId = 0;
+
+    /** Persisted GoverningFaction overrides from a load, keyed by the settlement's stable designer-set SettlementTag
+     *  (FName). NOT CenterCell — that field is never assigned (always (0,0)), which would collapse every settlement
+     *  onto one key. Consumed one-shot as settlements register (or patched in immediately for already-registered
+     *  ones), so a later re-registration after a post-load conquest can't revert to a stale saved value. */
+    TMap<FName, uint8> LoadedGoverningFactionOverrides;
 
     /** Rebuild the cell→settlement and faction→settlements indices from scratch */
     void RebuildIndices();

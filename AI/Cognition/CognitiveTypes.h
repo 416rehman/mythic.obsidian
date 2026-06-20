@@ -97,6 +97,11 @@ struct FMythicBelief {
     /** World time when this belief was formed */
     double FormationTime = 0.0;
 
+    /** World time of the last confidence-decay step. Decay multiplies by exp(-rate * (now - LastDecayTime)) so the
+     *  product over ticks telescopes to exp(-rate * totalAge) — without this, decaying by the FULL age every tick
+     *  compounds quadratically and beliefs evaporate far too fast. 0 = not yet decayed (seeded from FormationTime). */
+    double LastDecayTime = 0.0;
+
     /** How many hops this belief has propagated through (0 = witnessed directly) */
     uint8 PropagationHops = 0;
 

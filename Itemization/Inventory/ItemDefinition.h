@@ -70,6 +70,14 @@ public:
         return nullptr;
     }
 
+    /**
+     * Single source of truth for the rarity -> display color mapping (Common/Rare/Epic/Legendary/Mythic).
+     * Used by both the inventory-slot background tint (UItemSlotVM) and the loot-pickup callout. Do NOT
+     * duplicate the hex literals at call sites — call this helper.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Itemization")
+    static FLinearColor GetRarityColor(EItemRarity InRarity);
+
 #if WITH_EDITOR
     //~ Set Category - Auto-configure this item for a specific category
 

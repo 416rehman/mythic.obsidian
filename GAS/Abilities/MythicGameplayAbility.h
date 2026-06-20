@@ -73,6 +73,11 @@ public:
     UFUNCTION(BlueprintCallable, Category = "MythicAbility")
     virtual TArray<FActiveGameplayEffectHandle> ApplyDamageContainerSpec(const FMythicDamageContainerSpec &ContainerSpec);
 
+    /** Applies the designer-mapped debuff GE for each status flag set on PerTargetContext (skips null maps). */
+    TArray<FActiveGameplayEffectHandle> ApplyMappedStatusEffects(const FGameplayEffectContextHandle &PerTargetContext,
+                                                                 const FMythicStatusEffectMapping &Mapping,
+                                                                 const FGameplayAbilityTargetDataHandle &SingleTarget, float Level);
+
     /** Applies a gameplay effect container, by creating and applying the spec */
     UFUNCTION(BlueprintCallable, Category = "MythicAbility", meta = (AutoCreateRefTerm = "EventData"))
     virtual TArray<FActiveGameplayEffectHandle> ApplyDamageContainer(const FMythicDamageContainer &Container, const TArray<FHitResult> &HitResults,

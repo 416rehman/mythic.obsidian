@@ -55,43 +55,52 @@ public:
     /**
      * Register a permanent NPC death.
      * - Adds to dead set (prevents future promotion/resurrection)
-     * - Severs social graph edges (returns entities needing Grief pressure)
-     * - Vacates held role (triggers succession in SettlementRegistry)
-     * - Writes death event to Causal Fabric
+     * - Vacates held role (triggers succession in SettlementRegistry, via OwningLWS)
+     * - Writes a World.Event.Death.Permanent event to the Causal Fabric (via OwningLWS's thread-safe queue);
+     *   Grief pressure is raised from that event by the witnessing PressureProcessor, not here.
      *
      * @param NameHash    Unique identity of dead NPC
      * @param Faction     Faction at time of death
      * @param RoleTag     Role held (for succession)
      * @param Cell        Cell where death occurred
      * @param WorldTime   Time of death
-     * @param SocialGraph Social graph (for edge severing)
-     * @param Fabric      Causal fabric (for death event)
-     * @param OutGrievingEntities  Filled with entities connected to this NPC (need Grief pressure)
+     * @param OwningLWS   Death event + settlement succession route through its thread-safe / SimulationLock-guarded wrappers
      */
     void RegisterDeath(
         uint32 NameHash,
-        const FMythicFactionId& Faction,
-        const FGameplayTag& RoleTag,
-        const FMythicCellCoord& Cell,
+        const FMythicFactionId &Faction,
+        const FGameplayTag &RoleTag,
+        const FMythicCellCoord &Cell,
         double WorldTime,
-        UMythicSocialGraph* SocialGraph,
-        UMythicCausalFabric* Fabric,
-        class UMythicSettlementRegistry* SettlementRegistry,
-        TArray<int32>& OutGrievingEntities);
+        class UMythicLivingWorldSubsystem *OwningLWS);
 
     /** Check if a NameHash belongs to a permanently dead NPC */
     bool IsPermaDead(uint32 NameHash) const {
         return DeadNPCHashes.Contains(NameHash);
     }
 
+    /**
+     * Allocate the next never-reused global spawn serial, fed to FMythicNPCGenerator::GenerateNameHash in place of
+     * the old wave-local SpawnIdx (which restarted at 0 each refill wave, so two waves in the same faction+cell
+     * aliased one NameHash — R18-M7). The serial is monotonic AND persisted (see Serialize), so a refill wave or a
+     * reloaded session can never recreate a NameHash a still-living or permanently-dead NPC already holds. Mirrors
+     * the collision-free monotonic-id pattern AMythicEncounterDirector already uses (NextEncounterId). Game-thread
+     * only (the PopulationSpawnerProcessor sets bRequiresGameThreadExecution=true) — same contract as IsPermaDead.
+     */
+    int32 AllocateSpawnSerial() {
+        const int32 Serial = static_cast<int32>(NextSpawnSerial);
+        ++NextSpawnSerial;
+        return Serial;
+    }
+
     /** Get all death records (for UI/debug display) */
-    const TArray<FMythicPersistentDeathRecord>& GetDeathRecords() const { return DeathRecords; }
+    const TArray<FMythicPersistentDeathRecord> &GetDeathRecords() const { return DeathRecords; }
 
     /** Get count of permanent deaths */
     int32 GetDeathCount() const { return DeadNPCHashes.Num(); }
 
     /** Serialization for save/load */
-    void Serialize(FArchive& Ar);
+    virtual void Serialize(FArchive &Ar) override;
 
 private:
     /** Fast hash set for O(1) permadeath check */
@@ -99,4 +108,11 @@ private:
 
     /** Ordered death records (for chronological display and event queries) */
     TArray<FMythicPersistentDeathRecord> DeathRecords;
+
+    /**
+     * Next never-reused global spawn serial, fed to GenerateNameHash as the SpawnIndex. Monotonic-increasing;
+     * persisted across save/load (Serialize v2) so a reloaded session never regenerates a NameHash already issued
+     * (which could match the persisted DeadNPCHashes set and wrongly perma-dead a fresh NPC). Mirrors EncounterDirector's NextEncounterId.
+     */
+    uint32 NextSpawnSerial = 0;
 };

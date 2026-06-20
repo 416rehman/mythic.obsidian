@@ -65,6 +65,15 @@ void UMythicSaveGameSubsystem::SaveCharacter(AActor *SourceActor, const FString 
 
     const FString SafeSlotName = SanitizeSlotName(CharacterID);
 
+    // Don't start a second concurrent background write to the same slot file (torn-save race). The in-flight
+    // write completes; this redundant request is dropped (under the shared-slot model the data is last-writer
+    // anyway). Cleared in HandleAsyncSaveFinished.
+    if (InFlightSaveSlots.Contains(SafeSlotName)) {
+        UE_LOG(MythSaveLoad, Warning, TEXT("SaveCharacter: a save to slot '%s' is already in flight; skipping concurrent write."), *SafeSlotName);
+        OnSaveGameActionFinished.Broadcast(SafeSlotName, false);
+        return;
+    }
+
     // Notify start
     OnSaveGameActionStarted.Broadcast(SafeSlotName);
 
@@ -100,7 +109,8 @@ void UMythicSaveGameSubsystem::SaveCharacter(AActor *SourceActor, const FString 
     FAsyncSaveGameToSlotDelegate SavedDelegate;
     SavedDelegate.BindUObject(this, &UMythicSaveGameSubsystem::HandleAsyncSaveFinished);
 
-    // Start Async Save
+    // Start Async Save (mark the slot in-flight first so a concurrent request is gated above).
+    InFlightSaveSlots.Add(SafeSlotName);
     UGameplayStatics::AsyncSaveGameToSlot(SaveObj, SafeSlotName, 0, SavedDelegate);
 }
 
@@ -135,6 +145,7 @@ void UMythicSaveGameSubsystem::LoadCharacter(AActor *TargetActor, const FString 
 }
 
 void UMythicSaveGameSubsystem::HandleAsyncSaveFinished(const FString &SlotName, const int32 UserIndex, bool bSuccess) {
+    InFlightSaveSlots.Remove(SlotName); // slot's write completed; future saves to it may proceed
     UE_LOG(MythSaveLoad, Log, TEXT("Async Save Finished for %s: %s"), *SlotName, bSuccess ? TEXT("Success") : TEXT("Failed"));
     OnSaveGameActionFinished.Broadcast(SlotName, bSuccess);
 }
@@ -181,6 +192,16 @@ void UMythicSaveGameSubsystem::HandleAsyncLoadFinished(const FString &SlotName, 
 
     SaveObj->DataChecksum = StoredChecksum;
     SaveObj->FixupData();
+
+    // Reject (don't half-apply) a save newer than the current format or otherwise out of bounds. FixupData only
+    // migrates OLDER saves; without this the existing-but-uncalled ValidateCharacterData guard was dead code, so a
+    // forward-version save passed the byte-checksum and got blindly Deserialized.
+    FString ValidationError;
+    if (!ValidateCharacterData(SaveObj->CharacterData, ValidationError)) {
+        UE_LOG(MythSaveLoad, Error, TEXT("AsyncLoadFinished: Invalid character data for %s: %s"), *SlotName, *ValidationError);
+        OnSaveGameActionFinished.Broadcast(SlotName, false);
+        return;
+    }
 
     // Deserialize to Actor
     // This MUST happen on GameThread (which we are on in this callback)
@@ -259,6 +280,15 @@ void UMythicSaveGameSubsystem::SaveWorld(const FString &SlotName) {
     }
 
     const FString SafeSlotName = SanitizeSlotName(SlotName);
+
+    // Don't stack a second concurrent background write to the same slot (torn-save race). Cleared in
+    // HandleAsyncSaveFinished.
+    if (InFlightSaveSlots.Contains(SafeSlotName)) {
+        UE_LOG(MythSaveLoad, Warning, TEXT("SaveWorld: a save to slot '%s' is already in flight; skipping concurrent write."), *SafeSlotName);
+        OnSaveGameActionFinished.Broadcast(SafeSlotName, false);
+        return;
+    }
+
     OnSaveGameActionStarted.Broadcast(SafeSlotName);
 
     UWorld *World = GetWorld();
@@ -269,7 +299,6 @@ void UMythicSaveGameSubsystem::SaveWorld(const FString &SlotName) {
 
     // SERIALIZE ON GAME THREAD
     FSerializedWorldData WorldData;
-    WorldData.TimeOfDay = World->GetTimeSeconds();
 
     // GameState Resources
     if (AMythicGameState *GameState = World->GetGameState<AMythicGameState>()) {
@@ -282,7 +311,7 @@ void UMythicSaveGameSubsystem::SaveWorld(const FString &SlotName) {
     FSerializedWorldActorHelper::SerializeAll(World, WorldData.SavedActors);
 
     // Living World state → blob
-    if (UMythicLivingWorldSubsystem* LWS = GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+    if (UMythicLivingWorldSubsystem *LWS = GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>()) {
         FMemoryWriter LWWriter(WorldData.LivingWorldBlob);
         LWS->SaveLivingWorld(LWWriter);
     }
@@ -309,6 +338,8 @@ void UMythicSaveGameSubsystem::SaveWorld(const FString &SlotName) {
     FAsyncSaveGameToSlotDelegate SavedDelegate;
     SavedDelegate.BindUObject(this, &UMythicSaveGameSubsystem::HandleAsyncSaveFinished);
 
+    // Mark the slot in-flight first so a concurrent request is gated above.
+    InFlightSaveSlots.Add(SafeSlotName);
     UGameplayStatics::AsyncSaveGameToSlot(SaveObj, SafeSlotName, 0, SavedDelegate);
 }
 
@@ -381,7 +412,7 @@ void UMythicSaveGameSubsystem::HandleAsyncWorldLoadFinished(const FString &SlotN
 
         // Living World state ← blob
         if (Data.LivingWorldBlob.Num() > 0) {
-            if (UMythicLivingWorldSubsystem* LWS = GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+            if (UMythicLivingWorldSubsystem *LWS = GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>()) {
                 FMemoryReader LWReader(Data.LivingWorldBlob, true);
                 LWS->LoadLivingWorld(LWReader);
             }

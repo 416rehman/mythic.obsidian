@@ -74,6 +74,10 @@ void UMythicUIManagerSubsystem::AddWidgetInstanceToLayer(FGameplayTag LayerName,
         return;
     }
 
+    if (!Widget) {
+        UE_LOG(Myth, Warning, TEXT("AddWidgetInstanceToLayer: null Widget"));
+        return;
+    }
     Layer->AddWidgetInstance(*Widget);
 }
 
@@ -96,6 +100,10 @@ void UMythicUIManagerSubsystem::RemoveWidgetInstanceFromLayer(FGameplayTag Layer
         return;
     }
 
+    if (!Widget) {
+        UE_LOG(Myth, Warning, TEXT("RemoveWidgetInstanceFromLayer: null Widget"));
+        return;
+    }
     Layer->RemoveWidget(*Widget);
 }
 

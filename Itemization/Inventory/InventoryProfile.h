@@ -47,9 +47,13 @@ struct FInventorySlotGroup {
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Group")
     bool bIsEquipmentGroup = false;
 
-    // If true, items cannot be dropped, sold, or transferred out by the player
+    // If false, items cannot be dropped, sold, or transferred out by the player
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Group")
-    bool bProtectedItems = false;
+    bool bCanPlayerTake = true;
+
+    // If false, the player cannot manually insert items into these slots (e.g., output slots of a crafting bench).
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Group")
+    bool bCanPlayerPut = true;
 
     // When group is full and item needs to be added, expand by this many slots (0 = no auto-expand)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Group", meta = (ClampMin = "0"))

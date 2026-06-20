@@ -59,11 +59,20 @@ void FMythicDamageContainerSpec::AddTargets(const TArray<FHitResult> &HitResults
             }
         }
 
+        // Hand ownership to the handle (which wraps the raw ptr in a TSharedPtr) ONLY for a non-empty category, and
+        // delete the other allocation — otherwise the empty category's `new` leaks on every hit. This is the common
+        // case on the melee/AoE chokepoint: a swing hitting only non-destructibles leaves DestructibleActors empty.
         if (DestructibleActors->TargetActorArray.Num() > 0) {
             DestructibleTargetsHandle.Add(DestructibleActors);
         }
+        else {
+            delete DestructibleActors;
+        }
         if (Actors->TargetActorArray.Num() > 0) {
             TargetsHandle.Add(Actors);
+        }
+        else {
+            delete Actors;
         }
     }
 }

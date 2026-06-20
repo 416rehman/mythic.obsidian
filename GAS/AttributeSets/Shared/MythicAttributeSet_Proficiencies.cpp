@@ -243,6 +243,14 @@ int32 UMythicAttributeSet_Proficiencies::GetLevel(const UAbilitySystemComponent 
 
     auto MaxLevel = Settings->MaxLevel;
 
+    // Guard divide-by-zero: OverallXpMax is 0 until the first proficiency-Max GE initializes it (SetOverallXpMax in
+    // PostGameplayEffectExecute). Calling GetLevel before then — e.g. a loot drop at spawn (LootReward uses this level
+    // for the rarity curve) — would compute CurrentXp/0 → NaN/Inf → FloorToInt32 garbage level → garbage loot rarity.
+    // An un-progressed character (no max XP yet) is level 1.
+    if (MaxXp <= 0.0f) {
+        return 1;
+    }
+
     auto Level = FMath::FloorToInt32(FMath::Clamp((CurrentXp / MaxXp) * MaxLevel, 1.0f, MaxLevel));
     return Level;
 }

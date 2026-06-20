@@ -223,8 +223,11 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnCachedNPC(FGuid NPCId, FVector Spaw
 }
 
 bool UMythicNPCManager::GetCachedNPCData(const FGuid NPCId, FMythicNPCData &NPCData) {
-    auto CachedData = CachedNPCs.FindRef(NPCId);
-    return CachedData.NPCData.NPCId == NPCId;
+    // Write the out-param before returning (was previously never assigned, so callers always got a default
+    // struct regardless of the bool). Mirrors GetCachedFamily below. FindRef returns a default entry on a miss,
+    // whose NPCId won't equal a valid NPCId, so the comparison still reports false correctly.
+    NPCData = CachedNPCs.FindRef(NPCId).NPCData;
+    return NPCData.NPCId == NPCId;
 }
 
 bool UMythicNPCManager::GetCachedFamily(FGuid FamilyId, FFamilySpec &FamilySpec) {

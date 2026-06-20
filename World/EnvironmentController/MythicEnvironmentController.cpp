@@ -1,4 +1,4 @@
-﻿// 
+// 
 
 
 #include "MythicEnvironmentController.h"
@@ -131,7 +131,10 @@ void AMythicEnvironmentController::BeginPlay() {
 }
 
 float AMythicEnvironmentController::GetSunPositionForCurrentTime() const {
-    auto todaysSeconds = static_cast<int>(this->Time.GetTotalMilliseconds()) % 86400000;
+    // Modulo in double BEFORE narrowing: GetTotalMilliseconds() accumulates ALL elapsed game time, so casting the full
+    // value to int32 overflowed after ~24.85 game-days (the sun yaw then froze and the day/night cycle stuck on any
+    // long-lived save). Fmod keeps it in the 0..86,399,999 range; the float cast avoids a narrowing warning.
+    const float todaysSeconds = static_cast<float>(FMath::Fmod(this->Time.GetTotalMilliseconds(), 86400000.0));
 
     UE::Math::TVector2<float> timeRange(0, 86400000);
     UE::Math::TVector2<float> sunRange(0 + 90, 359.9 + 90);
@@ -234,7 +237,18 @@ void AMythicEnvironmentController::SetTime(const FDateTime &DateTime) {
     auto NewHour = DateTime.GetHour();
     auto NewMinute = DateTime.GetMinute();
     auto NewSeconds = DateTime.GetSecond();
-    auto NewDays = DateTime.GetDayOfYear() * DateTime.GetYear();
+    // Reconstruct the LINEAR game-day count that AsDateTime() maps FROM — it is the exact inverse of the calendar
+    // helpers (GetYear = Days/360+1, GetMonthOfYear = Days%360/30 with raw 0 SHOWN as 12, GetDayOfMonth = Days%30 with
+    // raw 0 SHOWN as 30). The old `GetDayOfYear() * GetYear()` was dimensionally meaningless and corrupted the date (a
+    // no-op SetTime jumped the world hundreds of days and fired spurious calendar delegates). Un-remap the 12/30 display
+    // values back to raw 0 before summing. (A day clamped by AsDateTime for a short real month is inherently lossy — a
+    // pre-existing property of the FDateTime round-trip — but the linear reconstruction is otherwise exact.)
+    const int32 TargetYear = DateTime.GetYear();
+    const int32 ShownMonth = DateTime.GetMonth(); // 1..12 (12 == raw month 0)
+    const int32 ShownDay = DateTime.GetDay(); // 1..30 (30 == raw day 0)
+    const int32 RawMonth = (ShownMonth == 12) ? 0 : ShownMonth;
+    const int32 RawDay = (ShownDay == 30) ? 0 : ShownDay;
+    const int32 NewDays = (TargetYear - 1) * 360 + RawMonth * 30 + RawDay;
 
     auto NewTime = FTimespan(NewDays, NewHour, NewMinute, NewSeconds);
 
@@ -357,9 +371,9 @@ void AMythicEnvironmentController::TimeTick() {
     const auto PreviousHour = PreviousTime.GetHours();
 
     switch (HourAsDayTime(PreviousHour)) {
-    case EDayTime::Morning:
-    case EDayTime::Afternoon:
-    case EDayTime::Evening:
+    case Morning:
+    case Afternoon:
+    case Evening:
         this->Time += FTimespan::FromSeconds(21600 / (this->DayLength / this->TimeUpdateFrequency));
         break;
     default:
@@ -455,9 +469,12 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
         FogComponent->SetFogHeightFalloff(LerpFogHeightFalloff);
     }
 
-    // If the transition is complete, set the current weather to the target weather
+    // If the transition is complete, finalize the weather. AUTHORITY-ONLY: CurrentWeather + WeatherTransition are
+    // server-replicated authoritative state; clients must NOT author them or they double-fire WeatherChangeDelegate
+    // (once here, then again from OnRep_CurrentWeather). Clients keep lerping visuals above and converge via OnRep — the
+    // lerp clamps to the target at progress>=1, and OnRep_WeatherTransition clears the transition to stop the tick loop.
     UWeatherType *TargetWeather = this->WeatherTransition.TransitionToWeather.Get();
-    if (TransitionProgress >= 1.0f || TargetWeather == this->CurrentWeather || Time < TransitionStartedAt) {
+    if (GetLocalRole() == ROLE_Authority && (TransitionProgress >= 1.0f || TargetWeather == this->CurrentWeather || Time < TransitionStartedAt)) {
         auto NewWeatherTag = TargetWeather ? TargetWeather->Tag : FGameplayTag();
         auto OldWeatherTag = this->CurrentWeather ? this->CurrentWeather->Tag : FGameplayTag();
 
@@ -470,8 +487,8 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
             this->TargetWeatherReachedDelegate.Broadcast(this->CurrentWeather->Tag);
         }
 
-        // Broadcast the weather change event
-        this->WeatherChangeDelegate.Broadcast(NewWeatherTag, OldWeatherTag);
+        // Broadcast the weather change event. Declared order is (PreviousWeather, NewWeather) — pass Old then New.
+        this->WeatherChangeDelegate.Broadcast(OldWeatherTag, NewWeatherTag);
         UE_LOG(Myth_Environment, Warning, TEXT("EnvironmentController: Transition complete. New weather: %s"), *this->CurrentWeather->GetName());
     }
 }
@@ -505,7 +522,8 @@ void AMythicEnvironmentController::OnRep_CurrentWeather(UWeatherType *PreviousWe
     // Broadcast change
     FGameplayTag OldTag = PreviousWeather ? PreviousWeather->Tag : FGameplayTag::EmptyTag;
     FGameplayTag NewTag = CurrentWeather ? CurrentWeather->Tag : FGameplayTag::EmptyTag;
-    this->WeatherChangeDelegate.Broadcast(NewTag, OldTag);
+    // Declared order is (PreviousWeather, NewWeather) — pass Old then New (was reversed).
+    this->WeatherChangeDelegate.Broadcast(OldTag, NewTag);
 }
 
 // Apply authoritative visuals from the WeatherTransition struct (which holds server-synced instance values)
@@ -556,6 +574,14 @@ void AMythicEnvironmentController::OnRep_WeatherTransition() {
                                        UE_LOG(Myth_Environment, Log, TEXT("OnRep_WeatherTransition: Transition to %s"),
                                               TargetWeather ? *TargetWeather->GetName() : TEXT("None"));
 
+                                       // A null target means the server CLEARED the transition on completion (set
+                                       // TransitionToWeather=nullptr), NOT that a new transition began. Running the
+                                       // start-transition setup — and especially firing the "transition started"
+                                       // delegate with an empty ToTag — would be a spurious client event. Bail.
+                                       if (!TargetWeather) {
+                                           return;
+                                       }
+
                                        // Cache "From" values to interpolate from current visual state
                                        TransitionFromScalarValues.Empty();
                                        TransitionFromVectorValues.Empty();
@@ -588,7 +614,9 @@ void AMythicEnvironmentController::OnRep_WeatherTransition() {
                                        // Trigger delegate
                                        FGameplayTag FromTag = CurrentWeather ? CurrentWeather->Tag : FGameplayTag::EmptyTag;
                                        FGameplayTag ToTag = TargetWeather ? TargetWeather->Tag : FGameplayTag::EmptyTag;
-                                       this->WeatherTransitionDelegate.Broadcast(ToTag, FromTag, WeatherTransition.TransitionLength);
+                                       // Declared signature is (FromWeather, ToWeather, TransitionLength) — pass From then
+                                       // To. These were swapped, so every client saw the from/to weathers reversed.
+                                       this->WeatherTransitionDelegate.Broadcast(FromTag, ToTag, WeatherTransition.TransitionLength);
                                    });
 }
 
@@ -667,6 +695,12 @@ void AMythicEnvironmentController::ResumeWeather() const {
     checkf(GetLocalRole() == ROLE_Authority, TEXT("Only the server can resume the weather"));
 
     GetWorld()->GetTimerManager().UnPauseTimer(this->WeatherTimerHandle);
+}
+
+bool AMythicEnvironmentController::IsWeatherPaused() const {
+    // FTimerHandle::IsValid() is true whenever a timer was ever registered (running OR paused), so the old inline
+    // version wrongly reported "paused" during normal weather cycling. Query the timer's real paused state instead.
+    return GetWorld()->GetTimerManager().IsTimerPaused(this->WeatherTimerHandle);
 }
 
 void AMythicEnvironmentController::SetWindTargetPosition(const FLinearColor &TargetPosition) {

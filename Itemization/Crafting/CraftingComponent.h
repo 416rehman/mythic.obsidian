@@ -54,7 +54,12 @@ public:
 
     void RemoveItems(const TArrayView<int32> Indices) {
         PreReplicatedRemove(Indices, Items.Num() - Indices.Num());
-        for (int32 Index : Indices) {
+        // Remove in DESCENDING index order: RemoveAt shifts later elements down, so removing ascending indices in-order
+        // deletes the WRONG entries once 2+ are given (mirrors the fix in ResourceManager::RemoveItems / R18-H2). All
+        // current callers pass a single index, but the TArrayView batch contract must be correct for any future caller.
+        TArray<int32> Sorted(Indices.GetData(), Indices.Num());
+        Sorted.Sort([](int32 A, int32 B) { return A > B; });
+        for (int32 Index : Sorted) {
             if (Items.IsValidIndex(Index)) {
                 Items.RemoveAt(Index);
             }

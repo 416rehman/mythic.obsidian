@@ -19,6 +19,14 @@ struct MYTHIC_API FMythicCreatureTag : public FMassTag {
     GENERATED_BODY()
 };
 
+/** Marks an entity spawned + owned by the EncounterDirector (a raid/ambush member). Excludes it from the ambient
+ *  PopulationSpawnerProcessor (both its density count and its far-from-player despawn) so the EncounterDirector is the
+ *  SOLE lifecycle authority for its entities — otherwise the population despawner silently destroys live encounters. */
+USTRUCT()
+struct MYTHIC_API FMythicEncounterEntityTag : public FMassTag {
+    GENERATED_BODY()
+};
+
 /** Marks that this entity has been hydrated with Tier 1+ fragments (Psychodynamic, Personality, Social) */
 USTRUCT()
 struct MYTHIC_API FMythicHydratedTag : public FMassTag {
@@ -34,5 +42,11 @@ struct MYTHIC_API FMythicCognitiveTag : public FMassTag {
 /** Marks an entity that requested an actor spawn */
 USTRUCT()
 struct MYTHIC_API FMythicActorSpawnRequestTag : public FMassTag {
+    GENERATED_BODY()
+};
+
+/** Marks an embodied entity that requested its cognitive actor be despawned (de-promotion / dehydration) */
+USTRUCT()
+struct MYTHIC_API FMythicActorDespawnRequestTag : public FMassTag {
     GENERATED_BODY()
 };

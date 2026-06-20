@@ -3,6 +3,11 @@
 #include "GAS/MythicGameplayEffectContext.h"
 #include "GAS/MythicTags_GAS.h"
 #include "Net/UnrealNetwork.h"
+#include "Itemization/InventoryProviderInterface.h"
+#include "Itemization/Inventory/MythicInventoryComponent.h"
+#include "Itemization/Inventory/MythicItemInstance.h"
+#include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
+#include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h"
 
 UMythicAttributeSet_Life::UMythicAttributeSet_Life()
     : MaxHealth(100.0f)
@@ -107,12 +112,60 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
         // Broadcast health change with the DAMAGE magnitude (for UI/cues)
         if (DamageDone > 0.0f) {
             // OnHealthChanged.Broadcast(Instigator, Causer, &Data.EffectSpec, -DamageDone, HealthBeforeAttributeChange, GetHealth());
-            SendEventToInstigator(Data, Instigator, InstigatorASC, ASC, GAS_EVENT_DMG_DELIVERED, DamageDone);
+
+            // DMG_DELIVERED credits a DISCRETE external hit (consumed by lifesteal). Skip it for periodic damage (a
+            // single applied DoT would otherwise re-fire every tick → heal the attacker off a FLAT LifePerHit per tick)
+            // and for self/environmental damage (Instigator == victim would heal the victim off its own damage). The
+            // victim genuinely RECEIVED the damage either way, so DMG_RECEIVED is NOT gated (stagger/UI still want it).
+            const bool bDirectExternalHit =
+                (Data.EffectSpec.GetPeriod() <= 0.0f) && Instigator && (Instigator != ASC->GetOwnerActor());
+            if (bDirectExternalHit) {
+                SendEventToInstigator(Data, Instigator, InstigatorASC, ASC, GAS_EVENT_DMG_DELIVERED, DamageDone);
+            }
             SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DMG_RECEIVED, DamageDone);
 
-            // Check for death
-            if (bOutOfHealth) {
+            // Equipment durability: wear the victim's equipped armor on a landed hit (1 per piece). Reuses the
+            // same UDurabilityFragment::ServerApplyWear as weapons (single source of wear). Player victims only -
+            // the ASC owner (PlayerState) provides inventory via IInventoryProviderInterface; NPCs have no
+            // inventory so this no-ops for them (NPC armor wear deferred, see BACKLOG).
+            if (ASC && ASC->IsOwnerActorAuthoritative()) {
+                if (AActor *OwnerActor = ASC->GetOwnerActor()) {
+                    if (IInventoryProviderInterface *Provider = Cast<IInventoryProviderInterface>(OwnerActor)) {
+                        for (UMythicInventoryComponent *Inv : Provider->GetAllInventoryComponents()) {
+                            if (!Inv) {
+                                continue;
+                            }
+                            for (const FMythicInventorySlotEntry &Slot : Inv->GetAllSlots()) {
+                                if (!Slot.bEquipmentSlot || !Slot.SlottedItemInstance) {
+                                    continue;
+                                }
+                                // Only worn gear (armor) wears from TAKING a hit. Weapons/tools expose an
+                                // AttackFragment and wear from being USED (the attack path), so skip them here -
+                                // otherwise a weapon would degrade from its owner being attacked.
+                                if (Slot.SlottedItemInstance->GetFragment<UAttackFragment>()) {
+                                    continue;
+                                }
+                                if (const UDurabilityFragment *Dur = Slot.SlottedItemInstance->GetFragment<UDurabilityFragment>()) {
+                                    const_cast<UDurabilityFragment *>(Dur)->ServerApplyWear(1);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check for death (server-authoritative; PostGameplayEffectExecute is authority-only, guard defensively)
+            if (bOutOfHealth && ASC && ASC->IsOwnerActorAuthoritative()) {
                 SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DEATH, DamageDone);
+
+                // Credit the KILL to an EXTERNAL killer. A kill is a DISCRETE event (fires once, on the lethal blow),
+                // so — unlike per-hit lifesteal — fire it even when the lethal blow was a periodic/DoT tick (it credits
+                // the DoT's original instigator). Self/environmental deaths (no instigator, or instigator == victim)
+                // credit no one. Reusable kill primitive: lifesteal-on-kill consumes it now; XP/bounties/kill-streaks
+                // can bind GAS_EVENT_KILL the same way.
+                if (Instigator && Instigator != ASC->GetOwnerActor()) {
+                    SendEventToInstigator(Data, Instigator, InstigatorASC, ASC, GAS_EVENT_KILL, DamageDone);
+                }
             }
         }
     }
@@ -139,6 +192,11 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
 
         if (GetHealth() <= 0.0f && !bOutOfHealth) {
             bOutOfHealth = true;
+            // Direct lethal Health changes (environmental / scripted kills) must trigger death like the Damage path
+            // does, otherwise such kills are silent (no respawn / loot / XP).
+            if (ASC && ASC->IsOwnerActorAuthoritative()) {
+                SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DEATH, FMath::Max(0.0f, HealthBeforeAttributeChange - GetHealth()));
+            }
         }
         else if (bOutOfHealth && GetHealth() > 0.0f) {
             bOutOfHealth = false;
@@ -154,6 +212,19 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
     }
 }
 
+
+void UMythicAttributeSet_Life::ResetForRespawn() {
+    SetHealth(GetMaxHealth());
+    bOutOfHealth = false;
+    // Clear the death latch's replicated tags too, so a reused pawn / persistent player ASC isn't stuck dead
+    // and clients drop their death cosmetics. Replicated tag counts are authority-only.
+    if (UAbilitySystemComponent *ASC = GetOwningAbilitySystemComponent()) {
+        if (ASC->IsOwnerActorAuthoritative()) {
+            ASC->SetLooseGameplayTagCount(GAS_STATE_DYING, 0);
+            ASC->SetLooseGameplayTagCount(GAS_STATE_DEAD, 0);
+        }
+    }
+}
 
 void UMythicAttributeSet_Life::ClampAttributes(const FGameplayAttribute &Attribute, float &NewValue) {
     if (Attribute == GetHealthAttribute()) {

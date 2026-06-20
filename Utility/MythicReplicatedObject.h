@@ -13,7 +13,9 @@ class MYTHIC_API UMythicReplicatedObject : public UObject {
     AActor *OwningActor;
 
     // The component in the OwningActor through which this object is being replicated. Can be null.
-    UPROPERTY(Replicated)
+    // Server-only bookkeeping (UpdateComponentOwnership) — it was NOT registered in GetLifetimeReplicatedProps, so the
+    // `Replicated` specifier was inert (silently never replicated) and tripped an engine validation warning. Dropped it.
+    UPROPERTY()
     UActorComponent *OwningComponent;
 
 public:
