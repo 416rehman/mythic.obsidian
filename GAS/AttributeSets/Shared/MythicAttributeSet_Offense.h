@@ -132,6 +132,14 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, IncreasedDamageToEnemiesUnderStatusEffects);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies);
 
+    // Clamp probability attributes to [0,1] (mirrors the Defense set's deliberate probability clamping). Multipliers
+    // (CriticalHitDamage, weapon/skill/status damage bonuses) are intentionally NOT clamped — they legitimately exceed 1.
+    virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
+
+    // True for the chance/probability attributes (CriticalHitChance + the 8 ApplyXxxOnHitChance) — the ones that must
+    // stay in [0,1]. Pure + static so the membership decision is unit-testable. Used by PreAttributeChange.
+    static bool IsProbabilityAttribute(const FGameplayAttribute &Attribute);
+
     UFUNCTION()
     virtual void OnRep_Power(const FGameplayAttributeData &OldPower);
     UFUNCTION()

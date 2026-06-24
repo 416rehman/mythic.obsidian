@@ -69,12 +69,33 @@ public:
 
     /**
      * Ticked by WorldSimThread to handle shop succession timers.
-     * Scans vacated shops; if VacatedTime > threshold, creates a new NPC
-     * template and assigns them to the shop.
+     * Scans vacated shops; once a slot's VacatedTime has aged past SuccessionDelay, clears VacatedTime to mark the slot
+     * READY for a new owner. It does NOT itself assign an owner — a role-bearing NPC claims the ready slot via
+     * ClaimVacantShop (the producer half). (Was documented as "creates a new NPC and assigns them" — it never did that.)
      * @param CurrentWorldTime  Current game time
      * @param SuccessionDelay   How long before a shop is replaced
      */
     void TickShopSuccession(double CurrentWorldTime, double SuccessionDelay);
+
+    /**
+     * PRODUCER half of the shop-ownership lifecycle: assign an NPC as the owner of a claimable shop slot in a
+     * settlement whose RequiredRole the NPC satisfies. A slot is claimable when it has no owner (OwnerEntityId == 0),
+     * is NOT player-owned, and is NOT mid-succession (VacatedTime == 0 — either never owned, or its succession delay
+     * already elapsed via TickShopSuccession). Without this, OwnerEntityId is never set non-zero anywhere, so shops are
+     * never owned → never vacate (HandleNPCDeath can't match) → never succeed; the whole lifecycle is inert.
+     * Intended caller: the population spawner, when a merchant-role NPC spawns into a settlement cell.
+     * @return index of the claimed slot in the settlement's Shops, or INDEX_NONE if none matched.
+     * @note Mutates registry shop state — call on the SAME thread / under the same external lock as
+     *       HandleNPCDeath + TickShopSuccession (the other shop mutators), never concurrently with them.
+     */
+    int32 ClaimVacantShop(int32 SettlementId, int32 ClaimantEntityId, const FGameplayTag &ClaimantRole);
+
+    /**
+     * True iff a shop slot can be claimed by an NPC with the given role: unowned, not player-owned, not mid-succession,
+     * with a valid RequiredRole the claimant's role satisfies (exact tag or a more-specific child). Pure + static so the
+     * claim-eligibility rule is unit-testable without a live registry. Used by ClaimVacantShop.
+     */
+    static bool CanClaimShop(const FMythicShopSlot &Shop, const FGameplayTag &ClaimantRole);
 
     // ─── Settlement Transfer ─────────────────────────────
 

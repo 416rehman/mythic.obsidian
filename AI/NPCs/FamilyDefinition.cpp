@@ -6,6 +6,7 @@
 #include "Mythic.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/PackageName.h"
 #include "UObject/ObjectSaveContext.h"
 #include "UObject/SavePackage.h"
 

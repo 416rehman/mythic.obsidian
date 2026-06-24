@@ -148,6 +148,23 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     FVector2D FogHeightFalloff = FVector2D(0.2, 0.2);
 
+    // If true, a (server-authoritative) transition TO this weather posts a player-facing World Chronicle beat via the
+    // living-world event queue. Default off so only designer-chosen significant weather (storms, blizzards, …) makes
+    // news — not every drizzle. This is the data-driven answer to "is this weather newsworthy" (no fabricated taxonomy).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "World News")
+    bool bGeneratesWorldNews = false;
+
+    // Significance stamped on that chronicle event. Must be >= the World Chronicle's MinSignificance (default 0.5) for
+    // the beat to actually surface; higher ranks it above other macro news. Only used when bGeneratesWorldNews is set.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "World News", meta = (UIMin = "0.0"))
+    float WorldNewsSignificance = 0.5f;
+
+    // If true, while this weather is active NPC crime-witness perception (hearing range) is reduced by the living-world
+    // WeatherPerceptionMultiplier — storms/fog/blizzards let crimes go less noticed (stacks with the night penalty).
+    // Default false = no effect (clear/fair weather). Designer-authored per weather; the magnitude is the shared setting.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Perception")
+    bool bImpairsPerception = false;
+
     // Check if this weather type can transition to the target weather
     bool CanTransitionTo(const UWeatherType &TargetWeather) const {
         // If we have a Post-Weather, we can only transition to the target weather if the target weather is the Post-Weather

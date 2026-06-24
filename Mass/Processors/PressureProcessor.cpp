@@ -35,6 +35,14 @@ void UMythicPressureProcessor::ConfigureQueries(const TSharedRef<FMassEntityMana
     HydratedEntityQuery.AddTagRequirement<FMythicHydratedTag>(EMassFragmentPresence::All);
 }
 
+bool UMythicPressureProcessor::ComputeDespairState(float TotalPressure, float DespairThreshold, bool bWasDespaired) {
+    constexpr float RecoveryFraction = 0.75f; // lift despair only after pressure drops to 75% of the trigger (hysteresis)
+    if (!bWasDespaired) {
+        return TotalPressure >= DespairThreshold; // enter despair
+    }
+    return TotalPressure >= DespairThreshold * RecoveryFraction; // stay despaired until well below the trigger
+}
+
 void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassExecutionContext &Context) {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicPressure_Execute);
 
@@ -211,10 +219,18 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
             for (int32 c = 0; c < PressureChannelCount; ++c) {
                 TotalPressure += Psycho.Pressure[c];
             }
-            if (TotalPressure >= DespairThreshold && !Psycho.bDespaired) {
-                Psycho.bDespaired = true;
-                UE_LOG(LogMythLivingWorld, Log, TEXT("Despair: Entity in cell %s reached despair (total=%.2f, threshold=%.2f)"),
-                       *Identity.Cell.ToString(), TotalPressure, DespairThreshold);
+            // Despair is RECOVERABLE (was previously set-once-never-reset → permanent). Recompute each pressure tick; it
+            // lifts once pressure falls back through the hysteresis band. NOTE: only updates when the entity has witness
+            // results this tick (the processor is event-driven), so decay-only recovery lags until the entity is next
+            // processed — acceptable, and far better than never recovering. (bDespaired's consumer — faction-collapse
+            // spirals per the fragment doc — is still unbuilt/design-gated; this makes the state correct for it.)
+            const bool bNowDespaired = ComputeDespairState(TotalPressure, DespairThreshold, Psycho.bDespaired);
+            if (bNowDespaired != Psycho.bDespaired) {
+                Psycho.bDespaired = bNowDespaired;
+                UE_LOG(LogMythLivingWorld, Log, TEXT("Despair: Entity in cell %s %s (total=%.2f, threshold=%.2f)"),
+                       *Identity.Cell.ToString(),
+                       bNowDespaired ? TEXT("reached despair") : TEXT("recovered from despair"),
+                       TotalPressure, DespairThreshold);
             }
 
             // ─── Vent Check ───

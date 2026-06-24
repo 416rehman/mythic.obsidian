@@ -34,6 +34,17 @@ class MYTHIC_API UMythicPopulationSpawnerProcessor : public UMassProcessor {
 public:
     UMythicPopulationSpawnerProcessor();
 
+    /**
+     * Compute the target NPC count for a settlement cell, scaled by the governing faction's "health".
+     * TargetDensity = Min(SettlementMaxDensity, SystemMaxPerCell) × clamp(FactionPopulation / FactionCapacity, 0, 1),
+     * rounded up; 0 when the faction has no capacity. Pure + static so the world-population-density rule is unit-testable.
+     * @param SettlementMaxDensity Designer-set max density for the settlement
+     * @param SystemMaxPerCell     Global system cap
+     * @param FactionPopulation    Current simulated population of the governing faction
+     * @param FactionCapacity      Max capacity (ControlledCellCount × PopulationPerCell)
+     */
+    static int32 ComputeTargetDensity(int32 SettlementMaxDensity, int32 SystemMaxPerCell, int32 FactionPopulation, int32 FactionCapacity);
+
 protected:
     virtual void ConfigureQueries(const TSharedRef<FMassEntityManager> &EntityManager) override;
     virtual void Execute(FMassEntityManager &EntityManager, FMassExecutionContext &Context) override;
@@ -44,19 +55,4 @@ private:
 
     /** Timer accumulator — processor runs at configured interval, not every frame */
     float TimeSinceLastTick = 0.0f;
-
-    /**
-     * Compute the target NPC count for a settlement cell based on faction health.
-     * @param SettlementMaxDensity The designer-set max density for the settlement
-     * @param SystemMaxPerCell The global system cap
-     * @param FactionPopulation Current simulated population of the governing faction
-     * @param FactionCapacity Max population capacity (ControlledCellCount × PopulationPerCell)
-     * @return Target entity count for this cell
-     */
-    int32 ComputeTargetDensity(
-        int32 SettlementMaxDensity,
-        int32 SystemMaxPerCell,
-        int32 FactionPopulation,
-        int32 FactionCapacity
-        ) const;
 };

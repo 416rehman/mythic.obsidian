@@ -8,6 +8,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "AI/Cognition/CognitiveBrainComponent.h" // ResolveActorFaction reads the NPC faction from the brain
+#include "Engine/GameInstance.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMythActionEvent, Log, All);
 

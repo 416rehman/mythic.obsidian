@@ -6,7 +6,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "MassEntityHandle.h"
+#include "Mass/EntityHandle.h"
 #include "Mass/Fragments/MythicMassFragments.h"
 #include "AI/Cognition/CognitiveTypes.h"
 #include "Tasks/Task.h"
@@ -44,14 +44,40 @@ public:
     /**
      * Resolves the best dialogue template for the NPC's current state.
      * Integrates faction, role, active intention, and emotional pressure.
+     * bCompanionCommentary=true selects the COMMENTARY template family (a companion remarking on the player's moral
+     * action), gated by PlayerActionMoralScore vs each template's CommentaryMoralThreshold; in that mode a no-match
+     * returns EMPTY (caller skips the bark). Defaults reproduce the normal player-initiated bark exactly.
      */
     UFUNCTION(BlueprintCallable, Category = "Living World|Dialogue")
-    FText SelectDialogue(AActor *InteractingPlayer = nullptr) const;
+    FText SelectDialogue(AActor *InteractingPlayer = nullptr, bool bCompanionCommentary = false, float PlayerActionMoralScore = 0.0f) const;
 
     //~ Begin UActorComponent Interface
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     //~ End UActorComponent Interface
+
+    // ─── Desire arbitration tuning ────────────────────────
+
+    /** Ceiling for ROUTINE (non-acute) desire utilities. Routine desires (Patrol/Trade/Socialize/Exploit/Rally/Report)
+     *  must NOT outscore the daily-schedule anchors (FollowSchedule=0.7, Rest=0.8) — only ACUTE threat desires
+     *  (Survive/Flee/Defend/Avenge) are intentionally unbounded. Without this cap an unbounded routine scorer (a
+     *  high-Injustice NPC's Rally/Report) wins arbitration and steers the NPC off its routine into a desire the
+     *  controller has no movement for, so it idles in place. */
+    static constexpr float RoutineDesireCeiling = 0.65f;
+
+    /** Pure utility for the simple "Weight × Pressure × Multiplier, capped at RoutineDesireCeiling, floored at 0"
+     *  routine scorers (Rally, Report). Static + pure so the cap is unit-testable without a live brain. */
+    static float ScoreRoutineDesire(float Weight, float Pressure, float Multiplier);
+
+    /** Pure per-step belief-confidence decay: Confidence × exp(-DecayRate × max(0, DeltaSeconds)). Applied over the
+     *  delta since a belief's last decay so the product telescopes to exp(-rate × totalAge) (decaying in N steps equals
+     *  one step over the summed time) — that property is the bug fix this guards. Static + pure so it is unit-testable. */
+    static float DecayBeliefConfidence(float Confidence, float DecayRate, double DeltaSeconds);
+
+    /** Intention-commit hysteresis: a new (highest-utility) desire replaces the current intention only if it beats it
+     *  by at least Hysteresis — without this margin an NPC flickers between two near-tied desires every think. Static +
+     *  pure so the threshold logic is unit-testable; the margin is data-driven (LivingWorldSettings::DesireHysteresis). */
+    static bool ShouldOverrideIntention(float BestUtility, float CurrentUtility, float Hysteresis);
 
     // ─── Configuration ────────────────────────────────────
 

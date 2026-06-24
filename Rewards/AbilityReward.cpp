@@ -6,6 +6,7 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
 #include "Mythic.h"
+#include "GameFramework/PlayerController.h"
 
 bool UAbilityReward::Give(FRewardContext &Context) const {
     // Check if the context is an ability system component
@@ -48,4 +49,11 @@ bool UAbilityReward::Give(FRewardContext &Context) const {
     }
 
     return true;
+}
+
+FText UAbilityReward::GetPreviewText() const {
+    if (!Ability) {
+        return FText::GetEmpty();
+    }
+    return FText::FromString(FString::Printf(TEXT("Ability: %s"), *Ability->GetName()));
 }

@@ -1,5 +1,7 @@
 #include "MythicGameplayEffectContext.h"
 
+#include "Engine/HitResult.h"
+
 #if UE_WITH_IRIS
 #include "Iris/ReplicationState/PropertyNetSerializerInfoRegistry.h"
 #include "Serialization/GameplayEffectContextNetSerializer.h"

@@ -7,6 +7,8 @@
 #include "GameplayTagContainer.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include <atomic>
+
+#include "Engine/DataAsset.h"
 #include "FactionDatabase.generated.h"
 
 // ─────────────────────────────────────────────────────────────
@@ -403,6 +405,25 @@ struct MYTHIC_API FMythicFactionData {
 };
 
 // ─────────────────────────────────────────────────────────────
+// Faction Moral Profile — lightweight read DTO (ideology + thresholds)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Just the fields needed to evaluate an action's severity against a faction
+ * (FMythicMoralSignature::EvaluateActionSeverity). Returned by UMythicFactionDatabase::GetFactionMoralProfile so the hot
+ * witness-perception path copies ~44 bytes under the snapshot lock instead of the entire FMythicFactionData (FText
+ * DisplayName + four resource stocks + population/territory state). All faction-DB readers serialize on one mutex, so a
+ * smaller per-read copy directly shortens the serialized critical path during a witness storm. Plain C++ (no USTRUCT) —
+ * it is a transient game-thread read bundle, never serialized or exposed to Blueprint.
+ */
+struct FMythicFactionMoralProfile {
+    FMythicIdeologyProfile Ideology;
+    float DisapproveThreshold = 0.2f;
+    float CondemnThreshold = 0.5f;
+    float HostileThreshold = 0.8f;
+};
+
+// ─────────────────────────────────────────────────────────────
 // Faction Database Settings — Data asset
 // ─────────────────────────────────────────────────────────────
 
@@ -465,6 +486,13 @@ public:
     /** Mark a faction as annihilated */
     void AnnihilateFaction(FMythicFactionId Id);
 
+    /**
+     * Restore a standing Resistance faction to a full, Active faction (REQ-FAC-004) — the symmetric counterpart to the
+     * population-gated CreateFactionFromConquest formation path. No-op if the faction isn't currently a Resistance. The
+     * caller gates WHEN this happens (territory retaken — see WorldSimThread); this just performs the status transition.
+     */
+    void RestoreResistanceToFaction(FMythicFactionId Id);
+
     /** Get number of registered factions (for sim iteration bounds) */
     int32 GetRegisteredCount() const { return RegisteredCount; }
 
@@ -484,6 +512,12 @@ public:
 
     /** Get faction data by ID (read snapshot). Returns false if ID is invalid. Copies thread-safe snapshot. */
     bool GetFaction(FMythicFactionId Id, FMythicFactionData &OutData) const;
+
+    /** Lightweight read: copy ONLY a faction's moral-evaluation fields (ideology + the three severity thresholds) from
+     *  the snapshot. For the hot witness-perception path, which evaluates severity per near-witness — copying the full
+     *  FMythicFactionData there needlessly lengthened the SnapshotLock critical section every faction-DB reader shares.
+     *  Returns false if ID is invalid. Thread-safe (same lock as GetFaction). */
+    bool GetFactionMoralProfile(FMythicFactionId Id, FMythicFactionMoralProfile &Out) const;
 
     /** Get faction by gameplay tag. Linear scan — use sparingly. Copies thread-safe snapshot. Optionally returns ID. */
     bool FindFactionByTag(const FGameplayTag &Tag, FMythicFactionData &OutData, FMythicFactionId *OutId = nullptr) const;

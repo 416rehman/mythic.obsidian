@@ -2,7 +2,7 @@
 #include "MythicAttributeSet_Proficiencies.h"
 
 #include "Mythic.h"
-#include "MythicDevSettings.h"
+#include "Settings/MythicDeveloperSettings.h"
 #include "Net/UnrealNetwork.h"
 
 void UMythicAttributeSet_Proficiencies::OnRep_CombatProficiency(const FGameplayAttributeData &OldValue) {
@@ -235,9 +235,9 @@ int32 UMythicAttributeSet_Proficiencies::GetLevel(const UAbilitySystemComponent 
         return 0;
     }
 
-    auto Settings = UMythicDevSettings::Get();
+    auto Settings = GetDefault<UMythicDeveloperSettings>();
     if (!Settings) {
-        UE_LOG(Myth, Error, TEXT("Unable to find MythicDevSettings"));
+        UE_LOG(Myth, Error, TEXT("Unable to find MythicDeveloperSettings"));
         return 0;
     }
 

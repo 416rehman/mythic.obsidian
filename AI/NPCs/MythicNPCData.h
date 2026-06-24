@@ -47,6 +47,18 @@ struct FMythicNPCData {
     UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
     TArray<FRolledAttributeSpec> Proficiencies;
 
+    // Per-NPC sight perception (copied from UNPCDefinition; defaults match the previous hardcoded AIController
+    // values so a default-constructed / MASS-baseline NPC perceives exactly as before). Applied by the AIController
+    // on possess. Carried on the runtime struct so pooled reuse retains it.
+    UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
+    float SightRadius = 1500.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
+    float LoseSightRadius = 2000.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
+    float PeripheralVisionAngleDegrees = 90.0f;
+
     void ClearAll() {
         NPCId.Invalidate();
         NPCName.Empty();
@@ -56,6 +68,10 @@ struct FMythicNPCData {
         FlightOrFightOverrides.Empty();
         NPCFamilyId.Invalidate();
         Proficiencies.Empty();
+        // "Cleared" perception = the standard defaults (NOT zero — a 0-radius NPC would be blind).
+        SightRadius = 1500.0f;
+        LoseSightRadius = 2000.0f;
+        PeripheralVisionAngleDegrees = 90.0f;
     }
 
     // Default Constructor
@@ -72,6 +88,9 @@ struct FMythicNPCData {
         this->AffiliationOverrides = NPCDef->AffiliationOverrides;
         this->FlightOrFightOverrides = NPCDef->FlightOrFightOverrides;
         this->Proficiencies = NPCDef->Proficiencies;
+        this->SightRadius = NPCDef->SightRadius;
+        this->LoseSightRadius = NPCDef->LoseSightRadius;
+        this->PeripheralVisionAngleDegrees = NPCDef->PeripheralVisionAngleDegrees;
         auto FamilyDef = NPCDef->FamilyDef.Get();
         if (FamilyDef) {
             this->NPCFamilyId = FamilyDef->FamilyId;

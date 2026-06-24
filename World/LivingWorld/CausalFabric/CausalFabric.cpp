@@ -234,6 +234,13 @@ void UMythicCausalFabric::Serialize(FArchive &Ar) {
     Ar << Capacity;
 
     if (Ar.IsLoading()) {
+        // Bound-check the stream-controlled Capacity BEFORE SetNum: a corrupted/tampered save with a garbage Capacity
+        // would otherwise SetNum(garbage) → a massive allocation (OOM/crash). Mirrors the PersistentNPCRegistry Count
+        // guard. 10,000,000 is far above any legitimate ring capacity; SetError flags the load as failed for the caller.
+        if (Capacity < 0 || Capacity > 10000000) {
+            Ar.SetError();
+            return;
+        }
         WriteBuffer.SetNum(Capacity);
         ReadBuffer.SetNum(Capacity);
     }
@@ -241,6 +248,15 @@ void UMythicCausalFabric::Serialize(FArchive &Ar) {
     Ar << WriteHead;
     Ar << WriteCount;
     Ar << BaseEventId;
+
+    if (Ar.IsLoading()) {
+        // Likewise bound the ring cursors read from the stream — a garbage WriteHead/WriteCount would drive
+        // out-of-bounds ring access in CommitWrites / EventIdToIndex below. Valid range is [0, Capacity].
+        if (WriteCount < 0 || WriteCount > Capacity || WriteHead < 0 || WriteHead > Capacity) {
+            Ar.SetError();
+            return;
+        }
+    }
 
     uint32 NextId = NextEventId.load(std::memory_order_relaxed);
     Ar << NextId;

@@ -9,6 +9,16 @@
 #include "InventorySlotDefinition.h"
 #include "MythicInventoryComponent.generated.h"
 
+// sort modes for ServerSortGroup
+UENUM(BlueprintType)
+enum class ESortMode : uint8 {
+    ByRarity,
+    ByType,
+    ByName,
+    ByValue,
+    ByWeight
+};
+
 class UInventoryVM;
 class AMythicWorldItem;
 
@@ -65,7 +75,7 @@ struct FMythicInventorySlotEntry : public FFastArraySerializerItem {
     UPROPERTY()
     TObjectPtr<UInventorySlotDefinition> SlotDefinition = nullptr;
 
-    void ClientUpdateActiveState();
+    void ClientUpdateActiveState(UMythicInventoryComponent* Owner);
     void ServerUpdateActiveState();
     void Clear();
 };
@@ -166,6 +176,18 @@ public:
     const TArray<FMythicInventorySlotEntry> &GetAllSlots() const { return Slots.GetItems(); }
     TArray<FMythicInventorySlotEntry> &GetAllSlotsMutable() { return Slots.Items; }
 
+    // Total carry weight of everything in this inventory: sum of each slotted item's UnitWeight × stack (encumbrance).
+    // Reads the replicated FastArray, so it is valid on the server and the owning client. 0 if every item is weightless.
+    float GetTotalCarriedWeight() const;
+
+    // Pure per-slot weight contribution: UnitWeight × StackCount with both clamped non-negative (a weightless or
+    // malformed entry contributes 0, never a negative). Static so the aggregation rule is unit-testable headlessly.
+    static float ComputeSlotWeight(float UnitWeight, int32 StackCount);
+
+    // The CURRENCY this inventory holds = summed stack quantity over Itemization.Type.Currency items (a player's wallet
+    // balance, since currency is modelled as stackable currency-type items). 0 if it holds none. Server + owning client.
+    int32 GetTotalCurrency() const;
+
     UMythicInventoryComponent(const FObjectInitializer &OI);
 
     virtual void BeginPlay() override;
@@ -184,6 +206,11 @@ public:
 
     // Checks if a specific slot can accept an item instance, enforcing whitelists and player restrictions.
     bool CanSlotAcceptItem(int32 SlotIndex, UMythicItemInstance *ItemInstance, bool bFromPlayer = false) const;
+
+    // Pure equip-requirement gate: an item with a RequiredEquipTag may only be equipped by an owner whose gameplay
+    // tags include it. An empty/invalid RequiredTag always passes (the default — no requirement). Static + no engine
+    // state for unit testing. (Range/authority are enforced elsewhere; this is purely the tag-gate.)
+    static bool MeetsEquipRequirement(const FGameplayTag &RequiredTag, const FGameplayTagContainer &OwnerTags);
 
     // Effective-type whitelist check using the item's type probe ({def ItemType} ∪ ItemTags).
     // An empty slot whitelist accepts all types. Single source of truth for slot whitelisting so that
@@ -220,6 +247,15 @@ public:
     // Removes from owner's subobject list on success. Returns the amount of items that were added.
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Slots")
     int32 AddToAnySlot(UMythicItemInstance *ItemInstance, bool bFromPlayer = false);
+
+    /**
+     * Whether AddToAnySlot should attempt to merge an incoming item into existing partial stacks: true iff the item's
+     * type is stackable (StackSizeMax > 1). Pure + static so the gate is unit-testable. (Fix: the gate was previously
+     * `StackSizeMax > IncomingStacks`, which skipped merging a FULL incoming stack — so picking up a full stack never
+     * topped off existing partial stacks, wasting inventory slots. Merging DRAINS the incoming; its own fullness is
+     * irrelevant. The per-slot `isStackableWith` check still guards genuine compatibility.)
+     */
+    static bool ShouldAttemptStackMerge(int32 StackSizeMax) { return StackSizeMax > 1; }
 
     // Add item to the given slot. If the slot is already occupied, the item will be stacked if possible. Returns the amount of items that were added.
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Slots")
@@ -277,12 +313,41 @@ public:
     UFUNCTION(BlueprintPure, Category = "Inventory")
     int32 GetItemCount(UItemDefinition *RequiredItem) const;
 
-    // Remove the given amount of stacks of an item from the inventory. Returns the amount of item stacks that were removed.
+    // Remove the given amount of stacks of an item from the inventory. Server RPC — void (a reliable Server RPC cannot
+    // return a value); the removed count is not reported back.
     UFUNCTION(Server, Reliable)
     void ServerRemoveItem(UMythicItemInstance *ItemInstance, int32 Amount = 1);
 
     UFUNCTION(Server, Reliable)
     void ServerRemoveItemByDefinition(UItemDefinition *ItemDefinition, int32 Amount = 1);
+
+    // split SplitAmount stacks from SourceSlotIndex into the first empty slot in the same group
+    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
+    void ServerSplitStack(int32 SourceSlotIndex, int32 SplitAmount);
+
+    // swap items between two slots, handling equipment activation/deactivation and empty slot moves
+    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
+    void ServerSwapSlots(int32 SlotA, int32 SlotB);
+
+    // move item from this inventory to a target inventory using AddToAnySlot
+    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
+    void ServerQuickMoveToInventory(int32 SourceSlotIndex, UMythicInventoryComponent *TargetInventory);
+
+    // sort all items in slots matching GroupTag by the specified mode
+    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
+    void ServerSortGroup(FGameplayTag GroupTag, ESortMode Mode);
+
+    // move all non-equipment items (optionally filtered by type tag) to the target inventory
+    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
+    void ServerDepositAll(UMythicInventoryComponent *Target, FGameplayTag OptionalTypeFilter);
+
+    // use a consumable item directly from inventory without equipping it
+    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
+    void ServerUseItemInSlot(int32 SlotIndex);
+
+    // returns true if the item in the slot has actionable fragments that support in-inventory use
+    UFUNCTION(BlueprintPure, Category = "Slots")
+    bool CanUseItemInSlot(int32 SlotIndex) const;
 
     // Called by item instances when a replicated field changed (e.g., quantity)
     void NotifyItemInstanceUpdated(int32 SlotIndex);

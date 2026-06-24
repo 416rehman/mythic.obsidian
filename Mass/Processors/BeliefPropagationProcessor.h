@@ -17,11 +17,14 @@
  * How it works:
  * 1. Timer-driven (2s intervals) — not per-frame
  * 2. Scans hydrated entities (Tier 1+) that have social edges
- * 3. For each entity with pending witness results or high-confidence beliefs,
- *    propagates the belief to connected entities via social edges
- * 4. Each propagation hop reduces belief confidence by BeliefPropagationDecay
- * 5. Max hops capped by MaxBeliefPropagationHops
- * 6. Total propagations per tick capped by MaxBeliefPropagationsPerTick
+ * 3. For each high-pressure entity that recently witnessed events, propagates significance-AWARENESS
+ *    (the dirty flag + a hop-decayed RelevantEventCount) to its social neighbors via social edges
+ * 4. Each propagation reduces the contributed event count by BeliefPropagationDecay (hop decay)
+ * 5. Total propagations per tick capped by MaxBeliefPropagationsPerTick
+ *
+ * Spread is naturally bounded to ~one hop per witness: a propagated-to entity gains awareness but no pressure, so it
+ * does not itself re-propagate. The per-belief MAX-HOP cap (MaxBeliefPropagationHops) applies to the cognitive belief
+ * path (UMythicPartySubsystem::ShouldShareBelief), not to this awareness spread.
  *
  * This allows crime reports to spread through the social network organically:
  * Witness → friend → guard → investigation. Not instant — takes real game time.

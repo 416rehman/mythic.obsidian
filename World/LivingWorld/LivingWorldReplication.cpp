@@ -1,3 +1,4 @@
+#include "LivingWorldReplication.h"
 #include "World/LivingWorld/LivingWorldReplication.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h"
 #include "World/LivingWorld/Factions/FactionDatabase.h"
@@ -120,6 +121,11 @@ void AMythicLivingWorldReplicator::GetLifetimeReplicatedProps(TArray<FLifetimePr
     DOREPLIFETIME(AMythicLivingWorldReplicator, EncounterProxies);
 }
 
+bool AMythicLivingWorldReplicator::TerritoryProxyNeedsUpdate(const FMythicTerritoryProxyItem &Existing, FMythicFactionId NewFaction, uint8 NewContestedLevel) {
+    // Compare only the client-visible fields. (FactionId identity is its Index.)
+    return Existing.ControllingFaction.Index != NewFaction.Index || Existing.ContestedLevel != NewContestedLevel;
+}
+
 void AMythicLivingWorldReplicator::SyncProxies(UMythicLivingWorldSubsystem *Subsystem) {
     if (!HasAuthority() || !Subsystem) {
         return;
@@ -217,24 +223,33 @@ void AMythicLivingWorldReplicator::SyncProxies(UMythicLivingWorldSubsystem *Subs
         for (const FMythicCellCoord &Cell : ChangedCells) {
             FMythicFactionId ControllingFaction = Grid->GetDominantFaction(Cell);
 
-            FMythicTerritoryProxyItem *FoundProxy = nullptr;
-            if (int32 *ProxyIdxPtr = TerritoryProxyIndex.Find(Cell)) {
-                FoundProxy = &TerritoryProxies.Items[*ProxyIdxPtr];
-            }
+            // ContestedLevel is not yet computed from the grid — always 0 for now. (The proxy field replicates, but the
+            // contested-cell signal never reaches clients; logged as a half-wired field in backlog.)
+            constexpr uint8 NewContested = 0;
 
-            if (!FoundProxy) {
+            // Change-detect like the faction sync above. GetChangedCells returns every INFLUENCE-changed cell, but a
+            // cell's influence often shifts WITHOUT flipping its dominant faction; re-marking those proxies dirty would
+            // re-replicate an unchanged ControllingFaction to every client each territory tick (bandwidth waste that
+            // defeats the delta). Only dirty when the client-visible fields actually change. New cells always dirty.
+            if (int32 *ProxyIdxPtr = TerritoryProxyIndex.Find(Cell)) {
+                FMythicTerritoryProxyItem &Proxy = TerritoryProxies.Items[*ProxyIdxPtr];
+                if (TerritoryProxyNeedsUpdate(Proxy, ControllingFaction, NewContested)) {
+                    Proxy.ControllingFaction = ControllingFaction;
+                    Proxy.ContestedLevel = NewContested;
+                    TerritoryProxies.MarkItemDirty(Proxy);
+                    bTerritoryChanged = true;
+                }
+            }
+            else {
                 FMythicTerritoryProxyItem NewProxy;
                 NewProxy.Cell = Cell;
-                int32 NewIdx = TerritoryProxies.Items.Add(NewProxy);
+                NewProxy.ControllingFaction = ControllingFaction;
+                NewProxy.ContestedLevel = NewContested;
+                const int32 NewIdx = TerritoryProxies.Items.Add(NewProxy);
                 TerritoryProxyIndex.Add(Cell, NewIdx);
-                FoundProxy = &TerritoryProxies.Items[NewIdx];
+                TerritoryProxies.MarkItemDirty(TerritoryProxies.Items[NewIdx]);
+                bTerritoryChanged = true;
             }
-
-            FoundProxy->ControllingFaction = ControllingFaction;
-            FoundProxy->ContestedLevel = 0;
-
-            TerritoryProxies.MarkItemDirty(*FoundProxy);
-            bTerritoryChanged = true;
         }
 
         if (bTerritoryChanged) {

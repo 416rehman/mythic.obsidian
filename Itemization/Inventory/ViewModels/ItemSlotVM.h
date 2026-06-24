@@ -5,60 +5,107 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "MVVMViewModelBase.h"
+#include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
+#include "Styling/SlateColor.h"
 #include "ItemSlotVM.generated.h"
 
 class UInventoryVM;
 class UInventoryTabVM;
 struct FTimerHandle;
 
-/**
- * 
- */
 UCLASS()
 class MYTHIC_API UItemSlotVM : public UMVVMViewModelBase {
     GENERATED_BODY()
 
 public:
-    // The icon to display for this item slot - it can be empty
+    // the icon to display for this item slot
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     UTexture2D *Icon;
 
-    // Is marked junk
+    // is marked junk
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     bool IsJunk;
 
-    // Background color for this item slot - can be used to indicate rarity or other states
+    // background color for this item slot
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     FSlateColor BackgroundColor;
 
-    // Quantity of items in this slot
+    // quantity of items in this slot
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     int32 Quantity = 0;
 
-    // Slot is locked (not yet unlocked by player) - locked slots are not interactive
+    // slot is locked (not yet unlocked by player)
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     bool IsLocked;
 
-    // Slot is currently in use (e.g., an ability is channeling from this slot)
+    // slot is currently in use
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     bool IsInUse;
 
-    // Slot is disabled by game rules (e.g., debuff disables all abilities)
+    // slot is disabled by game rules
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     bool IsDisabled;
 
-    // Absolute inventory index backing this slot (in the owning InventoryComponent)
+    // absolute inventory index backing this slot
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     int32 AbsoluteIndex;
 
-    // Slot Definition
+    // slot definition
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     TObjectPtr<UInventorySlotDefinition> SlotDefinition;
 
-    // Owning InventoryVM
+    // owning InventoryVM
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     UInventoryVM *ParentInventoryVM;
+
+    // item name from definition
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    FText ItemName;
+
+    // item description from definition
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    FText ItemDescription;
+
+    // rarity tier from definition
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    TEnumAsByte<EItemRarity> Rarity = EItemRarity::Common;
+
+    // instance level
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    int32 ItemLevel = 1;
+
+    // current durability from DurabilityFragment (0 if none)
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    float CurrentDurability = 0.0f;
+
+    // max durability from DurabilityFragment (0 if none)
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    float MaxDurability = 0.0f;
+
+    // current/max ratio, 0 when max is 0
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    float DurabilityPercent = 0.0f;
+
+    // whether this slot is an equipment slot with an active item
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    bool IsEquipped = false;
+
+    // item is broken (durability at 0 with a max above 0)
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    bool IsBroken = false;
+
+    // item type tag from definition
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    FGameplayTag ItemType;
+
+    // per-unit weight from definition
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    float Weight = 0.0f;
+
+    // base monetary value from definition
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    int32 Value = 0;
 
     void SetIcon(UTexture2D *InIcon);
     UTexture2D *GetIcon() const;
@@ -85,15 +132,38 @@ public:
     void SetParentInventoryVM(UInventoryVM *InParentInventoryVM);
     UInventoryVM *GetParentInventoryVM() const;
 
+    void SetItemName(FText InItemName);
+    FText GetItemName() const;
+    void SetItemDescription(FText InItemDescription);
+    FText GetItemDescription() const;
+    void SetRarity(EItemRarity InRarity);
+    EItemRarity GetRarity() const;
+    void SetItemLevel(int32 InItemLevel);
+    int32 GetItemLevel() const;
+    void SetCurrentDurability(float InCurrentDurability);
+    float GetCurrentDurability() const;
+    void SetMaxDurability(float InMaxDurability);
+    float GetMaxDurability() const;
+    void SetDurabilityPercent(float InDurabilityPercent);
+    float GetDurabilityPercent() const;
+    void SetIsEquipped(bool bInIsEquipped);
+    bool GetIsEquipped() const;
+    void SetIsBroken(bool bInIsBroken);
+    bool GetIsBroken() const;
+    void SetItemType(FGameplayTag InItemType);
+    FGameplayTag GetItemType() const;
+    void SetWeight(float InWeight);
+    float GetWeight() const;
+    void SetValue(int32 InValue);
+    int32 GetValue() const;
+
     void Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *InParentVM, UInventorySlotDefinition *InSlotDefinition, int32 InAbsoluteIndex);
 
-    /** Helpers **/
-    // Get owning inventory component from ParentInventoryVM - ONE SHOT
+    // get owning inventory component from ParentInventoryVM
     UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
     UMythicInventoryComponent *TryGetOwningInventoryComponent() const;
 
-    // Try getting the item instance currently in this slot - ONE SHOT
-    // Checks ParentInventoryVM and its OwningInventoryComponent and queries for the item in this slot index
+    // try getting the item instance currently in this slot
     UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
     UMythicItemInstance *TryGetItemInstance() const;
 };

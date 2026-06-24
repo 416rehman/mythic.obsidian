@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
+#include "Engine/DataAsset.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "MythicSettlement.generated.h"
 
@@ -188,6 +189,16 @@ public:
      * @param TerritoryGrid The grid to use for coordinate conversion
      */
     void RasterizeSplineToCells(const UMythicTerritoryGrid *TerritoryGrid);
+
+    /**
+     * Compute a settlement's center cell: the rasterized cell nearest the cells' centroid (guaranteed to be an ACTUAL
+     * settlement cell, so it's valid even for concave/L-shaped boundaries where the raw centroid could fall outside).
+     * Empty input → (0,0). Pure + static so it's unit-testable. CenterCell drives the Socialize gather-point
+     * (AIController — "converge where people are") — it was previously never assigned (always (0,0) → socializing NPCs
+     * converged on the grid's origin corner instead of the town center). (It was also the v1 save key, since replaced
+     * by SettlementTag.) RasterizeSplineToCells sets it from the rasterized cells.
+     */
+    static FMythicCellCoord ComputeCenterCell(const TArray<FMythicCellCoord> &Cells);
 
     /**
      * Transfer this settlement to a new governing faction.

@@ -398,8 +398,10 @@ void FMythicWorldSimThread::TickPopulation() {
             F->Population = FMath::Max(0, F->Population + Births - Deaths - Emigrants);
         }
         else if (!F->bHasEconomy) {
-            // ── Spawning (creatures, undead): population from territory ──
-            F->Population += F->ControlledCellCount * Settings->SpawnRatePerCell;
+            // ── Spawning (creatures, undead): population from territory, BOUNDED by carrying capacity ──
+            // (else this grew unbounded every tick → runaway spawn pressure + int32 overflow; the civilian path caps too).
+            F->Population = ComputeCappedSpawnPopulation(F->Population, F->ControlledCellCount, Settings->SpawnRatePerCell,
+                                                         Settings->PopulationPerCell);
         }
         else {
             // ── Recruitment-based (mercenary-like): population from wealth ──
@@ -470,12 +472,90 @@ void FMythicWorldSimThread::TickPopulation() {
 
             UE_LOG(LogMythWorldSim, Log, TEXT("Faction '%s' annihilated (pop=0, cells=0)"), *F->DisplayName.ToString());
         }
+
+        // ── Resistance restoration (REQ-FAC-004) ──
+        // The symmetric counterpart to resistance FORMATION (gated by ResistancePopulationThreshold, above): a standing
+        // resistance that has retaken enough territory re-establishes itself as a full faction. Cell-gated by
+        // RestorationCellThreshold (previously DEAD config — declared but never read). Mutually exclusive with the
+        // annihilation branch (cells <= 0 there vs cells >= threshold >= 1 here). ControlledCellCount is synced from the
+        // territory census each tick, so a resistance that captures cells (scheme reclaim / settlement capture) reaches it.
+        if (Settings && FactionDB && F->Status == EMythicFactionStatus::Resistance &&
+            F->ControlledCellCount >= Settings->RestorationCellThreshold) {
+            FMythicFactionId RestoredId;
+            RestoredId.Index = static_cast<uint8>(i);
+            FactionDB->RestoreResistanceToFaction(RestoredId);
+
+            if (Fabric) {
+                FMythicWorldEvent RestEvent;
+                RestEvent.EventTag = TAG_LIVINGWORLD_EVENT_FACTION_RESTORATION;
+                RestEvent.PrimaryFaction = RestoredId;
+                RestEvent.Significance = 0.85f;
+                RestEvent.CategoryFlags = EMythicEventCategory::Diplomacy;
+                Fabric->AppendEvent(RestEvent);
+            }
+        }
     }
 }
 
 // ─────────────────────────────────────────────────────────────
 // TickDiplomacy — Relationship evaluation from ideology + trade + events
 // ─────────────────────────────────────────────────────────────
+
+EMythicFactionRelation FMythicWorldSimThread::MapDiplomacyScoreToRelation(
+    float Score, EMythicFactionRelation Current,
+    float AllyThreshold, float FriendlyThreshold, float UnfriendlyThreshold, float HostileThreshold, float Hyst) {
+    // Hysteresis: entering a NON-current tier requires overshooting its threshold by Hyst; staying in the current tier
+    // needs only the base threshold (sticky → no relationship flicker). Tiers high→low: Allied / Friendly / Neutral
+    // (the default band) / Unfriendly / Hostile. Exact transcription of the prior inline arbitration.
+    if (Score > AllyThreshold + (Current == EMythicFactionRelation::Allied ? 0.0f : Hyst)) {
+        return EMythicFactionRelation::Allied;
+    }
+    if (Score > FriendlyThreshold + (Current == EMythicFactionRelation::Friendly ? 0.0f : Hyst)) {
+        return EMythicFactionRelation::Friendly;
+    }
+    if (Score < HostileThreshold - (Current == EMythicFactionRelation::Hostile ? 0.0f : Hyst)) {
+        return EMythicFactionRelation::Hostile;
+    }
+    if (Score < UnfriendlyThreshold - (Current == EMythicFactionRelation::Unfriendly ? 0.0f : Hyst)) {
+        return EMythicFactionRelation::Unfriendly;
+    }
+    return EMythicFactionRelation::Neutral;
+}
+
+float FMythicWorldSimThread::DiplomacyShiftSignificance(EMythicFactionRelation NewRelation) {
+    // Scale by the extremity of the NEW relationship — the chronicle should rank a war or an alliance far above a
+    // minor warming/cooling. Ordering is the design intent; the exact values are tunable defaults consistent with the
+    // other faction-event significances (annihilation 1.0, resistance 0.9, restoration 0.85).
+    switch (NewRelation) {
+    case EMythicFactionRelation::Allied:     return 0.9f; // alliance forged — major
+    case EMythicFactionRelation::Hostile:    return 0.9f; // war declared — major
+    case EMythicFactionRelation::Friendly:   return 0.6f;
+    case EMythicFactionRelation::Unfriendly: return 0.6f;
+    case EMythicFactionRelation::Neutral:    return 0.4f; // warmed/cooled back to neutral — minor
+    default:                                 return 0.5f; // any other tier (e.g. Rival/Subordinate) — middle ground
+    }
+}
+
+float FMythicWorldSimThread::DriftTowardClamped(float Current, float Target, float Rate) {
+    // Exponential approach toward Target, clamped to the valid ideology-axis range so an out-of-range Target (or Rate)
+    // can never push an axis past [-1, 1]. Single source for ideology drift + bleed.
+    return FMath::Clamp(Current + (Target - Current) * Rate, -1.0f, 1.0f);
+}
+
+bool FMythicWorldSimThread::ShouldFactionSchism(float InternalDivergence, float IdeologyThreshold, bool bGeographicallyFragmented,
+                                                int32 Population, int32 MinSchismPopulation) {
+    const bool bDestabilized = InternalDivergence > IdeologyThreshold || bGeographicallyFragmented;
+    // 2x: the split transfers half the population, so both halves must clear MinSchismPopulation for a viable splinter.
+    return bDestabilized && Population >= MinSchismPopulation * 2;
+}
+
+int32 FMythicWorldSimThread::ComputeCappedSpawnPopulation(int32 CurrentPop, int32 CellCount, int32 SpawnRatePerCell, int32 PopulationPerCell) {
+    const int32 Growth = CellCount * SpawnRatePerCell;
+    const int32 Capacity = CellCount * PopulationPerCell;
+    // Bound growth at carrying capacity, but never below the CURRENT population: a faction temporarily at 0 cells
+    // (Capacity 0) is left untouched, not zeroed into annihilation. So growth is capped while decline is never forced.
+    return FMath::Min(CurrentPop + Growth, FMath::Max(CurrentPop, Capacity));
+}
 
 void FMythicWorldSimThread::TickDiplomacy() {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicWorldSim_Diplomacy);
@@ -552,21 +632,11 @@ void FMythicWorldSimThread::TickDiplomacy() {
 
             // ── Map to relationship with hysteresis ──
             const EMythicFactionRelation CurrentRel = FactionDB->GetWriteRelationship(IdA, IdB);
-            EMythicFactionRelation NewRel = EMythicFactionRelation::Neutral;
-
-            const float Hyst = Settings->HysteresisMargin;
-            if (Score > Settings->AllyThreshold + (CurrentRel == EMythicFactionRelation::Allied ? 0.0f : Hyst)) {
-                NewRel = EMythicFactionRelation::Allied;
-            }
-            else if (Score > Settings->FriendlyThreshold + (CurrentRel == EMythicFactionRelation::Friendly ? 0.0f : Hyst)) {
-                NewRel = EMythicFactionRelation::Friendly;
-            }
-            else if (Score < Settings->HostileThreshold - (CurrentRel == EMythicFactionRelation::Hostile ? 0.0f : Hyst)) {
-                NewRel = EMythicFactionRelation::Hostile;
-            }
-            else if (Score < Settings->UnfriendlyThreshold - (CurrentRel == EMythicFactionRelation::Unfriendly ? 0.0f : Hyst)) {
-                NewRel = EMythicFactionRelation::Unfriendly;
-            }
+            const EMythicFactionRelation NewRel = MapDiplomacyScoreToRelation(
+                Score, CurrentRel,
+                Settings->AllyThreshold, Settings->FriendlyThreshold,
+                Settings->UnfriendlyThreshold, Settings->HostileThreshold,
+                Settings->HysteresisMargin);
 
             if (NewRel != CurrentRel) {
                 FactionDB->SetRelationship(IdA, IdB, NewRel);
@@ -577,7 +647,7 @@ void FMythicWorldSimThread::TickDiplomacy() {
                     DiploEvent.EventTag = TAG_LIVINGWORLD_EVENT_DIPLOMACY_SHIFT;
                     DiploEvent.PrimaryFaction = IdA;
                     DiploEvent.SecondaryFaction = IdB;
-                    DiploEvent.Significance = 0.5f;
+                    DiploEvent.Significance = DiplomacyShiftSignificance(NewRel);
                     DiploEvent.CategoryFlags = EMythicEventCategory::Diplomacy;
                     Fabric->AppendEvent(DiploEvent);
                 }
@@ -669,8 +739,7 @@ void FMythicWorldSimThread::TickIdeologyMetabolism() {
                 const EMythicMoralAxis AxisEnum = static_cast<EMythicMoralAxis>(Axis);
                 const float EventMean = AccumulatedVector[Axis] * InvCount;
                 const float CurrentValue = F->Ideology.GetAxis(AxisEnum);
-                const float DriftedValue = CurrentValue + (EventMean - CurrentValue) * Settings->IdeologyDriftRate;
-                F->Ideology.GetAxisMutable(AxisEnum) = FMath::Clamp(DriftedValue, -1.0f, 1.0f);
+                F->Ideology.GetAxisMutable(AxisEnum) = DriftTowardClamped(CurrentValue, EventMean, Settings->IdeologyDriftRate);
             }
 
             // Mark ideology as dirty so the NPC generation pipeline regenerates templates
@@ -700,8 +769,8 @@ void FMythicWorldSimThread::TickIdeologyMetabolism() {
                     const EMythicMoralAxis AxisEnum = static_cast<EMythicMoralAxis>(Axis);
                     const float SourceValue = F->Ideology.GetAxis(AxisEnum);
                     const float TargetValue = Other->Ideology.GetAxis(AxisEnum);
-                    const float BledValue = TargetValue + (SourceValue - TargetValue) * Settings->IdeologyBleedRate;
-                    Other->Ideology.GetAxisMutable(AxisEnum) = FMath::Clamp(BledValue, -1.0f, 1.0f);
+                    // Bleed: move the territorial faction's axis (TargetValue) toward the non-territorial source's.
+                    Other->Ideology.GetAxisMutable(AxisEnum) = DriftTowardClamped(TargetValue, SourceValue, Settings->IdeologyBleedRate);
                 }
             }
         }
@@ -878,9 +947,10 @@ void FMythicWorldSimThread::TickFactionEvolution() {
             }
         }
 
-        // Schism occurs if internal divergence is high enough OR geographically fragmented
-        if ((InternalDivergence > Settings->SchismIdeologyThreshold || bGeographicSchism) &&
-            F->Population >= Settings->MinSchismPopulation * 2) {
+        // Schism occurs if internal divergence is high enough OR geographically fragmented — and only if the faction is
+        // big enough that BOTH halves survive the split (see ShouldFactionSchism).
+        if (ShouldFactionSchism(InternalDivergence, Settings->SchismIdeologyThreshold, bGeographicSchism,
+                                F->Population, Settings->MinSchismPopulation)) {
 
             // ── Procedural faction generation ──
             FMythicFactionData NewFaction;

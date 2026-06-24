@@ -1,6 +1,8 @@
 // Copyright Stellar Games. All Rights Reserved.
 
 #include "MythicGameplayCue_DamageNumber.h"
+
+#include "Engine/World.h"
 #include "UI/MythicDamageNumberSubsystem.h"
 
 UMythicGameplayCue_DamageNumber::UMythicGameplayCue_DamageNumber() {}

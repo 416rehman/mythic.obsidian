@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "RewardBase.h"
+#include "UObject/ScriptInterface.h"
 #include "LootReward.generated.h"
 
 class IInventoryProviderInterface;
@@ -113,6 +114,14 @@ class MYTHIC_API ULootReward : public URewardBase {
 
 public:
     virtual bool Give(FRewardContext &Context) const override;
+
+    /**
+     * Resolve a loot entry's drop chance: a positive OverrideDropChance wins; otherwise the per-rarity weight (indexed
+     * by the item's rarity). Returns FALSE — the entry must be SKIPPED — for an out-of-range rarity with no override,
+     * rather than reading the rarity-weight array out of bounds (the weights array is fixed-size; a future/extra or
+     * corrupt rarity would otherwise UB-read it). Pure + static so the resolution is unit-testable.
+     */
+    static bool ResolveEntryDropChance(float OverrideDropChance, int32 RarityIndex, TConstArrayView<float> RarityWeights, float &OutChance);
 
     // The loot table to use
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loot Reward Context")

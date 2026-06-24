@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/SoftObjectPath.h"
 #include "SavedDestructible.generated.h"
 
 class UMythicResourceManagerComponent;

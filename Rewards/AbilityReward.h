@@ -26,6 +26,8 @@ public:
     // Gives/activates an ability
     virtual bool Give(FRewardContext &Context) const override;
 
+    virtual FText GetPreviewText() const override;
+
     // Ability rewards can be safely reapplied - won't duplicate abilities
     virtual bool CanReapplyOnLoad() const override { return true; }
 

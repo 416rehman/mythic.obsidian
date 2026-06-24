@@ -140,6 +140,13 @@ public:
     // Removes applied affixes
     static void RemoveAffixes(UAbilitySystemComponent *ASC, TArray<FRolledAffix> &InRolledAffixes);
 
+    /**
+     * The value that reverses a previously-applied attribute modifier of the given op: Additive → negate; Multiplicitive
+     * / Division → reciprocal. Returns false (no reversal possible) for a (near-)zero mult/div magnitude (1/0 = inf would
+     * poison the attribute) or an unsupported op (Override). Pure + static so the reversal math is unit-testable.
+     */
+    static bool ComputeReversedModValue(TEnumAsByte<EGameplayModOp::Type> Modifier, float Value, float &OutReversed);
+
     // SERVER: re-roll the value of every UNLOCKED random affix (locked affixes AND core affixes — which roll
     // locked — keep their values). Authority-gated (mirrors UDurabilityFragment::ServerApplyWear). If the item is
     // currently active on an ASC, the live GAS modifiers are reversed (with the OLD values) and re-applied (with

@@ -4,6 +4,7 @@
 
 #include "GameplayEffectTypes.h"
 #include "MythicAbilitySourceInterface.h"
+#include "Kismet/BlueprintFunctionLibrary.h"
 
 #include "MythicGameplayEffectContext.generated.h"
 

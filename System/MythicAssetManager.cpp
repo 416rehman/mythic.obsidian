@@ -2,6 +2,7 @@
 
 #include "AbilitySystemGlobals.h"
 #include "Mythic.h"
+#include "Engine/Engine.h"
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Settings/MythicDeveloperSettings.h"
 

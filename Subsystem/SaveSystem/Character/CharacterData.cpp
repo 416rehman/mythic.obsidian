@@ -4,6 +4,8 @@
 #include "Mythic/Itemization/InventoryProviderInterface.h"
 #include "Mythic/Itemization/Inventory/MythicInventoryComponent.h"
 #include "Mythic/Player/Proficiency/ProficiencyComponent.h"
+#include "Mythic/Player/MythicPlayerController.h"
+#include "Mythic/Objectives/ObjectiveTracker.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 
@@ -50,8 +52,19 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
         }
     }
 
+    UProficiencyComponent *ProfComp = nullptr;
+    UObjectiveTracker *Tracker = nullptr;
+    if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PC)) {
+        ProfComp = MythicPC->GetProficiencyComponent();
+        Tracker = MythicPC->GetObjectiveTracker();
+    }
+    else {
+        ProfComp = ProfHost->FindComponentByClass<UProficiencyComponent>();
+        Tracker = ProfHost->FindComponentByClass<UObjectiveTracker>();
+    }
+
     // Proficiencies (save first - they track claimed levels)
-    if (UProficiencyComponent *ProfComp = ProfHost->FindComponentByClass<UProficiencyComponent>()) {
+    if (ProfComp) {
         UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Found ProficiencyComponent, serializing %d proficiencies..."),
                ProfComp->Proficiencies.Num());
         FSerializedProficiencyHelper::Serialize(ProfComp, OutData.Proficiencies);
@@ -59,6 +72,12 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
     }
     else {
         UE_LOG(MythSaveLoad, Warning, TEXT("SerializedCharacterData::Serialize: No ProficiencyComponent found!"));
+    }
+
+    // Objectives/quests (live on the PC alongside the proficiency component) — definition path + progress.
+    if (Tracker) {
+        Tracker->SaveObjectives(OutData.Objectives);
+        UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d objectives"), OutData.Objectives.Num());
     }
 
     // Inventory - use IInventoryProviderInterface
@@ -127,13 +146,30 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
         }
     }
 
+    UProficiencyComponent *ProfComp = nullptr;
+    UObjectiveTracker *Tracker = nullptr;
+    if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PC)) {
+        ProfComp = MythicPC->GetProficiencyComponent();
+        Tracker = MythicPC->GetObjectiveTracker();
+    }
+    else {
+        ProfComp = ProfHost->FindComponentByClass<UProficiencyComponent>();
+        Tracker = ProfHost->FindComponentByClass<UObjectiveTracker>();
+    }
+
     // Proficiencies. Deserialize only STAGES CurrentXP into FProficiency::SavedXP; the ASC write happens in
     // UProficiencyComponent::ApplyLoadedProficiencies. On load-on-join the component's BeginPlay has already run
     // (async load completes later), so we must re-apply here or the loaded XP never reaches the ASC. Idempotent.
-    if (UProficiencyComponent *ProfComp = ProfHost->FindComponentByClass<UProficiencyComponent>()) {
+    if (ProfComp) {
         FSerializedProficiencyHelper::Deserialize(ProfComp, InData.Proficiencies);
         ProfComp->ApplyLoadedProficiencies();
         UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d proficiencies"), ProfComp->Proficiencies.Num());
+    }
+
+    // Objectives/quests — restore the tracked set (server-authoritative; re-subscribes incomplete objectives so they
+    // keep advancing, and replicates the restored list to the owning client). Tolerant of an empty array (old saves).
+    if (Tracker) {
+        Tracker->RestoreObjectives(InData.Objectives);
     }
 
     // Inventory (items will apply their stats when equipped)

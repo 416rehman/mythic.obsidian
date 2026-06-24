@@ -12,6 +12,15 @@
 
 class UMythicAbilitySystemComponent;
 
+// Result of deciding what an OnItemActivated pass must (re)do. The two actions are INDEPENDENT: the rolled damage
+// attribute is (re)applied only if not already applied, and the attack ability is granted only if not already live.
+// They were previously conflated under a single early-return on bDamageApplied, which wrongly skipped the ability
+// grant whenever damage was already applied (e.g. a re-activation after a first grant that failed).
+struct FAttackActivationPlan {
+    bool bApplyDamage = false;
+    bool bGrantAbility = false;
+};
+
 USTRUCT(Blueprintable, BlueprintType)
 struct FAttackRuntimeServerOnlyData {
     GENERATED_BODY()
@@ -113,6 +122,12 @@ public:
 
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
     //~ Overrides
+
+    // Pure decision for OnItemActivated: each action is independently idempotent (apply damage iff not yet applied,
+    // grant ability iff no live handle). Static + side-effect-free so the activation logic is unit-testable headlessly.
+    static FAttackActivationPlan PlanAttackActivation(bool bDamageApplied, bool bAbilityHandleValid) {
+        return FAttackActivationPlan{!bDamageApplied, !bAbilityHandleValid};
+    }
 
     // Replication
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {

@@ -3,6 +3,8 @@
 #include "MythicFactionStandingComponent.h"
 
 #include "Mythic.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h" // FactionDatabase (server-side faction name resolution)
 #include "World/LivingWorld/Factions/FactionDatabase.h"
@@ -59,6 +61,64 @@ void UMythicFactionStandingComponent::ServerAdjustStanding(FMythicFactionId Fact
     UE_LOG(Myth, Log, TEXT("FactionStanding: %s standing toward faction %d -> %.1f (delta %.1f)"),
            *GetNameSafe(Owner), Faction.Index, Standings[Index].Value, Delta);
     NotifyStandingTierChange(Faction, OldValue, Standings[Index].Value);
+}
+
+float FMythicKillStandingPropagation::FactorForRelation(EMythicFactionRelation Relation) const {
+    switch (Relation) {
+    case EMythicFactionRelation::Allied:
+        return AlliedFactor; // ally of the victim — also loses standing
+    case EMythicFactionRelation::Friendly:
+        return FriendlyFactor;
+    case EMythicFactionRelation::Hostile:
+        return -HostileFactor; // enemy of the victim — GAINS standing (negate so the penalty becomes a reward)
+    case EMythicFactionRelation::Unfriendly:
+        return -UnfriendlyFactor;
+    default:
+        return 0.0f; // Neutral — no reaction
+    }
+}
+
+void UMythicFactionStandingComponent::ServerApplyKillStanding(FMythicFactionId VictimFaction) {
+    const AActor *Owner = GetOwner();
+    if (!Owner || !Owner->HasAuthority() || !VictimFaction.IsValid()) {
+        return;
+    }
+
+    // Direct hit: the victim's own faction always reacts (the original kill→standing behavior, unchanged).
+    const float BasePenalty = KillStandingPenalty;
+    ServerAdjustStanding(VictimFaction, -BasePenalty);
+
+    // Politics propagation across the faction-relationship graph. Read the committed faction snapshot lock-free on the
+    // game thread (the established pattern — see NotifyStandingTierChange). Collect the alive faction IDs FIRST, then
+    // read relationships + adjust standing OUTSIDE ForEachAliveFaction: GetRelationship and ForEachAliveFaction both
+    // take the DB snapshot lock, and nesting them would rely on the mutex being recursive. ServerAdjustStanding mutates
+    // OUR Standings array (not the DB), so it's safe to call here.
+    if (KillStandingPropagation.IsDisabled()) {
+        return;
+    }
+    UWorld *World = GetWorld();
+    UGameInstance *GI = World ? World->GetGameInstance() : nullptr;
+    UMythicLivingWorldSubsystem *LWS = GI ? GI->GetSubsystem<UMythicLivingWorldSubsystem>() : nullptr;
+    UMythicFactionDatabase *FDB = LWS ? LWS->GetFactionDatabase() : nullptr;
+    if (!FDB) {
+        return;
+    }
+
+    TArray<FMythicFactionId, TInlineAllocator<32>> AliveFactions;
+    FDB->ForEachAliveFaction([&AliveFactions](FMythicFactionId Id, const FMythicFactionData &) {
+        AliveFactions.Add(Id);
+    });
+
+    for (const FMythicFactionId Id : AliveFactions) {
+        if (!Id.IsValid() || Id == VictimFaction) {
+            continue; // the victim faction already took the direct hit
+        }
+        const EMythicFactionRelation Relation = FDB->GetRelationship(VictimFaction, Id);
+        const float Factor = KillStandingPropagation.FactorForRelation(Relation);
+        if (Factor != 0.0f) {
+            ServerAdjustStanding(Id, -BasePenalty * Factor);
+        }
+    }
 }
 
 void UMythicFactionStandingComponent::SetStanding(FMythicFactionId Faction, float NewValue) {

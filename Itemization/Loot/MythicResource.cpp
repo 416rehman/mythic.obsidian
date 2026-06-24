@@ -1,7 +1,9 @@
 #include "MythicResource.h"
 #include "Mythic.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Engine/World.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
+#include "GAS/MythicTags_GAS.h" // GAS_EVENT_DMG_RECEIVED
 #include "Kismet/KismetSystemLibrary.h"
 #include "Net/UnrealNetwork.h"
 
@@ -64,13 +66,16 @@ bool AMythicResource::TakePlaceOfISM() {
     return false;
 }
 
-void AMythicResource::OnHit(AActor *Actor, AActor *Actor1, const FGameplayEffectSpec *GameplayEffectSpec, float X, float Arg, float X1) {
+void AMythicResource::HandleDamageReceived(const FGameplayEventData *Payload) {
     HitsTillDestruction--;
+    // The instigator of the hit (the harvester) — credited to the server-side BP events.
+    const AActor *InstConst = Payload ? Payload->Instigator : nullptr;
+    AActor *HitInstigator = const_cast<AActor *>(InstConst);
     // Broadcast to clients
-    OnResourceHit(Actor, HitsTillDestruction);
+    OnResourceHit(HitInstigator, HitsTillDestruction);
 
     if (HitsTillDestruction <= 0) {
-        OnResourceDestroyed(Actor);
+        OnResourceDestroyed(HitInstigator);
     }
 }
 
@@ -122,8 +127,11 @@ void AMythicResource::BeginPlay() {
                 }
             }
 
-            // Listen for health attribute changes, and decrease hits till destruction every time health changes
-            this->LifeAttributes->OnHealthChanged.AddUObject(this, &AMythicResource::OnHit);
+            // Decrement remaining hits on each damaging hit. The Life set fires GAS_EVENT_DMG_RECEIVED on this ASC per
+            // hit (DamageDone > 0); listen for that LIVE event — the same GenericGameplayEventCallbacks mechanism the
+            // LifeComponent uses for death/kill. (The old OnHealthChanged delegate this used is no longer broadcast, so
+            // harvest-by-hit was silently dead.)
+            this->AbilitySystemComponent->GenericGameplayEventCallbacks.FindOrAdd(GAS_EVENT_DMG_RECEIVED).AddUObject(this, &AMythicResource::HandleDamageReceived);
         }
         else {
             UE_LOG(LogTemp, Warning, TEXT("Not server, not initializing default abilities and effects"));

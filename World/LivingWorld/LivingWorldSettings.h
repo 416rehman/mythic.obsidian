@@ -99,6 +99,16 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Significance")
     float EmotionalIntensityWeight = 0.3f;
 
+    /** RelevantEventCount at which the event-count contribution to significance saturates to 1.0 (further events don't
+     *  raise it). Pairs with EventCountWeight. Was a hardcoded 16.0 inside the significance processor. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Significance", meta = (ClampMin = "1.0"))
+    float EventCountFullScore = 16.0f;
+
+    /** Total pressure (sum across all pressure channels) at which the emotional-intensity contribution saturates to 1.0.
+     *  Only hydrated (Tier1+) entities carry pressure. Pairs with EmotionalIntensityWeight. Was a hardcoded 3.0. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Significance", meta = (ClampMin = "0.01"))
+    float EmotionalPressureFullScore = 3.0f;
+
     // ─── Economy Simulation ──────────────────────────────
 
     /**
@@ -656,6 +666,36 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schedule", meta = (ClampMin = "60.0", ClampMax = "7200.0"))
     float DayLengthSeconds = 1200.0f;
 
+    // ─── NPC daily schedule hours ────────────────────────
+    // Hours of the game day [0,24) that drive ScheduleTransitionProcessor → the FollowSchedule desire → Tier-2 NPC
+    // movement (work/social/rest), so designers can tune the town's daily rhythm. Phases cascade: Rest until DayStart,
+    // morning Travel to WorkStart, Work to WorkEnd, Travel to SocialStart, Social to SocialEnd, evening Travel to
+    // DayEnd, then Rest. Keep ascending; out-of-order values collapse the affected window (well-defined, no crash).
+    // Defaults reproduce the prior hardcoded 6/8/14/15/18/19 layout exactly.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schedule", meta = (ClampMin = "0.0", ClampMax = "24.0"))
+    float ScheduleDayStartHour = 6.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schedule", meta = (ClampMin = "0.0", ClampMax = "24.0"))
+    float ScheduleWorkStartHour = 8.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schedule", meta = (ClampMin = "0.0", ClampMax = "24.0"))
+    float ScheduleWorkEndHour = 14.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schedule", meta = (ClampMin = "0.0", ClampMax = "24.0"))
+    float ScheduleSocialStartHour = 15.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schedule", meta = (ClampMin = "0.0", ClampMax = "24.0"))
+    float ScheduleSocialEndHour = 18.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schedule", meta = (ClampMin = "0.0", ClampMax = "24.0"))
+    float ScheduleDayEndHour = 19.0f;
+
+    /** Per-NPC schedule stagger (± hours). Each NPC's daily routine is offset by a deterministic amount in
+     *  [-ScheduleStaggerHours, +ScheduleStaggerHours] derived from its stable NameHash, so the town doesn't transition
+     *  every NPC's phase in lockstep (organic staggered commutes/rest vs robotic global sync). 0 disables (global sync). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schedule", meta = (ClampMin = "0.0", ClampMax = "6.0"))
+    float ScheduleStaggerHours = 2.0f;
+
     // ─── Belief Propagation ──────────────────────────────
 
     /**
@@ -673,6 +713,21 @@ public:
      */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social", meta = (ClampMin = "1", ClampMax = "10"))
     int32 MaxBeliefPropagationHops = 3;
+
+    /**
+     * Per-second exponential decay rate for an NPC's belief confidence (Confidence *= exp(-rate * dt)). Higher = NPCs
+     * forget faster. The default 0.005/s gives a ~10-minute half-life (ln2/0.005 ≈ 139s... per ~2.3 half-lives to prune).
+     * Applied over the DELTA since each belief's last decay so the curve telescopes to the intended single exp(-rate*age).
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float BeliefConfidenceDecayRate = 0.005f;
+
+    /**
+     * Confidence floor below which a decayed belief is forgotten (pruned from the brain). Keeps the belief set bounded
+     * as old memories fade. Must stay below the InjectBelief seed confidence (0.1) so freshly-formed beliefs survive.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float BeliefPruneThreshold = 0.05f;
 
     // ─── Scheme Engine (Phase 5) ─────────────────────────
 

@@ -63,7 +63,10 @@ protected:
     UInstancedStaticMeshComponent *Source_ISM;
 
 public:
-    void OnHit(AActor *Actor, AActor *Actor1, const FGameplayEffectSpec *GameplayEffectSpec, float X, float Arg, float X1);
+    // SERVER: decrement remaining hits when this resource takes a damaging hit. Driven by the GAS_EVENT_DMG_RECEIVED
+    // gameplay event the Life attribute set fires on the owner ASC per hit. (Previously bound to
+    // UMythicAttributeSet_Life::OnHealthChanged — a delegate that is no longer broadcast, so harvest-by-hit was dead.)
+    void HandleDamageReceived(const struct FGameplayEventData *Payload);
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;
 

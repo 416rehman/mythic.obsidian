@@ -102,8 +102,8 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
         // Convert damage to -Health and clamp
         const float NewHealth = FMath::Clamp(GetHealth() - DamageDone, 0.0f, GetMaxHealth());
         SetHealth(NewHealth);
-        // Check for death
-        if (GetHealth() <= 0.0f && !bOutOfHealth) {
+        // Check for death (shared latch rule)
+        if (ComputeOutOfHealthLatch(GetHealth()) && !bOutOfHealth) {
             bOutOfHealth = true;
         }
 
@@ -178,6 +178,13 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
         SetHealth(NewHealth);
         SetHealing(0.0f); // Reset meta attribute
 
+        // Keep the death latch in sync: a heal that restores health above 0 must CLEAR bOutOfHealth, exactly as the
+        // direct-Health path does on recovery. Without this, an entity healed back from 0 (e.g. a co-op AoE heal / HoT
+        // landing on a downed ally) stays "out of health" → the Damage path's early-out makes it permanently
+        // damage-immune and unable to die again. (Whether such a heal should ALSO clear the DYING/DEAD tags or fire a
+        // revive is a separate design question — see backlog; this is the pure latch-sync correctness fix.)
+        bOutOfHealth = ComputeOutOfHealthLatch(GetHealth());
+
         if (HealingDone > 0.0f) {
             // OnHealthChanged.Broadcast(Instigator, Causer, &Data.EffectSpec, HealingDone, HealthBeforeAttributeChange, GetHealth());
             SendEventToInstigator(Data, Instigator, InstigatorASC, ASC, GAS_EVENT_HEAL_DELIVERED, HealingDone);
@@ -190,7 +197,7 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
         SetHealth(FMath::Clamp(GetHealth(), 0.0f, GetMaxHealth()));
         // OnHealthChanged.Broadcast(Instigator, Causer, &Data.EffectSpec, Data.EvaluatedData.Magnitude, HealthBeforeAttributeChange, GetHealth());
 
-        if (GetHealth() <= 0.0f && !bOutOfHealth) {
+        if (ComputeOutOfHealthLatch(GetHealth()) && !bOutOfHealth) {
             bOutOfHealth = true;
             // Direct lethal Health changes (environmental / scripted kills) must trigger death like the Damage path
             // does, otherwise such kills are silent (no respawn / loot / XP).
@@ -198,7 +205,7 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
                 SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DEATH, FMath::Max(0.0f, HealthBeforeAttributeChange - GetHealth()));
             }
         }
-        else if (bOutOfHealth && GetHealth() > 0.0f) {
+        else if (bOutOfHealth && !ComputeOutOfHealthLatch(GetHealth())) {
             bOutOfHealth = false;
         }
     }
@@ -224,6 +231,32 @@ void UMythicAttributeSet_Life::ResetForRespawn() {
             ASC->SetLooseGameplayTagCount(GAS_STATE_DEAD, 0);
         }
     }
+}
+
+bool UMythicAttributeSet_Life::ComputeOutOfHealthLatch(float NewHealth) {
+    return NewHealth <= 0.0f;
+}
+
+EMythicLethalOutcome UMythicAttributeSet_Life::ResolveLethalOutcome(const bool bWouldBeLethal, const bool bCoopDownStateEnabled,
+                                                                    const bool bAlreadyDowned, const bool bRevivablePawn) {
+    // A hit that doesn't bring the entity to zero health is just damage.
+    if (!bWouldBeLethal) {
+        return EMythicLethalOutcome::Survive;
+    }
+    // Down-state disabled (the default) → lethal hits kill, exactly as today.
+    if (!bCoopDownStateEnabled) {
+        return EMythicLethalOutcome::Die;
+    }
+    // Only revivable pawns (players) can be downed; NPCs / creatures die outright.
+    if (!bRevivablePawn) {
+        return EMythicLethalOutcome::Die;
+    }
+    // Being hit while already downed finishes the entity off.
+    if (bAlreadyDowned) {
+        return EMythicLethalOutcome::Die;
+    }
+    // Co-op down enabled, a revivable pawn taking its FIRST lethal hit → downed, not dead (teammates can revive).
+    return EMythicLethalOutcome::EnterDownState;
 }
 
 void UMythicAttributeSet_Life::ClampAttributes(const FGameplayAttribute &Attribute, float &NewValue) {

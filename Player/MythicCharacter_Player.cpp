@@ -11,6 +11,7 @@
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
+#include "MythicPlayerController.h" // revive interaction routes via ServerInteractPrimary
 
 AMythicCharacter_Player::AMythicCharacter_Player() {
     // Set size for player capsule
@@ -84,4 +85,60 @@ void AMythicCharacter_Player::GetLifetimeReplicatedProps(TArray<FLifetimePropert
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
     DOREPLIFETIME(AMythicCharacter_Player, ASC_Ref);
+}
+
+// ─── IMythicInteractable: revive a downed teammate ───
+// A player pawn is interactable ONLY while downed. The prompt widget calls OnPrimaryInteract on the REVIVER's client
+// (Interactor = the reviver's controller); we route to the server via ServerInteractPrimary, then on the server
+// validate (target still downed, reviver alive) and revive.
+void AMythicCharacter_Player::OnPrimaryInteract_Implementation(AActor *Interactor) {
+    AMythicPlayerController *ReviverPC = Cast<AMythicPlayerController>(Interactor);
+    if (!ReviverPC) {
+        return;
+    }
+    if (HasAuthority()) {
+        if (!LifeComponent) {
+            return;
+        }
+        bool bReviverDowned = false;
+        if (const APawn *ReviverPawn = ReviverPC->GetPawn()) {
+            if (const UMythicLifeComponent *ReviverLife = UMythicLifeComponent::FindHealthComponent(ReviverPawn)) {
+                bReviverDowned = ReviverLife->IsDowned();
+            }
+        }
+        if (UMythicLifeComponent::CanReviveTarget(LifeComponent->IsDowned(), bReviverDowned)) {
+            LifeComponent->ServerReviveFromDowned();
+        }
+        return;
+    }
+    if (ReviverPC->IsLocalController()) {
+        ReviverPC->ServerInteractPrimary(this);
+    }
+}
+
+void AMythicCharacter_Player::OnSecondaryInteract_Implementation(AActor *Interactor) {
+    // No secondary action.
+}
+
+USceneComponent *AMythicCharacter_Player::GetWidgetAttachmentComponent_Implementation() const {
+    return GetRootComponent();
+}
+
+bool AMythicCharacter_Player::GetInteractionData_Implementation(AActor *Interactor, FMythicInteractionData &OutInteractionData) const {
+    // Offer the "Revive" interaction ONLY while downed; a healthy player exposes no prompt (the focus sweep still
+    // sees the pawn, but a false return means "not interactable right now").
+    if (!LifeComponent || !LifeComponent->IsDowned()) {
+        return false;
+    }
+    OutInteractionData.InputActionDataTable = InputActionDataTable;
+    OutInteractionData.PrimaryInteractionName = ReviveInteractionName;
+    return true;
+}
+
+void AMythicCharacter_Player::OnFocused_Implementation(AActor *Interactor) {
+    // Visual feedback handled in Blueprint.
+}
+
+void AMythicCharacter_Player::OnUnfocused_Implementation(AActor *Interactor) {
+    // Visual feedback handled in Blueprint.
 }

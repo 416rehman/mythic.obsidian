@@ -18,6 +18,7 @@ class UMythicLivingWorldSettings;
 class UMythicCognitiveBrainComponent;
 class APawn;
 struct FMythicMoralAction; // full per-axis moral vector (Morality/MoralSignature.h) — passed by const-ref into loyalty eval
+struct FMythicBelief;      // cognitive belief (AI/Cognition/CognitiveTypes.h) — passed by const-ref into ShouldShareBelief
 class AMythicEnvironmentController; // the world clock — its DayTimeChangeDelegate drives the nightfall rest phase
 
 /**
@@ -56,12 +57,28 @@ public:
 
     /**
      * Add a companion to the player's party.
-     * @param PlayerId      Player controller ID
+     * @param PlayerKey     The recruiter's CANONICAL key (GetCanonicalPlayerKey). Both the party membership key AND the
+     *                      follow key: the companion follows THIS player's pawn via the registry, so a co-op companion
+     *                      follows whoever recruited it (not always the host), and the party survives save/load.
      * @param NPC           The NPC actor to add (must be Tier 2-3 cognitive)
      * @param SourceEntity  The MASS entity this NPC was promoted from
      * @return true if successfully added (false if party full or NPC invalid)
      */
-    bool AddCompanion(int32 PlayerId, AMythicNPCCharacter *NPC, FMassEntityHandle SourceEntity);
+    bool AddCompanion(const FString &PlayerKey, AMythicNPCCharacter *NPC, FMassEntityHandle SourceEntity);
+
+    /**
+     * True if ANY player's party already contains a member with this persisted NameHash. Used by AddCompanion's
+     * cross-party duplicate guard so two players can't both recruit the same NPC (co-op). NameHash 0 (no captured
+     * identity) never matches. Pure + static so the cross-party scan is unit-testable.
+     */
+    static bool AnyPartyContainsNameHash(const TMap<FString, TArray<FMythicPartyMember>> &AllParties, uint32 NameHash);
+
+    /**
+     * Migrate a pre-v4 save's int32 party key (always 0 in slice-1) to a well-formed canonical player key. Delegates to
+     * AMythicPlayerState::ResolveCanonicalPlayerKey (single source), so the migrated key uses the session-fallback form.
+     * Static + pure so the migration rule is unit-testable.
+     */
+    static FString MakeLegacyPartyKey(int32 LegacyPlayerId);
 
     /**
      * Remove a companion from the player's party.
@@ -70,7 +87,7 @@ public:
      * @param bVoluntary Whether this is a voluntary departure (true) or forced removal (false)
      * @return true if the companion was found and removed
      */
-    bool RemoveCompanion(int32 PlayerId, AMythicNPCCharacter *NPC, bool bVoluntary = false);
+    bool RemoveCompanion(const FString &PlayerKey, AMythicNPCCharacter *NPC, bool bVoluntary = false);
 
     /**
      * Remove an NPC from WHATEVER player's party holds it (the caller doesn't know the PlayerId). Used on companion
@@ -86,12 +103,12 @@ public:
      * @param OutMembers Output array of party members
      * @return Number of party members
      */
-    int32 GetPartyMembers(int32 PlayerId, TArray<FMythicPartyMember> &OutMembers) const;
+    int32 GetPartyMembers(const FString &PlayerKey, TArray<FMythicPartyMember> &OutMembers) const;
 
     /**
      * Get current party size for a player.
      */
-    int32 GetPartySize(int32 PlayerId) const;
+    int32 GetPartySize(const FString &PlayerKey) const;
 
     /**
      * Check if an NPC is in any player's party.
@@ -99,10 +116,33 @@ public:
     bool IsInParty(const AMythicNPCCharacter *NPC) const;
 
     /**
+     * Pure propagation-eligibility predicate for a belief during party gossip: a belief is shared only while it is
+     * still confident enough to matter AND has not exceeded the designer's max hop distance (MaxBeliefPropagationHops).
+     * Static + pure so it is unit-testable without live party actors, and the single source of truth for the gossip
+     * loop's gate. PropagationHops is 0 for a directly-witnessed belief and incremented on each propagation hop.
+     */
+    static bool ShouldShareBelief(const FMythicBelief &Belief, int32 MaxHops);
+
+    /**
+     * Single source of truth for one belief's save/load byte layout (used by both branches of Serialize so the field
+     * order can never desync between save and load). Reads/writes the original 3 fields (EventTag/Confidence/
+     * FormationTime) for all versions and the full semantic state (Cell/InvolvedFaction/LastDecayTime/PropagationHops/
+     * SourceEventId) at Version >= 3. Static so it is unit-testable without a live subsystem.
+     */
+    static void SerializeBelief(FArchive &Ar, FMythicBelief &Belief, int32 Version);
+
+    /**
+     * Single source of truth for a party's save/load KEY field (so save + load can't desync — same rationale as
+     * SerializeBelief). v4+: the canonical player key (FString). v<4 (legacy): the field was an int32 PlayerId — read it
+     * for byte-alignment then migrate via MakeLegacyPartyKey. Static so the round-trip is unit-testable with an FArchive.
+     */
+    static void SerializePartyKey(FArchive &Ar, FString &Key, int32 Version);
+
+    /**
      * The pawn a companion of PlayerId should follow. Slice-1 single-player mapping: PlayerId 0 → the first local
      * player's pawn. The real PlayerId→pawn resolver is the MP slice (one shared source per Rule 3).
      */
-    APawn *GetLeaderPawn(int32 PlayerId) const;
+    APawn *GetLeaderPawn(const FString &PlayerKey) const;
 
     /**
      * True if the MASS entity belongs to any player's party. Game-thread query used by the SignificanceProcessor
@@ -122,18 +162,18 @@ public:
      *                    single axis) feeds companions the SAME data the world-action pipeline records — e.g. a kill
      *                    carries Violence AND Mercy — so loyalty severity is judged on the complete action, not a slice.
      */
-    void OnPlayerAction(int32 PlayerId, const FGameplayTag &EventTag, const FMythicMoralAction &MoralAction);
+    void OnPlayerAction(const FString &PlayerKey, const FGameplayTag &EventTag, const FMythicMoralAction &MoralAction);
 
     /**
      * Enter rest phase for a player's party. Triggers belief propagation.
      * @param PlayerId Player entering rest
      */
-    void EnterRestPhase(int32 PlayerId);
+    void EnterRestPhase(const FString &PlayerKey);
 
     /**
      * Exit rest phase.
      */
-    void ExitRestPhase(int32 PlayerId);
+    void ExitRestPhase(const FString &PlayerKey);
 
     // ─── Serialization ───────────────────────────────────
 
@@ -158,7 +198,7 @@ private:
      * Propagate beliefs between party members during rest.
      * Each member shares their top beliefs with others, with confidence reduction per hop.
      */
-    void PropagateBeliefs(int32 PlayerId);
+    void PropagateBeliefs(const FString &PlayerKey);
 
     /**
      * Evaluate a companion's loyalty response to a player action's full moral vector (judged against the companion's
@@ -170,29 +210,29 @@ private:
     /**
      * Check if a companion should leave or betray based on current state.
      */
-    void CheckCompanionThresholds(int32 PlayerId, int32 MemberIndex);
+    void CheckCompanionThresholds(const FString &PlayerKey, int32 MemberIndex);
 
     /**
      * Handle companion departure (voluntary or forced by loyalty threshold).
      */
-    void HandleCompanionDeparture(int32 PlayerId, int32 MemberIndex);
+    void HandleCompanionDeparture(const FString &PlayerKey, int32 MemberIndex);
 
     /**
      * Handle companion betrayal (pressure exceeded betrayal threshold).
      */
-    void HandleCompanionBetrayal(int32 PlayerId, int32 MemberIndex);
+    void HandleCompanionBetrayal(const FString &PlayerKey, int32 MemberIndex);
 
     /**
      * The SINGLE removal sink for a party slot: drops the despawn-exemption signal + stops the companion's follow timer
      * BEFORE the RemoveAtSwap, so no exit path (RemoveCompanion / departure / betrayal / later death) can bypass either
      * cleanup. Captures the member by const-ref before the swap.
      */
-    void RemoveMemberAt(int32 PlayerId, TArray<FMythicPartyMember> &Party, int32 Index);
+    void RemoveMemberAt(const FString &PlayerKey, TArray<FMythicPartyMember> &Party, int32 Index);
 
     // SERVER → owning client: float a "<Name> has left your party" (grey) or "<Name> turns on you!" (red) callout over
     // the departing companion. Single source for the departure + betrayal loss feedback. Call BEFORE RemoveMemberAt
     // (while Member is still valid).
-    void NotifyCompanionLost(int32 PlayerId, const FMythicPartyMember &Member, bool bBetrayed);
+    void NotifyCompanionLost(const FString &PlayerKey, const FMythicPartyMember &Member, bool bBetrayed);
 
     // ─── Slice-7: post-load companion entity re-creation + rebind ───
     // The Mass world is transient on load (the EntityManager is never serialized) + the spawner only mints NEW
@@ -215,7 +255,7 @@ private:
 
     /** Bind a loaded party slot to its freshly re-embodied actor + re-arm its follow timer, preserving the already-
      *  loaded loyalty/pressure/beliefs. */
-    void RebindLoadedCompanion(int32 PlayerId, FMythicPartyMember &Member, AMythicNPCCharacter *Actor);
+    void RebindLoadedCompanion(const FString &PlayerKey, FMythicPartyMember &Member, AMythicNPCCharacter *Actor);
 
     /** Handle for the self-rescheduling rebuild ticker (invalid when not running). */
     FTSTicker::FDelegateHandle CompanionRebuildTickHandle;
@@ -225,8 +265,9 @@ private:
 
     // ─── State ────────────────────────────────────────────
 
-    /** Per-player party: PlayerId → array of party members */
-    TMap<int32, TArray<FMythicPartyMember>> PlayerParties;
+    /** Per-player party: canonical player key (GetCanonicalPlayerKey) → array of party members. Keyed by the persistent
+     *  cross-session key (not the session int32 PlayerId) so co-op parties stay distinct + survive save/load. */
+    TMap<FString, TArray<FMythicPartyMember>> PlayerParties;
 
     /** Flat set of all companion MASS entities (across all parties) for O(1) IsCompanionEntity — the despawn-exemption
      *  signal the SignificanceProcessor reads. Maintained in AddCompanion / RemoveCompanion alongside PlayerParties. */
@@ -241,8 +282,18 @@ private:
     /** Betrayal pressure above which companion acts against the player */
     float BetrayalThreshold = 5.0f;
 
+    /** A single player action whose |loyalty impact| on a STAYING companion meets/exceeds this makes that companion
+     *  remark on it (moral commentary). Just above the betrayal-pressure trigger (0.1) so only notably-charged acts —
+     *  heroic or villainous — draw a comment, not routine ones. */
+    float CompanionCommentaryLoyaltyDelta = 0.15f;
+
     /** Confidence reduction per belief propagation hop */
     float BeliefPropagationDecay = 0.3f;
+
+    /** Max hops a belief travels through party gossip before it stops spreading (designer cap; cached from
+     *  LivingWorldSettings::MaxBeliefPropagationHops). Enforced via ShouldShareBelief so a rumor cannot reach the
+     *  entire connected party graph — confidence-decay alone would otherwise let it spread ~5-6 hops. */
+    int32 MaxBeliefPropagationHops = 3;
 
     // ─── Cached References ────────────────────────────────
 

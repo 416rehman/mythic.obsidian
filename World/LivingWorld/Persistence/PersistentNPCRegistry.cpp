@@ -121,7 +121,11 @@ void UMythicPersistentNPCRegistry::Serialize(FArchive &Ar) {
             FMythicPersistentDeathRecord &Record = DeathRecords[i];
             Record.NameHash = Hash;
             Record.Faction.Index = FactionIdx;
-            Record.RoleTag = FGameplayTag::RequestGameplayTag(FName(*RoleStr));
+            // ErrorIfNotFound=false: a death record's RoleTag is historical display/succession data. Most perma-dead
+            // NPCs are non-leaders with NO role, so RoleStr round-trips as "None" — and a tag could also be removed
+            // between save and load. The old default-true call logged an Error on EVERY load of such a record (and the
+            // tag still resolved to empty anyway). Resolve quietly to an empty tag instead.
+            Record.RoleTag = FGameplayTag::RequestGameplayTag(FName(*RoleStr), /*ErrorIfNotFound=*/false);
             Record.DeathTime = Time;
             Record.DeathCell = FMythicCellCoord(CellX, CellY);
 

@@ -6,8 +6,10 @@
 #include "IMythicInteractable.h"
 #include "Mythic.h"
 #include "PrimaryGameLayout.h"
+#include "TimerManager.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/WidgetComponent.h"
+#include "GameFramework/Pawn.h"
 
 ////////////// HOW IT WORKS /////////////////////
 /// InteractionComponent takes a Tag for the GameUILayerName and finds the first widget, UI_LayerRootWidget, in that layer (This layer should only have one widget, the HUD)
@@ -76,6 +78,32 @@ void UMythicInteractionComponent::BeginPlay() {
     this->PauseInteractions(false);
 }
 
+int32 UMythicInteractionComponent::SelectFocusedInteractable(TConstArrayView<FMythicInteractCandidate> Candidates, float MinDot) {
+    float BestDot = -1.0f;
+    int32 Best = INDEX_NONE;
+    for (int32 i = 0; i < Candidates.Num(); ++i) {
+        const FMythicInteractCandidate &C = Candidates[i];
+        // Forward-cone eligibility gate: a candidate outside the cone is never focusable (both tiers). At the default
+        // MinDot = -1, Dot (in [-1,1]) is never below it, so nothing is skipped — identical to the prior full-sphere.
+        if (C.Dot < MinDot) {
+            continue;
+        }
+        if (C.bInRange) {
+            // In-range: keep the best forward-alignment.
+            if (C.Dot > BestDot) {
+                BestDot = C.Dot;
+                Best = i;
+            }
+        }
+        else if (Best == INDEX_NONE || C.Distance < Candidates[Best].Distance) {
+            // Out-of-range fallback: closest by origin. Never overrides an in-range pick — an in-range origin distance
+            // is < InteractionRange <= any out-of-range distance, so this comparison is false against an in-range Best.
+            Best = i;
+        }
+    }
+    return Best;
+}
+
 void UMythicInteractionComponent::ScanForInteractableActors() {
     auto Pawn = this->OwningController->GetPawn();
     if (!Pawn) {
@@ -85,10 +113,6 @@ void UMythicInteractionComponent::ScanForInteractableActors() {
     auto PlayerForward = this->OwningController->GetPawn()->GetActorForwardVector();
     auto World = GetWorld();
 
-    // If items are within this distance, then use dot product to pick the one closest to the player's forward vector
-    auto bestDot = -1.f;
-    AActor *bestActor = nullptr;
-
     // Check for interactable actors in a sphere around the owning actor
     TArray<FHitResult> HitResults;
     FCollisionQueryParams QueryParams;
@@ -96,37 +120,30 @@ void UMythicInteractionComponent::ScanForInteractableActors() {
     auto HasResults = World->SweepMultiByChannel(HitResults, PlayerLoc, PlayerLoc, FQuat::Identity, ECollisionChannel::ECC_Visibility,
                                                  FCollisionShape::MakeSphere(InteractionRange), QueryParams);
 
+    // Reduce the swept interactables to focus candidates, then pick via the pure priority rule (SelectFocusedInteractable):
+    // best forward-alignment among in-range, else closest out-of-range. Parallel arrays keep the index→actor mapping.
+    TArray<FMythicInteractCandidate> Candidates;
+    TArray<AActor *> CandidateActors;
     if (HasResults) {
-        // Iterate over all hit results
         for (auto &hit : HitResults) {
             auto actor = hit.GetActor();
-            if (!actor) {
+            if (!actor || OwningController->GetPawn() == actor) {
                 continue;
             }
-
-            // Check if the actor implements the IMythicInteractable interface
             if (actor->GetClass()->ImplementsInterface(UMythicInteractable::StaticClass())) {
-                auto thisActorLocation = actor->GetActorLocation();
-
-                // If the item is within the distance threshold, then use the dot product to pick the one closest to the player's forward vector
-                auto distance = (thisActorLocation - PlayerLoc).Size();
-                if (distance < InteractionRange) {
-                    auto toActor = (thisActorLocation - PlayerLoc).GetSafeNormal();
-                    auto dot = FVector::DotProduct(PlayerForward, toActor);
-                    if (dot > bestDot) {
-                        bestDot = dot;
-                        bestActor = actor;
-                    }
-                }
-                else {
-                    // If the item is outside the distance threshold, then just pick the closest one
-                    if (!bestActor || distance < (bestActor->GetActorLocation() - PlayerLoc).Size()) {
-                        bestActor = actor;
-                    }
-                }
+                const FVector thisActorLocation = actor->GetActorLocation();
+                const float distance = (thisActorLocation - PlayerLoc).Size();
+                FMythicInteractCandidate Cand;
+                Cand.bInRange = distance < InteractionRange;
+                Cand.Dot = FVector::DotProduct(PlayerForward, (thisActorLocation - PlayerLoc).GetSafeNormal());
+                Cand.Distance = distance;
+                Candidates.Add(Cand);
+                CandidateActors.Add(actor);
             }
         }
     }
+    const int32 BestIdx = SelectFocusedInteractable(Candidates, InteractionConeMinDot);
+    AActor *bestActor = (BestIdx != INDEX_NONE) ? CandidateActors[BestIdx] : nullptr;
 
     // Detect a destroyed/stale focused actor before resolving focus this scan.
     // CurrentFocusedActor is a UPROPERTY raw pointer, so GC may have nulled it after the actor's

@@ -5,7 +5,9 @@
 
 #include "AbilitySystemGlobals.h"
 #include "Mythic.h"
-#include "MythicDevSettings.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "Settings/MythicDeveloperSettings.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Proficiencies.h"
 #include "GameModes/Attributes/WorldAttributes.h"
 #include "GameModes/GameState/MythicGameState.h"
@@ -13,6 +15,20 @@
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
 #include "Itemization/MythicTags_Inventory.h"
+
+bool ULootReward::ResolveEntryDropChance(float OverrideDropChance, int32 RarityIndex, TConstArrayView<float> RarityWeights, float &OutChance) {
+    if (OverrideDropChance > 0.0f) {
+        OutChance = OverrideDropChance; // explicit per-entry override wins (player level / rarity weight ignored)
+        return true;
+    }
+    if (RarityWeights.IsValidIndex(RarityIndex)) {
+        OutChance = RarityWeights[RarityIndex];
+        return true;
+    }
+    // Out-of-range rarity with no override — no resolvable weight; caller must skip (never OOB-read the weights array).
+    OutChance = 0.0f;
+    return false;
+}
 
 bool ULootReward::Give(FRewardContext &Context) const {
     // Cast the context to the correct type
@@ -74,7 +90,7 @@ bool ULootReward::Give(FRewardContext &Context) const {
     }
 
     // Settings
-    auto MythicSettings = UMythicDevSettings::Get();
+    auto MythicSettings = GetDefault<UMythicDeveloperSettings>();
     if (!MythicSettings) {
         UE_LOG(Myth, Error, TEXT("LootReward::Give - Mythic Settings not found"));
         return false;
@@ -144,7 +160,15 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
             continue;
 
         const int32 RarityIndex = static_cast<int32>(Entry.Item->Rarity);
-        float DropChance = Entry.OverrideDropChance > 0 ? Entry.OverrideDropChance : WeightsByRarity[RarityIndex];
+        // Resolve via the bounds-safe helper — an out-of-range rarity with no override is SKIPPED, not an OOB read of
+        // the fixed-size WeightsByRarity stack array (mirrors the IsValidIndex guards the affix/talent count sites use).
+        float DropChance = 0.0f;
+        if (!ResolveEntryDropChance(Entry.OverrideDropChance, RarityIndex, MakeArrayView(WeightsByRarity, NumRarities), DropChance)) {
+            UE_LOG(Myth, Warning,
+                   TEXT("LootReward::RequestLootFromSource - Item %s has out-of-range rarity %d with no OverrideDropChance — skipping"),
+                   *Entry.Item->GetName(), RarityIndex);
+            continue;
+        }
 
         const float RollResult = FMath::FRand();
 

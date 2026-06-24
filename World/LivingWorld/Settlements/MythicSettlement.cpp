@@ -6,6 +6,7 @@
 #include "World/LivingWorld/LivingWorldSubsystem.h"
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "Components/SplineComponent.h"
+#include "Engine/GameInstance.h"
 
 AMythicSettlement::AMythicSettlement() {
     PrimaryActorTick.bCanEverTick = false;
@@ -121,8 +122,41 @@ void AMythicSettlement::RasterizeSplineToCells(const UMythicTerritoryGrid *Terri
         }
     }
 
-    UE_LOG(LogMythSettlement, Log, TEXT("Settlement '%s' rasterized to %d cells from %d spline samples."),
-           *SettlementName.ToString(), SettlementData.RasterizedCells.Num(), NumSamples);
+    // Set the center cell now that the rasterized cells are known — consumed by the Socialize gather-point (AIController).
+    // (Was never assigned → defaulted to (0,0), sending socializing NPCs to the grid's origin corner.)
+    SettlementData.CenterCell = ComputeCenterCell(SettlementData.RasterizedCells);
+
+    UE_LOG(LogMythSettlement, Log, TEXT("Settlement '%s' rasterized to %d cells from %d spline samples (center %d,%d)."),
+           *SettlementName.ToString(), SettlementData.RasterizedCells.Num(), NumSamples,
+           SettlementData.CenterCell.X, SettlementData.CenterCell.Y);
+}
+
+FMythicCellCoord AMythicSettlement::ComputeCenterCell(const TArray<FMythicCellCoord> &Cells) {
+    if (Cells.Num() == 0) {
+        return FMythicCellCoord(0, 0); // degenerate (MinSettlementCells should prevent it) — matches the default
+    }
+    // Centroid of the rasterized cells (int64 sums avoid overflow at max grid 1024×1024).
+    int64 SumX = 0;
+    int64 SumY = 0;
+    for (const FMythicCellCoord &C : Cells) {
+        SumX += C.X;
+        SumY += C.Y;
+    }
+    const double CenX = static_cast<double>(SumX) / Cells.Num();
+    const double CenY = static_cast<double>(SumY) / Cells.Num();
+    // Return the ACTUAL rasterized cell nearest the centroid (so it lies inside the settlement even for concave shapes).
+    FMythicCellCoord Best = Cells[0];
+    double BestDistSq = TNumericLimits<double>::Max();
+    for (const FMythicCellCoord &C : Cells) {
+        const double dx = static_cast<double>(C.X) - CenX;
+        const double dy = static_cast<double>(C.Y) - CenY;
+        const double DistSq = dx * dx + dy * dy;
+        if (DistSq < BestDistSq) {
+            BestDistSq = DistSq;
+            Best = C;
+        }
+    }
+    return Best;
 }
 
 void AMythicSettlement::TransferToFaction(FMythicFactionId NewFaction) {

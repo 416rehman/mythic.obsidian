@@ -4,6 +4,8 @@
 #include "MythicAIController.h"
 #include "MythicNPCCharacter.h"
 #include "GAS/MythicAbilitySystemComponent.h"
+#include "GAS/MythicTags_GAS.h"                  // GAS_EVENT_DMG_RECEIVED (threat accrual)
+#include "Settings/MythicDeveloperSettings.h"    // bThreatTargetingEnabled / ThreatPerDamage
 #include "AbilitySystemGlobals.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
@@ -14,9 +16,11 @@
 #include "Player/MythicFactionStandingComponent.h"
 #include "AI/Cognition/CognitiveBrainComponent.h"
 #include "AI/Party/PartySubsystem.h" // companion follow + leader pawn
+#include "Player/MythicPlayerRegistrySubsystem.h" // resolve leader canonical key -> pawn
 #include "World/LivingWorld/LivingWorldSubsystem.h"
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
+#include "World/LivingWorld/Settlements/MythicSettlement.h" // FMythicSettlementData (Socialize -> settlement centre)
 #include "MassEntitySubsystem.h" // FROZEN-CELL #34: the live-cell refresh writes the Identity fragment
 #include "Mass/Fragments/MythicMassFragments.h"
 #include "Engine/GameInstance.h"
@@ -65,6 +69,79 @@ FGenericTeamId AMythicAIController::GetGenericTeamId() const {
     return FGenericTeamId(1);
 }
 
+void AMythicAIController::SanitizePerception(float &SightRadius, float &LoseSightRadius, float &PeripheralAngleDegrees) {
+    SightRadius = FMath::Max(0.0f, SightRadius);
+    // Lose-sight must be at least the sight radius — a smaller lose-radius makes a target sensed then INSTANTLY lost.
+    LoseSightRadius = FMath::Max(LoseSightRadius, SightRadius);
+    PeripheralAngleDegrees = FMath::Clamp(PeripheralAngleDegrees, 0.0f, 180.0f);
+}
+
+void AMythicAIController::OnPossess(APawn *InPawn) {
+    Super::OnPossess(InPawn);
+
+    // Subscribe threat accrual to the possessed pawn's received-hit event (aggro table). Rebind-safe (RemoveAll first,
+    // for a pooled pawn re-possession) and cached for a clean unbind. Done before the sight early-return below so it
+    // is never skipped. Gated internally on the dev flag, so it's zero-cost when threat targeting is off.
+    UnbindThreatEvent();
+    if (UAbilitySystemComponent *MyASC = GetAbilitySystemComponent()) {
+        FGameplayEventMulticastDelegate &Del = MyASC->GenericGameplayEventCallbacks.FindOrAdd(GAS_EVENT_DMG_RECEIVED);
+        Del.AddUObject(this, &AMythicAIController::HandleThreatFromHit);
+        ThreatBoundASC = MyASC;
+    }
+
+    // Override the constructor's default sight with the possessed NPC's per-type perception (data-driven). A
+    // default-constructed / MASS-baseline NPCData carries the standard defaults, so behavior is unchanged unless a
+    // designer tuned the NPC's definition.
+    const AMythicNPCCharacter *NPC = Cast<AMythicNPCCharacter>(InPawn);
+    if (!NPC || !SightConfig || !AIPerception) {
+        return;
+    }
+    const FMythicNPCData Data = NPC->GetNPCData();
+    float Sight = Data.SightRadius;
+    float LoseSight = Data.LoseSightRadius;
+    float Angle = Data.PeripheralVisionAngleDegrees;
+    SanitizePerception(Sight, LoseSight, Angle);
+
+    SightConfig->SightRadius = Sight;
+    SightConfig->LoseSightRadius = LoseSight;
+    SightConfig->PeripheralVisionAngleDegrees = Angle;
+    AIPerception->ConfigureSense(*SightConfig);
+    AIPerception->RequestStimuliListenerUpdate();
+}
+
+bool AMythicAIController::ShouldReleaseLeash(float DistSqFromAnchor, float LeashRangeSq) {
+    // A non-positive range disables the leash (infinite pursuit — the default).
+    return LeashRangeSq > 0.0f && DistSqFromAnchor > LeashRangeSq;
+}
+
+int32 AMythicAIController::SelectClosestHostileIndex(TConstArrayView<float> DistancesSq) {
+    int32 Best = INDEX_NONE;
+    float BestDistSq = TNumericLimits<float>::Max();
+    for (int32 i = 0; i < DistancesSq.Num(); ++i) {
+        if (DistancesSq[i] < BestDistSq) {
+            BestDistSq = DistancesSq[i];
+            Best = i;
+        }
+    }
+    return Best;
+}
+
+int32 AMythicAIController::SelectHighestThreatIndex(TConstArrayView<float> Threats) {
+    int32 Best = INDEX_NONE;
+    float BestThreat = 0.0f; // strictly-positive: zero/negative threat never wins → caller falls back to closest
+    for (int32 i = 0; i < Threats.Num(); ++i) {
+        if (Threats[i] > BestThreat) {
+            BestThreat = Threats[i];
+            Best = i;
+        }
+    }
+    return Best;
+}
+
+float AMythicAIController::ComputeThreatDelta(float Damage, float ThreatPerDamage, float BonusThreat) {
+    return FMath::Max(0.0f, Damage) * FMath::Max(0.0f, ThreatPerDamage) + FMath::Max(0.0f, BonusThreat);
+}
+
 void AMythicAIController::OnTargetPerceptionUpdated(AActor *Actor, FAIStimulus Stimulus) {
     if (!Actor) {
         return;
@@ -73,19 +150,68 @@ void AMythicAIController::OnTargetPerceptionUpdated(AActor *Actor, FAIStimulus S
     // Re-confirm hostility through the single source of truth (faction + player reputation), not just the
     // sense's affiliation pre-filter.
     if (Stimulus.WasSuccessfullySensed() && GetTeamAttitudeTowards(*Actor) == ETeamAttitude::Hostile) {
-        if (CurrentHostileTarget != Actor) {
-            CurrentHostileTarget = Actor;
+        // COMMIT to the current target: only acquire when we don't already have a valid one. The prior `!= Actor` test
+        // switched to ANY newly-sensed hostile, so with two continuously-sensed enemies the target flip-flopped on every
+        // perception update (the NPC never committed to a fight). A target is released (→ re-acquirable) on lost/dead/
+        // no-longer-hostile via the else branch + ReleaseHostileTarget.
+        if (!IsValid(CurrentHostileTarget)) {
+            // Acquire the CLOSEST perceived hostile (sane default), not merely this stimulus's actor — so a multi-enemy
+            // engage commits to the nearest threat instead of whichever perception update fired first. Each candidate is
+            // re-confirmed hostile through GetTeamAttitudeTowards (the SoT), never trusting the sense pre-filter. A
+            // threat-weighted policy remains the logged aggro-model design call. (Acquisition is a rare event, not a tick
+            // — the transient allocation here is fine.)
+            AActor *Target = Actor;
+            const APawn *MyPawn = GetPawn();
+            if (AIPerception && MyPawn) {
+                TArray<AActor *> Perceived;
+                AIPerception->GetPerceivedHostileActors(Perceived);
+                TArray<AActor *, TInlineAllocator<8>> Candidates;
+                TArray<float, TInlineAllocator<8>> DistancesSq;
+                const FVector MyLoc = MyPawn->GetActorLocation();
+                for (AActor *H : Perceived) {
+                    if (IsValid(H) && GetTeamAttitudeTowards(*H) == ETeamAttitude::Hostile) {
+                        Candidates.Add(H);
+                        DistancesSq.Add(FVector::DistSquared(MyLoc, H->GetActorLocation()));
+                    }
+                }
+                // Aggro/threat policy (default-off): when enabled AND some candidate has accrued threat, engage the
+                // HIGHEST-threat hostile (a tank holding aggro); otherwise fall back to the CLOSEST. Threat targeting
+                // off → SelectHighestThreatIndex isn't consulted → byte-identical to the closest-only behaviour.
+                int32 ChosenIdx = INDEX_NONE;
+                const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+                if (Settings && Settings->bThreatTargetingEnabled) {
+                    TArray<float, TInlineAllocator<8>> Threats;
+                    for (const AActor *H : Candidates) {
+                        const float *Found = ThreatTable.Find(H);
+                        Threats.Add(Found ? *Found : 0.0f);
+                    }
+                    ChosenIdx = SelectHighestThreatIndex(Threats); // INDEX_NONE if no candidate has positive threat
+                }
+                if (ChosenIdx == INDEX_NONE) {
+                    ChosenIdx = SelectClosestHostileIndex(DistancesSq);
+                }
+                if (Candidates.IsValidIndex(ChosenIdx)) {
+                    Target = Candidates[ChosenIdx];
+                }
+            }
+
+            CurrentHostileTarget = Target;
+            // Anchor the leash at the engage point (where we acquired). The leash check in TryAttackCurrentTarget
+            // resets the NPC if it is later pulled beyond LeashRange from here.
+            if (MyPawn) {
+                EngageAnchorLocation = MyPawn->GetActorLocation();
+            }
             // Pursue + keep facing the target (SetFocus orients the pawn even once stopped in range, so a
             // forward melee swing lands), then drive attack attempts on a timer. Content may also react to the
             // engage event.
-            MoveToActor(Actor, PursueAcceptanceRadius); // close to INSIDE swing range (150 stopped ~187 > 180, never swung)
-            SetFocus(Actor);
+            MoveToActor(Target, PursueAcceptanceRadius); // close to INSIDE swing range (150 stopped ~187 > 180, never swung)
+            SetFocus(Target);
             bFleeingMove = false; // engage is a toward-the-target move
             if (UWorld *World = GetWorld()) {
                 World->GetTimerManager().SetTimer(AttackTimerHandle, this, &AMythicAIController::TryAttackCurrentTarget,
                                                   AttackAttemptInterval, /*bLoop=*/true, /*InitialDelay=*/0.0f);
             }
-            OnEngageHostileTarget(Actor);
+            OnEngageHostileTarget(Target);
         }
     }
     else if (CurrentHostileTarget == Actor) {
@@ -131,6 +257,14 @@ void AMythicAIController::TryAttackCurrentTarget() {
             ReleaseHostileTarget();
             return;
         }
+    }
+
+    // Leash: if pulled too far from where we engaged, give up the target and reset (prevents infinite cross-map
+    // pursuit / dragging enemy trains). Default LeashRange 0 disables this → prior infinite-pursuit behaviour. The
+    // NPC then resumes its idle/schedule behaviour (which paths it home) on the next idle dispatch.
+    if (ShouldReleaseLeash(FVector::DistSquared(MyPawn->GetActorLocation(), EngageAnchorLocation), FMath::Square(LeashRange))) {
+        ReleaseHostileTarget();
+        return;
     }
 
     // FROZEN-CELL #34-r2: a fleeing / chasing (Avenge) / engaging embodied NPC moves below; keep its live cell tracking
@@ -204,6 +338,15 @@ void AMythicAIController::TryAttackCurrentTarget() {
     NPC->TryActivateAttack();
 }
 
+FMythicCellCoord AMythicAIController::GetPatrolCell(FMythicCellCoord Anchor, int32 LegIndex) {
+    // Cardinal ring: East, North, West, South. ((idx % 4) + 4) % 4 keeps a defensively-negative leg in range.
+    static const FMythicCellCoord Ring[4] = {
+        FMythicCellCoord(1, 0), FMythicCellCoord(0, 1), FMythicCellCoord(-1, 0), FMythicCellCoord(0, -1)
+    };
+    const FMythicCellCoord &Off = Ring[((LegIndex % 4) + 4) % 4];
+    return FMythicCellCoord(Anchor.X + Off.X, Anchor.Y + Off.Y);
+}
+
 void AMythicAIController::TickIdleBehavior() {
     // Combat owns movement — never fight the engage / Flee / Avenge logic.
     if (IsValid(CurrentHostileTarget)) {
@@ -237,28 +380,79 @@ void AMythicAIController::TickIdleBehavior() {
     if (!Brain) {
         return;
     }
-    // Only the grounded-target desires carry a real move cell set by the brain's scorer: Defend → near-home threat cell,
-    // Rest → HomeCell, FollowSchedule → WorkCell (Work phase only), Avenge → the highest-confidence grievance belief cell
-    // (this runs only out of combat — the early CurrentHostileTarget return above hands in-combat Avenge to the engage
-    // logic). Every OTHER desire has no authored cell, so idle dispatch leaves the NPC put rather than steering to (0,0).
+    // Grounded-target desires carry a real move cell set by the brain's scorer: Defend → near-home threat cell,
+    // Rest → HomeCell, FollowSchedule → WorkCell (Work phase only), Avenge → the highest-confidence grievance belief
+    // cell (this runs only out of combat). Patrol → HomeCell ANCHOR, around which we walk a ring (below). Every OTHER
+    // desire has no authored cell, so idle dispatch leaves the NPC put rather than steering to (0,0).
     const FMythicIntention &Intention = Brain->GetCurrentIntention();
-    if (!Intention.bValid ||
-        (Intention.Desire.Type != EMythicDesireType::Defend && Intention.Desire.Type != EMythicDesireType::Rest
-            && Intention.Desire.Type != EMythicDesireType::FollowSchedule && Intention.Desire.Type != EMythicDesireType::Avenge)) {
+    if (!Intention.bValid) {
         return;
     }
-    // Resolve the territory grid to turn the home cell into a world location (same subsystem as faction lookups).
+    const EMythicDesireType DesireType = Intention.Desire.Type;
+    const bool bGroundedTarget = (DesireType == EMythicDesireType::Defend || DesireType == EMythicDesireType::Rest
+        || DesireType == EMythicDesireType::FollowSchedule || DesireType == EMythicDesireType::Avenge);
+    if (DesireType != EMythicDesireType::Patrol && DesireType != EMythicDesireType::Socialize && !bGroundedTarget) {
+        return;
+    }
+    // Resolve the living world + territory grid (same subsystem as faction lookups). LW is kept (non-const) for the
+    // Socialize settlement-centre lookup below.
+    UMythicLivingWorldSubsystem *LW = nullptr;
     UMythicTerritoryGrid *Grid = nullptr;
     if (const UGameInstance *GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr) {
-        if (const UMythicLivingWorldSubsystem *LW = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+        LW = GI->GetSubsystem<UMythicLivingWorldSubsystem>();
+        if (LW) {
             Grid = LW->GetTerritoryGrid();
         }
     }
     if (!Grid) {
         return;
     }
+
+    // Patrol: walk a bounded ring of neighbour cells around the home anchor (Desire.TargetCell = HomeCell), stepping to
+    // the next leg each time we arrive — so an Enforce-driven guard with nothing acute to do actively patrols its post
+    // instead of standing still. Combat / Flee / Avenge all preempt (the CurrentHostileTarget early-return + the brain
+    // re-committing a higher-utility intention). Controller-owned rotation: no brain/threading/hysteresis coupling.
+    if (DesireType == EMythicDesireType::Patrol) {
+        constexpr int32 NumLegs = 4; // matches GetPatrolCell's cardinal ring
+        const FMythicCellCoord &Anchor = Intention.Desire.TargetCell;
+        const FMythicCellCoord PatrolCell = GetPatrolCell(Anchor, PatrolLegIndex);
+        // Skip an off-grid leg (an edge-anchored guard would otherwise try to reach an unreachable cell forever and,
+        // never arriving, never advance the rotation — stalling the whole patrol). Advance and let the next tick try
+        // the next leg. (At least two cardinal neighbours of any in-grid anchor are in-grid, so this always converges.)
+        if (!Grid->IsValidCoord(PatrolCell)) {
+            PatrolLegIndex = (PatrolLegIndex + 1) % NumLegs;
+            return;
+        }
+        const FVector PatrolLoc = Grid->CellToWorld(PatrolCell);
+        if (FVector::DistSquared2D(MyPawn->GetActorLocation(), PatrolLoc) <= FMath::Square(IdleMoveAcceptanceRadius)) {
+            PatrolLegIndex = (PatrolLegIndex + 1) % NumLegs; // reached this post — advance to the next leg next tick
+        }
+        else if (GetMoveStatus() != EPathFollowingStatus::Moving) {
+            MoveToLocation(PatrolLoc, IdleMoveAcceptanceRadius);
+        }
+        return;
+    }
+
+    // Socialize: a socially-driven NPC (high Tend/Rally, low recent contact) heads to the CENTRE of the settlement
+    // governing its current cell — NPCs organically gather in the town square. A wilderness NPC (cell governed by no
+    // settlement) has no social hub, so it stays put. Controller-owned destination on the game thread, and
+    // CopySettlementAtCell is SimulationLock-safe, so the brain needs no worker-thread settlement access. (Behavioural
+    // reading: socialise = converge where people are; the settlement's own CenterCell, no fabricated data.)
+    if (DesireType == EMythicDesireType::Socialize) {
+        FMythicSettlementData Settlement;
+        if (LW && LW->CopySettlementAtCell(Grid->WorldToCell(MyPawn->GetActorLocation()), Settlement)) {
+            const FVector CenterLoc = Grid->CellToWorld(Settlement.CenterCell);
+            if (FVector::DistSquared2D(MyPawn->GetActorLocation(), CenterLoc) > FMath::Square(IdleMoveAcceptanceRadius)
+                && GetMoveStatus() != EPathFollowingStatus::Moving) {
+                MoveToLocation(CenterLoc, IdleMoveAcceptanceRadius);
+            }
+        }
+        return;
+    }
+
+    // Grounded single-cell desires (Defend / Rest / FollowSchedule / Avenge): steer toward the authored cell.
     const FVector HomeLoc = Grid->CellToWorld(Intention.Desire.TargetCell);
-    // Already home (within acceptance) — don't thrash the path system re-issuing the same move every tick.
+    // Already there (within acceptance) — don't thrash the path system re-issuing the same move every tick.
     if (FVector::DistSquared2D(MyPawn->GetActorLocation(), HomeLoc) <= FMath::Square(IdleMoveAcceptanceRadius)) {
         return;
     }
@@ -268,9 +462,9 @@ void AMythicAIController::TickIdleBehavior() {
     }
 }
 
-void AMythicAIController::SetCompanionFollow(bool bActive, int32 PlayerId) {
+void AMythicAIController::SetCompanionFollow(bool bActive, const FString &LeaderKey) {
     bCompanionFollowActive = bActive;
-    CompanionLeaderPlayerId = PlayerId;
+    CompanionLeaderKey = LeaderKey;
     UWorld *World = GetWorld();
     if (!World) {
         return;
@@ -302,10 +496,12 @@ void AMythicAIController::TickCompanionFollow() {
             return;
         }
     }
-    UMythicPartySubsystem *Party = GetWorld() ? GetWorld()->GetSubsystem<UMythicPartySubsystem>() : nullptr;
-    APawn *Leader = Party ? Party->GetLeaderPawn(CompanionLeaderPlayerId) : nullptr;
+    // Resolve the live leader pawn from the leader's canonical key via the player registry — works for ANY player
+    // (the recruiter), not just the host, and survives the leader re-possessing a pawn.
+    UMythicPlayerRegistrySubsystem *Registry = GetWorld() ? GetWorld()->GetSubsystem<UMythicPlayerRegistrySubsystem>() : nullptr;
+    APawn *Leader = Registry ? Registry->GetPawnForKey(CompanionLeaderKey) : nullptr;
     if (!Leader) {
-        return; // no leader pawn yet (e.g. not possessed) — stand put, don't crash
+        return; // no leader pawn yet (key empty / leader unregistered / not possessed) — stand put, don't crash
     }
     // Re-anchor to the LIVE leader pawn whenever out of the stop-band. MoveToActor de-dupes an identical in-flight
     // goal-actor request, so re-issuing every fast tick is cheap and removes the post-arrival rubber-band.
@@ -365,13 +561,57 @@ void AMythicAIController::RefreshLiveCell() {
     }
 }
 
+void AMythicAIController::OnUnPossess() {
+    UnbindThreatEvent(); // drop the threat subscription before losing the pawn (pooled re-possess starts clean)
+    Super::OnUnPossess();
+}
+
 void AMythicAIController::EndPlay(const EEndPlayReason::Type EndPlayReason) {
+    UnbindThreatEvent();
     if (UWorld *World = GetWorld()) {
         World->GetTimerManager().ClearTimer(AttackTimerHandle);
         World->GetTimerManager().ClearTimer(IdleTimerHandle);
         World->GetTimerManager().ClearTimer(FollowTimerHandle);
     }
     Super::EndPlay(EndPlayReason);
+}
+
+void AMythicAIController::UnbindThreatEvent() {
+    if (UAbilitySystemComponent *BoundASC = ThreatBoundASC.Get()) {
+        if (FGameplayEventMulticastDelegate *Del = BoundASC->GenericGameplayEventCallbacks.Find(GAS_EVENT_DMG_RECEIVED)) {
+            Del->RemoveAll(this);
+        }
+    }
+    ThreatBoundASC.Reset();
+    ThreatTable.Empty();
+}
+
+void AMythicAIController::HandleThreatFromHit(const FGameplayEventData *Payload) {
+    if (!Payload) {
+        return;
+    }
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    if (!Settings || !Settings->bThreatTargetingEnabled) {
+        return; // accrue only while the feature is on → zero cost (and empty table) when off
+    }
+    AActor *Attacker = const_cast<AActor *>(Payload->Instigator.Get());
+    if (!Attacker || Attacker == GetPawn()) {
+        return; // ignore self-damage (fall / env / self-DoT) — it must not pollute the aggro table
+    }
+    const float Delta = ComputeThreatDelta(Payload->EventMagnitude, Settings->ThreatPerDamage, 0.0f);
+    if (Delta <= 0.0f) {
+        return;
+    }
+    ThreatTable.FindOrAdd(Attacker) += Delta;
+    PruneThreatTable();
+}
+
+void AMythicAIController::PruneThreatTable() {
+    for (auto It = ThreatTable.CreateIterator(); It; ++It) {
+        if (!It.Key().IsValid() || It.Value() <= 0.0f) {
+            It.RemoveCurrent(); // stale/destroyed attacker or drained threat — drop it (keeps the table small)
+        }
+    }
 }
 
 UAbilitySystemComponent *AMythicAIController::GetAbilitySystemComponent() const {

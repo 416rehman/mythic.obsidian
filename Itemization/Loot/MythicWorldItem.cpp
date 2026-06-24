@@ -4,8 +4,11 @@
 
 #include "Mythic.h"
 #include "NavigationSystem.h"
+#include "Components/StaticMeshComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Kismet/GameplayStatics.h"
+#include "Serialization/MemoryReader.h"
+#include "Serialization/MemoryWriter.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 
 
@@ -37,19 +40,9 @@ void AMythicWorldItem::EndPlay(const EEndPlayReason::Type EndPlayReason) {
 
     UE_LOG(Myth, Warning, TEXT("AMythicWorldItem::EndPlay: %s"), *GetName());
 
-    // If the item was not picked up, add it to the player's unclaimed items
-    if (ItemInstance) {
-        AddToUnclaimed();
-    }
-}
-
-void AMythicWorldItem::AddToUnclaimed() {
-    //TODO
-    // Get the DataManagerSubsystem
-    // UDataManagerSubsystem* DataManager = GetGameInstance()->GetSubsystem<UDataManagerSubsystem>();
-    //
-    // // Add this item to the player's unclaimed items in the database
-    // DataManager->AddUnclaimedItem(RelevantPlayerController->PlayerState->GetUniqueId(), this);
+    // NOTE: a despawned/streamed-out world item that was never picked up is currently NOT preserved. The former
+    // AddToUnclaimed() here was a TODO stub referencing a non-existent UDataManagerSubsystem; the "unclaimed items"
+    // feature (persisting un-picked-up drops per player) needs a real storage subsystem and is tracked as deferred.
 }
 
 // Initialize. Sets the item instance

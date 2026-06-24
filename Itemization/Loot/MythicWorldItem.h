@@ -21,8 +21,6 @@ protected:
     // Called when the item is going to be destroyed
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    void AddToUnclaimed();
-
     // For all. If this is set, the item will only be relevant to the owner, and hidden from other players.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item", ReplicatedUsing=OnRep_TargetRecipient)
     AController *TargetRecipient;

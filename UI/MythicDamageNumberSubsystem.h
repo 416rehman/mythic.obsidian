@@ -7,6 +7,7 @@
 #include "Engine/Canvas.h"
 #include "Fonts/SlateFontInfo.h"
 #include "GameplayEffectTypes.h"
+#include "Engine/DataAsset.h"
 #include "MythicDamageNumberSubsystem.generated.h"
 
 class AHUD;

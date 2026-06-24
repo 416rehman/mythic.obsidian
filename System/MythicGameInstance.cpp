@@ -5,6 +5,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "MythicAssetManager.h"
+#include "Engine/GameViewportClient.h"
 #include "Streaming/LevelStreamingDelegates.h"
 #include "World/GameDirector/MythicGamePlayerSubsystem.h"
 

@@ -12,6 +12,8 @@
 #include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SphereComponent.h"
+#include "Engine/LocalPlayer.h"
+#include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Mythic/Mythic.h"
@@ -120,9 +122,8 @@ void UMythicNavigationComponent::CachePlayerObstacleCapsule() {
     }
 
     auto CapsuleComponents = this->CachedPlayerCharacter->GetComponentsByTag(UCapsuleComponent::StaticClass(), "NavigationCapsule");
-    this->CachedPlayerObstacleCapsule = Cast<UCapsuleComponent>(CapsuleComponents[0]);
-
-    if (this->CachedPlayerObstacleCapsule) {
+    if (CapsuleComponents.Num() > 0) {
+        this->CachedPlayerObstacleCapsule = Cast<UCapsuleComponent>(CapsuleComponents[0]);
         UE_LOG(Myth, Warning, TEXT("NavigationCapsule found"));
         this->CachedPlayerObstacleCapsule->OnComponentBeginOverlap.AddDynamic(this, &UMythicNavigationComponent::OnObstacleOverlapped);
     }
@@ -133,6 +134,7 @@ void UMythicNavigationComponent::CachePlayerObstacleCapsule() {
                ));
         AddNavigationCapsuleToChar();
     }
+
     this->CachedPlayerObstacleCapsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 

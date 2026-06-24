@@ -89,7 +89,7 @@ private:
     /** Submit the ENCOUNTER_COMPLETED chronicle beat (mirror of the spawn beat). Single source — called from BOTH the
      *  UpdateActiveEncounters timeout/completion path AND ForceCompleteEncounter, so it fires exactly once per completed
      *  encounter regardless of which path completes it. NOT called from CleanupEncounter (which is also the deinit path). */
-    void EmitEncounterCompletedEvent(const FMythicActiveEncounter &Encounter) const;
+    void EmitEncounterCompletedEvent(const FMythicActiveEncounter &Encounter, bool bDefeated) const;
 
     // ─── Cooldown Tracking ────────────────────────────────
 

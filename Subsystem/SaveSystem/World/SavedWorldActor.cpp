@@ -4,6 +4,8 @@
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 #include "EngineUtils.h"
 #include "Mythic/Mythic.h"
+#include "Serialization/MemoryReader.h"
+#include "Serialization/MemoryWriter.h"
 
 void FSerializedWorldActorHelper::SerializeAll(UWorld *World, TArray<FSerializedWorldActorData> &OutActors) {
     if (!World) {
@@ -61,6 +63,11 @@ void FSerializedWorldActorHelper::DeserializeAll(UWorld *World, const TArray<FSe
 
     UE_LOG(MythSaveLoad, Log, TEXT("DeserializeAll: Processing %d actors"), InActors.Num());
 
+    // Actors spawned by THIS load (vs found-existing / pre-existing). Exempt from the reconciliation destroy pass
+    // below: a cross-session respawn gets a fresh path-name id that won't be in SavedIds, and we must not delete the
+    // very actors we just restored.
+    TSet<AActor *> SpawnedThisLoad;
+
     for (const FSerializedWorldActorData &Data : InActors) {
         AActor *TargetActor = nullptr;
 
@@ -87,6 +94,9 @@ void FSerializedWorldActorHelper::DeserializeAll(UWorld *World, const TArray<FSe
                 Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
                 TargetActor = World->SpawnActor<AActor>(ActorClass, Data.Transform, Params);
+                if (TargetActor) {
+                    SpawnedThisLoad.Add(TargetActor);
+                }
                 UE_LOG(MythSaveLoad, Log, TEXT("DeserializeAll: Spawned runtime actor %s at %s"),
                        *Data.ActorClass.ToString(), *Data.Transform.GetLocation().ToString());
             }
@@ -129,11 +139,17 @@ void FSerializedWorldActorHelper::DeserializeAll(UWorld *World, const TArray<FSe
     TArray<AActor *> ToDestroy;
     for (TActorIterator<AActor> It(World); It; ++It) {
         AActor *Actor = *It;
-        if (!Actor || Actor->HasAnyFlags(RF_WasLoaded)) {
-            continue; // level-placed actor — not runtime-spawned, never remove
+        if (!Actor) {
+            continue;
         }
         IMythicSaveableActor *Saveable = Cast<IMythicSaveableActor>(Actor);
-        if (Saveable && !SavedIds.Contains(Saveable->GetSaveableActorId())) {
+        if (!Saveable) {
+            continue;
+        }
+        const bool bIsRuntimeSpawned = !Actor->HasAnyFlags(RF_WasLoaded);
+        const bool bSpawnedThisLoad = SpawnedThisLoad.Contains(Actor);
+        const bool bPresentInSave = SavedIds.Contains(Saveable->GetSaveableActorId());
+        if (ShouldDestroyOnReconcile(bIsRuntimeSpawned, bSpawnedThisLoad, bPresentInSave)) {
             ToDestroy.Add(Actor);
         }
     }
@@ -141,4 +157,19 @@ void FSerializedWorldActorHelper::DeserializeAll(UWorld *World, const TArray<FSe
         UE_LOG(MythSaveLoad, Log, TEXT("DeserializeAll: Destroying stale runtime actor %s (absent from save)"), *Actor->GetName());
         Actor->Destroy();
     }
+}
+
+bool FSerializedWorldActorHelper::ShouldDestroyOnReconcile(const bool bIsRuntimeSpawned, const bool bSpawnedThisLoad,
+                                                           const bool bPresentInSave) {
+    // Level-placed actors are part of the map and are never reconciled away.
+    if (!bIsRuntimeSpawned) {
+        return false;
+    }
+    // An actor we just spawned FROM this save is the restored state, not a stale orphan. (Cross-session its fresh
+    // path-name id won't match the saved id, so without this exemption the id-set check below would destroy it.)
+    if (bSpawnedThisLoad) {
+        return false;
+    }
+    // A pre-existing runtime actor stays iff the save knows about it; otherwise it is a stale orphan to remove.
+    return !bPresentInSave;
 }

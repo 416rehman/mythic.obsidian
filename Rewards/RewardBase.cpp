@@ -1,4 +1,4 @@
-﻿// 
+// 
 
 #pragma once
 
@@ -60,4 +60,49 @@ bool FRewardsToGive::Give(APlayerController *PlayerController, bool IsPrivateIte
     }
 
     return retval;
+}
+
+FText FRewardsToGive::GetPreviewText() const {
+    TArray<FString> Lines;
+
+    if (XPReward) {
+        FText Preview = XPReward->GetPreviewText();
+        if (!Preview.IsEmpty()) {
+            Lines.Add(Preview.ToString());
+        }
+    }
+
+    if (ItemReward) {
+        FText Preview = ItemReward->GetPreviewText();
+        if (!Preview.IsEmpty()) {
+            Lines.Add(Preview.ToString());
+        }
+    }
+
+    if (LootReward) {
+        FText Preview = LootReward->GetPreviewText();
+        if (!Preview.IsEmpty()) {
+            Lines.Add(Preview.ToString());
+        }
+    }
+
+    if (AbilityReward) {
+        FText Preview = AbilityReward->GetPreviewText();
+        if (!Preview.IsEmpty()) {
+            Lines.Add(Preview.ToString());
+        }
+    }
+
+    if (AttributeReward) {
+        FText Preview = AttributeReward->GetPreviewText();
+        if (!Preview.IsEmpty()) {
+            Lines.Add(Preview.ToString());
+        }
+    }
+
+    if (Lines.Num() == 0) {
+        return FText::GetEmpty();
+    }
+
+    return FText::FromString(FString::Join(Lines, TEXT("\n")));
 }

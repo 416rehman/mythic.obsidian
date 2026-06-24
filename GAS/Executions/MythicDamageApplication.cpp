@@ -10,12 +10,19 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
+#include "GAS/Executions/MythicCombatRoll.h"
 #include "GameModes/GameState/MythicGameState.h"
 #include "Curves/RealCurve.h"
+#include "Engine/World.h"
 #include "Player/MythicPlayerController.h" // ClientShowDodge callout (dodge negates before the damage cue)
 #include "GameFramework/Pawn.h"
+#include "Settings/MythicDeveloperSettings.h" // friendly-fire policy (bFriendlyFireEnabled)
 
 struct FMythicGameplayEffectContext;
+
+bool UMythicDamageApplication::ShouldNegateFriendlyFire(bool bSourceIsPlayer, bool bTargetIsPlayer, bool bSameActor, bool bFriendlyFireEnabled) {
+    return bSourceIsPlayer && bTargetIsPlayer && !bSameActor && !bFriendlyFireEnabled;
+}
 
 struct FDamageApplicationStatics {
     FGameplayEffectAttributeCaptureDefinition Power;
@@ -141,6 +148,26 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     auto SourceASC = ExecutionParams.GetSourceAbilitySystemComponent();
     auto TargetASC = ExecutionParams.GetTargetAbilitySystemComponent();
 
+    // ===== Friendly fire (co-op policy, server-authoritative) =====
+    // A combat hit from one player onto ANOTHER player is negated unless friendly fire is enabled (default OFF — the
+    // standard co-op default). Mirrors the Invincible/Dodge early-returns (no output modifiers = no damage/shield/
+    // status). PvE is provably unaffected (the gate needs BOTH source+target player-controlled), and SELF-damage
+    // (fall damage, env hazards, self-DoT — source == target) is excluded, so only a distinct player→player hit is
+    // gated. Policy lives on the consolidated dev settings. (Co-op behaviour is replication/2-client-UNVERIFIED.)
+    {
+        const AActor *SourceActor = SourceASC ? SourceASC->GetAvatarActor() : nullptr;
+        const AActor *TargetActor = TargetASC ? TargetASC->GetAvatarActor() : nullptr;
+        const APawn *SourcePawn = Cast<APawn>(SourceActor);
+        const APawn *TargetPawn = Cast<APawn>(TargetActor);
+        const bool bSourceIsPlayer = SourcePawn && SourcePawn->IsPlayerControlled();
+        const bool bTargetIsPlayer = TargetPawn && TargetPawn->IsPlayerControlled();
+        const bool bFriendlyFire = GetDefault<UMythicDeveloperSettings>()->bFriendlyFireEnabled;
+        if (ShouldNegateFriendlyFire(bSourceIsPlayer, bTargetIsPlayer, SourceActor == TargetActor, bFriendlyFire)) {
+            UE_LOG(Myth, Log, TEXT("DamageApplication:: friendly fire OFF — player→player hit negated"));
+            return; // no damage, no shield drain, no status
+        }
+    }
+
     const FGameplayTagContainer *SourceTags = Spec->CapturedSourceTags.GetAggregatedTags();
     const FGameplayTagContainer *TargetTags = Spec->CapturedTargetTags.GetAggregatedTags();
 
@@ -159,6 +186,12 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().DamagePerHit, EvaluateParameters, DmgPerHit);
     float CriticalHitDamage = 0.0f; // unresolved capture (e.g. source has no Offense set) = no crit bonus, not a silent +50%
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().CriticalHitDamage, EvaluateParameters, CriticalHitDamage);
+    // BonusSkillDamage (source Offense attr): captured in readiness but NOT yet applied — like BonusDamageToSuperiorEnemies
+    // below, it has no keying scheme. "Skill damage" means damage dealt BY A SKILL (vs a basic attack), but no
+    // skill-vs-basic-attack classification exists (UMythicGameplayAbility has only Activation policy/group, and no
+    // GAS tag distinguishes the two), so there is no honest signal to gate this on. DEFERRED pending that design
+    // decision (see backlog) — captured here so the wire-up is a one-liner once a skill tag is injected by
+    // MakeDamageContainerSpec, mirroring the weapon-class tags.
     float BonusSkillDamage = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().BonusSkillDamage, EvaluateParameters, BonusSkillDamage);
     float BonusSwordDamage = 0.0f;
@@ -271,7 +304,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     // (1) Dodge - per-target roll against the victim's DodgeChance: negates the hit entirely.
     float DodgeChance = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.DodgeChance, EvaluateParameters, DodgeChance);
-    if (DodgeChance > 0.0f && FMath::FRand() <= DodgeChance) { // guard 0% (FRand() can return exactly 0.0)
+    if (MythicCombat::RollSucceeds(DodgeChance, FMath::FRand())) { // shared boundary rule (0% never dodges, 100% always)
         MythicContext->SetDodged(true);
         UE_LOG(Myth, Log, TEXT("DamageApplication:: Attack DODGED (chance %.2f)"), DodgeChance);
         // Player-facing callout: the dodge negates the hit BEFORE the damage cue runs, so push a "DODGE" float to the
@@ -292,10 +325,10 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         }
         float Resist = 0.0f;
         ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(ResistDef, EvaluateParameters, Resist);
-        // Two-sided: a fully-resisted status (1-Resist <= 0) must NEVER survive (a bare `<=` lets it through on an
-        // exact-0 roll); keep `<=` for the unresisted case since FRand() can equal 1.0.
+        // Two-sided: a fully-resisted status (SurviveChance <= 0) must NEVER survive; an unresisted one (>= 1) ALWAYS
+        // survives. Same boundary rule as the proc/dodge rolls — shared via MythicCombat::RollSucceeds.
         const float SurviveChance = FMath::Clamp(1.0f - Resist, 0.0f, 1.0f);
-        return SurviveChance > 0.0f && FMath::FRand() <= SurviveChance;
+        return MythicCombat::RollSucceeds(SurviveChance, FMath::FRand());
     };
     MythicContext->SetBleed(GateStatus(Statics.BleedResistance, MythicContext->IsBleed()));
     MythicContext->SetBurn(GateStatus(Statics.BurnResistance, MythicContext->IsBurn()));

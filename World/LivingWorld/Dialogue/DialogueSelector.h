@@ -103,4 +103,13 @@ struct MYTHIC_API FMythicDialogueSelector {
     static FText ResolveVariables(
         const FText& TemplateText,
         const FMythicDialogueVariables& Variables);
+
+    /**
+     * True if a template constrains the severity of events it applies to — i.e. it tightened EITHER bound from the
+     * defaults (MinSeverity 0 / MaxSeverity 0xFF = "any severity"). SelectTemplate hard-filters an out-of-range event
+     * only when this is true. (Fix: the filter previously keyed only on MinSeverity > 0, so a template that lowered
+     * MaxSeverity but left MinSeverity at its default 0 had its upper bound silently ignored and would match
+     * higher-severity events.) Pure + static so the rule is unit-testable.
+     */
+    static bool TemplateConstrainsSeverity(uint8 MinSeverity, uint8 MaxSeverity);
 };

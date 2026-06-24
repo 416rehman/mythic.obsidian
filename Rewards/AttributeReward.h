@@ -1,4 +1,4 @@
-﻿// 
+// 
 
 #pragma once
 
@@ -34,6 +34,8 @@ public:
 
     // Applies the reward to the attribute
     virtual bool Give(FRewardContext &Context) const override;
+
+    virtual FText GetPreviewText() const override;
 
     // Attribute rewards are idempotent - safe to reapply on load
     virtual bool CanReapplyOnLoad() const override { return true; }

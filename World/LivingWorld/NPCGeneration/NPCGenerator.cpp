@@ -228,7 +228,7 @@ FMythicPersonalityFragment FMythicNPCGenerator::GeneratePersonality(
     // High Loyalty → higher Submit weight (obedient)
     // Low Authority → higher Rally weight (anti-authority = rebels)
 
-    const float BaseWeight = 0.3f; // All channels start with a baseline
+    constexpr float BaseWeight = 0.3f; // All channels start with a baseline
 
     // Fight: boosted by Violence tolerance, reduced by Mercy
     Personality.VentWeights[static_cast<int32>(EMythicVentChannel::Fight)] =

@@ -271,6 +271,16 @@ protected:
     int32 ComputeProductLevel(const struct FConversionProduct &P, const FConversionJobEntry &Job) const;
 
 public:
+    /** Designer-set level of this crafting station. Drives `EProductLevelMode::InheritStationLevel` product output
+     *  levels (previously hard-stubbed to 1 — "no station-level concept yet" — so that mode silently always yielded
+     *  level 1). Per-station config (default 1 → backward-compatible); a future station-progression system can raise it. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Conversion", meta=(ClampMin="1"))
+    int32 StationLevel = 1;
+
+    /** Pure product-level rule (extracted from the member ComputeProductLevel for unit-testing): FixedLevel→FixedLevel,
+     *  InheritInputLevel→InputLevel, InheritStationLevel→StationLevel. Static + pure (no actor/world). */
+    static int32 ResolveProductLevel(EProductLevelMode LevelMode, int32 InputLevel, int32 InStationLevel, int32 FixedLevel);
+
     UPROPERTY(BlueprintAssignable, Category="Conversion")
     FOnConversionJobsChanged OnJobsChanged;
     UPROPERTY(BlueprintAssignable, Category="Conversion")

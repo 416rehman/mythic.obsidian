@@ -3,6 +3,7 @@
 #include "AbilitySystemComponent.h"
 #include "ConversionStationComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
@@ -25,6 +26,24 @@ AMythicConversionStation::AMythicConversionStation() {
 
     StationInventory = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("StationInventory"));
     StationInventory->SetIsReplicated(true);
+}
+
+void AMythicConversionStation::SetupLocalViewModel() {
+    // Only create VMs where they can be used (not on dedicated server)
+    auto World = GetWorld();
+    if (World && World->GetNetMode() == NM_DedicatedServer) {
+        return;
+    }
+
+    if (!IsValid(StationViewModel)) {
+        StationViewModel = NewObject<UConversionStationVM>(this);
+    }
+}
+
+void AMythicConversionStation::BeginPlay() {
+    Super::BeginPlay();
+    
+    SetupLocalViewModel();
 }
 
 AController *AMythicConversionStation::ResolveController(AActor *Interactor) {
@@ -56,6 +75,7 @@ void AMythicConversionStation::OnPrimaryInteract_Implementation(AActor *Interact
     // Blueprint push the station widget.
     if (PC->IsLocalController()) {
         PC->ServerOpenConversionStation(this);
+        this->StationViewModel->InitializeForStation(this->ConversionComponent, PC);
         OnStationOpened(PC);
     }
 }

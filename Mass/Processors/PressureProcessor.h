@@ -36,6 +36,14 @@ class MYTHIC_API UMythicPressureProcessor : public UMassProcessor {
 public:
     UMythicPressureProcessor();
 
+    /**
+     * Despair is a RECOVERABLE state, not a permanent brand: an NPC enters despair when its total pressure reaches
+     * DespairThreshold, and lifts out once pressure falls back below a hysteresis band (RecoveryFraction of the
+     * threshold) so it does not flicker at the boundary. Previously bDespaired was set once and NEVER reset, so an NPC
+     * that briefly spiked stayed "despaired" forever. Static + pure so the state machine is unit-testable.
+     */
+    static bool ComputeDespairState(float TotalPressure, float DespairThreshold, bool bWasDespaired);
+
 protected:
     virtual void ConfigureQueries(const TSharedRef<FMassEntityManager> &EntityManager) override;
     virtual void Execute(FMassEntityManager &EntityManager, FMassExecutionContext &Context) override;

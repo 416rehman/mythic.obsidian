@@ -23,6 +23,12 @@ struct FCraftingQueueEntry : public FFastArraySerializerItem {
     // How many of this item are being crafted
     UPROPERTY()
     int32 Quantity = 1;
+
+    // The actor that queued this craft (the material payer). Server-side anchor for refunding the consumed materials on
+    // cancel — the only place that knows the per-requirement amounts. Auto-nulls if the actor is destroyed (logout);
+    // replicates harmlessly as a NetGUID.
+    UPROPERTY()
+    TObjectPtr<AActor> RequestingActor = nullptr;
 };
 
 USTRUCT()
@@ -38,10 +44,11 @@ public:
         return FastArrayDeltaSerialize<FCraftingQueueEntry, FCraftingQueue>(Items, DeltaParms, *this);
     }
 
-    void AddItem(UItemDefinition *ItemDefinition, int32 Quantity) {
+    void AddItem(UItemDefinition *ItemDefinition, int32 Quantity, AActor *RequestingActor = nullptr) {
         FCraftingQueueEntry NewEntry;
         NewEntry.ItemDefinition = ItemDefinition;
         NewEntry.Quantity = Quantity;
+        NewEntry.RequestingActor = RequestingActor;
 
         Items.Add(NewEntry);
         MarkItemDirty(NewEntry);
@@ -123,6 +130,10 @@ protected:
 
     bool ConsumeRequirements(UItemDefinition *Item, int32 Amount, TArray<UMythicInventoryComponent *> Inventories,
                              const UAbilitySystemComponent *SchematicsASC);
+
+    // Refund a cancelled entry's consumed materials back to the actor that queued it. The component owns this (only it
+    // knows the per-requirement amounts) instead of relying on the unlistened OnItemCanceled delegate.
+    void RefundRequirements(const FCraftingQueueEntry &Entry);
 
 public:
     UPROPERTY(BlueprintAssignable, Category="Crafting")

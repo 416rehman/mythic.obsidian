@@ -3,6 +3,7 @@
 
 #include "MythicResourceISM.h"
 #include "Mythic.h"
+#include "Misc/MessageDialog.h"
 
 FRewardsToGive UMythicResourceISM::GetOnKillRewards(AActor *Killer) {
     return this->OnKillRewards;

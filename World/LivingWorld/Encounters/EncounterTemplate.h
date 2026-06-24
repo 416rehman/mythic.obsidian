@@ -5,7 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "MassEntityHandle.h"
+#include "Mass/EntityHandle.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "EncounterTemplate.generated.h"

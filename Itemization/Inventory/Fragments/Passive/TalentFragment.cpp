@@ -3,6 +3,7 @@
 #include "TalentFragment.h"
 #include "AbilitySystemComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
+#include "Itemization/MythicLootSettings.h" // data-driven per-rarity talent count
 #include "System/MythicAssetManager.h"
 
 #if WITH_EDITOR
@@ -85,8 +86,16 @@ void UTalentFragment::OnInstanced(UMythicItemInstance *ItemInstance) {
                                            return;
                                        }
 
-                                       auto Rarity = ItemInstance->GetItemDefinition()->Rarity;
-                                       auto NumTalentsToRoll = Rarity == Legendary ? 1 : Rarity == Mythic ? 2 : 0;
+                                       const int32 RarityValue = ItemInstance->GetItemDefinition()->Rarity;
+                                       // Data-driven talent count per rarity (Project Settings -> Game -> Mythic Loot
+                                       // Settings, TalentCountByRarity). GetDefault is a world-independent CDO read,
+                                       // safe in this async-load callback. Bounds-guarded fallback to the prior
+                                       // hardcoded mapping (Legendary=1, Mythic=2, else 0) for an out-of-range rarity.
+                                       const UMythicLootSettings *LootSettings = GetDefault<UMythicLootSettings>();
+                                       const int32 NumTalentsToRoll =
+                                           (LootSettings && LootSettings->TalentCountByRarity.IsValidIndex(RarityValue))
+                                               ? LootSettings->TalentCountByRarity[RarityValue]
+                                               : (RarityValue == Legendary ? 1 : RarityValue == Mythic ? 2 : 0);
                                        RollTalents(TalentPool, NumTalentsToRoll);
                                    });
 }
@@ -124,7 +133,7 @@ void UTalentFragment::ServerRemoveAbility_Implementation() {
     for (auto &TalentSpec : this->TalentRuntimeReplicatedData.RolledTalents) {
         if (!TalentSpec.AbilitySpec.Handle.IsValid()) {
             UE_LOG(Myth, Warning, TEXT("UTalentFragment::ServerHandleInHandRemoveAbility_Implementation: No ability to remove."));
-            return;
+            continue; // skip an ungranted talent, but still remove the others on a multi-talent item
         }
 
         if (!this->ParentItemInstance) {
@@ -187,9 +196,15 @@ void UTalentFragment::ServerHandleGrantAbility_Implementation() {
         auto NewAbilityHandle = ASC->GiveAbility(AbilitySpec);
         if (!NewAbilityHandle.IsValid()) {
             UE_LOG(Myth, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Failed to grant ability."));
-            return;
+            continue; // a failed grant must not skip the remaining talents on a multi-talent (Mythic = 2) item
         }
 
+        // Store the handle GiveAbility actually ASSIGNED — not the handle-less local spec (GiveAbility returns the
+        // handle, it does not back-patch the argument). Without this the stored spec's Handle stays invalid, so
+        // ServerRemoveAbility's ClearAbility no-ops (talent abilities are NEVER removed on unequip) AND re-equipping
+        // re-grants another copy each time (the IsValid() guard above never trips) — an item-swap exploit that stacks
+        // abilities on the ASC. Capturing the real handle fixes BOTH removal and the re-grant guard.
+        AbilitySpec.Handle = NewAbilityHandle;
         TalentSpec.AbilitySpec = AbilitySpec;
     }
 }

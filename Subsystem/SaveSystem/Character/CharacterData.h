@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "SavedInventory.h"
 #include "SavedProficiency.h"
+#include "SavedObjective.h"
 #include "CharacterData.generated.h"
 
 UENUM(BlueprintType)
@@ -40,6 +41,11 @@ struct FSerializedCharacterData {
     UPROPERTY(BlueprintReadWrite)
     TArray<FSerializedProficiencyData> Proficiencies;
 
+    // Per-player quest/objective progress (definition asset + count + completed). Persists the otherwise session-only
+    // UObjectiveTracker so a reload doesn't wipe in-progress and completed quests.
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FSerializedObjectiveData> Objectives;
+
     // Note: Attributes are NOT saved - they are derived from proficiencies + items on load
 
     // Last world transform of the player's pawn, so a reload restores position/rotation instead of respawning at
@@ -50,9 +56,6 @@ struct FSerializedCharacterData {
 
     UPROPERTY(BlueprintReadWrite)
     bool bHasSavedTransform = false;
-
-    UPROPERTY(BlueprintReadWrite)
-    TMap<FString, FString> CustomData;
 
     /** Serializes an actor into this character data struct */
     static bool Serialize(AActor *SourceActor, FSerializedCharacterData &OutData);

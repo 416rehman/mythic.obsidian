@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/DataAsset.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "TerritoryGrid.generated.h"
 
@@ -142,8 +143,11 @@ public:
     void GetFactionCells(FMythicFactionId Faction, int32 MaxResults, TArray<FMythicCellCoord> &OutCells) const;
 
     /**
-     * Get cells that changed dominant faction since last commit.
-     * Used for delta-compressed network replication.
+     * Get cells flagged dirty (ANY influence change) since the last commit — NOT only dominant-faction flips. Influence
+     * propagation marks a cell dirty whenever its influence shifts, even when the dominant faction is unchanged, so this
+     * is a SUPERSET of dominant-faction changes. Callers replicating per-DOMINANT-FACTION proxy state must therefore
+     * change-detect downstream (see AMythicLivingWorldReplicator::TerritoryProxyNeedsUpdate) or they re-send unchanged
+     * proxies. Drains the committed delta (consumed once per call). Used for delta-compressed network replication.
      */
     void GetChangedCells(TArray<FMythicCellCoord> &OutChangedCells) const;
 

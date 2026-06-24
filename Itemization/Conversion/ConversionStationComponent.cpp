@@ -5,6 +5,7 @@
 #include "ConversionSubsystem.h"
 #include "Mythic.h"
 #include "TimerManager.h"
+#include "Engine/GameInstance.h"
 #include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -18,6 +19,8 @@
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
 #include "Itemization/MythicTags_Conversion.h"
+#include "Player/MythicPlayerController.h" // repaired-durability callout over the job's instigator
+#include "ViewModels/ConversionViewModels.h"
 
 namespace {
     constexpr double kMinRequestInterval = 0.2;
@@ -557,16 +560,20 @@ bool UConversionStationComponent::EnsureFuel(UConversionRecipe *R) {
     return FuelState.BufferedBurnSeconds >= R->Process.Duration;
 }
 
-int32 UConversionStationComponent::ComputeProductLevel(const FConversionProduct &P, const FConversionJobEntry &Job) const {
-    switch (P.LevelMode) {
+int32 UConversionStationComponent::ResolveProductLevel(EProductLevelMode LevelMode, int32 InputLevel, int32 InStationLevel, int32 FixedLevel) {
+    switch (LevelMode) {
     case EProductLevelMode::InheritInputLevel:
-        return Job.SnapshotInputLevel;
+        return InputLevel;
     case EProductLevelMode::InheritStationLevel:
-        return 1; // no station-level concept yet
+        return InStationLevel; // now driven by the station's configured StationLevel (was hard-stubbed to 1)
     case EProductLevelMode::FixedLevel:
     default:
-        return P.FixedLevel;
+        return FixedLevel;
     }
+}
+
+int32 UConversionStationComponent::ComputeProductLevel(const FConversionProduct &P, const FConversionJobEntry &Job) const {
+    return ResolveProductLevel(P.LevelMode, Job.SnapshotInputLevel, StationLevel, P.FixedLevel);
 }
 
 void UConversionStationComponent::RouteInstance(UMythicItemInstance *Inst, EConversionOutputRouting Routing, const FConversionJobEntry &Job) {
@@ -670,7 +677,20 @@ void UConversionStationComponent::ProduceAndRoute(UConversionRecipe *R, const FC
             // wear chokepoints (the only writers of the durability fragment). No-op without a durability fragment.
             if (P.bRepairToFull) {
                 if (const UDurabilityFragment *Dura = T->GetFragment<UDurabilityFragment>()) {
+                    const bool bWasBroken = Dura->IsBroken();
                     const_cast<UDurabilityFragment *>(Dura)->ServerRepairFull();
+                    // Confirm a genuine broken -> working recovery over the player who ordered the job (the repaired
+                    // instance is detached mid-routing, so it can't resolve its own owner — the station can). A top-up
+                    // of a still-working item is implied by the job completing, so it stays quiet.
+                    if (bWasBroken && !Dura->IsBroken()) {
+                        if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(ResolveInstigatorController(Job.JobId))) {
+                            FText ItemName;
+                            if (const UItemDefinition *Def = T->GetItemDefinition()) {
+                                ItemName = Def->Name;
+                            }
+                            PC->ClientNotifyItemDurability(ItemName, EMythicItemDurabilityBeat::Repaired);
+                        }
+                    }
                 }
             }
             RouteInstance(T, R->Process.OutputRouting, Job);

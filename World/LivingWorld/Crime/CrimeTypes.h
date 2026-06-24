@@ -5,7 +5,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "MassEntityHandle.h"
+#include "Mass/EntityHandle.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "World/LivingWorld/Morality/MoralSignature.h"
 
@@ -61,8 +61,9 @@ struct FMythicCrimeRecord {
     /** When the crime occurred */
     double WorldTime = 0.0;
 
-    /** Number of witnesses who saw the crime directly */
-    uint8 DirectWitnessCount = 0;
+    /** Number of witnesses who saw the crime directly. uint16: a large crowd can exceed 255 direct witnesses for a
+     *  single event (e.g. a public massacre), which would wrap a uint8 and corrupt the witness tally / crime weight. */
+    uint16 DirectWitnessCount = 0;
 
     /** How many hops this crime report has propagated through belief network */
     uint8 PropagationHops = 0;

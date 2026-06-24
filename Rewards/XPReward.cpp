@@ -5,6 +5,7 @@
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
+#include "GameFramework/PlayerController.h"
 
 bool UXPReward::Give(FRewardContext &Context) const {
     // Cast the context to FXpRewardContext
@@ -45,6 +46,13 @@ float UXPReward::CalculateXP(UAbilitySystemComponent *AbilitySystemComponent, UP
     // Level Difference
     int32 LevelDifference = TargetLvl - CurrentLevel;
 
-    // Scaled XP
-    return PreScaledXP + (LevelDifference * PreScaledXP * OverlevelBonus);
+    // scaled xp, clamped so overlevel kills never subtract xp
+    return FMath::Max(0.0f, PreScaledXP + (LevelDifference * PreScaledXP * OverlevelBonus));
+}
+
+FText UXPReward::GetPreviewText() const {
+    if (!ProficiencyDef) {
+        return FText::GetEmpty();
+    }
+    return FText::FromString(FString::Printf(TEXT("%s XP"), *ProficiencyDef->Name.ToString()));
 }

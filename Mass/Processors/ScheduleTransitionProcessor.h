@@ -9,6 +9,8 @@
 #include "Mass/Fragments/MythicMassFragments.h"
 #include "ScheduleTransitionProcessor.generated.h"
 
+class UMythicLivingWorldSettings;
+
 /**
  * MASS processor that drives NPC daily schedule phase transitions.
  *
@@ -41,6 +43,23 @@ class MYTHIC_API UMythicScheduleTransitionProcessor : public UMassProcessor {
 public:
     UMythicScheduleTransitionProcessor();
 
+    /**
+     * Determine the schedule phase for a given hour of the game day, using the designer-tunable hour boundaries
+     * (UMythicLivingWorldSettings::Schedule*Hour). Static + Settings-parameterized so it stays unit-testable.
+     * @param GameHour  Hour of the day [0.0, 24.0)
+     * @param Settings  Living-world settings supplying the phase boundaries (null → Rest, a safe default)
+     * @return Target schedule phase for this time of day
+     */
+    static EMythicSchedulePhase GetPhaseForHour(float GameHour, const UMythicLivingWorldSettings *Settings);
+
+    /**
+     * Apply a deterministic per-NPC schedule offset so the town doesn't transition every NPC's phase in lockstep.
+     * Returns the effective hour = GameHour shifted by an offset in [-MaxStaggerHours, +MaxStaggerHours] derived from
+     * the stable NameHash, wrapped into [0.0, 24.0). MaxStaggerHours <= 0 → returns GameHour unchanged (global sync).
+     * Pure + static so the offset rule is unit-testable.
+     */
+    static float ComputeStaggeredHour(float GameHour, uint32 NameHash, float MaxStaggerHours);
+
 protected:
     virtual void ConfigureQueries(const TSharedRef<FMassEntityManager> &EntityManager) override;
     virtual void Execute(FMassEntityManager &EntityManager, FMassExecutionContext &Context) override;
@@ -51,11 +70,4 @@ private:
 
     /** Timer accumulator — transitions run at configured interval */
     float TimeSinceLastTick = 0.0f;
-
-    /**
-     * Determine the schedule phase for a given hour of the game day.
-     * @param GameHour  Hour of the day [0.0, 24.0)
-     * @return Target schedule phase for this time of day
-     */
-    static EMythicSchedulePhase GetPhaseForHour(float GameHour);
 };

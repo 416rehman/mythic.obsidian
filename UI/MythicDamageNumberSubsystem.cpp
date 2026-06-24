@@ -4,6 +4,7 @@
 #include "GAS/MythicGameplayEffectContext.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "Engine/Canvas.h"
+#include "Engine/Engine.h"
 #include "Engine/Font.h"
 #include "GameFramework/HUD.h"
 #include "GameFramework/PlayerController.h"

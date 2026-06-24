@@ -23,6 +23,8 @@
 #include "World/LivingWorld/Persistence/PersistentNPCRegistry.h"
 #include "TimerManager.h"
 #include "Components/CapsuleComponent.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Player/MythicPlayerController.h"
 
@@ -170,23 +172,48 @@ void AMythicNPCCharacter::SeedAttributesFromData() {
 }
 
 void AMythicNPCCharacter::OnReturnedToPool() {
-    // Reset transient combat state so a pooled actor doesn't carry the previous occupant's effects onto the next NPC
-    // that reuses this slot — covering BOTH return paths (death and alive-despawn). Two distinct kinds:
-    //   1. Active debuff GameplayEffects (Bleed/Burn/Poison DoTs + Stun/Slow/Freeze CC) — and their periodic ticks.
-    //   2. The combat STAGGER, applied as a LOOSE GAS.Debuff.Stunned tag (NOT a GE) + a pending recovery timer. The GE
-    //      removal in (1) does NOT touch loose tags, so without this a still-staggered NPC returned via alive-despawn
-    //      (which skips StartDeath) would spawn movement-frozen — ReevaluateCrowdControl reads the leftover loose tag.
-    // OnSpawnedFromPool re-seeds attributes/abilities, so removing these is safe. Server-only: authority-owned state.
-    if (AbilitySystemComponent && AbilitySystemComponent->IsOwnerActorAuthoritative()) {
-        static const FGameplayTag DebuffParent = FGameplayTag::RequestGameplayTag(FName("GAS.Debuff"), /*ErrorIfNotFound=*/false);
-        if (DebuffParent.IsValid()) {
-            // Removes every active GE that GRANTS a GAS.Debuff.* tag (HasAny matches the child tags hierarchically).
-            AbilitySystemComponent->RemoveActiveEffectsWithGrantedTags(FGameplayTagContainer(DebuffParent));
-        }
-        if (LifeComponent) {
-            LifeComponent->ClearStagger(); // loose STUNNED tag + orphaned recovery timer (not covered by GE removal)
+    if (!HasAuthority()) {
+        return;
+    }
+
+    // cancel all ongoing abilities to abort active states or animations
+    if (AbilitySystemComponent) {
+        AbilitySystemComponent->CancelAllAbilities();
+    }
+
+    // remove all active gameplay effects applied to this npc
+    if (AbilitySystemComponent) {
+        FGameplayTagContainer AllTags;
+        AbilitySystemComponent->GetOwnedGameplayTags(AllTags);
+        AbilitySystemComponent->RemoveActiveEffectsWithGrantedTags(AllTags);
+    }
+
+    // clear loose gameplay tags to prevent leftover state
+    if (AbilitySystemComponent) {
+        FGameplayTagContainer TempTags;
+        AbilitySystemComponent->GetOwnedGameplayTags(TempTags);
+        for (const FGameplayTag &Tag : TempTags) {
+            AbilitySystemComponent->RemoveLooseGameplayTag(Tag);
         }
     }
+
+    // uninitialize life component from ability system to release delegates and timers
+    if (LifeComponent) {
+        LifeComponent->UninitializeFromAbilitySystem();
+    }
+
+    // clear all registered timers for the npc and its controller
+    if (UWorld *World = GetWorld()) {
+        World->GetTimerManager().ClearAllTimersForObject(this);
+        if (AController *AIController = GetController()) {
+            World->GetTimerManager().ClearAllTimersForObject(AIController);
+            AIController->UnPossess();
+        }
+    }
+
+    // clean up local cached flags
+    bCombatInitialized = false;
+    AttackAbilityHandle = FGameplayAbilitySpecHandle();
 }
 
 const FGuid &AMythicNPCCharacter::GetNPCId() const {

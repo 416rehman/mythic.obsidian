@@ -20,6 +20,10 @@
 #include "Itemization/Inventory/Fragments/ItemFragment.h"
 #include "Itemization/MythicTags_Inventory.h"
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h" // CooldownReduction (ApplyCooldown scaling)
+#include "GameModes/GameState/MythicGameState.h"                 // MaxCooldownReduction cap
+#include "GameplayEffect.h"                                       // FGameplayEffectSpec Get/SetDuration
+#include "Engine/World.h"                                         // World->GetGameState<AMythicGameState>()
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(MythicGameplayAbility)
 
@@ -450,6 +454,65 @@ void UMythicGameplayAbility::ApplyCost(const FGameplayAbilitySpecHandle Handle, 
             AdditionalCost->ApplyCost(this, Handle, ActorInfo, ActivationInfo);
         }
     }
+}
+
+namespace {
+    // Cooldown duration multiplier = 1 - clamp(CooldownReduction, 0, MaxCooldownReduction). Returns 1.0 (no change)
+    // when the owner has no Utility set or no reduction, so non-CDR owners (incl. most NPCs) get stock cooldowns.
+    float ComputeCooldownMultiplier(const FGameplayAbilityActorInfo *ActorInfo) {
+        if (!ActorInfo) {
+            return 1.0f;
+        }
+        const UAbilitySystemComponent *ASC = ActorInfo->AbilitySystemComponent.Get();
+        if (!ASC) {
+            return 1.0f;
+        }
+        const UMythicAttributeSet_Utility *Util = ASC->GetSet<UMythicAttributeSet_Utility>();
+        if (!Util) {
+            return 1.0f;
+        }
+        // Designer-tunable safety cap (default 0.8) keeps a sliver of cooldown so stacked CDR can't reach zero.
+        float MaxCDR = 0.8f;
+        if (const UWorld *World = ASC->GetWorld()) {
+            if (const AMythicGameState *GS = World->GetGameState<AMythicGameState>()) {
+                MaxCDR = FMath::Clamp(GS->MaxCooldownReduction, 0.0f, 1.0f);
+            }
+        }
+        const float CDR = FMath::Clamp(Util->GetCooldownReduction(), 0.0f, MaxCDR);
+        return 1.0f - CDR;
+    }
+}
+
+void UMythicGameplayAbility::ApplyCooldown(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo,
+                                           const FGameplayAbilityActivationInfo ActivationInfo) const {
+    const float Mult = ComputeCooldownMultiplier(ActorInfo);
+
+    // No reduction (the common case — no CDR gear/buffs): defer entirely to the stock engine cooldown application so
+    // those owners are provably unaffected by this override.
+    if (Mult >= 1.0f) {
+        Super::ApplyCooldown(Handle, ActorInfo, ActivationInfo);
+        return;
+    }
+
+    UGameplayEffect *CooldownGE = GetCooldownGameplayEffect();
+    if (!CooldownGE) {
+        return; // ability has no cooldown — nothing to reduce
+    }
+    // Mirror UGameplayAbility::ApplyGameplayEffectToOwner (incl. the prediction-key gate so the client's predicted
+    // cooldown matches the server — CooldownReduction replicates, so both sides scale identically), but inject the
+    // scaled, locked duration into the spec before applying.
+    if (!HasAuthorityOrPredictionKey(ActorInfo, &ActivationInfo)) {
+        return;
+    }
+    FGameplayEffectSpecHandle SpecHandle = MakeOutgoingGameplayEffectSpec(Handle, ActorInfo, ActivationInfo, CooldownGE->GetClass(), GetAbilityLevel(Handle, ActorInfo));
+    if (!SpecHandle.IsValid()) {
+        return;
+    }
+    const float BaseDuration = SpecHandle.Data->GetDuration();
+    if (BaseDuration > 0.0f) { // only scale a finite, positive cooldown (skip Instant/Infinite durations)
+        SpecHandle.Data->SetDuration(BaseDuration * Mult, true);
+    }
+    ApplyGameplayEffectSpecToOwner(Handle, ActorInfo, ActivationInfo, SpecHandle);
 }
 
 FGameplayEffectContextHandle UMythicGameplayAbility::MakeEffectContext(const FGameplayAbilitySpecHandle Handle,

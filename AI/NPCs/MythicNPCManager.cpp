@@ -5,6 +5,7 @@
 
 #include "Mythic.h"
 #include "MythicNPCCharacter.h"
+#include "Engine/World.h"
 
 void UMythicNPCManager::Initialize(FSubsystemCollectionBase &Collection) {
     // Server Only Subsystem

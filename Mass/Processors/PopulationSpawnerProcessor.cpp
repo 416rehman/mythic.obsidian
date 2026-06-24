@@ -144,8 +144,8 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
     TArray<FMythicNPCPopulationSpawnData> SpawnDataArray;
     SpawnDataArray.Reserve(SpawnBudget);
 
-    // Collect unique cells within spawn radius of any player
-    TSet<FMythicCellCoord> CellsToPopulate;
+    // Cells already CONSIDERED this tick — dedup across overlapping player spawn radii (see the lock note below).
+    TSet<FMythicCellCoord> ConsideredCells;
     for (const FMythicCellCoord &PlayerCell : PlayerCells) {
         for (int32 DY = -SpawnRadiusCells; DY <= SpawnRadiusCells && SpawnBudget > 0; ++DY) {
             for (int32 DX = -SpawnRadiusCells; DX <= SpawnRadiusCells && SpawnBudget > 0; ++DX) {
@@ -159,6 +159,16 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
                     continue;
                 }
 
+                // Dedup BEFORE the (SimulationLock-guarded) settlement copy below. When players cluster — common in
+                // co-op — their spawn radii overlap heavily, so the same cell is reached once per nearby player.
+                // Considering each cell only once per tick eliminates redundant CopySettlementAtCell lock acquisitions
+                // that contend with the sim thread's conquest writes. The set holds every cell CONSIDERED this tick
+                // (settlement or not), so even non-settlement cells aren't re-copied per overlapping player.
+                if (ConsideredCells.Contains(CandidateCell)) {
+                    continue;
+                }
+                ConsideredCells.Add(CandidateCell);
+
                 // Only populate cells that belong to a settlement. Snapshot it under SimulationLock (copy-out) — NEVER
                 // hold a live Settlements-map pointer on this game thread: the sim thread writes GoverningFaction during
                 // a conquest TransferSettlement under that lock, so an unlocked read here tears (NPCs stamped to the
@@ -167,11 +177,6 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
                 if (!LWS->CopySettlementAtCell(CandidateCell, Settlement) || !Settlement.GoverningFaction.IsValid()) {
                     continue;
                 }
-
-                if (CellsToPopulate.Contains(CandidateCell)) {
-                    continue;
-                }
-                CellsToPopulate.Add(CandidateCell);
 
                 FMythicFactionData FactionData;
                 if (!FactionDB->GetFaction(Settlement.GoverningFaction, FactionData)) {
@@ -332,7 +337,7 @@ int32 UMythicPopulationSpawnerProcessor::ComputeTargetDensity(
     int32 SettlementMaxDensity,
     int32 SystemMaxPerCell,
     int32 FactionPopulation,
-    int32 FactionCapacity) const {
+    int32 FactionCapacity) {
     // Cap by system limit
     const int32 EffectiveMax = FMath::Min(SettlementMaxDensity, SystemMaxPerCell);
 

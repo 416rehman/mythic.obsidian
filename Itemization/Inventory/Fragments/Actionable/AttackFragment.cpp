@@ -59,32 +59,43 @@ void UAttackFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
            *GetNameSafe(AttackRuntimeReplicatedData.ASC),
            *GetNameSafe(AttackRuntimeReplicatedData.ASC->GetOwnerActor()));
 
-    auto Roll = &this->AttackRuntimeReplicatedData.RolledDamageSpec;
-    if (Roll->bIsApplied) {
-        UE_LOG(Myth, Log, TEXT("  -> Damage already applied, skipping attribute modification"));
-        return;
-    }
-
     const auto ASC = this->AttackRuntimeReplicatedData.ASC;
-    ASC->ApplyModToAttribute(Roll->Attribute, EGameplayModOp::AddBase, Roll->Value);
-    Roll->bIsApplied = true;
-    UE_LOG(Myth, Log, TEXT("  -> Applied damage attribute: %s = %f"), *Roll->Attribute.GetName(), Roll->Value);
+    auto Roll = &this->AttackRuntimeReplicatedData.RolledDamageSpec;
 
-    // Give the player the ability to attack
-    UE_LOG(Myth, Log, TEXT("  -> Granting ability %s with InputTag %s"), *GetNameSafe(AttackConfig.TriggerAbility), *InputTag.ToString());
-    this->AttackRuntimeReplicatedData.AbilityHandle = GrantItemAbility(ASC, ItemInstance, AttackConfig.TriggerAbility);
+    // Decide each action independently. The old single early-return on bIsApplied also skipped the ability grant —
+    // so a re-activation whose first grant had failed (damage applied, no live ability) would never get an attack
+    // ability. Damage and ability are now each idempotent on their own state.
+    const FAttackActivationPlan Plan = PlanAttackActivation(Roll->bIsApplied, this->AttackRuntimeReplicatedData.AbilityHandle.IsValid());
 
-    if (!this->AttackRuntimeReplicatedData.AbilityHandle.IsValid()) {
-        UE_LOG(Myth, Error, TEXT("UAttackFragment::OnItemActivated: Failed to grant attack ability %s"), *GetNameSafe(AttackConfig.TriggerAbility));
+    if (Plan.bApplyDamage) {
+        ASC->ApplyModToAttribute(Roll->Attribute, EGameplayModOp::AddBase, Roll->Value);
+        Roll->bIsApplied = true;
+        UE_LOG(Myth, Log, TEXT("  -> Applied damage attribute: %s = %f"), *Roll->Attribute.GetName(), Roll->Value);
     }
     else {
-        UE_LOG(Myth, Log, TEXT("  -> SUCCESS! Granted ability"));
+        UE_LOG(Myth, Log, TEXT("  -> Damage already applied, skipping attribute modification"));
+    }
 
-        // Log the granted ability's dynamic tags to verify the InputTag was applied
-        if (FGameplayAbilitySpec *Spec = ASC->FindAbilitySpecFromHandle(this->AttackRuntimeReplicatedData.AbilityHandle)) {
-            FGameplayTagContainer DynamicTags = Spec->GetDynamicSpecSourceTags();
-            UE_LOG(Myth, Log, TEXT("  -> Granted ability DynamicSpecSourceTags: %s"), *DynamicTags.ToString());
+    if (Plan.bGrantAbility) {
+        // Give the player the ability to attack
+        UE_LOG(Myth, Log, TEXT("  -> Granting ability %s with InputTag %s"), *GetNameSafe(AttackConfig.TriggerAbility), *InputTag.ToString());
+        this->AttackRuntimeReplicatedData.AbilityHandle = GrantItemAbility(ASC, ItemInstance, AttackConfig.TriggerAbility);
+
+        if (!this->AttackRuntimeReplicatedData.AbilityHandle.IsValid()) {
+            UE_LOG(Myth, Error, TEXT("UAttackFragment::OnItemActivated: Failed to grant attack ability %s"), *GetNameSafe(AttackConfig.TriggerAbility));
         }
+        else {
+            UE_LOG(Myth, Log, TEXT("  -> SUCCESS! Granted ability"));
+
+            // Log the granted ability's dynamic tags to verify the InputTag was applied
+            if (FGameplayAbilitySpec *Spec = ASC->FindAbilitySpecFromHandle(this->AttackRuntimeReplicatedData.AbilityHandle)) {
+                FGameplayTagContainer DynamicTags = Spec->GetDynamicSpecSourceTags();
+                UE_LOG(Myth, Log, TEXT("  -> Granted ability DynamicSpecSourceTags: %s"), *DynamicTags.ToString());
+            }
+        }
+    }
+    else {
+        UE_LOG(Myth, Log, TEXT("  -> Attack ability already live, skipping grant"));
     }
 }
 

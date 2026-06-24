@@ -2,6 +2,8 @@
 #include "ItemReward.h"
 
 #include "Mythic.h"
+#include "Engine/GameInstance.h"
+#include "GameFramework/PlayerController.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
 
 bool UItemReward::Give(FRewardContext &Context) const {
@@ -47,4 +49,14 @@ bool UItemReward::Give(FRewardContext &Context) const {
 
 bool UItemReward::GiveItemReward(UItemReward *Reward, FItemRewardContext Context) {
     return Reward->Give(Context);
+}
+
+FText UItemReward::GetPreviewText() const {
+    if (!Item) {
+        return FText::GetEmpty();
+    }
+    if (Quantity <= 1) {
+        return FText::FromString(Item->GetName());
+    }
+    return FText::FromString(FString::Printf(TEXT("%dx %s"), Quantity, *Item->GetName()));
 }

@@ -14,8 +14,13 @@
 #include "TimerManager.h"
 #include "AbilitySystemInterface.h"
 #include "AbilitySystemComponent.h"
+#include "EngineUtils.h"                       // TActorIterator (re-publicize a departing player's private loot)
+#include "Components/SkeletalMeshComponent.h"
+#include "Itemization/Loot/MythicWorldItem.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
+#include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "Subsystem/SaveSystem/MythicSaveGameSubsystem.h"
+#include "UObject/Package.h"
 
 namespace {
     // Local FString aliases of the canonical slot names (single source: UMythicSaveGameSubsystem) so cheat-saved,
@@ -95,6 +100,22 @@ void AMythicGameMode::Logout(AController *Exiting) {
     if (FTimerHandle *Existing = RespawnTimers.Find(Exiting)) {
         GetWorldTimerManager().ClearTimer(*Existing);
         RespawnTimers.Remove(Exiting);
+    }
+
+    // A departing player's PRIVATE world-item drops are bOnlyRelevantToOwner with their PlayerController as the
+    // relevancy owner. Once that controller is torn down (just below, in Super::Logout) the items become relevant to
+    // NOBODY — invisible, unclaimable, and leaked on the server. Re-publicize them so they revert to ordinary public
+    // loot a remaining player can pick up (the reservation expired with the player; strictly better than a leak).
+    // Server-only; logout is rare, so the one-time world-item scan is fine.
+    if (HasAuthority() && GetWorld() && Exiting) {
+        for (TActorIterator<AMythicWorldItem> It(GetWorld()); It; ++It) {
+            AMythicWorldItem *WorldItem = *It;
+            if (WorldItem && WorldItem->GetTargetRecipient() == Exiting) {
+                WorldItem->SetOwner(nullptr);            // detach from the leaving PC (the relevancy owner)
+                WorldItem->bOnlyRelevantToOwner = false; // relevant to every connection again
+                WorldItem->SetTargetRecipient(nullptr);  // OnRep clears the private-visibility hide → visible to all
+            }
+        }
     }
 
     // Save-on-logout: persist the departing player's character while their PlayerState is still valid

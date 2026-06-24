@@ -54,16 +54,27 @@ UAbilitySystemComponent *AMythicStorageContainer::GetSchematicsASC() const {
 }
 
 void AMythicStorageContainer::OnPrimaryInteract_Implementation(AActor *Interactor) {
-    AController *C = ResolveController(Interactor);
-    AMythicPlayerController *PC = Cast<AMythicPlayerController>(C);
+    AMythicPlayerController *PC = Cast<AMythicPlayerController>(ResolveController(Interactor));
     if (!PC) {
         return;
     }
 
-    // Runs on the interacting client: register server-side (range-gated) and let the Blueprint push the
-    // dual-pane container widget.
+    if (HasAuthority()) {
+        // Server (incl. the listen-server host): register the player as an opener, range-gated exactly as before.
+        // Reached directly on the host, or re-entered by the generic ServerInteractPrimary route for a remote client.
+        if (IsActorInRange(PC->GetPawn())) {
+            Server_AddOpener(PC);
+        }
+    }
+    else {
+        // Remote client: route through the single generic interaction primitive instead of a bespoke open RPC.
+        PC->ServerInteractPrimary(this);
+    }
+
+    // The local controller (host OR remote client; never a dedicated server / remote proxy) pushes the dual-pane
+    // widget. Optimistic open, exactly as before — actual access to the container inventory is independently
+    // re-gated server-side on every item move in CanPlayerAccessInventory.
     if (PC->IsLocalController()) {
-        PC->ServerOpenStorageContainer(this);
         OnContainerOpened(PC);
     }
 }

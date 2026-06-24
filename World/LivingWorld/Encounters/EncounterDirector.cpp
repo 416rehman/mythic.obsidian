@@ -17,9 +17,11 @@
 #include "Mass/Fragments/MythicMassFragments.h"
 #include "AI/NPCs/MythicNPCCharacter.h" // CleanupEncounter tears down embodied actors before freeing their entities
 #include "World/LivingWorld/MythicTags_LivingWorld.h" // TAG_LIVINGWORLD_EVENT_ENCOUNTER_COMPLETED
+#include "GAS/Executions/MythicCombatRoll.h"          // MythicCombat::RollSucceeds (shared 0/100% boundary rule)
 #include "Mass/Tags/MythicMassTags.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "Engine/GameInstance.h"
 
 DEFINE_LOG_CATEGORY(LogMythEncounter);
 
@@ -136,7 +138,7 @@ bool UMythicEncounterDirector::ForceCompleteEncounter(uint32 EncounterId) {
     for (int32 i = 0; i < ActiveEncounters.Num(); ++i) {
         if (ActiveEncounters[i].EncounterId == EncounterId) {
             ActiveEncounters[i].State = EMythicEncounterState::Completed;
-            EmitEncounterCompletedEvent(ActiveEncounters[i]); // same completion beat as the timeout path (single source)
+            EmitEncounterCompletedEvent(ActiveEncounters[i], /*bDefeated*/ false); // forced close = generic Completed beat (not a player victory)
             CleanupEncounter(i);
             return true;
         }
@@ -194,8 +196,10 @@ void UMythicEncounterDirector::EvaluationTick() {
             continue;
         }
 
-        // Probability roll
-        if (FMath::FRand() > Template.BaseProbability) {
+        // Probability roll — shared boundary rule: BaseProbability <= 0 NEVER spawns (a disabled template must stay
+        // disabled even on an exact-0.0 FRand()), >= 1 always spawns. The bare `FRand() > BaseProbability` skip let a
+        // 0% template spawn when FRand() returned exactly 0.0.
+        if (!MythicCombat::RollSucceeds(Template.BaseProbability, FMath::FRand())) {
             continue;
         }
 
@@ -281,6 +285,10 @@ bool UMythicEncounterDirector::EvaluateTemplate(
     const bool bRelationGated =
         static_cast<uint8>(Template.MinFactionRelation) > static_cast<uint8>(EMythicFactionRelation::Neutral);
 
+    // Collect ALL qualifying factions, then pick one at random — previously this returned the FIRST qualifying faction,
+    // so every encounter clustered in the lowest-index alive faction's territory (no spread across the world). Random
+    // selection distributes encounters over all eligible factions. (Server-side only — no client determinism concern.)
+    TArray<FMythicFactionId> QualifyingFactions;
     for (const FCandidateFaction &C : Candidates) {
         // Military strength check
         if (C.Military < Template.MinMilitaryStrength) {
@@ -308,17 +316,28 @@ bool UMythicEncounterDirector::EvaluateTemplate(
             }
         }
 
-        // This faction qualifies — find a cell in their territory and pick a random one.
-        TArray<FMythicCellCoord> FactionCells;
-        TerritoryGrid->GetFactionCells(C.Id, 32, FactionCells);
-        if (FactionCells.Num() > 0) {
-            OutCell = FactionCells[FMath::RandRange(0, FactionCells.Num() - 1)];
-            OutFaction = C.Id;
-            return true;
+        // Qualifies only if it actually holds territory to host the encounter (cheap existence probe — fetch 1 cell).
+        TArray<FMythicCellCoord> Probe;
+        TerritoryGrid->GetFactionCells(C.Id, 1, Probe);
+        if (Probe.Num() > 0) {
+            QualifyingFactions.Add(C.Id);
         }
     }
 
-    return false;
+    if (QualifyingFactions.Num() == 0) {
+        return false;
+    }
+
+    // Pick a random qualifying faction, then a random cell within its territory.
+    const FMythicFactionId ChosenFaction = QualifyingFactions[FMath::RandRange(0, QualifyingFactions.Num() - 1)];
+    TArray<FMythicCellCoord> ChosenCells;
+    TerritoryGrid->GetFactionCells(ChosenFaction, 32, ChosenCells);
+    if (ChosenCells.Num() == 0) {
+        return false; // territory emptied between the qualify probe and now — bail safely
+    }
+    OutCell = ChosenCells[FMath::RandRange(0, ChosenCells.Num() - 1)];
+    OutFaction = ChosenFaction;
+    return true;
 }
 
 void UMythicEncounterDirector::SpawnEncounter(
@@ -430,17 +449,48 @@ void UMythicEncounterDirector::SpawnEncounter(
 void UMythicEncounterDirector::UpdateActiveEncounters() {
     const double WorldTime = GetWorld()->GetTimeSeconds();
 
+    // Resolved once for the defeat scan below (all game-thread — UpdateActiveEncounters is a timer callback).
+    UMassEntitySubsystem *MassSubsystem = GetWorld() ? GetWorld()->GetSubsystem<UMassEntitySubsystem>() : nullptr;
+    const UMythicPersistentNPCRegistry *Registry = LivingWorld ? LivingWorld->GetPersistentNPCRegistry() : nullptr;
+
     for (int32 i = ActiveEncounters.Num() - 1; i >= 0; --i) {
         FMythicActiveEncounter &Encounter = ActiveEncounters[i];
+        bool bDefeated = false; // true = completed via player wipeout (below); false = timeout/withdrawal
 
-        // Check timeout
+        // Defeat detection: an Active encounter whose every spawned NPC is dead (in the perma-death registry) or gone
+        // is RESOLVED — complete it now instead of lingering to MaxDuration (which would hold a per-cluster budget slot
+        // and fire a stale "completed" beat minutes after the player actually won). The perma-death registry is the
+        // CORRECT signal, not entity-validity: the EncounterDirector is the sole entity-lifecycle authority (it frees
+        // them only on cleanup), and a dehydrated-but-ALIVE member (player engaged then walked away) is NOT perma-dead,
+        // so it rightly keeps the encounter active until timeout. Skipped until something has spawned (an empty list
+        // must not vacuously complete a just-created encounter).
+        if (Encounter.State == EMythicEncounterState::Active && MassSubsystem && Registry && Encounter.SpawnedEntities.Num() > 0) {
+            const FMassEntityManager &EntityManager = MassSubsystem->GetEntityManager();
+            bool bAllDown = true;
+            for (const FMassEntityHandle &Entity : Encounter.SpawnedEntities) {
+                if (!EntityManager.IsEntityValid(Entity)) {
+                    continue; // already-destroyed entity = gone = counts as down
+                }
+                const FMythicIdentityFragment *Id = EntityManager.GetFragmentDataPtr<FMythicIdentityFragment>(Entity);
+                if (!Id || !Registry->IsPermaDead(Id->NameHash)) {
+                    bAllDown = false; // a live, not-perma-dead member remains — the threat isn't resolved
+                    break;
+                }
+            }
+            if (bAllDown) {
+                Encounter.State = EMythicEncounterState::Completed;
+                bDefeated = true;
+            }
+        }
+
+        // Check timeout (leaves bDefeated false — the threat withdrew rather than being beaten)
         if (Encounter.HasTimedOut(WorldTime)) {
             Encounter.State = EMythicEncounterState::Completed;
         }
 
         // Clean up completed encounters
         if (Encounter.State == EMythicEncounterState::Completed) {
-            EmitEncounterCompletedEvent(Encounter); // ENCOUNTER_COMPLETED beat (single source — see the helper)
+            EmitEncounterCompletedEvent(Encounter, bDefeated); // Defeated vs Completed beat (single source — see the helper)
             CleanupEncounter(i);
         }
     }
@@ -492,19 +542,21 @@ void UMythicEncounterDirector::CleanupEncounter(int32 Index) {
     ActiveEncounters.RemoveAtSwap(Index);
 }
 
-void UMythicEncounterDirector::EmitEncounterCompletedEvent(const FMythicActiveEncounter &Encounter) const {
+void UMythicEncounterDirector::EmitEncounterCompletedEvent(const FMythicActiveEncounter &Encounter, bool bDefeated) const {
     // Mirror the SpawnEncounter spawn beat: surface the encounter's END as a chronicle event (the symmetric close of
     // the story the spawn opened). Through the subsystem's THREAD-SAFE queue (game thread → sim-thread fabric), NOT a
-    // direct AppendEvent. CategoryFlags=Encounter so the chronicle MacroMask surfaces it; the distinct Encounter.Completed
-    // leaf lets FormatEvent render "Completed — <faction>".
+    // direct AppendEvent. CategoryFlags=Encounter so the chronicle MacroMask surfaces it. The leaf reflects the OUTCOME:
+    // DEFEATED (player wiped out every spawned member) renders "Encounter Defeated — <faction>", vs the generic
+    // COMPLETED ("Encounter Completed — <faction>") for a timeout/withdrawal/force-complete — so the news shows agency.
+    // Defeat is the more salient beat, so it carries slightly higher significance.
     if (!LivingWorld) {
         return;
     }
     FMythicWorldEvent CompletedEvent;
-    CompletedEvent.EventTag = TAG_LIVINGWORLD_EVENT_ENCOUNTER_COMPLETED;
+    CompletedEvent.EventTag = bDefeated ? TAG_LIVINGWORLD_EVENT_ENCOUNTER_DEFEATED : TAG_LIVINGWORLD_EVENT_ENCOUNTER_COMPLETED;
     CompletedEvent.Cell = Encounter.Cell;
     CompletedEvent.PrimaryFaction = Encounter.OriginFaction;
-    CompletedEvent.Significance = 0.5f;
+    CompletedEvent.Significance = bDefeated ? 0.6f : 0.5f;
     CompletedEvent.CategoryFlags = EMythicEventCategory::Encounter;
     LivingWorld->SubmitWorldEvent(CompletedEvent);
 }

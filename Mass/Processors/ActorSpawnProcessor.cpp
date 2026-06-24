@@ -81,6 +81,14 @@ void UMythicActorSpawnProcessor::Execute(FMassEntityManager &EntityManager, FMas
             continue;
         }
 
+        // Already embodied? Don't spawn a SECOND actor for one entity. The SpawnRequestQuery does NOT exclude the
+        // FMythicCognitiveTag added below, so a re-issued spawn request (a future re-promotion / save-restore path)
+        // would otherwise double-embody this entity. The entity→actor reverse link is the single source of truth for
+        // "has an actor"; the request tag was already consumed above, so a skipped duplicate doesn't linger.
+        if (LWS->FindEmbodiedActor(Entity)) {
+            continue;
+        }
+
         const FVector SpawnLoc = Grid->CellToWorld(Identity.Cell);
         FActorSpawnParameters SpawnInfo;
         SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;

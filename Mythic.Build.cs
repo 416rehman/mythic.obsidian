@@ -54,6 +54,7 @@ public class Mythic : ModuleRules
 			"Json",
 			"JsonUtilities",
 			// MASS ECS — Living World population layer
+			"MassCore",   // UE 5.8: FMassElement/FMassFragment/FMassTag base reflection types split into MassCore
 			"MassEntity",
 			"MassSpawner",
 			"MassSimulation",

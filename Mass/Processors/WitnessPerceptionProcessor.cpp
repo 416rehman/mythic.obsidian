@@ -14,6 +14,7 @@
 #include "World/LivingWorld/Morality/MoralSignature.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "World/EnvironmentController/MythicEnvironmentSubsystem.h" // GetDayTime for REQ-BEH-007 night perception
+#include "World/EnvironmentController/MythicEnvironmentController.h" // GetCurrentWeather → UWeatherType::bImpairsPerception
 #include "Engine/World.h"
 
 UMythicWitnessPerceptionProcessor::UMythicWitnessPerceptionProcessor() {
@@ -78,19 +79,27 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
         return;
     }
 
-    // REQ-BEH-007: NPC perception (hearing range) degrades at NIGHT. Drive the ActionEventSubsystem's perception
-    // multiplier from the real time-of-day (the env subsystem owns the clock) — SetPerceptionMultiplier was previously
-    // NEVER called, so the multiplier sat at 1.0 regardless of the clock, and NightPerceptionMultiplier was dead.
-    // (Weather-based degradation is deferred: UWeatherType exposes only visual fog ranges, not a gameplay perception
-    // scalar — a per-weather perception multiplier should be designer-authored before WeatherPerceptionMultiplier is
-    // wired, rather than baking in a fog-density threshold here.)
+    // REQ-BEH-007: NPC perception (hearing range) degrades at NIGHT and in designer-flagged bad WEATHER. Drive the
+    // ActionEventSubsystem's perception multiplier from the real time-of-day + active weather (the env subsystem owns
+    // the clock; the controller owns the weather). Night and weather STACK multiplicatively, so a storm at night is the
+    // worst (crimes go least noticed). The weather factor is per-weather data-driven — UWeatherType::bImpairsPerception
+    // chosen by the designer (no baked fog-density threshold), with the shared WeatherPerceptionMultiplier magnitude.
     float EnvPerceptionMul = 1.0f;
     if (const UMythicEnvironmentSubsystem *Env = GI->GetSubsystem<UMythicEnvironmentSubsystem>()) {
         // Gate on a REGISTERED controller: GetDayTime() FAIL-UNSAFE-returns Night (and logs) when the controller is
         // absent (a startup/teardown transient), which would wrongly halve hearing AND spam a per-frame log. Only
         // degrade when the clock is genuinely known; "no clock yet" means full daylight perception.
-        if (Env->GetEnvironmentController() != nullptr && Env->GetDayTime() == EDayTime::Night) {
-            EnvPerceptionMul = Settings->NightPerceptionMultiplier;
+        if (const AMythicEnvironmentController *Ctrl = Env->GetEnvironmentController()) {
+            if (Env->GetDayTime() == EDayTime::Night) {
+                EnvPerceptionMul *= Settings->NightPerceptionMultiplier;
+            }
+            // Active bad weather (designer-flagged) further reduces perception — finally wires the previously-dead
+            // WeatherPerceptionMultiplier setting through a real per-weather signal.
+            if (const UWeatherType *Weather = Ctrl->GetCurrentWeather()) {
+                if (Weather->bImpairsPerception) {
+                    EnvPerceptionMul *= Settings->WeatherPerceptionMultiplier;
+                }
+            }
         }
     }
     ActionSub->SetPerceptionMultiplier(EnvPerceptionMul);
@@ -103,30 +112,65 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
     TArray<FMythicWitnessResult> &WitnessResults = ActionSub->GetPendingWitnessResults();
     FMythicCrimeReportQueue &CrimeQueue = ActionSub->GetCrimeReportQueue();
 
-    // Process each pending event, budget-capped
+    // Build the broad-phase cell→entity index ONCE this tick (single O(N) pass over the SAME entity set
+    // AllEntitiesQuery scanned before), so the per-event witness lookup below queries only the hearing-radius
+    // neighborhood instead of re-scanning ALL entities for every event — the O(events × N) → O(N + events × box) fix.
+    // Reset retains allocations (no per-tick churn). Indexing the same set means witnesses are unchanged vs the old scan.
+    SpatialIndex.Reset();
+    AllEntitiesQuery.ForEachEntityChunk(Context, [this](FMassExecutionContext &ChunkContext) {
+        const int32 NumEntities = ChunkContext.GetNumEntities();
+        const auto IdentityView = ChunkContext.GetFragmentView<FMythicIdentityFragment>();
+        for (int32 i = 0; i < NumEntities; ++i) {
+            SpatialIndex.Insert(IdentityView[i].Cell, ChunkContext.GetEntity(i));
+        }
+    });
+
+    // Process each pending event ATOMICALLY: once an event is STARTED it is scanned to completion this frame, so its
+    // witness results + crime records are emitted exactly once. The budget caps how many EVENTS begin per frame, NOT
+    // the scan within one. Why atomic: the previous code aborted an event's scan mid-way when the per-frame budget ran
+    // out but left it un-flushed (bFullyProcessed only set when budget remained), so next frame the scan restarted at
+    // entity 0 and RE-EMITTED witness results + crime records for witnesses it had already counted — duplicate pressure
+    // and inflated crime confidence under exactly the heavy-witness load (a crowd watching a massacre) this system
+    // exists for. `WitnessesProcessed` was added "for budget-capped multi-frame processing" but was never read as a
+    // resume cursor, and a raw entity index is not a safe cursor (MASS chunk order shifts as entities spawn/despawn/
+    // migrate between frames → it would skip or double-count). Atomic per-event fulfils that multi-frame intent
+    // correctly: unstarted events wait for a later frame; a started event never leaves partial state. NOTE: this makes
+    // MaxWitnessEvalsPerFrame a SOFT per-event-granular cap — a single high-witness event may overshoot it in one frame
+    // (bounded by witnesses near ONE event, not all entities). A hard within-event cap needs a stable resume cursor,
+    // which the cell-ordered spatial index (see BACKLOG: O(E×N) witness scan) provides — tracked as the follow-on.
     for (FMythicPendingActionEvent &PendingEvent : PendingEvents) {
-        if (PendingEvent.bFullyProcessed || WitnessBudget <= 0) {
-            continue;
+        if (PendingEvent.bFullyProcessed) {
+            continue; // already emitted on an earlier frame; awaiting FlushProcessedEvents
+        }
+        if (WitnessBudget <= 0) {
+            break; // no budget left to START another event this frame — it stays queued, processed next frame
         }
 
         const FMythicWorldEvent &Event = PendingEvent.WorldEvent;
         const FMythicCellCoord &EventCell = Event.Cell;
 
-        // Track per-event crime witness count for confidence scoring
-        uint8 EventCrimeWitnessCount = 0;
+        // Track per-event crime witness count for confidence scoring. int32 accumulator, saturated into the uint16
+        // DirectWitnessCount field below — a >65535-witness crowd clamps instead of wrapping (the uint8 it replaced
+        // wrapped at 256, silently corrupting the tally for large public crimes).
+        int32 EventCrimeWitnessCount = 0;
 
-        // For each entity chunk, scan for witnesses near the event cell
-        AllEntitiesQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext &ChunkContext) {
-            if (WitnessBudget <= 0) {
-                return;
-            }
+        // BROAD PHASE: candidate witnesses = entities in cells within the hearing-radius BOX of the event cell. The
+        // Chebyshev box (|dx|,|dy| <= r) is a SUPERSET of the Manhattan hearing ball the narrow phase re-checks below,
+        // so the witnesses produced are IDENTICAL to the former full-entity scan — this only shrinks the examined set
+        // from ALL entities to those near the event. NO mid-scan budget abort — a started event is scanned fully so its
+        // emissions are complete and never duplicated (WitnessBudget may go negative here; the between-events check
+        // above then prevents the NEXT event from starting this frame). Fragments are fetched by handle from the
+        // EntityManager (entities don't despawn mid-Execute; the null guard is defensive).
+        WitnessCandidates.Reset();
+        SpatialIndex.QueryRange(EventCell, EffectiveHearingRadius, WitnessCandidates);
 
-            const int32 NumEntities = ChunkContext.GetNumEntities();
-            const auto IdentityView = ChunkContext.GetFragmentView<FMythicIdentityFragment>();
-            auto SignificanceView = ChunkContext.GetMutableFragmentView<FMythicSignificanceFragment>();
-
-            for (int32 i = 0; i < NumEntities && WitnessBudget > 0; ++i) {
-                const FMythicIdentityFragment &Identity = IdentityView[i];
+        for (const FMassEntityHandle WitnessEntity : WitnessCandidates) {
+                const FMythicIdentityFragment *IdPtr = EntityManager.GetFragmentDataPtr<FMythicIdentityFragment>(WitnessEntity);
+                FMythicSignificanceFragment *SigPtr = EntityManager.GetFragmentDataPtr<FMythicSignificanceFragment>(WitnessEntity);
+                if (!IdPtr || !SigPtr) {
+                    continue;
+                }
+                const FMythicIdentityFragment &Identity = *IdPtr;
 
                 // Cell-distance hearing check — O(1) integer math
                 const int32 CellDist = FMath::Abs(Identity.Cell.X - EventCell.X)
@@ -150,8 +194,8 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
                 if (!Identity.Faction.IsValid()) {
                     continue;
                 }
-                FMythicFactionData FactionData;
-                if (!FactionDB->GetFaction(Identity.Faction, FactionData)) {
+                FMythicFactionMoralProfile FactionProfile;
+                if (!FactionDB->GetFactionMoralProfile(Identity.Faction, FactionProfile)) {
                     continue;
                 }
 
@@ -187,10 +231,10 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
 
                 const EMythicMoralSeverity Severity = FMythicMoralSignature::EvaluateActionSeverity(
                     EvaluatedVector,
-                    FactionData.Ideology,
-                    FactionData.DisapproveThreshold,
-                    FactionData.CondemnThreshold,
-                    FactionData.HostileThreshold
+                    FactionProfile.Ideology,
+                    FactionProfile.DisapproveThreshold,
+                    FactionProfile.CondemnThreshold,
+                    FactionProfile.HostileThreshold
                     );
 
                 if (Severity == EMythicMoralSeverity::Ignore) {
@@ -198,14 +242,14 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
                 }
 
                 // Dirty the significance score — this entity is now contextually relevant
-                FMythicSignificanceFragment &Significance = SignificanceView[i];
+                FMythicSignificanceFragment &Significance = *SigPtr;
                 Significance.bDirty = true;
                 // Saturate in 32-bit before narrowing (FMath::Min<uint16> truncates the +1 sum first: at 65535 -> 65536 -> 0).
                 Significance.RelevantEventCount = static_cast<uint16>(FMath::Min<uint32>(static_cast<uint32>(Significance.RelevantEventCount) + 1u, 0xFFFFu));
 
                 // Produce witness result for the pressure processor
                 FMythicWitnessResult Result;
-                Result.WitnessEntity = ChunkContext.GetEntity(i);
+                Result.WitnessEntity = WitnessEntity;
                 Result.Severity = Severity;
                 Result.ActionMoralVector = Event.MoralVector;
                 Result.EventCategoryFlags = Event.CategoryFlags;
@@ -228,20 +272,19 @@ void UMythicWitnessPerceptionProcessor::Execute(FMassEntityManager &EntityManage
                     Crime.ActionMoralVector = Event.MoralVector;
                     Crime.Cell = EventCell;
                     Crime.WorldTime = Event.WorldTime;
-                    Crime.DirectWitnessCount = EventCrimeWitnessCount;
+                    Crime.DirectWitnessCount = static_cast<uint16>(FMath::Min(EventCrimeWitnessCount, 0xFFFF));
                     Crime.Confidence = 1.0f; // Direct witness = full confidence
                     CrimeQueue.Enqueue(Crime);
                 }
 
                 UE_LOG(LogMythLivingWorld, Verbose, TEXT("Witness: Entity in cell %s saw event at %s — Severity=%d"),
                        *Identity.Cell.ToString(), *EventCell.ToString(), static_cast<int32>(Severity));
-            }
-        });
-
-        // Mark event as fully processed if budget allowed full scan
-        if (WitnessBudget > 0) {
-            PendingEvent.bFullyProcessed = true;
         }
+
+        // The event was scanned to completion (no mid-scan abort), so its witnesses are fully emitted exactly once.
+        // Always mark processed → FlushProcessedEvents removes it and it is never re-scanned (the source of the former
+        // duplicate emissions). WitnessesProcessed now holds this event's final processed-witness tally (a diagnostic).
+        PendingEvent.bFullyProcessed = true;
     }
 
     // Flush fully processed events

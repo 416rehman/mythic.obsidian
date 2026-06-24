@@ -6,8 +6,9 @@
 
 #include "CoreMinimal.h"
 #include "Net/Serialization/FastArraySerializer.h"
-#include "World/LivingWorld/LivingWorldTypes.h"
-#include "World/LivingWorld/Factions/FactionDatabase.h"
+#include "LivingWorldTypes.h"
+#include "Factions/FactionDatabase.h"
+#include "GameFramework/Info.h"
 #include "World/LivingWorld/Encounters/EncounterTemplate.h" // EMythicEncounterState + FGameplayTag
 #include "LivingWorldReplication.generated.h"
 
@@ -210,6 +211,12 @@ public:
 
     /** Sync current subsystem state into these arrays (called on Server by Subsystem) */
     void SyncProxies(class UMythicLivingWorldSubsystem *Subsystem);
+
+    /** True iff a territory proxy's CLIENT-VISIBLE fields (dominant faction, contested level) differ from the new grid
+     *  state. SyncProxies uses this to avoid re-replicating cells whose influence shifted but whose dominant faction
+     *  didn't change (GetChangedCells returns every influence-changed cell) — without it the delta re-sends unchanged
+     *  proxies to every client each tick. Static + pure → unit-testable. */
+    static bool TerritoryProxyNeedsUpdate(const FMythicTerritoryProxyItem &Existing, FMythicFactionId NewFaction, uint8 NewContestedLevel);
 
     // ─── Client read API (the replicated proxies are the client's living-world cache) ───
 

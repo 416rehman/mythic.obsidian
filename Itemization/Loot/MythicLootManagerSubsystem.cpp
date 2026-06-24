@@ -1,5 +1,6 @@
 #include "MythicLootManagerSubsystem.h"
 #include "../Loot/MythicWorldItem.h"
+#include "Engine/World.h"
 #include "GameFramework/GameState.h"
 #include "Itemization/InventoryProviderInterface.h"
 #include "Itemization/Inventory/MythicItemInstance.h"

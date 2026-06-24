@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/SoftObjectPath.h"
 #include "SavedWorldActor.generated.h"
 
 /**
@@ -43,4 +44,11 @@ struct FSerializedWorldActorHelper {
 
     // Deserialize and restore/spawn all saved actors
     static void DeserializeAll(UWorld *World, const TArray<FSerializedWorldActorData> &InActors);
+
+    // Pure subtractive-reconciliation decision: should a live actor be destroyed as a stale orphan after a load?
+    // Only runtime-spawned actors are ever removed (level-placed actors are part of the map). An actor SPAWNED by
+    // this very load is the restored state — never destroy it (cross-session its fresh path-name id won't match the
+    // saved id, so the id-set check alone would wrongly delete the actor we just restored). Otherwise a pre-existing
+    // runtime actor is kept iff the save knows about it. Pure + static for unit testing.
+    static bool ShouldDestroyOnReconcile(bool bIsRuntimeSpawned, bool bSpawnedThisLoad, bool bPresentInSave);
 };

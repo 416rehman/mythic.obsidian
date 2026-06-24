@@ -315,14 +315,25 @@ void UMythicTerritoryGrid::Serialize(FArchive &Ar) {
     Ar << InfluenceBleedRate;
     Ar << MinControlThreshold;
 
-    const int32 TotalCells = Width * Height;
+    // Compute in int64 to detect int32 overflow from a corrupted/tampered Width*Height (e.g. 100000*100000 wraps int32).
+    const int64 TotalCells64 = static_cast<int64>(Width) * static_cast<int64>(Height);
 
     if (Ar.IsLoading()) {
-        WriteBuffer.SetNum(TotalCells);
-        ReadBuffer.SetNum(TotalCells);
-        DirtyCells.Init(false, TotalCells);
-        ReadDirtyCells.Init(false, TotalCells);
+        // Bound-check the stream-controlled dimensions BEFORE SetNum: garbage Width/Height would otherwise overflow
+        // int32 and/or SetNum(garbage) → a massive allocation (OOM/crash). Cap at 100M cells (far above any real world
+        // grid); SetError flags the load as failed. Mirrors the CausalFabric / PersistentNPCRegistry stream guards.
+        if (Width < 0 || Height < 0 || TotalCells64 < 0 || TotalCells64 > 100000000) {
+            Ar.SetError();
+            return;
+        }
+        const int32 SafeTotal = static_cast<int32>(TotalCells64);
+        WriteBuffer.SetNum(SafeTotal);
+        ReadBuffer.SetNum(SafeTotal);
+        DirtyCells.Init(false, SafeTotal);
+        ReadDirtyCells.Init(false, SafeTotal);
     }
+
+    const int32 TotalCells = static_cast<int32>(TotalCells64);
 
     for (int32 i = 0; i < TotalCells; ++i) {
         FMythicTerritoryCell &Cell = WriteBuffer[i];

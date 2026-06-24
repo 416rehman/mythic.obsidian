@@ -6,7 +6,7 @@
 
 #include "CoreMinimal.h"
 #include "HAL/CriticalSection.h" // FRWLock (GraphLock)
-#include "MassEntityHandle.h"
+#include "Mass/EntityHandle.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "SocialGraph.generated.h"
 
@@ -134,9 +134,12 @@ public:
 
     /**
      * Remove ALL edges involving an entity (both as source and as target).
-     * Call this when an entity is destroyed/despawned.
-     * Budget-capped: if the entity has many incoming edges across many sources,
-     * this batches removal across frames.
+     * Call this when an entity is destroyed/despawned. SYNCHRONOUS and complete in one call — it is NOT batched across
+     * frames. Incoming-edge removal scans every source's adjacency list: O(E × M), where E = entities with edges and
+     * M = edges each (≤ MaxEdgesPerEntity). E is bounded by the social graph's real population — hydrated/cognitive
+     * NPCs only, ~hundreds — not the full entity count, so it is fine at scale; but because it is unthrottled, do not
+     * bulk-call it for many entities in a single frame (that would multiply the scan). (A reverse target→sources index
+     * would make it O(incoming) — logged as a deferred optimization, unnecessary at the current graph population.)
      *
      * @param Entity       The entity being removed
      * @param OutSeveredConnections  Entities that lost a connection (for Grief pressure)
@@ -213,6 +216,9 @@ private:
     /** Round-robin iterator for budget-capped pruning */
     int32 PruneIteratorIndex = 0;
 
-    /** Apply lazy decay to an edge's strength. Returns the new strength. */
+public:
+    /** Apply lazy exponential decay to an edge's strength: S × e^(-rate·Δt); returns the strength unchanged when the
+     *  rate is non-positive or no world time has elapsed since the last interaction. Pure + static (no graph state)
+     *  so the relationship-aging rule is unit-testable. */
     static float ApplyDecay(const FMythicSocialEdge &Edge, double WorldTime, float DecayRate);
 };

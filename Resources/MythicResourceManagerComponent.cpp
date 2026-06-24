@@ -5,8 +5,13 @@
 
 #include "Mythic.h"
 #include "MythicResourceISM.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
-#include "Player/MythicPlayerController.h" // per-hit gather feedback callout
+#include "Player/MythicPlayerController.h"
+#include "Player/Proficiency/ProficiencyComponent.h"
+#include "Player/Proficiency/ProficiencyDefinition.h"
+#include "AbilitySystemComponent.h"
+#include "AbilitySystemGlobals.h"
 #if ENABLE_DRAW_DEBUG
 #include "DrawDebugHelpers.h"
 #include "HAL/IConsoleManager.h"
@@ -86,7 +91,7 @@ void UMythicResourceManagerComponent::ProcessBatchRespawn() {
     auto DestroyedItems = *DestroyedResources.GetItems();
     for (int32 i = 0; i < DestroyedItems.Num(); i++) {
         auto &item = DestroyedItems[i];
-        if (item.HitsTillDestruction <= 0 && item.RespawnTime > 0 && CurrentTime >= item.RespawnTime) {
+        if (ShouldRespawnDestructible(item.HitsTillDestruction, item.RespawnTime, CurrentTime)) {
             indicesToRemove.Add(i);
         }
     }
@@ -158,6 +163,16 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
     }
 #endif
 
+    // apply proficiency damage bonus before routing to damage helpers
+    int32 ScaledDamage = DamageAmount;
+    if (ResourceISM && ResourceISM->ResourceType.IsValid()) {
+        int32 ProfLevel = GetGathererProficiencyLevel(PlayerController, ResourceISM->ResourceType);
+        if (ProfLevel > 0) {
+            float Multiplier = 1.0f + static_cast<float>(ProfLevel) * GatheringConfig.BonusDamagePerLevel;
+            ScaledDamage = FMath::Max(1, FMath::RoundToInt(static_cast<float>(DamageAmount) * Multiplier));
+        }
+    }
+
     // Try to find existing resource
     FTrackedDestructibleData *ExistingResource = TrackedResources.FindByPredicate([&](const FTrackedDestructibleData &TrackedResource) {
         return TrackedResource.ResourceISM == ResourceISM && TrackedResource.InstanceId == ResourceISM->InstanceIndexToId(index).Id;
@@ -166,10 +181,10 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
 
     int32 HitsRemaining;
     if (ExistingResource) {
-        HitsRemaining = ApplyDamageToResource(*ExistingResource, DamageAmount, PlayerController);
+        HitsRemaining = ApplyDamageToResource(*ExistingResource, ScaledDamage, PlayerController);
     }
     else {
-        HitsRemaining = AddNewResource(Transform, DamageAmount, PlayerController, ResourceISM, index);
+        HitsRemaining = AddNewResource(Transform, ScaledDamage, PlayerController, ResourceISM, index);
     }
 
     // Player-facing gather feedback — SINGLE source for ALL branches (existing hit, new-tracked, one-shot destroy), so
@@ -312,8 +327,20 @@ void UMythicResourceManagerComponent::AddToDestroyedResources(FTrackedDestructib
            TEXT("UMythicResourceManagerComponent::AddToDestroyedResources: Resource %d added to destroyed resources, will respawn in %.1f seconds"),
            DestroyedResource.InstanceId, DefaultRespawnDelay);
 
-    // Give rewards — drop them at the destroyed node's world location (its tracked Transform), not the player's feet.
+    // give rewards at the destroyed node's world location
     DestroyedResource.ResourceISM->OnKillRewards.Give(PlayerController, false, 0, DestroyedResource.Transform.GetLocation());
+
+    // proficiency bonus yield: roll a chance to double the reward
+    if (DestroyedResource.ResourceISM->ResourceType.IsValid()) {
+        int32 ProfLevel = GetGathererProficiencyLevel(PlayerController, DestroyedResource.ResourceISM->ResourceType);
+        if (ProfLevel > 0) {
+            float BonusChance = static_cast<float>(ProfLevel) * GatheringConfig.BonusYieldChancePerLevel;
+            if (FMath::FRand() < BonusChance) {
+                DestroyedResource.ResourceISM->OnKillRewards.Give(PlayerController, false, 0, DestroyedResource.Transform.GetLocation());
+                UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent: bonus yield triggered (level %d, chance %.2f)"), ProfLevel, BonusChance);
+            }
+        }
+    }
 }
 
 // Called when the game starts
@@ -344,6 +371,11 @@ void UMythicResourceManagerComponent::GetLifetimeReplicatedProps(TArray<FLifetim
 
 TArray<FTrackedDestructibleData> UMythicResourceManagerComponent::GetTrackedDestructibles() const {
     return this->TrackedResources;
+}
+
+bool UMythicResourceManagerComponent::ShouldRespawnDestructible(int32 HitsTillDestruction, float RespawnTime, float CurrentTime) {
+    // Destroyed (no hits left), a real respawn time was assigned (> 0 rejects uninitialized entries), delay elapsed.
+    return HitsTillDestruction <= 0 && RespawnTime > 0.0f && CurrentTime >= RespawnTime;
 }
 
 // This is only called OnRep of the MythicResourceManagerComponent's DestroyedResources array to catch up state on clients
@@ -404,4 +436,40 @@ void UMythicResourceManagerComponent::HandleResourceRespawn(const TArray<FTracke
         bool ShouldUpdateRender = i == length - 1; // Only update on the last one to save performance
         ResourceComponent->RestoreResource(Resource.InstanceId, Resource.Transform, ShouldUpdateRender);
     }
+}
+
+int32 UMythicResourceManagerComponent::GetGathererProficiencyLevel(APlayerController *PlayerController, const FGameplayTag &ResourceType) const {
+    if (!PlayerController || !ResourceType.IsValid()) {
+        return 0;
+    }
+
+    // look up which proficiency definition maps to this resource type
+    const TObjectPtr<UProficiencyDefinition> *FoundDef = GatheringConfig.ResourceToProficiency.Find(ResourceType);
+    if (!FoundDef || !*FoundDef) {
+        return 0;
+    }
+    UProficiencyDefinition *ProfDef = *FoundDef;
+
+    // find the proficiency component on the player controller
+    UProficiencyComponent *ProfComp = nullptr;
+    if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PlayerController)) {
+        ProfComp = const_cast<UProficiencyComponent*>(MythicPC->GetProficiencyComponent());
+    }
+    if (!ProfComp) {
+        return 0;
+    }
+
+    // find the matching proficiency entry and resolve its current level from the ASC
+    for (const FProficiency &Prof : ProfComp->Proficiencies) {
+        if (Prof.Definition == ProfDef) {
+            UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(PlayerController);
+            if (!ASC) {
+                return 0;
+            }
+            float CurrentXP = ASC->GetNumericAttribute(ProfDef->ProgressAttribute);
+            return UProficiencyDefinition::CalcLevelAtXP(CurrentXP, ProfDef);
+        }
+    }
+
+    return 0;
 }

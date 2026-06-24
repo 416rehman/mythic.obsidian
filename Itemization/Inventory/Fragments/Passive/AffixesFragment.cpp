@@ -3,6 +3,7 @@
 #include "Mythic/Itemization/Inventory/MythicItemInstance.h"
 #include "AbilitySystemGlobals.h"
 #include "GameModes/GameState/MythicGameState.h"
+#include "Itemization/MythicLootSettings.h" // data-driven per-rarity affix count
 #include "Mythic/Mythic.h"
 
 void UAffixesFragment::RollAffixes(int ItemLevel, int Qty) {
@@ -127,9 +128,15 @@ bool UAffixesFragment::IsValidFragment(FText &OutErrorMessage) const {
 void UAffixesFragment::OnInstanced(UMythicItemInstance *Instance) {
     Super::OnInstanced(Instance);
 
-    // Quantity of affixes to roll is based on the item's rarity
+    // Quantity of random affixes to roll is based on the item's rarity — now DATA-DRIVEN (Project Settings -> Game ->
+    // Mythic Loot Settings, AffixCountByRarity). GetDefault is a world-independent CDO read, safe here (OnInstanced can
+    // run during save-load with no world). Bounds-guarded fallback to the prior hardcoded "1 + rarity" so an out-of-range
+    // rarity or a short/empty array can never crash or mis-roll.
     int RarityValue = Instance->GetItemDefinition()->Rarity;
-    int AffixesToRoll = 1 + RarityValue;
+    const UMythicLootSettings *LootSettings = GetDefault<UMythicLootSettings>();
+    int AffixesToRoll = (LootSettings && LootSettings->AffixCountByRarity.IsValidIndex(RarityValue))
+                            ? LootSettings->AffixCountByRarity[RarityValue]
+                            : (1 + RarityValue);
 
     RollAffixes(Instance->GetItemLevel(), AffixesToRoll);
     RollCoreAffixes(Instance->GetItemLevel());
@@ -163,9 +170,12 @@ void UAffixesFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
         return;
     }
 
-    // Remove affixes
-    RemoveAffixes(ASC, this->AffixesRuntimeReplicatedData.RolledAffixes);
+    // Remove affixes in REVERSE of the apply order (OnItemActivated applies RolledAffixes then RolledCoreAffixes).
+    // ApplyModToAttribute mutates the BASE value, so a non-commutative (mult/div) op must be undone in reverse order —
+    // otherwise a random affix and a core affix on the SAME attribute with mixed ops would not restore the original
+    // value on unequip (e.g. core +50 then random ×1.2 reversed in forward order leaves the attribute corrupted).
     RemoveAffixes(ASC, this->AffixesRuntimeReplicatedData.RolledCoreAffixes);
+    RemoveAffixes(ASC, this->AffixesRuntimeReplicatedData.RolledAffixes);
 
     // Clear the MEMBER (not a local copy) so the item reads as inactive — otherwise RerollUnlockedAffixes would
     // see a stale ASC and re-apply re-rolled magnitudes onto the previous wearer's attributes.
@@ -273,6 +283,23 @@ void UAffixesFragment::SetAffixLocked(int32 AffixIndex, bool bLocked) {
     }
 }
 
+bool UAffixesFragment::ComputeReversedModValue(TEnumAsByte<EGameplayModOp::Type> Modifier, float Value, float &OutReversed) {
+    if (Modifier == EGameplayModOp::Additive) {
+        OutReversed = -Value; // subtract back out
+        return true;
+    }
+    if (Modifier == EGameplayModOp::Multiplicitive || Modifier == EGameplayModOp::Division) {
+        if (FMath::IsNearlyZero(Value)) {
+            OutReversed = 0.0f; // 1/0 = inf would poison the attribute — caller skips
+            return false;
+        }
+        OutReversed = 1.0f / Value; // reciprocal reverses both multiply-by and divide-by
+        return true;
+    }
+    OutReversed = 0.0f; // Override (or any other op) is not reversible by a single mod
+    return false;
+}
+
 void UAffixesFragment::ApplyAffixes(UAbilitySystemComponent *ASC, TArray<FRolledAffix> &InRolledAffixes) {
     for (auto &Roll : InRolledAffixes) {
         if (!Roll.Attribute.IsValid()) {
@@ -303,27 +330,15 @@ void UAffixesFragment::RemoveAffixes(UAbilitySystemComponent *ASC, TArray<FRolle
             continue;
         }
 
-        //Reverse the modifier
-        auto ReversedValue = Roll.Value;
-        auto modifier = Roll.Definition.Modifier;
-        if (modifier == EGameplayModOp::Additive) {
-            // Addition can be reversed by subtracting the value
-            ReversedValue = -ReversedValue;
-        }
-        else if (modifier == EGameplayModOp::Multiplicitive || modifier == EGameplayModOp::Division) {
-            if (FMath::IsNearlyZero(ReversedValue)) {
-                // 1/0 -> +inf would permanently poison the attribute. Skip the reversal for a degenerate magnitude.
-                UE_LOG(Myth, Error, TEXT("AffixesInstFragment::RemoveAffixes: zero magnitude for mult/div affix %s; skipping reciprocal to avoid inf."),
-                       *Roll.Attribute.GetName());
-                Roll.bIsApplied = false;
-                continue;
-            }
-            // Multiplication and division can be reversed by taking the reciprocal
-            ReversedValue = 1 / ReversedValue;
-        }
-        else {
-            // Override is not supported
-            UE_LOG(Myth, Error, TEXT("AffixesInstFragment::RemoveAffixes: Invalid modifier."));
+        // Reverse the modifier (Additive → negate; Mult/Div → reciprocal; zero/Override → skip). Shared, tested rule.
+        const TEnumAsByte<EGameplayModOp::Type> modifier = Roll.Definition.Modifier;
+        float ReversedValue = 0.0f;
+        if (!ComputeReversedModValue(modifier, Roll.Value, ReversedValue)) {
+            UE_LOG(Myth, Error,
+                   TEXT("AffixesInstFragment::RemoveAffixes: non-invertible modifier (zero mult/div, or Override) for affix %s; skipping."),
+                   *Roll.Attribute.GetName());
+            Roll.bIsApplied = false;
+            continue;
         }
 
         ASC->ApplyModToAttribute(Roll.Attribute, modifier, ReversedValue);

@@ -111,6 +111,11 @@ public:
                            OUT FGameplayTagContainer *OptionalRelevantTags = nullptr) const override;
     virtual void ApplyCost(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo,
                            const FGameplayAbilityActivationInfo ActivationInfo) const override;
+    // Applies the ability's cooldown GE with its duration scaled by the owner's UMythicAttributeSet_Utility::
+    // CooldownReduction (the canonical 1 - CDR), so the dormant CDR stat actually accelerates every ability that has a
+    // cooldown. Defers to the stock engine path when CDR is zero (the common case) so non-CDR owners are unaffected.
+    virtual void ApplyCooldown(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo,
+                               const FGameplayAbilityActivationInfo ActivationInfo) const override;
     virtual FGameplayEffectContextHandle MakeEffectContext(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo) const override;
     virtual void GetAbilitySource(FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo, float &OutSourceLevel,
                                   const IMythicAbilitySourceInterface *&OutAbilitySource, AActor *&OutEffectCauser) const;

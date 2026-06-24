@@ -62,6 +62,19 @@ bool UMythicFactionDatabase::GetFaction(FMythicFactionId Id, FMythicFactionData 
     return true;
 }
 
+bool UMythicFactionDatabase::GetFactionMoralProfile(FMythicFactionId Id, FMythicFactionMoralProfile &Out) const {
+    if (!Id.IsValid() || Id.Index >= RegisteredCount) {
+        return false;
+    }
+    FScopeLock Lock(&SnapshotLock);
+    const FMythicFactionData &Data = ReadFactions[Id.Index];
+    Out.Ideology = Data.Ideology;
+    Out.DisapproveThreshold = Data.DisapproveThreshold;
+    Out.CondemnThreshold = Data.CondemnThreshold;
+    Out.HostileThreshold = Data.HostileThreshold;
+    return true;
+}
+
 FMythicFactionData *UMythicFactionDatabase::GetFactionMutable(FMythicFactionId Id) {
     if (!Id.IsValid() || Id.Index >= RegisteredCount) {
         return nullptr;
@@ -155,6 +168,22 @@ void UMythicFactionDatabase::AnnihilateFaction(FMythicFactionId Id) {
     Faction->Prices = FMythicResourceStock();
 
     UE_LOG(LogMythFaction, Log, TEXT("Faction '%s' (index %d) annihilated"), *Faction->DisplayName.ToString(), Id.Index);
+}
+
+void UMythicFactionDatabase::RestoreResistanceToFaction(FMythicFactionId Id) {
+    FMythicFactionData *Faction = GetFactionMutable(Id);
+    if (!Faction || Faction->Status != EMythicFactionStatus::Resistance) {
+        return; // Only a standing resistance can be restored to a full faction.
+    }
+
+    // Re-establish as a full, Active faction. The resistance kept its inherited ideology + its accrued territory/
+    // population, so restoration is just the status flip — the territorial/economy flags are re-acquired naturally by
+    // TickFactionEvolution now that it holds territory. Name + tag retain the "… Resistance" framing (no original name
+    // is stored to revert to; a victorious resistance becoming the new establishment is a coherent outcome).
+    Faction->Status = EMythicFactionStatus::Active;
+
+    UE_LOG(LogMythFaction, Log, TEXT("Resistance '%s' (index %d) restored to a full faction (cells=%d, pop=%d)"),
+           *Faction->DisplayName.ToString(), Id.Index, Faction->ControlledCellCount, Faction->Population);
 }
 
 FMythicFactionData *UMythicFactionDatabase::GetFactionMutableByIndex(int32 Index) {
@@ -300,6 +329,14 @@ void UMythicFactionDatabase::Serialize(FArchive &Ar) {
     RegisteredCount.store(RegCountTmp);
 
     if (Ar.IsLoading()) {
+        // Bound the stream-controlled MaxFactions + RegisteredCount BEFORE sizing/iterating: a corrupted/tampered save
+        // would otherwise SetNum(MaxFactions*MaxFactions) (int32 overflow + OOM) and/or index WriteFactions[i] out of
+        // bounds in the faction loop below (when RegisteredCount > MaxFactions). 1024 is far above the designer cap
+        // (settings ClampMax 64) and keeps MaxFactions*MaxFactions int32-safe (<=~1M). Mirrors the other serialize guards.
+        if (MaxFactions < 0 || MaxFactions > 1024 || RegCountTmp < 0 || RegCountTmp > MaxFactions) {
+            Ar.SetError();
+            return;
+        }
         WriteFactions.SetNum(MaxFactions);
         ReadFactions.SetNum(MaxFactions);
         const int32 RelationCount = MaxFactions * MaxFactions;

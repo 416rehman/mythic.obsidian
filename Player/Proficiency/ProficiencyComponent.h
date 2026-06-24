@@ -1,4 +1,4 @@
-﻿// 
+// 
 
 #pragma once
 
@@ -7,10 +7,44 @@
 #include "AttributeSet.h"
 #include "GameplayEffectTypes.h"
 #include "Components/ActorComponent.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Proficiencies.h"
 #include "ProficiencyComponent.generated.h"
 
 struct FMilestone;
 class UProficiencyDefinition;
+
+USTRUCT(BlueprintType)
+struct FProficiencySummary {
+    GENERATED_BODY()
+
+    // name of the proficiency track
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
+    FText Name;
+
+    // description of the proficiency track
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
+    FText Description;
+
+    // current level reached
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
+    int32 Level = 0;
+
+    // current cumulative experience
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
+    float CurrentXP = 0.0f;
+
+    // cumulative experience required for the current level
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
+    float LevelXPStart = 0.0f;
+
+    // cumulative experience required for the next level
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
+    float LevelXPEnd = 0.0f;
+
+    // progress fraction towards the next level
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
+    float ProgressFraction = 0.0f;
+};
 
 USTRUCT(BlueprintType, Blueprintable)
 struct FProficiency {
@@ -59,6 +93,24 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     void ApplyLoadedProficiencies();
+
+    // server: grant combat proficiency XP to the owning player (applies ProficiencyXPBonus and Enlighten scaling)
+    UFUNCTION(BlueprintCallable, Category = "Proficiency")
+    void GrantCombatXP(float Amount);
+
+    // server: apply death penalty to combat proficiency XP (reduces current XP by PenaltyFraction)
+    UFUNCTION(BlueprintCallable, Category = "Proficiency")
+    void ApplyDeathPenalty(float PenaltyFraction);
+
+    // pure death penalty math: returns XP left after losing PenaltyFraction of current progress
+    static float ComputeXpAfterDeathPenalty(float CurrentXP, float PenaltyFraction);
+
+    // find the proficiency whose ProgressAttribute matches CombatProficiency
+    FProficiency* FindCombatProficiency();
+
+    // returns a summary of the proficiency at the specified index
+    UFUNCTION(BlueprintCallable, Category = "Proficiency")
+    FProficiencySummary GetSummary(int32 Index) const;
 
 protected:
     // When true, skip normal reward logic in OnAttributeChanged (used during restore)

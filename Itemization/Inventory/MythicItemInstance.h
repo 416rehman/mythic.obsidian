@@ -83,6 +83,14 @@ public:
     // Initialize the item instance
     void Initialize(UItemDefinition *ItemDef, const int32 quantityIfStackable, const int32 level);
 
+    /**
+     * Clamp a requested initial stack quantity to the item's contract: a created stack is always >= 1 (the Quantity
+     * ClampMin) and never exceeds StackSizeMax (the same cap SetStackSize enforces — Initialize previously bypassed it,
+     * so a created stack could exceed the max or be zero/negative). Non-stackable items (StackSizeMax <= 1) are always
+     * a single unit. Static + pure so the clamp is unit-testable without an owning actor.
+     */
+    static int32 ClampInitialStackQuantity(int32 Requested, int32 StackSizeMax);
+
     // Get the item definition
     UFUNCTION(BlueprintCallable, Category = "Item")
     UItemDefinition *GetItemDefinition() const {

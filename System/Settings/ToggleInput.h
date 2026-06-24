@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "SelectInput.h"
+#include "Styling/SlateTypes.h"
 #include "ToggleInput.generated.h"
 
 UCLASS(BlueprintType, Blueprintable)

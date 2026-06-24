@@ -8,6 +8,7 @@
 #include "GameplayEffect.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/Actor.h"
+#include "Player/MythicPlayerController.h" // hazard onset/relief callout (the component is hosted on the PC)
 
 UMythicEnvironmentHazardComponent::UMythicEnvironmentHazardComponent() {
     PrimaryComponentTick.bCanEverTick = false;
@@ -51,6 +52,7 @@ void UMythicEnvironmentHazardComponent::EndPlay(const EEndPlayReason::Type EndPl
     }
     ActiveHazardHandles.Empty();
     HandlesOwnerASC.Reset();
+    NotifiedConditions.Empty(); // no relief callout on teardown/logout — this is not a real world-state relief
 
     if (AMythicEnvironmentController *Controller = BoundController.Get()) {
         Controller->WeatherChangeDelegate.RemoveDynamic(this, &UMythicEnvironmentHazardComponent::HandleWeatherChanged);
@@ -105,15 +107,14 @@ void UMythicEnvironmentHazardComponent::ReevaluateAll() {
         const bool bWasActive = ActiveHazardHandles.Contains(i);
 
         if (bNowActive && !bWasActive) {
-            if (!Condition.HazardEffect) {
-                continue;
-            }
-            FGameplayEffectContextHandle Ctx = ASC->MakeEffectContext();
-            Ctx.AddSourceObject(GetOwner());
-            const FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(Condition.HazardEffect, Condition.EffectLevel, Ctx);
-            if (Spec.IsValid()) {
-                const FActiveGameplayEffectHandle Handle = ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
-                ActiveHazardHandles.Add(i, Handle);
+            if (Condition.HazardEffect) {
+                FGameplayEffectContextHandle Ctx = ASC->MakeEffectContext();
+                Ctx.AddSourceObject(GetOwner());
+                const FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(Condition.HazardEffect, Condition.EffectLevel, Ctx);
+                if (Spec.IsValid()) {
+                    const FActiveGameplayEffectHandle Handle = ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
+                    ActiveHazardHandles.Add(i, Handle);
+                }
             }
         }
         else if (!bNowActive && bWasActive) {
@@ -121,6 +122,29 @@ void UMythicEnvironmentHazardComponent::ReevaluateAll() {
             ActiveHazardHandles.Remove(i);
         }
         // Unchanged: leave as-is (no re-apply) — idempotent, no duplicate stacks.
+
+        // Player-facing perception, tracked against NotifiedConditions (NOT the GE handle map) so an ASC swap that
+        // re-applies handles without a real world-state change can't re-announce. Driven purely by the matched world
+        // state + the rule's DisplayName, so a feedback-only rule (no GE) still announces and a silent rule (no name)
+        // stays quiet (NotifyHazard no-ops on an empty name).
+        const bool bNotified = NotifiedConditions.Contains(i);
+        if (bNowActive && !bNotified) {
+            NotifiedConditions.Add(i);
+            NotifyHazard(Condition, /*bOnset=*/true);
+        }
+        else if (!bNowActive && bNotified) {
+            NotifiedConditions.Remove(i);
+            NotifyHazard(Condition, /*bOnset=*/false);
+        }
+    }
+}
+
+void UMythicEnvironmentHazardComponent::NotifyHazard(const FEnvironmentHazardCondition &Condition, bool bOnset) const {
+    if (Condition.DisplayName.IsEmpty()) {
+        return; // unnamed hazard -> no callout (the GE, if any, still applies)
+    }
+    if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(GetOwner())) {
+        PC->ClientNotifyEnvironmentHazard(Condition.DisplayName, bOnset);
     }
 }
 

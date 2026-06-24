@@ -5,6 +5,29 @@
 
 #include "Net/UnrealNetwork.h"
 
+bool UMythicAttributeSet_Offense::IsProbabilityAttribute(const FGameplayAttribute &Attribute) {
+    return Attribute == GetCriticalHitChanceAttribute()
+        || Attribute == GetApplyBurnOnHitChanceAttribute()
+        || Attribute == GetApplyBleedOnHitChanceAttribute()
+        || Attribute == GetApplyPoisonOnHitChanceAttribute()
+        || Attribute == GetApplySlowOnHitChanceAttribute()
+        || Attribute == GetApplyFreezeOnHitChanceAttribute()
+        || Attribute == GetApplyStunOnHitChanceAttribute()
+        || Attribute == GetApplyWeakenOnHitChanceAttribute()
+        || Attribute == GetApplyTerrifyOnHitChanceAttribute();
+}
+
+void UMythicAttributeSet_Offense::PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) {
+    Super::PreAttributeChange(Attribute, NewValue);
+
+    // Probabilities are fractions: clamp to [0,1] so stacked buffs can't push a crit/proc chance past 100% (the damage
+    // rolls treat anything >1 as "always" anyway, and raw values feed UI/tooltips) and a negative can't underflow.
+    // Multipliers (crit damage, weapon/skill/status bonuses) are NOT clamped — they may exceed 1 by design.
+    if (IsProbabilityAttribute(Attribute)) {
+        NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    }
+}
+
 void UMythicAttributeSet_Offense::OnRep_Power(const FGameplayAttributeData &OldPower) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, Power, OldPower);
 }

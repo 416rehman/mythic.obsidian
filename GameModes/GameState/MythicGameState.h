@@ -41,32 +41,16 @@ protected:
     // Handle to the currently active World Tier Attributes Initialization Effect
     UPROPERTY(BlueprintReadOnly)
     FActiveGameplayEffectHandle ActiveWorldTierInitEffectHandle;
-
 public:
-    // Curve Table Row Handle for XP Levels
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic")
-    FCurveTableRowHandle XPLevelsCurveRowHandle;
-
-    // Flat MaxHealth granted per character level (and healed immediately) when ProcessLevelUps fires. 0 = leveling
-    // grants no health. The single source for the per-level health reward.
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic")
-    float HealthPerLevel = 20.0f;
-
-    // Flat Armor (damage mitigation, consumed every hit by the damage execution) granted per character level when
-    // ProcessLevelUps fires. 0 = leveling grants no armor. The single source for the per-level armor reward.
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic")
-    float ArmorPerLevel = 2.0f;
-
-    // Raw Armor -> incoming-damage reduction fraction [0,1]. Used by the damage Application execution.
+    // raw armor -> incoming-damage reduction fraction [0,1], used by the damage application execution
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     FCurveTableRowHandle ArmorMitigationCurveRowHandle;
 
-    // Post-mitigation damage floor: high Armor can never reduce a non-zero hit below this (keeps targets killable).
+    // post-mitigation damage floor: high armor can never reduce a non-zero hit below this (keeps targets killable)
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float MinChipDamage = 1.0f;
 
-    // Status-tag damage modifiers, consumed by the damage Application execution PRE-mitigation. Source RAGE deals
-    // more / WEAKENED deals less; target TERRIFIED takes more / FORTIFY takes less. Designer-tunable fractions.
+    // status-tag damage modifiers, consumed by the damage application execution pre-mitigation
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float RageDamageBonus = 0.25f;
 
@@ -79,10 +63,16 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float FortifyDamageReduction = 0.25f;
 
-    // Bonus XP fraction while GAS.Buff.Enlighten is active, applied at the canonical XP funnel (AddExperience).
-    // Same designer-tunable shape as the four status-damage scalars above. Ex: 0.5 = +50% XP gain.
+    // bonus proficiency XP fraction while GAS.Buff.Enlighten is active, applied at the proficiency XP grant path
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
-    float EnlightenXpBonus = 0.5f;
+    float EnlightenProficiencyBonus = 0.5f;
+
+    // Upper bound on UMythicAttributeSet_Utility::CooldownReduction when it scales ability cooldown durations
+    // (effective cooldown = base * (1 - clamp(CDR, 0, MaxCooldownReduction))). A safety cap, NOT a balance lever:
+    // it keeps a sliver of cooldown so stacked CDR gear can't reach a degenerate zero/instant cooldown. 0.8 = at
+    // most 80% faster. Applied in UMythicGameplayAbility::ApplyCooldown.
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaxCooldownReduction = 0.8f;
 
     // Minimum Health Curve Row Handle - Used for initializing the health of the NPC's at their level
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")

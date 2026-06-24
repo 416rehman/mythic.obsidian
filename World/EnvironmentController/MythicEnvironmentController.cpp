@@ -14,6 +14,28 @@
 #include "Materials/MaterialParameterCollection.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 #include "System/MythicAssetManager.h"
+#include "Engine/GameInstance.h"
+#include "World/LivingWorld/LivingWorldSubsystem.h"        // SubmitWorldEvent (thread-safe game->sim queue)
+#include "World/LivingWorld/CausalFabric/CausalFabric.h"   // FMythicWorldEvent + EMythicEventCategory
+#include "World/MythicTags_World.h"                         // World.Event.Season.* chronicle tags
+
+namespace {
+    // Map a calendar season to its World Chronicle EventTag (the chronicle distills it to "Season <X>").
+    FGameplayTag SeasonToEventTag(ESeason Season) {
+        switch (Season) {
+        case Spring:
+            return WORLD_EVENT_SEASON_SPRING;
+        case Summer:
+            return WORLD_EVENT_SEASON_SUMMER;
+        case Autumn:
+            return WORLD_EVENT_SEASON_AUTUMN;
+        case Winter:
+            return WORLD_EVENT_SEASON_WINTER;
+        default:
+            return FGameplayTag();
+        }
+    }
+}
 
 // Sets default values
 AMythicEnvironmentController::AMythicEnvironmentController() : FogComponent(nullptr), SkyAtmosphereComponent(nullptr),
@@ -137,7 +159,8 @@ float AMythicEnvironmentController::GetSunPositionForCurrentTime() const {
     const float todaysSeconds = static_cast<float>(FMath::Fmod(this->Time.GetTotalMilliseconds(), 86400000.0));
 
     UE::Math::TVector2<float> timeRange(0, 86400000);
-    UE::Math::TVector2<float> sunRange(0 + 90, 359.9 + 90);
+    // 359.9f + 90.0f
+    UE::Math::TVector2<float> sunRange(90.0f, 449.9f);
     float sunPos = FMath::GetMappedRangeValueClamped(timeRange, sunRange, todaysSeconds);
 
     return sunPos;
@@ -355,6 +378,26 @@ void AMythicEnvironmentController::MulticastSyncGameWorldTimer_Implementation(co
         auto oldSeason = MonthAsSeason(PrevMonth);
         auto newSeason = MonthAsSeason(NewMonth);
         this->MonthChangeDelegate.Broadcast(PrevMonth, NewMonth, oldSeason, newSeason);
+
+        // A calendar SEASON turn ("Winter descends") is a significant world beat — post it to the World Chronicle.
+        // HasAuthority-gated: this is a MULTICAST RPC body (runs on the server AND every client), so without the gate
+        // each client would ALSO submit. Routed through the living world's thread-safe SubmitWorldEvent queue — NOT the
+        // sim-thread-only CausalFabric. Mirrors the weather beat. No-op when the living world is absent (test map).
+        if (oldSeason != newSeason && HasAuthority() && SeasonNewsSignificance > 0.0f) {
+            if (const UGameInstance *GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr) {
+                if (UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+                    const FGameplayTag SeasonTag = SeasonToEventTag(newSeason);
+                    if (SeasonTag.IsValid()) {
+                        FMythicWorldEvent SeasonEvent;
+                        SeasonEvent.EventTag = SeasonTag; // chronicle distills "Season <X>"
+                        SeasonEvent.CategoryFlags = EMythicEventCategory::Environment; // in the chronicle MacroMask
+                        SeasonEvent.Significance = SeasonNewsSignificance;
+                        // Cell left default (seasons are global); no faction; WorldTime stamped by AppendEvent.
+                        LWS->SubmitWorldEvent(SeasonEvent);
+                    }
+                }
+            }
+        }
     }
 
     // Broadcast Year Change
@@ -430,16 +473,14 @@ void AMythicEnvironmentController::WeatherTick() {
 void AMythicEnvironmentController::HandleWeatherTransition() {
     // Transition start time should be in the past
 
-    // Lerp the weather attributes based on the TransitionStartedAt timespan and the TransitionDurationInMins
-    auto TransitionProgress = 1.0f;
-
-    if (this->WeatherTransition.bSetInstantly) {
-        // Instant
-    }
-    else {
-        const auto TransitionTime = this->Time - this->TransitionStartedAt;
-        TransitionProgress = TransitionTime.GetTotalMinutes() / TransitionDurationInMins;
-    }
+    // Lerp the weather attributes based on the TransitionStartedAt timespan and the TransitionDurationInMins.
+    // CLAMPED to [0,1]: the FMath::Lerp calls below are unclamped, so an over-duration tick (every transition's last
+    // tick, since ticks are discrete) would otherwise overshoot the target values; a 0/negative duration would yield
+    // inf/NaN material params. ComputeWeatherTransitionProgress folds both guards into one tested decision.
+    const float TransitionProgress = ComputeWeatherTransitionProgress(
+        this->WeatherTransition.bSetInstantly,
+        (this->Time - this->TransitionStartedAt).GetTotalMinutes(),
+        TransitionDurationInMins);
 
     // Lerp the scalar attributes
     for (int i = 0; i < TransitionFromScalarValues.Num(); i++) {
@@ -472,7 +513,7 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
     // If the transition is complete, finalize the weather. AUTHORITY-ONLY: CurrentWeather + WeatherTransition are
     // server-replicated authoritative state; clients must NOT author them or they double-fire WeatherChangeDelegate
     // (once here, then again from OnRep_CurrentWeather). Clients keep lerping visuals above and converge via OnRep — the
-    // lerp clamps to the target at progress>=1, and OnRep_WeatherTransition clears the transition to stop the tick loop.
+    // progress is clamped to the target at >=1 (ComputeWeatherTransitionProgress), and OnRep_WeatherTransition clears the transition to stop the tick loop.
     UWeatherType *TargetWeather = this->WeatherTransition.TransitionToWeather.Get();
     if (GetLocalRole() == ROLE_Authority && (TransitionProgress >= 1.0f || TargetWeather == this->CurrentWeather || Time < TransitionStartedAt)) {
         auto NewWeatherTag = TargetWeather ? TargetWeather->Tag : FGameplayTag();
@@ -490,6 +531,25 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
         // Broadcast the weather change event. Declared order is (PreviousWeather, NewWeather) — pass Old then New.
         this->WeatherChangeDelegate.Broadcast(OldWeatherTag, NewWeatherTag);
         UE_LOG(Myth_Environment, Warning, TEXT("EnvironmentController: Transition complete. New weather: %s"), *this->CurrentWeather->GetName());
+
+        // Designer-flagged significant weather posts a player-facing World Chronicle beat. This whole block is
+        // ROLE_Authority-gated (clients converge via OnRep_CurrentWeather), so it submits EXACTLY once; the chronicle
+        // replicates the beat to each client. Routed through the living world's THREAD-SAFE SubmitWorldEvent queue —
+        // NOT CausalFabric->AppendEvent, which is a lock-free single-writer drained by the sim thread (a direct
+        // game-thread append would race its ring/index mutation). No-op when the living world isn't present (e.g. a
+        // weather-only test map). Mirrors AMythicEncounterDirector's event submission.
+        if (this->CurrentWeather && this->CurrentWeather->bGeneratesWorldNews && NewWeatherTag.IsValid()) {
+            if (const UGameInstance *GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr) {
+                if (UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+                    FMythicWorldEvent WeatherEvent;
+                    WeatherEvent.EventTag = NewWeatherTag; // chronicle distills the leaf ("Weather <X>")
+                    WeatherEvent.CategoryFlags = EMythicEventCategory::Environment; // in the chronicle MacroMask
+                    WeatherEvent.Significance = this->CurrentWeather->WorldNewsSignificance;
+                    // Cell left default (weather is global, not cell-local); no faction; WorldTime stamped by AppendEvent.
+                    LWS->SubmitWorldEvent(WeatherEvent);
+                }
+            }
+        }
     }
 }
 

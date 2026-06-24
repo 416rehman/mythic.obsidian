@@ -1,5 +1,6 @@
 #include "ConversionViewModels.h"
 
+#include "Engine/GameInstance.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"

@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "MassProcessor.h"
 #include "MassEntityQuery.h"
+#include "World/LivingWorld/MythicCellSpatialIndex.h" // broad-phase cell→entity witness lookup
 #include "WitnessPerceptionProcessor.generated.h"
 
 class UMythicActionEventSubsystem;
@@ -42,4 +43,11 @@ private:
 
     /** Cached subsystem pointer — resolved on first Execute */
     TWeakObjectPtr<UMythicActionEventSubsystem> CachedActionSubsystem;
+
+    /** Broad-phase cell→entity index, REBUILT each Execute (single O(N) pass) so per-event witness lookup queries only
+     *  the hearing-radius neighborhood instead of re-scanning ALL entities. Reused member to avoid per-tick allocation. */
+    FMythicCellSpatialIndex SpatialIndex;
+
+    /** Scratch buffer for per-event QueryRange results (reused — Reset, not freed — to avoid per-tick allocation). */
+    TArray<FMassEntityHandle> WitnessCandidates;
 };

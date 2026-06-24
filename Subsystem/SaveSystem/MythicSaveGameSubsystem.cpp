@@ -8,12 +8,17 @@
 
 #include "Mythic/Mythic.h"
 #include "Mythic/Player/MythicPlayerState.h"
+#include "GameFramework/PlayerController.h" // resolve TargetActor → PlayerState to stamp the persistent CharacterID
+#include "GameFramework/Pawn.h"
 #include "Mythic/Itemization/Inventory/MythicInventoryComponent.h"
 #include "Mythic/Player/Proficiency/ProficiencyComponent.h"
 #include "Mythic/GameModes/GameState/MythicGameState.h"
 #include "Mythic/Resources/MythicResourceManagerComponent.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h"
 #include "AI/Party/PartySubsystem.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "Serialization/MemoryReader.h"
 
 FString UMythicSaveGameSubsystem::SanitizeSlotName(const FString &Input) {
     FString Safe = Input;
@@ -209,6 +214,24 @@ void UMythicSaveGameSubsystem::HandleAsyncLoadFinished(const FString &SlotName, 
         UE_LOG(MythSaveLoad, Error, TEXT("AsyncLoadFinished: Failed to deserialize"));
         OnSaveGameActionFinished.Broadcast(SlotName, false);
         return;
+    }
+
+    // Stamp the canonical PERSISTENT player identity onto the loaded character's PlayerState: this slot's CharacterID
+    // is the stable cross-session key the party/companion + player-registry systems resolve against. Server-only (this
+    // load path runs on authority); replicates to clients via the PlayerState. Resolve the PS from whatever flavour of
+    // actor was loaded into (pawn / controller / the PS itself).
+    AMythicPlayerState *MythPS = nullptr;
+    if (const APawn *Pawn = Cast<APawn>(TargetActor)) {
+        MythPS = Pawn->GetPlayerState<AMythicPlayerState>();
+    }
+    else if (const APlayerController *PC = Cast<APlayerController>(TargetActor)) {
+        MythPS = PC->GetPlayerState<AMythicPlayerState>();
+    }
+    else {
+        MythPS = Cast<AMythicPlayerState>(TargetActor);
+    }
+    if (MythPS) {
+        MythPS->SetPersistentCharacterId(SlotName);
     }
 
     UE_LOG(MythSaveLoad, Log, TEXT("AsyncLoadFinished: Successfully loaded %s"), *SlotName);

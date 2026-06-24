@@ -16,6 +16,8 @@
 #include "AI/Party/PartySubsystem.h"
 #include "World/LivingWorld/LivingWorldReplication.h"
 #include "Async/Async.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 
 bool UMythicLivingWorldSubsystem::ShouldCreateSubsystem(UObject *Outer) const {
     return true;

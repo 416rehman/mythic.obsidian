@@ -1,4 +1,4 @@
-﻿// 
+// 
 
 
 #include "AttributeReward.h"
@@ -6,6 +6,7 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
 #include "Mythic.h"
+#include "GameFramework/PlayerController.h"
 
 bool UAttributeReward::Give(FRewardContext &Context) const {
     // Check if the context is an ability system component
@@ -53,4 +54,11 @@ bool UAttributeReward::Give(FRewardContext &Context) const {
     UE_LOG(Myth, Log, TEXT("Set base value of %s: %.2f -> %.2f"), *Attribute.GetName(), CurrentBase, NewBase);
 
     return true;
+}
+
+FText UAttributeReward::GetPreviewText() const {
+    if (!Attribute.IsValid()) {
+        return FText::GetEmpty();
+    }
+    return FText::FromString(FString::Printf(TEXT("+%.1f %s"), Magnitude, *Attribute.GetName()));
 }

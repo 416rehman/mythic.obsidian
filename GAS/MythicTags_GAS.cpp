@@ -1,9 +1,10 @@
-﻿#include "MythicTags_GAS.h"
+#include "MythicTags_GAS.h"
 
 /** States */
 // State tags are applied to entities to indicate their current state, such as dead, in combat, etc.
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DEAD, "GAS.State.Dead", "The entity is dead");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DYING, "GAS.State.Dying", "The entity is dying");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DOWNED, "GAS.State.Downed", "Co-op down state: incapacitated but revivable (bleeds out if not revived)");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_INCOMBAT, "GAS.State.InCombat", "The entity was damaged recently");
 
 /** Debuffs */
@@ -23,7 +24,7 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_HEALING, "GAS.Buff.Healing", "The entity
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_RAGE, "GAS.Buff.Rage", "The entity is enraged and deals increased damage");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_HASTE, "GAS.Buff.Haste", "The entity is hasted and moves at an increased speed");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_FORTIFY, "GAS.Buff.Fortify", "The entity is fortified and receives increased damage");
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_ENLIGHTEN, "GAS.Buff.Enlighten", "The entity is enlightened and receives increased damage");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_ENLIGHTEN, "GAS.Buff.Enlighten", "The entity is enlightened and gains increased proficiency XP");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_INVINCIBLE, "GAS.Buff.Invincible", "The entity is invincible and cannot be damaged");
 
 /// Gameplay Buffs
@@ -48,8 +49,6 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_PIPELINE_DEATH_HANDLED, "GAS.Pipeline.Death.H
                                "Indicates that death has been handled and further death processing should be skipped");
 
 /** GAS Events */
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ACTIVATE_XPGAIN, "GAS.Event.Activate.XPGain", "Event called when player gains XP");
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ACTIVATE_LEVELUP, "GAS.Event.Activate.LevelUp", "Event called when player levels up");
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_HITBOX, "GAS.Event.Hitbox", "Event called when owner's animation's hitbox overlaps with another entity");
 
@@ -72,6 +71,9 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ATTACK_BEGIN, "GAS.Event.Attack.Begin",
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ATTACK_END, "GAS.Event.Attack.End", "Event called when owner's attack ends");
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_DESTRUCTIBLE, "GAS.Event.Dmg.Destructible", "Event called when the owner's attack hits a destructible object");
+
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ITEM_ACQUIRED, "GAS.Event.Item.Acquired",
+                               "Fired server-side on a player's ASC when they genuinely acquire item(s). EventMagnitude = quantity; TargetTags carries the item's ItemType. Drives 'collect N' objectives.");
 
 /** GameplayCues */
 UE_DEFINE_GAMEPLAY_TAG(GAMEPLAYCUE_ABILITY_HEAL_ACTIVATED, "GameplayCue.Ability.Heal.Activated");

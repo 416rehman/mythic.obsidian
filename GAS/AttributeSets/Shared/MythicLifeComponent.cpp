@@ -16,12 +16,18 @@
 #include "Engine/World.h"
 #include "MythicAttributeSet_Defense.h"
 #include "MythicAttributeSet_Utility.h"
-#include "MythicAttributeSet_Exp.h"
+#include "Player/Proficiency/ProficiencyComponent.h"
+#include "Player/MythicPlayerController.h"
+#include "MythicAttributeSet_Life.h"                  // EMythicLethalOutcome + ResolveLethalOutcome + Health attr
+#include "Settings/MythicDeveloperSettings.h"         // co-op down policy (default-off)
 #include "TimerManager.h"
 #include "AbilitySystemGlobals.h"
 #include "AI/Cognition/CognitiveBrainComponent.h"
 #include "AI/Party/PartySubsystem.h" // companion loyalty reacts to player kills (OnPlayerAction)
 #include "Player/MythicPlayerState.h"
+#include "Itemization/Inventory/MythicEncumbrance.h"        // ComputeTier / SpeedMultiplierForTier (carry-weight slow)
+#include "Itemization/Inventory/MythicInventoryComponent.h" // GetTotalCarriedWeight
+#include "Itemization/InventoryProviderInterface.h"         // reach the owner's inventory components
 #include "Player/MythicFactionStandingComponent.h"
 #include "World/LivingWorld/Events/ActionEventSubsystem.h"
 #include "World/LivingWorld/MythicTags_LivingWorld.h"
@@ -110,6 +116,11 @@ void UMythicLifeComponent::InitializeWithAbilitySystem(UAbilitySystemComponent *
             this, &ThisClass::HandleCrowdControlTagChanged);
     }
 
+    // Encumbrance: recompute move speed when carried weight changes, not only on CC events. This init runs post-
+    // possession (the ASC/avatar is ready), so the owner's controller + inventory provider exist for a player; binds
+    // are skipped (no-op) for an owner with no inventory provider (NPC). Re-init re-binds cleanly (Unbind-first).
+    BindEncumbranceInventoryDelegates();
+
     // Start the server-side regen tick (Health / Shield / Stamina toward max).
     if (GetOwner()->HasAuthority() && RegenInterval > 0.0f && GetWorld()) {
         GetWorld()->GetTimerManager().SetTimer(RegenTimerHandle, this, &ThisClass::ApplyRegen, RegenInterval, true);
@@ -149,6 +160,10 @@ void UMythicLifeComponent::InitializeWithAbilitySystem(UAbilitySystemComponent *
 
 void UMythicLifeComponent::UninitializeFromAbilitySystem() {
     ClearGameplayTags();
+
+    // Drop the encumbrance inventory-change subscriptions so no dangling delegate points at this torn-down component
+    // (the inventories outlive the pawn — they live on the controller — so this must be explicit).
+    UnbindEncumbranceInventoryDelegates();
 
     if (GetWorld()) {
         GetWorld()->GetTimerManager().ClearTimer(RegenTimerHandle);
@@ -210,14 +225,13 @@ void UMythicLifeComponent::HandleReceivedHit(const FGameplayEventData *Payload) 
         return;
     }
     // Heavy hit? The threshold is a FRACTION of MaxHealth so it scales with the entity — a chip hit doesn't stagger.
-    const float MaxHP = GetMaxHealth();
-    if (MaxHP <= 0.0f || Payload->EventMagnitude < HeavyHitHealthFraction * MaxHP) {
+    if (!IsHeavyHit(Payload->EventMagnitude, GetMaxHealth(), HeavyHitHealthFraction)) {
         return;
     }
     // Stagger immunity (measured from the last stagger's start) prevents stun-lock from rapid heavy hits.
     UWorld *W = GetWorld();
     const double Now = W ? W->GetTimeSeconds() : 0.0;
-    if (W && (Now - LastStaggerTime) < StaggerImmunityWindow) {
+    if (W && IsStaggerImmune(Now, LastStaggerTime, StaggerImmunityWindow)) {
         return;
     }
     LastStaggerTime = Now;
@@ -251,7 +265,101 @@ void UMythicLifeComponent::HandleDeathEvent(const FGameplayEventData *Payload) {
     }
     // The death event carries the killer as its instigator.
     AActor *Killer = Payload ? const_cast<AActor *>(Payload->Instigator.Get()) : nullptr;
+
+    // Co-op down/revive gate (default OFF → always Die, byte-identical to before). When enabled, a revivable player
+    // taking a lethal blow enters the downed state instead of dying. The decision is the unit-tested ResolveLethalOutcome.
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    const bool bDownEnabled = Settings && Settings->bCoopDownStateEnabled;
+    const EMythicLethalOutcome Outcome =
+        UMythicAttributeSet_Life::ResolveLethalOutcome(/*bWouldBeLethal*/ true, bDownEnabled, bIsDowned, IsOwnerRevivablePlayer());
+    if (Outcome == EMythicLethalOutcome::EnterDownState) {
+        EnterDownedState(Killer);
+        return;
+    }
     StartDeath(Killer);
+}
+
+bool UMythicLifeComponent::IsOwnerRevivablePlayer() const {
+    const APawn *OwnerPawn = Cast<APawn>(GetOwner());
+    return OwnerPawn && OwnerPawn->IsPlayerControlled();
+}
+
+bool UMythicLifeComponent::CanReviveTarget(const bool bTargetDowned, const bool bReviverDowned) {
+    // Only a downed target can be revived, and only by a reviver who isn't downed themselves.
+    return bTargetDowned && !bReviverDowned;
+}
+
+void UMythicLifeComponent::EnterDownedState(AActor *Killer) {
+    if (!AbilitySystemComponent) {
+        return;
+    }
+    AActor *Owner = GetOwner();
+    bIsDowned = true;
+    DownedKiller = Killer;
+
+    // Incapacitate, but DON'T latch Dead — this is recoverable. Cancel abilities + clear any stagger so the downed
+    // owner can't act or carry a leftover stun.
+    AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DOWNED, 1);
+    AbilitySystemComponent->CancelAllAbilities();
+    ClearStagger();
+
+    // Disable MOVEMENT only — keep collision so the body stays present and reachable by a reviving teammate.
+    if (ACharacter *Char = Cast<ACharacter>(Owner)) {
+        if (UCharacterMovementComponent *Move = Char->GetCharacterMovement()) {
+            Move->StopMovementImmediately();
+            Move->DisableMovement();
+        }
+    }
+
+    UE_LOG(Myth, Log, TEXT("LifeComponent: %s is DOWNED (co-op)."), *GetNameSafe(Owner));
+    OnDowned.Broadcast(Owner); // cosmetics: down pose + revive prompt (client cosmetics off the OnRep/delegate)
+
+    // Bleed-out: die for real if no revive arrives in time.
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    const float BleedOut = Settings ? Settings->DownedBleedOutSeconds : 30.0f;
+    if (UWorld *W = GetWorld(); W && BleedOut > 0.0f) {
+        W->GetTimerManager().SetTimer(BleedOutTimerHandle, FTimerDelegate::CreateWeakLambda(this, [this]() {
+            if (!bIsDowned) {
+                return; // already revived
+            }
+            bIsDowned = false;
+            if (AbilitySystemComponent) {
+                AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DOWNED, 0);
+            }
+            StartDeath(DownedKiller.Get());
+        }), BleedOut, /*bLoop=*/false);
+    }
+}
+
+void UMythicLifeComponent::ServerReviveFromDowned() {
+    if (!AbilitySystemComponent || !bIsDowned) {
+        return;
+    }
+    if (UWorld *W = GetWorld()) {
+        W->GetTimerManager().ClearTimer(BleedOutTimerHandle);
+    }
+    bIsDowned = false;
+    DownedKiller = nullptr;
+    AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DOWNED, 0);
+
+    // Restore movement (the downed state only disabled movement; collision was kept).
+    if (ACharacter *Char = Cast<ACharacter>(GetOwner())) {
+        if (UCharacterMovementComponent *Move = Char->GetCharacterMovement()) {
+            Move->SetMovementMode(MOVE_Walking);
+        }
+    }
+
+    // Heal to the configured revive fraction — restoring Health above zero clears the out-of-health death latch via
+    // the attribute machinery (same path a recovery heal uses).
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    const float Fraction = Settings ? Settings->ReviveHealthFraction : 0.5f;
+    if (LifeSet) {
+        const float NewHealth = FMath::Max(1.0f, LifeSet->GetMaxHealth() * Fraction);
+        AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Life::GetHealthAttribute(), NewHealth);
+    }
+
+    UE_LOG(Myth, Log, TEXT("LifeComponent: %s REVIVED from downed."), *GetNameSafe(GetOwner()));
+    OnRevived.Broadcast(GetOwner());
 }
 
 void UMythicLifeComponent::ClearStagger() {
@@ -301,18 +409,28 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
     BP_OnDeath();
     OnDeath.Broadcast(Owner);
 
-    // Award kill XP to the killer (processes level-ups via the Exp set's single-source AddExperience).
+    // award combat proficiency XP to the killer via their ProficiencyComponent
     if (XPReward > 0.0f && Killer && Killer != Owner) {
-        if (UAbilitySystemComponent *KillerASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Killer)) {
-            if (const UMythicAttributeSet_Exp *ExpSet = KillerASC->GetSet<UMythicAttributeSet_Exp>()) {
-                const_cast<UMythicAttributeSet_Exp *>(ExpSet)->AddExperience(XPReward);
+        APlayerController *KillerPC = nullptr;
+        if (const APawn *KillerPawn = Cast<APawn>(Killer)) {
+            KillerPC = Cast<APlayerController>(KillerPawn->GetController());
+        }
+        else {
+            KillerPC = Cast<APlayerController>(Killer);
+        }
+        if (KillerPC) {
+            if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(KillerPC)) {
+                if (UProficiencyComponent *ProfComp = const_cast<UProficiencyComponent*>(MythicPC->GetProficiencyComponent())) {
+                    ProfComp->GrantCombatXP(XPReward);
+                }
             }
         }
     }
 
-    // Faction reputation: if a player killed a member of a faction, lower that player's standing with that
-    // faction (a kill consequence, kept alongside XP credit as the single death-consequence site). The victim's
-    // faction comes from its cognitive brain; the killer's standing store lives on its PlayerState.
+    // Faction reputation: if a player killed a member of a faction, apply that player's standing consequence — a direct
+    // penalty with the victim's faction PLUS data-driven propagation across the faction-relationship graph (allies
+    // resent the kill, enemies approve). ServerApplyKillStanding owns the politics; we just supply the victim faction.
+    // The victim's faction comes from its cognitive brain; the killer's standing store lives on its PlayerState.
     if (Killer && Killer != Owner && Owner) {
         if (UMythicCognitiveBrainComponent *VictimBrain = Owner->FindComponentByClass<UMythicCognitiveBrainComponent>()) {
             const FMythicFactionId VictimFaction = VictimBrain->GetFaction();
@@ -326,7 +444,7 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
                 }
                 if (KillerPS) {
                     if (UMythicFactionStandingComponent *Standing = KillerPS->GetFactionStanding()) {
-                        Standing->ServerAdjustStanding(VictimFaction, -Standing->GetKillStandingPenalty());
+                        Standing->ServerApplyKillStanding(VictimFaction);
                     }
                 }
             }
@@ -365,19 +483,23 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
             // Companion loyalty (wakes the dormant party loyalty/betrayal system): when the killer is a PLAYER, their
             // party companions judge this kill against their OWN faction ideology — fed the SAME moral vector submitted
             // above (single source, nothing fabricated). A companion whose faction abhors violence loses loyalty / gains
-            // betrayal pressure; one aligned with the kill is unmoved or pleased. PlayerId 0 is the single-player party
-            // key (the AddCompanion(0,...) convention; a real multiplayer AActor->PlayerId resolver is the MP slice).
-            // Server-only by construction (StartDeath runs on authority; the party UWorldSubsystem is server-side).
-            bool bKillerIsPlayer = false;
+            // betrayal pressure; one aligned with the kill is unmoved or pleased. The party is keyed by the killer's
+            // CANONICAL player key (GetCanonicalPlayerKey), so in co-op only the KILLER's companions judge their own
+            // leader's act. Server-only by construction (StartDeath runs on authority; the party subsystem is server-side).
+            FString KillerKey;
             if (const APawn *KillerPawn = Cast<APawn>(Killer)) {
-                bKillerIsPlayer = KillerPawn->IsPlayerControlled();
+                if (const AMythicPlayerState *KillerPS = KillerPawn->GetPlayerState<AMythicPlayerState>()) {
+                    KillerKey = KillerPS->GetCanonicalPlayerKey();
+                }
             }
-            else if (const AController *KillerController = Cast<AController>(Killer)) {
-                bKillerIsPlayer = KillerController->IsPlayerController();
+            else if (const APlayerController *KillerPC = Cast<APlayerController>(Killer)) {
+                if (const AMythicPlayerState *KillerPS = KillerPC->GetPlayerState<AMythicPlayerState>()) {
+                    KillerKey = KillerPS->GetCanonicalPlayerKey();
+                }
             }
-            if (bKillerIsPlayer) {
+            if (!KillerKey.IsEmpty()) {
                 if (UMythicPartySubsystem *PartySub = GetWorld()->GetSubsystem<UMythicPartySubsystem>()) {
-                    PartySub->OnPlayerAction(0, KillAction.ActionTag, KillAction.MoralVector);
+                    PartySub->OnPlayerAction(KillerKey, KillAction.ActionTag, KillAction.MoralVector);
                 }
             }
         }
@@ -406,10 +528,20 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
         }
     }
 
-    // Player-controlled owners are respawned by the GameMode after a delay.
+    // Player-controlled owners: apply the death penalty, then the GameMode respawns them after a delay.
     if (const APawn *Pawn = Cast<APawn>(Owner)) {
         if (AController *Controller = Pawn->GetController()) {
             if (Controller->IsPlayerController()) {
+                // death penalty (default OFF): lose a fraction of combat proficiency XP progress
+                const UMythicDeveloperSettings *DSettings = GetDefault<UMythicDeveloperSettings>();
+                const float PenaltyFrac = DSettings ? DSettings->DeathProficiencyPenaltyFraction : 0.0f;
+                if (PenaltyFrac > 0.0f) {
+                    if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(Controller)) {
+                        if (UProficiencyComponent *ProfComp = const_cast<UProficiencyComponent*>(MythicPC->GetProficiencyComponent())) {
+                            ProfComp->ApplyDeathPenalty(PenaltyFrac);
+                        }
+                    }
+                }
                 if (AMythicGameMode *GM = GetWorld() ? GetWorld()->GetAuthGameMode<AMythicGameMode>() : nullptr) {
                     GM->RequestRespawn(Controller, RespawnDelay);
                 }
@@ -486,7 +618,63 @@ void UMythicLifeComponent::ReevaluateCrowdControl() {
     if (bHasted) {
         SpeedScale *= HasteMultiplier;
     }
+    // Encumbrance: an over-capacity carry load composes as one more multiplier on the captured base, stacking with
+    // Slow/Haste. Default-OFF (bEncumbranceEnabled false → 1.0 → byte-identical to before).
+    SpeedScale *= ComputeEncumbranceSpeedScale();
     Move->MaxWalkSpeed = BaseWalkSpeed * SpeedScale;
+}
+
+TArray<UMythicInventoryComponent *> UMythicLifeComponent::GetOwnerInventoryComponents() const {
+    const APawn *OwnerPawn = Cast<APawn>(GetOwner());
+    AController *OwnerController = OwnerPawn ? OwnerPawn->GetController() : nullptr;
+    if (IInventoryProviderInterface *Provider = Cast<IInventoryProviderInterface>(OwnerController)) {
+        return Provider->GetAllInventoryComponents(); // players; NPC / inventory-less → empty
+    }
+    return TArray<UMythicInventoryComponent *>();
+}
+
+float UMythicLifeComponent::ComputeEncumbranceSpeedScale() const {
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    if (!Settings || !Settings->bEncumbranceEnabled) {
+        return 1.0f; // feature off → no penalty
+    }
+    float TotalWeight = 0.0f;
+    for (const UMythicInventoryComponent *Inv : GetOwnerInventoryComponents()) {
+        if (Inv) {
+            TotalWeight += Inv->GetTotalCarriedWeight();
+        }
+    }
+    const EMythicEncumbranceTier Tier =
+        MythicEncumbrance::ComputeTier(TotalWeight, Settings->EncumbranceSoftCapacity, Settings->EncumbranceHardCapacity);
+    return MythicEncumbrance::SpeedMultiplierForTier(Tier, Settings->EncumbranceHeavySpeedMultiplier, Settings->EncumbranceOverloadedSpeedMultiplier);
+}
+
+void UMythicLifeComponent::HandleInventoryChanged(int32 /*Slot*/) {
+    // Carried weight just changed (pickup/drop/stack). Recompute move speed — but only when encumbrance is enabled, so
+    // the default-off path adds zero work on every inventory mutation. ReevaluateCrowdControl is idempotent.
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    if (Settings && Settings->bEncumbranceEnabled) {
+        ReevaluateCrowdControl();
+    }
+}
+
+void UMythicLifeComponent::BindEncumbranceInventoryDelegates() {
+    UnbindEncumbranceInventoryDelegates(); // idempotent: drop any prior binds (re-init / re-possession safe)
+    for (UMythicInventoryComponent *Inv : GetOwnerInventoryComponents()) {
+        if (Inv) {
+            Inv->OnSlotUpdated.AddDynamic(this, &UMythicLifeComponent::HandleInventoryChanged);
+            EncumbranceBoundInventories.Add(Inv);
+        }
+    }
+}
+
+void UMythicLifeComponent::UnbindEncumbranceInventoryDelegates() {
+    for (const TWeakObjectPtr<UMythicInventoryComponent> &InvPtr : EncumbranceBoundInventories) {
+        if (UMythicInventoryComponent *Inv = InvPtr.Get()) {
+            Inv->OnSlotUpdated.RemoveDynamic(this, &UMythicLifeComponent::HandleInventoryChanged);
+        }
+    }
+    EncumbranceBoundInventories.Reset();
 }
 
 void UMythicLifeComponent::HandleDamageDelivered(const struct FGameplayEventData *Payload) {
@@ -554,38 +742,41 @@ void UMythicLifeComponent::ApplyRegen() {
 
     const UMythicAttributeSet_Defense *Def = AbilitySystemComponent->GetSet<UMythicAttributeSet_Defense>();
 
-    // Health (rate lives on the Defense set; value on the Life set). Only regen while alive and below max.
+    // Health (rate lives on the Defense set; value on the Life set). Only regen while ALIVE (Cur > 0 — never
+    // self-revive) and below max.
     if (LifeSet && Def) {
         const float Cur = LifeSet->GetHealth();
-        const float Max = LifeSet->GetMaxHealth();
-        const float Rate = Def->GetHealthRegenRate();
-        if (Cur > 0.0f && Cur < Max && Rate > 0.0f) {
-            AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Life::GetHealthAttribute(),
-                                                            FMath::Min(Cur + Rate * RegenInterval, Max));
+        const float NewV = ComputeRegenTarget(Cur, LifeSet->GetMaxHealth(), Def->GetHealthRegenRate(), RegenInterval);
+        if (Cur > 0.0f && NewV > Cur) {
+            AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Life::GetHealthAttribute(), NewV);
         }
     }
 
-    // Shield.
+    // Shield (recharges from 0 — no alive gate).
     if (Def) {
         const float Cur = Def->GetShield();
-        const float Max = Def->GetMaxShield();
-        const float Rate = Def->GetShieldRegenRate();
-        if (Cur < Max && Rate > 0.0f) {
-            AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Defense::GetShieldAttribute(),
-                                                            FMath::Min(Cur + Rate * RegenInterval, Max));
+        const float NewV = ComputeRegenTarget(Cur, Def->GetMaxShield(), Def->GetShieldRegenRate(), RegenInterval);
+        if (NewV > Cur) {
+            AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Defense::GetShieldAttribute(), NewV);
         }
     }
 
-    // Stamina.
+    // Stamina (recharges from 0 — no alive gate).
     if (const UMythicAttributeSet_Utility *Util = AbilitySystemComponent->GetSet<UMythicAttributeSet_Utility>()) {
         const float Cur = Util->GetCurrentStamina();
-        const float Max = Util->GetMaxStamina();
-        const float Rate = Util->GetStaminaRegenRate();
-        if (Cur < Max && Rate > 0.0f) {
-            AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Utility::GetCurrentStaminaAttribute(),
-                                                            FMath::Min(Cur + Rate * RegenInterval, Max));
+        const float NewV = ComputeRegenTarget(Cur, Util->GetMaxStamina(), Util->GetStaminaRegenRate(), RegenInterval);
+        if (NewV > Cur) {
+            AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Utility::GetCurrentStaminaAttribute(), NewV);
         }
     }
+}
+
+float UMythicLifeComponent::ComputeRegenTarget(float Cur, float Max, float Rate, float DeltaSeconds) {
+    // Nothing to do: no (positive) rate, or already at/above max. Return Cur so callers see `result > Cur` == false.
+    if (Rate <= 0.0f || Cur >= Max) {
+        return Cur;
+    }
+    return FMath::Min(Cur + Rate * DeltaSeconds, Max); // clamp so a large rate/interval never overshoots Max
 }
 
 bool UMythicLifeComponent::CanSpendStamina(float Cost) const {
@@ -596,8 +787,26 @@ bool UMythicLifeComponent::CanSpendStamina(float Cost) const {
     if (!Util) {
         return false;
     }
-    const float Reduction = FMath::Clamp(Util->GetStaminaCostReduction(), 0.0f, 1.0f);
-    return Util->GetCurrentStamina() >= Cost * (1.0f - Reduction);
+    return Util->GetCurrentStamina() >= EffectiveStaminaCost(Cost, Util->GetStaminaCostReduction());
+}
+
+float UMythicLifeComponent::EffectiveStaminaCost(float RawCost, float StaminaCostReduction) {
+    // Clamp the reduction so an out-of-range attribute can't make the spend negative (Reduction>1) or amplified (<0).
+    return RawCost * (1.0f - FMath::Clamp(StaminaCostReduction, 0.0f, 1.0f));
+}
+
+bool UMythicLifeComponent::IsHeavyHit(float EventMagnitude, float MaxHealth, float HeavyHitHealthFraction) {
+    // Scales with the entity: a hit staggers only at >= a fraction of MaxHealth. Non-positive MaxHealth never staggers.
+    return MaxHealth > 0.0f && EventMagnitude >= HeavyHitHealthFraction * MaxHealth;
+}
+
+bool UMythicLifeComponent::IsStaggerImmune(double Now, double LastStaggerTime, float ImmunityWindow) {
+    // "Never staggered yet" (sentinel <= 0) is NOT immune — the first heavy hit must stagger even if it lands before
+    // ImmunityWindow seconds of world time have elapsed (otherwise Now - 0 < Window wrongly suppresses it).
+    if (LastStaggerTime <= 0.0) {
+        return false;
+    }
+    return (Now - LastStaggerTime) < ImmunityWindow;
 }
 
 bool UMythicLifeComponent::TrySpendStamina(float Cost) {
@@ -608,8 +817,7 @@ bool UMythicLifeComponent::TrySpendStamina(float Cost) {
     if (!Util) {
         return false;
     }
-    const float Reduction = FMath::Clamp(Util->GetStaminaCostReduction(), 0.0f, 1.0f);
-    const float Effective = Cost * (1.0f - Reduction);
+    const float Effective = EffectiveStaminaCost(Cost, Util->GetStaminaCostReduction());
     const float Cur = Util->GetCurrentStamina();
     if (Cur < Effective) {
         return false; // not enough stamina
@@ -804,7 +1012,10 @@ void UMythicLifeComponent::TriggerGameplayEvent_Death(AActor *DamageInstigator, 
 
 void UMythicLifeComponent::TriggerGameplayEvent_Kill(AActor *DamageInstigator, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude,
                                                      float OldValue, float NewValue) {
-    if (!OnDeathGameplayEventTag.IsValid()) {
+    // Guard the tag this function actually FIRES (OnKillGameplayEventTag) — not OnDeathGameplayEventTag. The wrong tag
+    // here meant: if the kill tag was unset we'd still HandleGameplayEvent() an INVALID tag, and if only the death tag
+    // was unset we'd wrongly skip a configured kill event. The log already named the intended tag.
+    if (!OnKillGameplayEventTag.IsValid()) {
         UE_LOG(Myth, Error, TEXT("Skipping TriggerGameplayEvent_Kill: OnKillGameplayEventTag is not set."));
         return;
     }

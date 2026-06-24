@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
@@ -37,6 +37,9 @@ public:
     virtual bool Give(FRewardContext &Context) const {
         return false;
     };
+
+    // returns a short human-readable preview of what this reward gives
+    virtual FText GetPreviewText() const { return FText::GetEmpty(); }
 
     /** 
      * Returns true if this reward can be safely reapplied on character load.
@@ -81,4 +84,7 @@ struct FRewardsToGive {
     //   to the player's pawn location (backward-compatible default).
     // Returns false if any error occured.
     bool Give(APlayerController *PlayerController, bool IsPrivateItem = true, int32 ItemLevel = 0, FVector SpawnLocation = FVector::ZeroVector) const;
+
+    // concatenates all non-null reward preview texts with newlines
+    FText GetPreviewText() const;
 };

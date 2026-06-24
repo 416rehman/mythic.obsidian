@@ -5,7 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "MassEntityHandle.h"
+#include "Mass/EntityHandle.h"
 #include "World/LivingWorld/CausalFabric/CausalFabric.h"
 #include "World/LivingWorld/Simulation/WorldSimThread.h"
 #include "World/LivingWorld/LivingWorldReplication.h"

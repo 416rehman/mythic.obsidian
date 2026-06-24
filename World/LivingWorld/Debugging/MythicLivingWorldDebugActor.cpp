@@ -11,6 +11,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "EngineUtils.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/GameInstance.h"
 
 AMythicLivingWorldDebugActor::AMythicLivingWorldDebugActor() {
     PrimaryActorTick.bCanEverTick = true;

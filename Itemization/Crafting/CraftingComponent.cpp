@@ -5,7 +5,10 @@
 
 #include "AbilitySystemComponent.h"
 #include "Itemization/Inventory/Fragments/Passive/CraftableFragment.h"
+#include "Itemization/Loot/MythicLootManagerSubsystem.h"
 #include "TimerManager.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "Player/MythicPlayerController.h"
 #include "System/MythicAssetManager.h"
 
@@ -84,14 +87,14 @@ void UCraftingComponent::OnCurrentItemCrafted() {
 
     // Item crafted, do something with it
     // Get the first item in the queue
-    const FCraftingQueueEntry &CurrentItem = QueuedItems[0];
+    auto CurrentItem = QueuedItems[0];
 
     // Get the craftable fragment from it
     auto CraftableFragment = UCraftableFragment::GetCraftableFragmentFromDefinition(CurrentItem.ItemDefinition);
     if (!CraftableFragment) {
         UE_LOG(Myth, Error, TEXT("UCraftingComponent::OnCurrentItemCrafted: Item in queue is not craftable."));
         // Remove the invalid item to avoid getting stuck
-        const int32 IndexToRemove = 0;
+        constexpr int32 IndexToRemove = 0;
         auto IndicesToRemove = TArrayView<int32>(const_cast<int32 *>(&IndexToRemove), 1);
         CraftingQueue.RemoveItems(IndicesToRemove);
         // Try queueing next valid item
@@ -100,7 +103,7 @@ void UCraftingComponent::OnCurrentItemCrafted() {
     }
 
     // Remove it from the queue
-    const int32 IndexToRemove = 0;
+    constexpr int32 IndexToRemove = 0;
     auto IndicesToRemove = TArrayView<int32>(const_cast<int32 *>(&IndexToRemove), 1);
     CraftingQueue.RemoveItems(IndicesToRemove);
 
@@ -175,8 +178,9 @@ bool UCraftingComponent::ConsumeRequirements(UItemDefinition *Item, int32 Amount
 
         // Remove from inventories
         for (auto Inventory : Inventories) {
-            if (!Inventory || AmountToRemove <= 0)
+            if (!Inventory || AmountToRemove <= 0) {
                 continue;
+            }
 
             auto AmountInInventory = Inventory->GetItemCount(RequiredItem);
             auto AmountToRemoveFromInventory = FMath::Min(AmountToRemove, AmountInInventory);
@@ -192,6 +196,42 @@ bool UCraftingComponent::ConsumeRequirements(UItemDefinition *Item, int32 Amount
     }
 
     return true;
+}
+
+void UCraftingComponent::RefundRequirements(const FCraftingQueueEntry &Entry) {
+    AActor *Requester = Entry.RequestingActor.Get();
+    if (!Entry.ItemDefinition || !Requester) {
+        UE_LOG(Myth, Warning, TEXT("RefundRequirements: missing item def or requesting actor — cannot refund cancelled craft."));
+        return;
+    }
+    if (!Cast<IInventoryProviderInterface>(Requester)) {
+        UE_LOG(Myth, Warning, TEXT("RefundRequirements: requester does not implement IInventoryProviderInterface — cannot refund."));
+        return;
+    }
+    UMythicLootManagerSubsystem *Loot = (GetWorld() && GetWorld()->GetGameInstance())
+        ? GetWorld()->GetGameInstance()->GetSubsystem<UMythicLootManagerSubsystem>()
+        : nullptr;
+    if (!Loot) {
+        return;
+    }
+    const UCraftableFragment *CraftableFragment = UCraftableFragment::GetCraftableFragmentFromDefinition(Entry.ItemDefinition);
+    if (!CraftableFragment) {
+        return;
+    }
+
+    // Give each requirement's materials (RequiredAmount * Quantity) back to the requester. CreateAndGive routes to the
+    // requester's inventory and spills a WorldItem if it is full, so the refund is never silently dropped.
+    TScriptInterface<IInventoryProviderInterface> ProviderRef(Requester);
+    for (const auto &Requirement : CraftableFragment->CraftingRequirements) {
+        UItemDefinition *RequiredItem = Requirement.RequiredItem.Get();
+        if (!RequiredItem) {
+            continue;
+        }
+        const int32 RefundQty = Requirement.RequiredAmount * Entry.Quantity;
+        if (RefundQty > 0) {
+            Loot->CreateAndGive(RequiredItem, RefundQty, ProviderRef, nullptr);
+        }
+    }
 }
 
 void UCraftingComponent::ServerAddToCraftingQueue_Implementation(UItemDefinition *ItemDefinition, int32 Quantity, const AActor *RequestingActor) {
@@ -224,10 +264,10 @@ void UCraftingComponent::ServerAddToCraftingQueue_Implementation(UItemDefinition
     if (!ConsumeRequirements(ItemDefinition, Quantity, Inventories, SchematicsASC)) {
         UE_LOG(Myth, Warning, TEXT("UCraftingComponent::ServerAddToCraftingQueue_Implementation: Requirements not met."));
         return;
-    };
+    }
 
     const bool bWasEmpty = (CraftingQueue.GetItems().Num() == 0);
-    CraftingQueue.AddItem(ItemDefinition, Quantity);
+    CraftingQueue.AddItem(ItemDefinition, Quantity, const_cast<AActor *>(RequestingActor));
 
     // If nothing was crafting, start the next item immediately
     if (bWasEmpty) {
@@ -248,15 +288,22 @@ void UCraftingComponent::ServerRemoveFromCraftingQueue_Implementation(int32 inde
         return;
     }
 
-    // if its the first item and the timer is active, clear the timer, refund, and start the next item
+    // Capture the entry BEFORE removal so we can refund its consumed materials — for ANY index, not just the active one.
+    // Previously index>0 entries were deleted with NO refund at all, and index==0 refunded only into the unlistened
+    // OnItemCanceled delegate (zero bound listeners) → cancelling a queued craft permanently destroyed the materials.
+    const FCraftingQueueEntry RemovedEntry = QueuedItems[index];
+
+    // If it's the active item and its timer is running, stop crafting it.
     if (index == 0 && GetWorld() && GetWorld()->GetTimerManager().IsTimerActive(CurrentCraftingTimerHandle)) {
         GetWorld()->GetTimerManager().ClearTimer(CurrentCraftingTimerHandle);
-        // Refund the item being removed
-        OnItemCanceled.Broadcast(QueuedItems[0]);
     }
 
     auto IndicesToRemove = TArrayView<int32>(&index, 1);
     CraftingQueue.RemoveItems(IndicesToRemove);
+
+    // Refund the consumed materials authoritatively, then fire OnItemCanceled as a pure UI/notify hook.
+    RefundRequirements(RemovedEntry);
+    OnItemCanceled.Broadcast(RemovedEntry);
 
     // Start next if we just removed the active item
     if (index == 0) {

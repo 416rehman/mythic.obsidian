@@ -1,4 +1,6 @@
 #include "SavedDestructible.h"
+
+#include "Engine/World.h"
 #include "Mythic/Resources/MythicResourceManagerComponent.h"
 #include "Mythic/Resources/MythicResourceISM.h"
 

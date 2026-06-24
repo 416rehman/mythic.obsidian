@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
@@ -44,9 +44,19 @@ public:
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(Categories="Itemization.Rarity", DisplayName="Rarity"))
     TEnumAsByte<EItemRarity> Rarity;
 
-    /** Static mesh to use for the item when it is in the world */
+    /** Optional gameplay tag a player must own to EQUIP this item (e.g. a class/proficiency unlock). EMPTY = no
+     *  requirement (any player can equip) — so this is non-breaking by default. Mirrors the crafting RequiredTag
+     *  pattern (UCraftableFragment::RequiredTag); gates only player-driven equips via CanSlotAcceptItem. */
+    UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(DisplayName="RequiredEquipTag"))
+    FGameplayTag RequiredEquipTag;
+
+    // static mesh to use for the item when it is in the world
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(DisplayName="WorldMesh", MakeStructureDefaultValue="None"))
     TSoftObjectPtr<UStaticMesh> WorldMesh;
+
+    // skeletal mesh to use for the item when it is equipped on the character
+    UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(DisplayName="EquippedMesh", MakeStructureDefaultValue="None"))
+    TSoftObjectPtr<USkeletalMesh> EquippedMesh;
 
     /** 2d icon to use for the item when it is in the inventory */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(DisplayName="2dIcon", MakeStructureDefaultValue="None"))
@@ -55,6 +65,18 @@ public:
     /** Stack size of the item. If greater than 1, the item can be stacked in the inventory if the fragments allow it */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(DisplayName="StackSizeMax", MakeStructureDefaultValue="0"))
     int32 StackSizeMax;
+
+    /** Carry weight of ONE unit of this item (encumbrance). 0 = weightless (the default → non-breaking: a world of
+     *  weightless items leaves every player Unencumbered even with encumbrance enabled). Summed × stack across the
+     *  inventory and compared to the carry capacity by the encumbrance decision (see MythicEncumbrance). */
+    UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(DisplayName="Weight", ClampMin="0.0"))
+    float Weight = 0.0f;
+
+    /** Base monetary VALUE of ONE unit of this item, in currency units (gold). Drives vendor buy/sell pricing (see
+     *  MythicCurrency). 0 = valueless / not sellable (the default → non-breaking until a designer prices items). For an
+     *  Itemization.Type.Currency item this is the coin's own denomination; for everything else it's the merchant price. */
+    UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(DisplayName="Value", ClampMin="0"))
+    int32 Value = 0;
 
     // Set of ItemDefinitionFragments that define the item
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(ShowOnlyInnerProperties, NoElementDuplicate), Instanced)

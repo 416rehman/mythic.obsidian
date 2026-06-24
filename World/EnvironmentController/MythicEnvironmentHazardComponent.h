@@ -45,6 +45,13 @@ struct FEnvironmentHazardCondition {
     // Level passed to the applied effect spec.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hazard")
     float EffectLevel = 1.0f;
+
+    // Player-facing name announced when this hazard begins ("<Name>") and ends ("<Name> subsides"), e.g. "Freezing",
+    // "Scorching Heat", "Toxic Fog". Empty = no callout (the GE, if any, still applies silently). Designer-authored —
+    // nothing fabricated in code. Independent of HazardEffect: a feedback-only rule (name, no GE) or a silent rule
+    // (GE, no name) are both valid.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hazard")
+    FText DisplayName;
 };
 
 /**
@@ -88,8 +95,17 @@ private:
     bool EvaluateCondition(const FEnvironmentHazardCondition &Condition) const;
     UAbilitySystemComponent *ResolvePlayerASC() const;
 
+    // Float the onset / relief callout for a hazard over the owning player (no-op if the rule has no DisplayName, or
+    // the owner isn't a player controller). Server-side; routes through the PC's Client RPC.
+    void NotifyHazard(const FEnvironmentHazardCondition &Condition, bool bOnset) const;
+
     // Rule index -> the active GE handle currently applied for it (diff state; not replicated — the GE itself is).
     TMap<int32, FActiveGameplayEffectHandle> ActiveHazardHandles;
+
+    // Rule indices the player has currently been ANNOUNCED (onset shown, relief pending). Tracked separately from
+    // ActiveHazardHandles so a seamless-travel ASC swap — which clears/re-applies the GE handles without any real
+    // world-state change — never re-announces a hazard the player already knows about. Drives the callouts only.
+    TSet<int32> NotifiedConditions;
 
     // The ASC the current handles were issued against. The component lives on the (persistent) PlayerController
     // but the ASC lives on the PlayerState, which can be REPLACED (seamless travel). If the ASC identity changes,

@@ -13,6 +13,7 @@
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "World/LivingWorld/Persistence/PersistentNPCRegistry.h"
 #include "AI/Party/PartySubsystem.h" // companion despawn-exemption query
+#include "GameFramework/Pawn.h"
 #include "World/LivingWorld/NPCGeneration/NPCGenerator.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "GameFramework/PlayerController.h"
@@ -79,6 +80,8 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
     const float EventWeight = Settings->EventCountWeight;
     const float EmotionWeight = Settings->EmotionalIntensityWeight;
     const float SpawnRadius = Settings->PopulationSpawnRadius;
+    const float EventCountFullScore = Settings->EventCountFullScore;
+    const float EmotionalPressureFullScore = Settings->EmotionalPressureFullScore;
     int32 RescoreBudget = Settings->MaxRescoresPerFrame;
     int32 PromotionBudget = Settings->MaxPromotionsPerFrame;
     // Demotions get their OWN per-frame budget so a tick saturated by promotions can never starve demotions
@@ -117,28 +120,23 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
 
         for (int32 i = 0; i < NumEntities && RescoreBudget > 0; ++i) {
             FMythicSignificanceFragment &Sig = SignificanceView[i];
-            if (!Sig.bDirty) {
+            // Rescore dirty AMBIENT entities AND always the (capped) hydrated hot-set — the latter so a stationary
+            // embodied NPC re-evaluates proximity and DEMOTES when players leave (else its stale high score leaks a
+            // cognitive slot forever). See ShouldRescore. NOTE: hydrated entities now consume RescoreBudget every tick,
+            // so MaxRescoresPerFrame should be >= MaxCognitiveActors to fully cover the hot-set each significance tick.
+            if (!ShouldRescore(Sig.bDirty, Sig.Tier)) {
                 continue;
             }
 
             --RescoreBudget;
 
             // ─── Proximity Score ───
-            // Inverse cell distance to nearest player [0.0, 1.0]
-            float ProximityScore = 0.0f;
-            const FMythicCellCoord &EntityCell = IdentityView[i].Cell;
-            for (const FMythicCellCoord &PlayerCell : PlayerCells) {
-                const float CellDist = static_cast<float>(
-                    FMath::Abs(EntityCell.X - PlayerCell.X) + FMath::Abs(EntityCell.Y - PlayerCell.Y)
-                );
-                const float Prox = FMath::Max(0.0f, 1.0f - (CellDist / FMath::Max(SpawnRadius, 1.0f)));
-                ProximityScore = FMath::Max(ProximityScore, Prox);
-            }
+            // Inverse cell distance to the nearest player [0.0, 1.0] — see ComputeProximityScore.
+            const float ProximityScore = ComputeProximityScore(IdentityView[i].Cell, PlayerCells, SpawnRadius);
 
             // ─── Event Count Score ───
-            // Normalized by a scaling factor (16 events = 1.0)
-            constexpr float EventScalingFactor = 16.0f;
-            const float EventScore = FMath::Min(1.0f, static_cast<float>(Sig.RelevantEventCount) / EventScalingFactor);
+            // Normalized by the designer-tunable saturation count (default 16 events = 1.0).
+            const float EventScore = FMath::Min(1.0f, static_cast<float>(Sig.RelevantEventCount) / EventCountFullScore);
 
             // ─── Emotional Intensity Score ───
             // Sum of all pressure channels (only for hydrated entities)
@@ -148,9 +146,8 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
                 for (int32 c = 0; c < PressureChannelCount; ++c) {
                     TotalPressure += PsychoData[i].Pressure[c];
                 }
-                // Normalize: 3.0 total pressure = 1.0 score
-                constexpr float PressureScalingFactor = 3.0f;
-                EmotionScore = FMath::Min(1.0f, TotalPressure / PressureScalingFactor);
+                // Normalize by the designer-tunable saturation pressure (default 3.0 total = 1.0 score).
+                EmotionScore = FMath::Min(1.0f, TotalPressure / EmotionalPressureFullScore);
             }
 
             // ─── Weighted Final Score ───
@@ -221,7 +218,7 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
             // ─── Tier 0 → Tier 1 Promotion ───
             if (PromotionBudget > 0
                 && Sig.Tier == EMythicSignificanceTier::Tier0_Ambient
-                && Sig.Score >= (PromotionThreshold + Hysteresis)) {
+                && QualifiesForPromotion(Sig.Score, PromotionThreshold, Hysteresis)) {
 
                 // Enforce hard cap on cognitive actors
                 if (CognitiveActorCount >= MaxCognitiveActors) {
@@ -286,8 +283,8 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
                         Sig.Score);
                 }
 
-                // ─── Promotion to Tier 2 (Actor Spawn) ───
-                if (Sig.Score >= Settings->Tier2PromotionThreshold) {
+                // ─── Promotion to Tier 2 (Actor Spawn) ─── (no hysteresis margin on the spawn threshold)
+                if (QualifiesForPromotion(Sig.Score, Settings->Tier2PromotionThreshold, 0.0f)) {
                     Sig.Tier = EMythicSignificanceTier::Tier2_Cognitive;
 
                     // Trigger actual actor spawn here or in PopulationSpawnerProcessor
@@ -306,7 +303,7 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
             // ─── Tier 1 → Tier 2 Promotion ───
             else if (PromotionBudget > 0
                 && Sig.Tier == EMythicSignificanceTier::Tier1_Reactive
-                && Sig.Score >= Settings->Tier2PromotionThreshold) {
+                && QualifiesForPromotion(Sig.Score, Settings->Tier2PromotionThreshold, 0.0f)) {
 
                 const FMythicIdentityFragment &Identity = ChunkContext.GetFragmentView<FMythicIdentityFragment>()[i];
 
@@ -332,7 +329,7 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
             // ─── Tier 1 → Tier 0 Demotion ───
             else if (DemotionBudget > 0
                 && Sig.Tier == EMythicSignificanceTier::Tier1_Reactive
-                && Sig.Score <= (DemotionThreshold - Hysteresis)) {
+                && QualifiesForDemotion(Sig.Score, DemotionThreshold, Hysteresis)) {
                 --DemotionBudget;
                 --CognitiveActorCount;
 
@@ -352,7 +349,7 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
             // ─── Tier 2 → Tier 1 Demotion (dehydrate: despawn the embodied actor) ───
             else if (DemotionBudget > 0
                 && Sig.Tier == EMythicSignificanceTier::Tier2_Cognitive
-                && Sig.Score <= (DemotionThreshold - Hysteresis)
+                && QualifiesForDemotion(Sig.Score, DemotionThreshold, Hysteresis)
                 // EXEMPT party companions — they stay embodied while following the player (see resolve above).
                 && !(PartySubsystem && PartySubsystem->IsCompanionEntity(ChunkContext.GetEntity(i)))) {
                 // Drop to Tier1_Reactive (stays hydrated + still counted in CognitiveActorCount, which counts
@@ -371,7 +368,31 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
     });
 }
 
-float UMythicSignificanceProcessor::ComputeProximityScore(const FMythicCellCoord &EntityCell, float SpawnRadius) const {
-    // This helper is available if needed by subclasses; main logic uses inline calculation.
-    return 0.0f;
+float UMythicSignificanceProcessor::ComputeProximityScore(const FMythicCellCoord &EntityCell, TConstArrayView<FMythicCellCoord> PlayerCells, float SpawnRadius) {
+    // Inverse cell (Manhattan) distance to the NEAREST player, normalized by the spawn radius → [0,1]. No players → 0.
+    float ProximityScore = 0.0f;
+    const float SafeRadius = FMath::Max(SpawnRadius, 1.0f);
+    for (const FMythicCellCoord &PlayerCell : PlayerCells) {
+        const float CellDist = static_cast<float>(
+            FMath::Abs(EntityCell.X - PlayerCell.X) + FMath::Abs(EntityCell.Y - PlayerCell.Y));
+        ProximityScore = FMath::Max(ProximityScore, FMath::Max(0.0f, 1.0f - (CellDist / SafeRadius)));
+    }
+    return ProximityScore;
+}
+
+bool UMythicSignificanceProcessor::QualifiesForPromotion(float Score, float Threshold, float Hysteresis) {
+    // Promote only once the score clears the threshold by the full hysteresis margin (>= so an exact hit promotes).
+    return Score >= Threshold + Hysteresis;
+}
+
+bool UMythicSignificanceProcessor::QualifiesForDemotion(float Score, float Threshold, float Hysteresis) {
+    // Demote only once the score has fallen the full hysteresis margin below the threshold (<= so an exact hit demotes).
+    return Score <= Threshold - Hysteresis;
+}
+
+bool UMythicSignificanceProcessor::ShouldRescore(bool bDirty, EMythicSignificanceTier Tier) {
+    // Ambient (Tier0) entities are rescored only on an event (bDirty) — there are vast numbers of them and they only
+    // matter when something happens. The cognitive hot-set (Tier1+) is CAPPED (MaxCognitiveActors) and always
+    // re-evaluated so its proximity stays current and it demotes once players move away (no stale-score slot leak).
+    return bDirty || Tier != EMythicSignificanceTier::Tier0_Ambient;
 }

@@ -38,6 +38,17 @@ public:
     UPROPERTY(EditAnywhere, Category = "Personality", meta=(Categories = "NPC.Trait"))
     FGameplayTagContainer Traits;
 
+    // Sight perception, per NPC type (a hawk sees farther than a boar). Defaults match the previous hardcoded
+    // AIController values, so an un-tuned NPC behaves exactly as before. The AIController applies these on possess.
+    UPROPERTY(EditAnywhere, Category = "Perception", meta = (ClampMin = "0.0"))
+    float SightRadius = 1500.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Perception", meta = (ClampMin = "0.0"))
+    float LoseSightRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Perception", meta = (ClampMin = "0.0", ClampMax = "180.0"))
+    float PeripheralVisionAngleDegrees = 90.0f;
+
     // Affiliation Overrides - Instead of using the global "per NPCType" affiliations from the NPCTypesTable
     UPROPERTY(EditAnywhere, Category = "Relations")
     TMap<FGameplayTag, float> AffiliationOverrides;

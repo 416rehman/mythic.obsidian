@@ -224,4 +224,25 @@ public:
     // Example: LivingWorldParty
     UFUNCTION(Exec)
     void MythLivingWorldParty();
+
+    // === PLACEABLES ===
+
+    // Deploy the placeable item in the given inventory slot at the player's aim (pawn eyes + forward). Drives the
+    // real server deploy path (AMythicPlayerController::ServerDeployPlaceable) — the interim human / 2-client test
+    // entry point until the player-facing deploy input + ghost-preview are wired.
+    // Example: DeployPlaceable 0
+    UFUNCTION(Exec)
+    void MythDeployPlaceable(int32 SlotIndex = 0);
+
+    // === CO-OP DOWN/REVIVE ===
+
+    // Toggle the co-op down/revive policy at runtime (UMythicDeveloperSettings::bCoopDownStateEnabled). With it ON, a
+    // lethal blow downs a player instead of killing. Example: ToggleCoopDown
+    UFUNCTION(Exec)
+    void MythToggleCoopDown();
+
+    // Revive the local player's pawn if it is downed (drives UMythicLifeComponent::ServerReviveFromDowned).
+    // Example: ReviveSelf
+    UFUNCTION(Exec)
+    void MythReviveSelf();
 };

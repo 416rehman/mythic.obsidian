@@ -29,36 +29,53 @@ void UMythicScheduleTransitionProcessor::ConfigureQueries(const TSharedRef<FMass
     ScheduleQuery.AddRequirement<FMythicSignificanceFragment>(EMassFragmentAccess::ReadOnly);
 }
 
-EMythicSchedulePhase UMythicScheduleTransitionProcessor::GetPhaseForHour(float GameHour) {
-    // Schedule layout (24h game time cycle):
-    //   06:00 - 08:00  Travel (home → work)
-    //   08:00 - 14:00  Work
-    //   14:00 - 15:00  Travel (work → social)
-    //   15:00 - 18:00  Social
-    //   18:00 - 19:00  Travel (social → home)
-    //   19:00 - 06:00  Rest (including night)
-
-    if (GameHour < 6.0f) {
+EMythicSchedulePhase UMythicScheduleTransitionProcessor::GetPhaseForHour(float GameHour, const UMythicLivingWorldSettings *Settings) {
+    // Designer-tunable daily routine (defaults reproduce the prior hardcoded 6/8/14/15/18/19 layout):
+    //   DayStart..WorkStart   Travel (home → work)
+    //   WorkStart..WorkEnd     Work
+    //   WorkEnd..SocialStart   Travel (work → social)
+    //   SocialStart..SocialEnd Social
+    //   SocialEnd..DayEnd      Travel (social → home)
+    //   DayEnd..DayStart       Rest (including night)
+    // Cascading thresholds — out-of-order hours collapse a window but stay well-defined. Null settings → Rest.
+    if (!Settings) {
         return EMythicSchedulePhase::Rest;
     }
-    else if (GameHour < 8.0f) {
+    if (GameHour < Settings->ScheduleDayStartHour) {
+        return EMythicSchedulePhase::Rest;
+    }
+    if (GameHour < Settings->ScheduleWorkStartHour) {
         return EMythicSchedulePhase::Travel;
     }
-    else if (GameHour < 14.0f) {
+    if (GameHour < Settings->ScheduleWorkEndHour) {
         return EMythicSchedulePhase::Work;
     }
-    else if (GameHour < 15.0f) {
+    if (GameHour < Settings->ScheduleSocialStartHour) {
         return EMythicSchedulePhase::Travel;
     }
-    else if (GameHour < 18.0f) {
+    if (GameHour < Settings->ScheduleSocialEndHour) {
         return EMythicSchedulePhase::Social;
     }
-    else if (GameHour < 19.0f) {
+    if (GameHour < Settings->ScheduleDayEndHour) {
         return EMythicSchedulePhase::Travel;
     }
-    else {
-        return EMythicSchedulePhase::Rest;
+    return EMythicSchedulePhase::Rest;
+}
+
+float UMythicScheduleTransitionProcessor::ComputeStaggeredHour(float GameHour, uint32 NameHash, float MaxStaggerHours) {
+    if (MaxStaggerHours <= 0.0f) {
+        return GameHour; // staggering disabled → global sync (prior behavior)
     }
+    // Deterministic per-NPC offset in [-MaxStaggerHours, +MaxStaggerHours] from the stable NameHash, so each NPC keeps
+    // a consistent personal routine offset across sessions with no extra per-entity state. A large prime modulus gives
+    // a smooth spread; map [0,1) → [-Max,+Max].
+    const float Frac = static_cast<float>(NameHash % 100003u) / 100003.0f; // [0,1)
+    const float Offset = (Frac * 2.0f - 1.0f) * MaxStaggerHours;            // [-Max,+Max]
+    float H = FMath::Fmod(GameHour + Offset, 24.0f);
+    if (H < 0.0f) {
+        H += 24.0f; // wrap a negative pre-dawn offset back into [0,24)
+    }
+    return H;
 }
 
 void UMythicScheduleTransitionProcessor::Execute(FMassEntityManager &EntityManager, FMassExecutionContext &Context) {
@@ -120,13 +137,16 @@ void UMythicScheduleTransitionProcessor::Execute(FMassEntityManager &EntityManag
         GameHour = DayProgress * 24.0f; // [0.0, 24.0)
     }
 
-    const EMythicSchedulePhase TargetPhase = GetPhaseForHour(GameHour);
+    const float StaggerHours = Settings->ScheduleStaggerHours;
 
-    // ─── Transition all entities to the target phase ───
-    ScheduleQuery.ForEachEntityChunk(Context, [TargetPhase](FMassExecutionContext &ChunkContext) {
+    // ─── Transition each entity to its (per-NPC staggered) target phase ───
+    // The target phase is computed PER ENTITY from its NameHash-staggered hour, so the town's routines don't flip in
+    // lockstep (organic commute/rest spread). Cost stays trivial: a handful of float compares per entity, timer-throttled.
+    ScheduleQuery.ForEachEntityChunk(Context, [GameHour, StaggerHours, Settings](FMassExecutionContext &ChunkContext) {
         const int32 NumEntities = ChunkContext.GetNumEntities();
         auto ScheduleView = ChunkContext.GetMutableFragmentView<FMythicScheduleFragment>();
         const auto SignificanceView = ChunkContext.GetFragmentView<FMythicSignificanceFragment>();
+        const auto IdentityView = ChunkContext.GetFragmentView<FMythicIdentityFragment>();
 
         for (int32 i = 0; i < NumEntities; ++i) {
             // Event disruption: if entity witnessed a recent event (bDirty=true),
@@ -135,6 +155,9 @@ void UMythicScheduleTransitionProcessor::Execute(FMassEntityManager &EntityManag
             if (SignificanceView[i].bDirty) {
                 continue;
             }
+
+            const float StaggeredHour = ComputeStaggeredHour(GameHour, IdentityView[i].NameHash, StaggerHours);
+            const EMythicSchedulePhase TargetPhase = GetPhaseForHour(StaggeredHour, Settings);
 
             FMythicScheduleFragment &Schedule = ScheduleView[i];
 

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "MythicResourceISM.h"
+#include "MythicGatheringConfig.h"
 #include "Components/ActorComponent.h"
 #include "Net/Serialization/FastArraySerializer.h"
 #include "MythicResourceManagerComponent.generated.h"
@@ -122,6 +123,10 @@ class MYTHIC_API UMythicResourceManagerComponent : public UActorComponent {
     UPROPERTY()
     FTimerHandle BatchRespawnTimerHandle;
 
+    // proficiency-based gathering bonuses (damage scaling + double yield chance)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Gathering", meta = (AllowPrivateAccess = "true"))
+    FGatheringProficiencyConfig GatheringConfig;
+
     // Settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Respawn", meta = (AllowPrivateAccess = "true"))
     float BatchRespawnInterval = 600.0f; // 10 minutes
@@ -163,6 +168,9 @@ private:
                          Index);
     void AddToDestroyedResources(FTrackedDestructibleData DestroyedResource, APlayerController *PlayerController);
 
+    // resolve the gatherer's proficiency level for the given resource type tag (0 if no match)
+    int32 GetGathererProficiencyLevel(APlayerController *PlayerController, const FGameplayTag &ResourceType) const;
+
 protected:
     // Called when the game starts
     virtual void BeginPlay() override;
@@ -172,6 +180,12 @@ public:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
     TArray<FTrackedDestructibleData> GetTrackedDestructibles() const;
+
+    /** Respawn-eligibility gate (used by ProcessBatchRespawn): a destroyed node returns once its delay has elapsed.
+     *  Requires HitsTillDestruction <= 0 (actually destroyed), RespawnTime > 0 (a real respawn time was assigned —
+     *  guards a default-constructed/uninitialized entry from respawning at world-time 0), and CurrentTime >= RespawnTime.
+     *  Pure + static so the respawn loop's core decision is unit-testable without a live world/timer. */
+    static bool ShouldRespawnDestructible(int32 HitsTillDestruction, float RespawnTime, float CurrentTime);
 
     const TArray<FTrackedDestructibleData> &GetDestroyedItems() const { return *DestroyedResources.GetItems(); }
 

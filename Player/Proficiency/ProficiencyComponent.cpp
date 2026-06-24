@@ -1,4 +1,4 @@
-﻿// 
+// 
 
 
 #include "ProficiencyComponent.h"
@@ -8,7 +8,11 @@
 #include "ProficiencyDefinition.h"
 #include "Net/UnrealNetwork.h"
 #include "Rewards/AttributeReward.h"
-#include "Player/MythicPlayerController.h" // proficiency level-up callout
+#include "Player/MythicPlayerController.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
+#include "GAS/MythicTags_GAS.h"
+#include "GameModes/GameState/MythicGameState.h"
+#include "Engine/World.h"
 
 void FProficiency::GenerateTrack() {
     const int NumKeyMilestones = this->Definition->KeyMilestones.Num();
@@ -202,32 +206,11 @@ void UProficiencyComponent::ReapplyRewardsForLevel(FProficiency &Proficiency, in
         return;
     }
 
-    // Idempotency for the load-time reapply: reset every goal attribute this track contributes to back to its
-    // class default BEFORE re-running rewards, so relative (Additive/Multiplicative) AttributeRewards don't STACK
-    // on top of the already-applied base across repeated loads (UAttributeReward::Give is a read-modify-write for
-    // non-Override ops, so a second load would inflate the attribute). This is the load path only — the sole
-    // caller is ApplyLoadedProficiencies — and equipped-item stats are (re)applied AFTER proficiencies in
-    // CharacterData::Deserialize, so resetting to CDO here can't strip item contributions.
-    if (ASC) {
-        TSet<FGameplayAttribute> ResetAttrs;
-        // Start at Level=1 to mirror the LIVE earn path: CalcLevelAtXP floors at 1, so OnAttributeChanged's grant loop
-        // begins at OldLevel>=1 and NEVER applies Track[0] (the level-1 reward, already held at spawn). The load path
-        // previously started at 0, applying Track[0] only on load — a live-vs-load divergence. Match the live floor.
-        for (int32 Level = 1; Level < TargetLevel && Level < Proficiency.Track.Num(); ++Level) {
-            for (const auto &Reward : Proficiency.Track[Level].Rewards) {
-                const UAttributeReward *AttrReward = Cast<UAttributeReward>(Reward);
-                if (!AttrReward || !AttrReward->Attribute.IsValid() || ResetAttrs.Contains(AttrReward->Attribute)) {
-                    continue;
-                }
-                ResetAttrs.Add(AttrReward->Attribute);
-                if (ASC->HasAttributeSetForAttribute(AttrReward->Attribute)) {
-                    const UAttributeSet *CDO = AttrReward->Attribute.GetAttributeSetClass()->GetDefaultObject<UAttributeSet>();
-                    ASC->SetNumericAttributeBase(AttrReward->Attribute, AttrReward->Attribute.GetNumericValue(CDO));
-                }
-            }
-        }
-    }
-
+    // APPLY-ONLY: the CDO reset that makes the relative (Additive/Multiplicative) AttributeRewards idempotent across
+    // repeated loads now lives ONCE in ApplyLoadedProficiencies, as a single union reset across ALL proficiencies
+    // performed BEFORE any reapply. That is required because two proficiencies can share a goal attribute: a per-call
+    // reset (the old design) would let proficiency B's reset wipe proficiency A's just-applied contribution, leaving
+    // CDO + B instead of CDO + A + B. The sole caller is ApplyLoadedProficiencies; do NOT reintroduce a reset here.
     auto Context = FRewardContext(Owner);
     int32 ReappliedCount = 0;
 
@@ -266,7 +249,26 @@ void UProficiencyComponent::ApplyLoadedProficiencies() {
     ASC = Cast<IAbilitySystemInterface>(GetOwner())->GetAbilitySystemComponent();
     checkf(ASC, TEXT("The parent actor of the ProficiencyComponent must implement IAbilitySystemInterface"));
 
-    // For each proficiency, build the proficiency track
+    // Two-phase load so multi-proficiency restore is additive-consistent with the live earn path (#7).
+    //
+    // PHASE 1 — per proficiency: Instantiate, set bIsRestoring iff SavedXP>0, ConfigureProgressionAttribute, clamp,
+    // SetNumericAttributeBase(ProgressAttribute, SavedXP), compute the restored Level, and accumulate the UNION of
+    // every goal attribute contributed across [1, Level) into one TSet. bIsRestoring guards each restore's
+    // ProgressAttribute write so OnAttributeChanged does not double-grant milestones / pop the floater. It is kept SET
+    // across BOTH phases (cleared only after Phase 2) so the reapply Give() calls stay suppressed exactly as the old
+    // single-loop did — a designer could author a goal attribute equal to a ProgressAttribute, and a Phase-2 Give to
+    // it must not re-enter OnAttributeChanged with the flag cleared (red-team requiredChange).
+    //
+    // Then reset each unioned goal attribute back to its class CDO default EXACTLY ONCE — not once per proficiency.
+    // The old per-proficiency reset let a second proficiency wipe the first's just-applied contribution when they
+    // shared a goal attribute (final = CDO + B; should be CDO + A + B). The Level>=1 floor (iter-54 #6) is kept here
+    // identically to the reapply pass so reset and reapply stay symmetric: Track[0] is never reset nor reapplied.
+    //
+    // PHASE 2 — per restored proficiency: ReapplyRewardsForLevel (now apply-only) re-Gives CanReapplyOnLoad rewards
+    // over [1, Level) on the union-reset baseline -> CDO + A + B.
+    TArray<TPair<FProficiency *, int32>> ToReapply;
+    TSet<FGameplayAttribute> ResetAttrs;
+
     for (auto &Proficiency : this->Proficiencies) {
         Proficiency.Instantiate();
 
@@ -279,7 +281,7 @@ void UProficiencyComponent::ApplyLoadedProficiencies() {
             UE_LOG(Myth, Log, TEXT("Proficiency %s: Restoring XP=%.1f, Level=%d"),
                    *Proficiency.Definition->Name.ToString(), Proficiency.SavedXP, Level);
 
-            // Set restoring flag to skip OnAttributeChanged rewards
+            // Set restoring flag to skip OnAttributeChanged rewards (kept set through Phase 2, cleared at the end).
             bIsRestoring = true;
         }
 
@@ -295,11 +297,162 @@ void UProficiencyComponent::ApplyLoadedProficiencies() {
 
         ASC->SetNumericAttributeBase(Proficiency.ProgressAttribute, Proficiency.SavedXP);
 
-        // Reapply only CanReapplyOnLoad rewards (items already in inventory)
-        ReapplyRewardsForLevel(Proficiency, Level);
+        // Accumulate the union of goal attributes this track contributes over [1, Level). Level>=1 floor mirrors the
+        // live earn path (CalcLevelAtXP floors at 1; OnAttributeChanged never grants Track[0]). At cold start every
+        // Level==0, so this loop body never runs, the union stays empty, and the reset pass below is a no-op.
+        for (int32 TrackLevel = 1; TrackLevel < Level && TrackLevel < Proficiency.Track.Num(); ++TrackLevel) {
+            for (const auto &Reward : Proficiency.Track[TrackLevel].Rewards) {
+                const UAttributeReward *AttrReward = Cast<UAttributeReward>(Reward);
+                if (!AttrReward || !AttrReward->Attribute.IsValid()) {
+                    continue;
+                }
+                ResetAttrs.Add(AttrReward->Attribute);
+            }
+        }
 
-        bIsRestoring = false;
+        // Defer the reapply to Phase 2 so the union reset runs first. Level==0 proficiencies are skipped: their
+        // reapply loop would be empty anyway, so omitting them is behavior-preserving.
+        if (Level > 0) {
+            ToReapply.Emplace(&Proficiency, Level);
+        }
     }
+
+    // Single union reset: hard-set each contributed goal attribute back to its AttributeSet CDO default ONCE, before
+    // any reapply, so relative AttributeRewards don't STACK across repeated whole-loads and a shared attribute isn't
+    // wiped by a later proficiency.
+    if (ASC) {
+        for (const FGameplayAttribute &Attr : ResetAttrs) {
+            if (ASC->HasAttributeSetForAttribute(Attr)) {
+                const UAttributeSet *CDO = Attr.GetAttributeSetClass()->GetDefaultObject<UAttributeSet>();
+                ASC->SetNumericAttributeBase(Attr, Attr.GetNumericValue(CDO));
+            }
+        }
+    }
+
+    // PHASE 2: apply-only reapply over the union-reset baseline, in proficiency order.
+    for (const TPair<FProficiency *, int32> &Entry : ToReapply) {
+        ReapplyRewardsForLevel(*Entry.Key, Entry.Value);
+    }
+
+    // Clear the restoring flag only AFTER Phase 2 — keeps the reapply Give() calls suppressed exactly as the original
+    // single-loop did (red-team requiredChange). Cold start never set it (all SavedXP=0), so this stays false there.
+    bIsRestoring = false;
+}
+
+FProficiency* UProficiencyComponent::FindCombatProficiency() {
+    const FGameplayAttribute CombatAttr = UMythicAttributeSet_Proficiencies::GetCombatProficiencyAttribute();
+    for (auto &Proficiency : Proficiencies) {
+        if (Proficiency.ProgressAttribute == CombatAttr) {
+            return &Proficiency;
+        }
+    }
+    return nullptr;
+}
+
+void UProficiencyComponent::GrantCombatXP(float Amount) {
+    if (Amount <= 0.0f) {
+        return;
+    }
+    if (!ASC || !GetOwner() || !GetOwner()->HasAuthority()) {
+        return;
+    }
+
+    FProficiency *CombatProf = FindCombatProficiency();
+    if (!CombatProf || !CombatProf->ProgressAttribute.IsValid()) {
+        UE_LOG(Myth, Warning, TEXT("ProficiencyComponent: no combat proficiency configured, cannot grant XP"));
+        return;
+    }
+
+    // apply ProficiencyXPBonus from utility attributes (gear/buffs)
+    if (const UMythicAttributeSet_Utility *Util = ASC->GetSet<UMythicAttributeSet_Utility>()) {
+        Amount *= FMath::Max(0.0f, 1.0f + Util->GetProficiencyXPBonus());
+    }
+
+    // apply Enlighten buff bonus
+    if (ASC->HasMatchingGameplayTag(GAS_BUFF_ENLIGHTEN)) {
+        if (const AMythicGameState *GS = GetWorld() ? GetWorld()->GetGameState<AMythicGameState>() : nullptr) {
+            Amount *= FMath::Max(0.0f, 1.0f + GS->EnlightenProficiencyBonus);
+        }
+    }
+
+    if (Amount <= 0.0f) {
+        return;
+    }
+
+    // grant via attribute base value modification, which fires OnAttributeChanged for level-up processing
+    const float Current = ASC->GetNumericAttributeBase(CombatProf->ProgressAttribute);
+    ASC->SetNumericAttributeBase(CombatProf->ProgressAttribute, Current + Amount);
+
+    UE_LOG(Myth, Log, TEXT("ProficiencyComponent: granted %.1f combat proficiency XP (%.1f -> %.1f)"),
+           Amount, Current, Current + Amount);
+}
+
+void UProficiencyComponent::ApplyDeathPenalty(float PenaltyFraction) {
+    if (PenaltyFraction <= 0.0f) {
+        return;
+    }
+    if (!ASC || !GetOwner() || !GetOwner()->HasAuthority()) {
+        return;
+    }
+
+    FProficiency *CombatProf = FindCombatProficiency();
+    if (!CombatProf || !CombatProf->ProgressAttribute.IsValid()) {
+        return;
+    }
+
+    const float OldXP = ASC->GetNumericAttributeBase(CombatProf->ProgressAttribute);
+    const float NewXP = ComputeXpAfterDeathPenalty(OldXP, PenaltyFraction);
+    ASC->SetNumericAttributeBase(CombatProf->ProgressAttribute, NewXP);
+
+    UE_LOG(Myth, Log, TEXT("ProficiencyComponent: death penalty, combat XP %.1f -> %.1f (%.0f%% loss)"),
+           OldXP, NewXP, PenaltyFraction * 100.0f);
+}
+
+float UProficiencyComponent::ComputeXpAfterDeathPenalty(float CurrentXP, float PenaltyFraction) {
+    const float Frac = FMath::Clamp(PenaltyFraction, 0.0f, 1.0f);
+    return FMath::Max(0.0f, CurrentXP * (1.0f - Frac));
+}
+
+FProficiencySummary UProficiencyComponent::GetSummary(int32 Index) const {
+    FProficiencySummary Summary;
+    if (!Proficiencies.IsValidIndex(Index)) {
+        return Summary;
+    }
+
+    const FProficiency &Prof = Proficiencies[Index];
+    if (!Prof.Definition) {
+        return Summary;
+    }
+
+    Summary.Name = Prof.Definition->Name;
+    Summary.Description = Prof.Definition->Description;
+
+    // use asc attribute base value if asc is initialized otherwise fallback to saved xp
+    if (ASC) {
+        Summary.CurrentXP = ASC->GetNumericAttributeBase(Prof.ProgressAttribute);
+    } else {
+        Summary.CurrentXP = Prof.SavedXP;
+    }
+
+    Summary.Level = UProficiencyDefinition::CalcLevelAtXP(Summary.CurrentXP, Prof.Definition);
+    
+    // calculate start and end xp for the current level
+    Summary.LevelXPStart = UProficiencyDefinition::CalcCumulativeXPForLevel(Summary.Level, Prof.Definition);
+    Summary.LevelXPEnd = UProficiencyDefinition::CalcCumulativeXPForLevel(Summary.Level + 1, Prof.Definition);
+    
+    // clamp progress fraction to one if max level is reached or calculate based on level cost
+    if (Summary.Level >= Prof.Definition->MaxLevel) {
+        Summary.ProgressFraction = 1.0f;
+    } else {
+        float Cost = Summary.LevelXPEnd - Summary.LevelXPStart;
+        if (Cost > 0.0f) {
+            Summary.ProgressFraction = FMath::Clamp((Summary.CurrentXP - Summary.LevelXPStart) / Cost, 0.0f, 1.0f);
+        } else {
+            Summary.ProgressFraction = 0.0f;
+        }
+    }
+
+    return Summary;
 }
 
 void UProficiencyComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {

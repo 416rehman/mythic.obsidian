@@ -63,6 +63,14 @@ void UMythicItemInstance::SetStackSize(const int32 newQuantity) {
     auto owner = this->GetOwningActor();
     checkf(owner->HasAuthority(), TEXT("Only the server can set the stack size of an item instance"));
 
+    // ItemDefinition is a replicated + SaveGame UPROPERTY that can resolve to null on load (an unresolvable data-asset
+    // ref); a raw deref of StackSizeMax would crash. Mirrors the null-on-load guards in AddToAnySlot / Serialize.
+    // Reachable via ConsumeItem / world-item paths where no prior def access guards line 66.
+    if (!ItemDefinition) {
+        UE_LOG(Myth, Error, TEXT("SetStackSize: ItemDefinition is null on %s; cannot clamp stack"), *GetName());
+        return;
+    }
+
     const auto newQty = FMath::Min(newQuantity, ItemDefinition->StackSizeMax);
     if (newQty != Quantity) {
         Quantity = newQty;
@@ -90,13 +98,25 @@ void UMythicItemInstance::SetStackSize(const int32 newQuantity) {
     }
 }
 
+int32 UMythicItemInstance::ClampInitialStackQuantity(int32 Requested, int32 StackSizeMax) {
+    // Non-stackable items are always a single unit.
+    if (StackSizeMax <= 1) {
+        return 1;
+    }
+    // A created stack must be >= 1 (Quantity's ClampMin) and <= the stack cap (mirrors SetStackSize's max clamp).
+    return FMath::Clamp(Requested, 1, StackSizeMax);
+}
+
 // Sets the item definition and quantity, then instantiates fragments from the item definition.
 void UMythicItemInstance::Initialize(UItemDefinition *ItemDef, const int32 quantityIfStackable, const int32 level) {
     checkf(this->GetOwningActor()->HasAuthority(), TEXT("Only the server can initialize an item instance"));
 
     this->ItemDefinition = ItemDef;
     this->ItemLevel = level;
-    this->Quantity = ItemDef->StackSizeMax > 1 ? quantityIfStackable : 1;
+    // Clamp to [1, StackSizeMax] (or a single unit for non-stackables). Previously this assigned quantityIfStackable
+    // raw when StackSizeMax > 1, so a created stack could EXCEED the cap that SetStackSize enforces (over-stacking) or
+    // be zero/negative. Single source: ClampInitialStackQuantity (unit-tested).
+    this->Quantity = ClampInitialStackQuantity(quantityIfStackable, ItemDef->StackSizeMax);
     UE_LOG(Myth, Verbose, TEXT("Initialized level %d item %s"), level, *GetName());
 
     // Create fragments for this item from the item definition

@@ -38,6 +38,12 @@ void UMythicCreatureEcologyProcessor::ConfigureQueries(const TSharedRef<FMassEnt
     HydratedCreatureQuery.AddTagRequirement<FMythicHydratedTag>(EMassFragmentPresence::All);
 }
 
+float UMythicCreatureEcologyProcessor::ComputeTerritorialAggression(float BaseAggression, bool bNearDen, float TerritorialBoost) {
+    // Transient boost near the den, clamped to 1; the bare authored base elsewhere. Recomputed from BaseAggression
+    // every tick (idempotent — no accumulation), so aggression relaxes the moment the creature leaves its territory.
+    return bNearDen ? FMath::Min(1.0f, BaseAggression + TerritorialBoost) : BaseAggression;
+}
+
 void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager, FMassExecutionContext &Context) {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicCreatureEcology_Execute);
 
@@ -89,22 +95,27 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
             const int32 DistToDen = FMath::Abs(CurrentCell.X - DenCell.X) + FMath::Abs(CurrentCell.Y - DenCell.Y);
             const bool bNearDen = DistToDen <= static_cast<int32>(Creature.TerritorialRadius);
 
-            // Boost/decay aggression based on den proximity
-            if (bNearDen) {
-                Creature.BaseAggression = FMath::Min(1.0f, Creature.BaseAggression + TerritorialBoost);
-            }
+            // Recompute the EFFECTIVE aggression transiently from the authored base — boosted near the den, relaxed
+            // away. NEVER mutate BaseAggression (the prior `BaseAggression += Boost` had no decay, so it ratcheted to
+            // 1.0 and stuck — territorial aggression that never relaxed once the creature had visited its den).
+            Creature.CurrentAggression = ComputeTerritorialAggression(Creature.BaseAggression, bNearDen, TerritorialBoost);
         }
     });
 
     // ─── Step 2: Pack Pressure Sharing + Herd-Flee Contagion ──
     // Only for hydrated creatures that have psychodynamic fragments
 
-    // First pass: collect pack pressure state into a map by PackId
-    TMap<uint16, float> PackMaxThreat;
+    // First pass: per pack, find the highest Threat AND the cell of the member holding it — pressure sharing is gated
+    // on distance to that source cell (PackRadiusSq) so distant pack members don't telepathically inherit a far-off
+    // scare. (Previously PackRadiusSq was computed but never used and the max threat was shared pack-wide regardless of
+    // distance, defeating PackPressureShareRadius — Mass chunks are archetype-grouped, not spatial, so there was no
+    // implicit spatial bound.)
+    TMap<uint16, TPair<float, FMythicCellCoord>> PackMaxThreat;
 
     HydratedCreatureQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext &ChunkContext) {
         const int32 NumEntities = ChunkContext.GetNumEntities();
         const auto CreatureView = ChunkContext.GetFragmentView<FMythicCreatureFragment>();
+        const auto IdentityView = ChunkContext.GetFragmentView<FMythicIdentityFragment>();
         const auto PsychoView = ChunkContext.GetFragmentView<FMythicPsychodynamicFragment>();
 
         for (int32 i = 0; i < NumEntities; ++i) {
@@ -114,8 +125,11 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
             }
 
             const float Threat = PsychoView[i].Pressure[ThreatIdx];
-            float &MaxThreat = PackMaxThreat.FindOrAdd(PackId, 0.0f);
-            MaxThreat = FMath::Max(MaxThreat, Threat);
+            TPair<float, FMythicCellCoord> &Entry = PackMaxThreat.FindOrAdd(PackId, TPair<float, FMythicCellCoord>(0.0f, FMythicCellCoord()));
+            if (Threat > Entry.Key) {
+                Entry.Key = Threat;
+                Entry.Value = IdentityView[i].Cell;
+            }
         }
     });
 
@@ -123,6 +137,7 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
     HydratedCreatureQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext &ChunkContext) {
         const int32 NumEntities = ChunkContext.GetNumEntities();
         const auto CreatureView = ChunkContext.GetFragmentView<FMythicCreatureFragment>();
+        const auto IdentityView = ChunkContext.GetFragmentView<FMythicIdentityFragment>();
         auto PsychoView = ChunkContext.GetMutableFragmentView<FMythicPsychodynamicFragment>();
 
         for (int32 i = 0; i < NumEntities && ContagionBudget > 0; ++i) {
@@ -131,17 +146,26 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
                 continue;
             }
 
-            const float *MaxThreat = PackMaxThreat.Find(PackId);
-            if (!MaxThreat) {
+            const TPair<float, FMythicCellCoord> *PackMax = PackMaxThreat.Find(PackId);
+            if (!PackMax) {
+                continue;
+            }
+
+            // Distance-gate: only members within PackPressureShareRadius of the threat source share its pressure
+            // (the documented contract). Squared-Euclidean so we consume PackRadiusSq without a sqrt.
+            const FMythicCellCoord &Cell = IdentityView[i].Cell;
+            const int32 dX = Cell.X - PackMax->Value.X;
+            const int32 dY = Cell.Y - PackMax->Value.Y;
+            if (static_cast<float>(dX * dX + dY * dY) > PackRadiusSq) {
                 continue;
             }
 
             FMythicPsychodynamicFragment &Psycho = PsychoView[i];
 
             // Pack pressure sharing: raise this member's threat toward pack max (dampened)
-            if (*MaxThreat > Psycho.Pressure[ThreatIdx]) {
+            if (PackMax->Key > Psycho.Pressure[ThreatIdx]) {
                 const float SharedFraction = 0.5f;
-                Psycho.Pressure[ThreatIdx] = FMath::Lerp(Psycho.Pressure[ThreatIdx], *MaxThreat, SharedFraction);
+                Psycho.Pressure[ThreatIdx] = FMath::Lerp(Psycho.Pressure[ThreatIdx], PackMax->Key, SharedFraction);
                 --ContagionBudget;
             }
         }

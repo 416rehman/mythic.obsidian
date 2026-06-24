@@ -9,6 +9,9 @@
 #include "Mythic/Itemization/InventoryProviderInterface.h"
 #include "Mythic/System/MythicAssetManager.h"
 #include "Mythic/Player/MythicPlayerState.h"
+#include "Mythic/Player/MythicPlayerController.h" // DeployPlaceable cheat -> ServerDeployPlaceable
+#include "Mythic/GAS/AttributeSets/Shared/MythicLifeComponent.h" // ReviveSelf cheat
+#include "Mythic/Settings/MythicDeveloperSettings.h"             // ToggleCoopDown cheat
 #include "Mythic/Player/Proficiency/ProficiencyComponent.h"
 #include "Mythic/Player/Proficiency/ProficiencyDefinition.h"
 #include "Mythic/GAS/MythicAbilitySystemComponent.h"
@@ -37,6 +40,7 @@
 #include "AI/Party/MythicPartyTypes.h"
 #include "MassExecutionContext.h"
 #include "MassCommandBuffer.h"
+#include "GameFramework/Pawn.h"
 
 // ============================================================================
 // HELP
@@ -529,7 +533,10 @@ void UMythicCheatManager::MythListProficiencies() {
         return;
     }
 
-    UProficiencyComponent *ProfComp = PC->FindComponentByClass<UProficiencyComponent>();
+    UProficiencyComponent *ProfComp = nullptr;
+    if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PC)) {
+        ProfComp = const_cast<UProficiencyComponent*>(MythicPC->GetProficiencyComponent());
+    }
     if (!ProfComp || ProfComp->Proficiencies.Num() == 0) {
         UE_LOG(Myth, Warning, TEXT(">>> No proficiencies configured"));
         return;
@@ -559,7 +566,10 @@ void UMythicCheatManager::MythGiveProficiency(const FString &ProficiencyName, fl
         return;
     }
 
-    UProficiencyComponent *ProfComp = PC->FindComponentByClass<UProficiencyComponent>();
+    UProficiencyComponent *ProfComp = nullptr;
+    if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PC)) {
+        ProfComp = const_cast<UProficiencyComponent*>(MythicPC->GetProficiencyComponent());
+    }
     if (!ProfComp || ProfComp->Proficiencies.Num() == 0) {
         UE_LOG(Myth, Error, TEXT(">>> No proficiencies available"));
         return;
@@ -1321,13 +1331,16 @@ void UMythicCheatManager::MythLivingWorldParty() {
         return;
     }
 
-    const int32 PlayerId = 0; // Local player
+    FString PlayerKey; // local player's canonical party key
+    if (const AMythicPlayerState *PS = PC->GetPlayerState<AMythicPlayerState>()) {
+        PlayerKey = PS->GetCanonicalPlayerKey();
+    }
 
     TArray<FMythicPartyMember> Members;
-    const int32 PartySize = PartySys->GetPartyMembers(PlayerId, Members);
+    const int32 PartySize = PartySys->GetPartyMembers(PlayerKey, Members);
 
     UE_LOG(Myth, Warning, TEXT(""));
-    UE_LOG(Myth, Warning, TEXT("=== PARTY (Player %d, %d members) ==="), PlayerId, PartySize);
+    UE_LOG(Myth, Warning, TEXT("=== PARTY (Player %s, %d members) ==="), *PlayerKey, PartySize);
 
     for (int32 i = 0; i < Members.Num(); ++i) {
         const FMythicPartyMember &M = Members[i];
@@ -1344,4 +1357,62 @@ void UMythicCheatManager::MythLivingWorldParty() {
     }
 
     UE_LOG(Myth, Warning, TEXT(""));
+}
+
+void UMythicCheatManager::MythDeployPlaceable(int32 SlotIndex) {
+    AMythicPlayerController *PC = Cast<AMythicPlayerController>(GetOuterAPlayerController());
+    if (!PC) {
+        UE_LOG(Myth, Error, TEXT(">>> DeployPlaceable: no Mythic player controller"));
+        return;
+    }
+    APawn *Pawn = PC->GetPawn();
+    if (!Pawn) {
+        UE_LOG(Myth, Error, TEXT(">>> DeployPlaceable: no pawn"));
+        return;
+    }
+
+    const TArray<UMythicInventoryComponent *> Inventories = PC->GetAllInventoryComponents();
+    if (Inventories.Num() == 0 || !Inventories[0]) {
+        UE_LOG(Myth, Error, TEXT(">>> DeployPlaceable: no inventory"));
+        return;
+    }
+
+    // Aim from the pawn (no camera wired on the player pawn): origin at the eyes, direction = pawn facing. This is the
+    // same (origin, dir) the future ghost-preview + deploy input will pass to ServerDeployPlaceable.
+    FVector AimOrigin;
+    FRotator AimRot;
+    Pawn->GetActorEyesViewPoint(AimOrigin, AimRot);
+
+    PC->ServerDeployPlaceable(Inventories[0], SlotIndex, AimOrigin, AimRot.Vector());
+    UE_LOG(Myth, Warning, TEXT(">>> DeployPlaceable: requested deploy of inventory slot %d (server validates; check the world for the spawned actor)"), SlotIndex);
+}
+
+void UMythicCheatManager::MythToggleCoopDown() {
+    UMythicDeveloperSettings *Settings = GetMutableDefault<UMythicDeveloperSettings>();
+    if (!Settings) {
+        return;
+    }
+    Settings->bCoopDownStateEnabled = !Settings->bCoopDownStateEnabled;
+    UE_LOG(Myth, Warning, TEXT(">>> Co-op down/revive is now %s (a lethal blow downs a player instead of killing)"),
+           Settings->bCoopDownStateEnabled ? TEXT("ENABLED") : TEXT("disabled"));
+}
+
+void UMythicCheatManager::MythReviveSelf() {
+    APlayerController *PC = GetOuterAPlayerController();
+    APawn *Pawn = PC ? PC->GetPawn() : nullptr;
+    if (!Pawn) {
+        UE_LOG(Myth, Error, TEXT(">>> ReviveSelf: no pawn"));
+        return;
+    }
+    UMythicLifeComponent *Life = UMythicLifeComponent::FindHealthComponent(Pawn);
+    if (!Life) {
+        UE_LOG(Myth, Error, TEXT(">>> ReviveSelf: pawn has no LifeComponent"));
+        return;
+    }
+    if (!Life->IsDowned()) {
+        UE_LOG(Myth, Warning, TEXT(">>> ReviveSelf: not downed (enable ToggleCoopDown, then take lethal damage to go down first)"));
+        return;
+    }
+    Life->ServerReviveFromDowned();
+    UE_LOG(Myth, Warning, TEXT(">>> ReviveSelf: revived"));
 }

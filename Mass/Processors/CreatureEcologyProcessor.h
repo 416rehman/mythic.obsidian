@@ -28,6 +28,13 @@ class MYTHIC_API UMythicCreatureEcologyProcessor : public UMassProcessor {
 public:
     UMythicCreatureEcologyProcessor();
 
+    /** Effective territorial aggression for a creature THIS tick: BaseAggression, plus TerritorialBoost (clamped to 1)
+     *  when near the den, else the bare BaseAggression. Recomputed from the AUTHORED base every tick — calling it
+     *  repeatedly with the same inputs is idempotent (it does NOT accumulate), which is the whole point: the prior code
+     *  did `BaseAggression += Boost` near the den with no decay, ratcheting aggression to 1.0 permanently. Pure + static
+     *  for unit testing. */
+    static float ComputeTerritorialAggression(float BaseAggression, bool bNearDen, float TerritorialBoost);
+
 protected:
     virtual void ConfigureQueries(const TSharedRef<FMassEntityManager> &EntityManager) override;
     virtual void Execute(FMassEntityManager &EntityManager, FMassExecutionContext &Context) override;

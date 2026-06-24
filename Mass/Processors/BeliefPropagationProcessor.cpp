@@ -70,7 +70,10 @@ void UMythicBeliefPropagationProcessor::Execute(FMassEntityManager &EntityManage
 
     int32 PropagationBudget = Settings->MaxBeliefPropagationsPerTick;
     const float DecayPerHop = Settings->BeliefPropagationDecay;
-    const int32 MaxHops = Settings->MaxBeliefPropagationHops;
+    // NOTE: MaxBeliefPropagationHops is intentionally NOT applied here. This processor spreads significance-AWARENESS
+    // one hop to direct social neighbors and is naturally bounded by the pressure gate below (a propagated-to entity
+    // gains awareness but no pressure, so it does not re-propagate). The per-belief hop cap lives in the cognitive
+    // belief path: UMythicPartySubsystem::ShouldShareBelief.
 
     // ─── Belief Propagation Pass ───
     // For each hydrated entity with social edges, check if it has high pressure

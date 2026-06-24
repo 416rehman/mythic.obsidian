@@ -4,7 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "MassEntityHandle.h"
+#include "Mass/EntityHandle.h"
 #include "GameplayTagContainer.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "World/LivingWorld/Morality/MoralSignature.h"

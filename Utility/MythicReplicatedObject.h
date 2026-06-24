@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "GameFramework/Actor.h"
 #include "Net/UnrealNetwork.h"
 #include "Mythic/Mythic.h"
 #include "MythicReplicatedObject.generated.h"
@@ -103,7 +104,7 @@ private:
      */
     void UpdateChildrenOwnership(AActor *NewOwner) const {
         TArray<UObject *> Children;
-        GetObjectsWithOuter(this, Children, true, RF_NoFlags);
+        GetObjectsWithOuter(this, Children, EGetObjectsFlags::IncludeNestedObjects, RF_NoFlags);
 
         for (UObject *Child : Children) {
             if (UMythicReplicatedObject *ChildObject = Cast<UMythicReplicatedObject>(Child)) {
@@ -136,7 +137,7 @@ private:
         }
 
         TArray<UObject *> Children;
-        GetObjectsWithOuter(this, Children, true, RF_NoFlags);
+        GetObjectsWithOuter(this, Children, EGetObjectsFlags::IncludeNestedObjects, RF_NoFlags);
 
         for (UObject *Child : Children) {
             if (UMythicReplicatedObject *ChildObject = Cast<UMythicReplicatedObject>(Child)) {

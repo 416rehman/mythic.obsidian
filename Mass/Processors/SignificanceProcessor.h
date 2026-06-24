@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "MassProcessor.h"
 #include "MassEntityQuery.h"
+#include "World/LivingWorld/LivingWorldTypes.h" // FMythicCellCoord (used by value via TConstArrayView in ComputeProximityScore)
 #include "SignificanceProcessor.generated.h"
 
 /**
@@ -32,6 +33,27 @@ class MYTHIC_API UMythicSignificanceProcessor : public UMassProcessor {
 public:
     UMythicSignificanceProcessor();
 
+    /** Compute proximity score: inverse cell (Manhattan) distance to the NEAREST player, normalized by SpawnRadius, in
+     *  [0.0, 1.0]. Empty PlayerCells → 0.0; at a player's cell → 1.0; at/beyond SpawnRadius → 0.0. Pure + static so the
+     *  core LOD-proximity math is unit-testable without a live world. Used by the rescore pass. */
+    static float ComputeProximityScore(const FMythicCellCoord &EntityCell, TConstArrayView<FMythicCellCoord> PlayerCells, float SpawnRadius);
+
+    /** Rescore gate (LOD policy): always re-evaluate the CAPPED cognitive hot-set (Tier1+) every significance tick so
+     *  proximity stays fresh and an entity DEMOTES when players leave (a stationary embodied NPC otherwise kept a stale
+     *  high score forever → cognitive-slot leak). The vast AMBIENT (Tier0) set stays event-driven (rescored only when
+     *  bDirty). Pure + static so the policy is unit-testable. */
+    static bool ShouldRescore(bool bDirty, EMythicSignificanceTier Tier);
+
+    /** Tier-PROMOTION gate: score must clear the threshold by the full hysteresis margin (>= Threshold + Hysteresis).
+     *  Pass Hysteresis = 0 for an un-margined gate (the Tier2 spawn threshold). Paired with QualifiesForDemotion, this
+     *  creates the dead-band (Threshold_demote - H, Threshold_promote + H) in which an entity holds its tier — the
+     *  anti-oscillation contract. Pure + static so the LOD promote/demote band is unit-testable. */
+    static bool QualifiesForPromotion(float Score, float Threshold, float Hysteresis);
+
+    /** Tier-DEMOTION gate: score must fall the full hysteresis margin BELOW the threshold (<= Threshold - Hysteresis).
+     *  See QualifiesForPromotion for the dead-band it forms. Pure + static. */
+    static bool QualifiesForDemotion(float Score, float Threshold, float Hysteresis);
+
 protected:
     virtual void ConfigureQueries(const TSharedRef<FMassEntityManager> &EntityManager) override;
     virtual void Execute(FMassEntityManager &EntityManager, FMassExecutionContext &Context) override;
@@ -42,7 +64,4 @@ private:
 
     /** Timer accumulator — rescoring runs at configured interval */
     float TimeSinceLastTick = 0.0f;
-
-    /** Compute proximity score: inverse distance to nearest player as cell distance [0.0, 1.0] */
-    float ComputeProximityScore(const FMythicCellCoord &EntityCell, float SpawnRadius) const;
 };

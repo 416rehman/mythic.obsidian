@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/SoftObjectPath.h"
 #include "SavedProficiency.generated.h"
 
 class UProficiencyComponent;

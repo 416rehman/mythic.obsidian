@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "Interaction/IMythicInteractable.h"
 #include "Itemization/InventoryProviderInterface.h"
+#include "ViewModels/ConversionViewModels.h"
 #include "MythicConversionStation.generated.h"
 
 class UConversionStationComponent;
@@ -25,6 +26,10 @@ class MYTHIC_API AMythicConversionStation : public AActor, public IMythicInterac
 
 public:
     AMythicConversionStation();
+    void SetupLocalViewModel();
+    
+    //~ BeginPlay
+    virtual void BeginPlay() override;
 
     //~ IInventoryProviderInterface
     virtual TArray<UMythicInventoryComponent *> GetAllInventoryComponents() const override;
@@ -45,6 +50,9 @@ public:
     UMythicInventoryComponent *GetStationInventory() const { return StationInventory; }
 
 protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ViweModel")
+    UConversionStationVM *StationViewModel;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Station")
     USceneComponent *SceneRoot;
 

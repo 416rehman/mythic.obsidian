@@ -205,6 +205,12 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Time of Day Controller | Weather", meta = (ClampMin = "10"))
     float TransitionDurationInMins = 30.0f;
 
+    // Significance of the World Chronicle beat posted when the calendar SEASON turns ("Winter descends"). Must be >= the
+    // chronicle's MinSignificance (default 0.5) to surface; defaults slightly above a routine weather beat since a season
+    // change is a bigger world event. 0 disables the beat. (Season changes always fire; only the news beat is gated here.)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Time of Day Controller | Weather", meta = (UIMin = "0.0"))
+    float SeasonNewsSignificance = 0.6f;
+
     // The exponential height fog actor
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Time of Day Controller | Weather")
     AExponentialHeightFog *ExponentialHeightFog;
@@ -313,6 +319,17 @@ public:
 
     // Processes the pre and post weather types to determine the next weather type to transition to, to eventually reach the target weather
     UWeatherType *GetNextWeatherTypeToReachTargetWeather(UWeatherType *FromWeather, UWeatherType *TargetWeather);
+
+    // Weather-transition lerp alpha in [0,1]. Instant transitions and a non-positive duration (guards div-by-zero from
+    // a code/BP/save path bypassing the editor ClampMin) return 1.0. Otherwise elapsed/duration CLAMPED to [0,1] — the
+    // lerps that consume this (FMath::Lerp) are UNCLAMPED, so without this clamp the final over-duration tick overshoots
+    // the target's material/fog values and the cleared transition leaves them overshot. Pure + static for unit testing.
+    static float ComputeWeatherTransitionProgress(bool bSetInstantly, double ElapsedMinutes, float DurationMinutes) {
+        if (bSetInstantly || DurationMinutes <= 0.0f) {
+            return 1.0f;
+        }
+        return FMath::Clamp(static_cast<float>(ElapsedMinutes / DurationMinutes), 0.0f, 1.0f);
+    }
 
     ///~ Setters - SERVER ONLY ---------------------------------------------------------------
     void SetTime(const FDateTime &DateTime);

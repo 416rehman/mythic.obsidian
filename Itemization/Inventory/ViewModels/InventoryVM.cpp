@@ -5,6 +5,8 @@
 
 #include "Mythic.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
+#include "Itemization/Inventory/MythicEncumbrance.h"
+#include "Settings/MythicDeveloperSettings.h"
 #include "Engine/Texture2D.h"
 
 // ---------------- UInventoryTabVM -----------------
@@ -126,6 +128,54 @@ UMythicInventoryComponent *UInventoryVM::GetOwningInventoryComponent() const {
     return OwningInventoryComponent;
 }
 
+void UInventoryVM::SetTotalWeight(float InTotalWeight) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(TotalWeight, InTotalWeight)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(TotalWeight);
+    }
+}
+
+float UInventoryVM::GetTotalWeight() const { return TotalWeight; }
+
+void UInventoryVM::SetMaxCarryWeight(float InMaxCarryWeight) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(MaxCarryWeight, InMaxCarryWeight)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(MaxCarryWeight);
+    }
+}
+
+float UInventoryVM::GetMaxCarryWeight() const { return MaxCarryWeight; }
+
+void UInventoryVM::SetEncumbranceTier(EMythicEncumbranceTier InEncumbranceTier) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(EncumbranceTier, InEncumbranceTier)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(EncumbranceTier);
+    }
+}
+
+EMythicEncumbranceTier UInventoryVM::GetEncumbranceTier() const { return EncumbranceTier; }
+
+void UInventoryVM::SetTotalCurrency(int32 InTotalCurrency) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(TotalCurrency, InTotalCurrency)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(TotalCurrency);
+    }
+}
+
+int32 UInventoryVM::GetTotalCurrency() const { return TotalCurrency; }
+
+void UInventoryVM::SetUsedSlots(int32 InUsedSlots) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(UsedSlots, InUsedSlots)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(UsedSlots);
+    }
+}
+
+int32 UInventoryVM::GetUsedSlots() const { return UsedSlots; }
+
+void UInventoryVM::SetTotalSlots(int32 InTotalSlots) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(TotalSlots, InTotalSlots)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(TotalSlots);
+    }
+}
+
+int32 UInventoryVM::GetTotalSlots() const { return TotalSlots; }
+
 void UInventoryVM::Clear() {
     if (SelectionVM != nullptr) {
         SelectionVM->ClearSelection();
@@ -138,7 +188,7 @@ void UInventoryVM::Clear() {
 }
 
 TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythicInventorySlotEntry> &allSlots, TSet<int32> SlotIndices) {
-    // Map GroupTag -> TabVM
+    // map GroupTag -> TabVM
     TMap<FGameplayTag, TObjectPtr<UInventoryTabVM>> GroupToTabMap;
 
     auto AsArray = SlotIndices.Array();
@@ -150,12 +200,12 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythic
             continue;
         }
 
-        // Get or create tab for this group
+        // get or create tab for this group
         TObjectPtr<UInventoryTabVM> *FoundTab = GroupToTabMap.Find(Entry.GroupTag);
         if (FoundTab == nullptr) {
             auto NewTabVM = NewObject<UInventoryTabVM>(this);
 
-            // Get group info from Profile if available
+            // get group info from Profile if available
             FText GroupName = FText::FromString(Entry.GroupTag.ToString());
             UTexture2D *GroupIcon = nullptr;
             bool bCanTake = true;
@@ -176,7 +226,7 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythic
             FoundTab = GroupToTabMap.Find(Entry.GroupTag);
         }
 
-        // Create slot VM and add to tab
+        // create slot VM and add to tab
         if (FoundTab && *FoundTab) {
             auto NewSlotVM = NewObject<UItemSlotVM>(this);
             NewSlotVM->Initialize(Entry.SlottedItemInstance, this, Entry.SlotDefinition, AbsIndex);
@@ -189,11 +239,11 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythic
         }
     }
 
-    // Convert to array and sort by DisplayOrder
+    // convert to array and sort by DisplayOrder
     TArray<TObjectPtr<UInventoryTabVM>> TabsArray;
     GroupToTabMap.GenerateValueArray(TabsArray);
 
-    // Sort by DisplayOrder from Profile
+    // sort by DisplayOrder from Profile
     if (OwningInventoryComponent && OwningInventoryComponent->InventoryProfile) {
         Algo::SortBy(TabsArray, [this](const UInventoryTabVM *Tab) -> int32 {
             const FInventorySlotGroup *Group = OwningInventoryComponent->InventoryProfile->SlotGroups.Find(Tab->GroupTag);
@@ -244,9 +294,53 @@ void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *I
             SelectionVM->SetSelectedSlotVM(FirstInvTab->Slots[0]);
         }
     }
+
+    // compute aggregates after all slot VMs are built
+    RefreshAggregates(InInventoryComponent);
+}
+
+void UInventoryVM::SetTransactionLocked(bool bInLocked) {
+    if (bTransactionLocked != bInLocked) {
+        bTransactionLocked = bInLocked;
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bTransactionLocked);
+
+        // handle client-side timeout timer for transaction lock state
+        if (bTransactionLocked) {
+            if (UMythicInventoryComponent* Comp = GetOwningInventoryComponent()) {
+                if (UWorld* World = Comp->GetWorld()) {
+                    World->GetTimerManager().SetTimer(
+                        TransactionLockTimerHandle,
+                        this,
+                        &UInventoryVM::ClearTransactionLock,
+                        0.5f,
+                        false
+                    );
+                }
+            }
+        } else {
+            if (UMythicInventoryComponent* Comp = GetOwningInventoryComponent()) {
+                if (UWorld* World = Comp->GetWorld()) {
+                    World->GetTimerManager().ClearTimer(TransactionLockTimerHandle);
+                }
+            }
+        }
+    }
+}
+
+bool UInventoryVM::GetTransactionLocked() const {
+    return bTransactionLocked;
+}
+
+void UInventoryVM::ClearTransactionLock() {
+    SetTransactionLocked(false);
 }
 
 void UInventoryVM::RefreshSlotFromInventory(UMythicInventoryComponent *Inventory, int32 AbsoluteIndex) {
+    // clear the transaction lock since a slot refresh indicates replication completed
+    if (GetTransactionLocked()) {
+        SetTransactionLocked(false);
+    }
+
     if (!Inventory) {
         return;
     }
@@ -263,7 +357,7 @@ void UInventoryVM::RefreshSlotFromInventory(UMythicInventoryComponent *Inventory
         return;
     }
 
-    // Update slot VM from current inventory data
+    // update slot VM from current inventory data
     if (Entry.SlotDefinition) {
         SlotVM->Initialize(Entry.SlottedItemInstance, this, Entry.SlotDefinition, AbsoluteIndex);
         UE_LOG(Myth, Verbose, TEXT("Slot %d refreshed from inventory."), AbsoluteIndex);
@@ -286,7 +380,49 @@ void UInventoryVM::RefreshAllItemsFromInventory(UMythicInventoryComponent *Inven
             RefreshSlotFromInventory(Inventory, AbsIdx);
         }
     }
+
+    RefreshAggregates(Inventory);
     UE_LOG(Myth, Log, TEXT("All inventory slots refreshed from inventory."));
+}
+
+void UInventoryVM::RefreshAggregates(UMythicInventoryComponent *Inventory) {
+    if (!Inventory) {
+        return;
+    }
+
+    const auto &AllSlots = Inventory->GetAllSlots();
+
+    // weight from the inventory component helper
+    float ComputedWeight = Inventory->GetTotalCarriedWeight();
+    SetTotalWeight(ComputedWeight);
+
+    // max carry weight and encumbrance from developer settings
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    float SoftCap = Settings->EncumbranceSoftCapacity;
+    float HardCap = Settings->EncumbranceHardCapacity;
+    SetMaxCarryWeight(SoftCap);
+    SetEncumbranceTier(MythicEncumbrance::ComputeTier(ComputedWeight, SoftCap, HardCap));
+
+    // currency from the inventory component helper
+    SetTotalCurrency(Inventory->GetTotalCurrency());
+
+    // slot counts: only non-equipment slots
+    int32 NumUsed = 0;
+    int32 NumTotal = 0;
+    for (const FMythicInventorySlotEntry &Entry : AllSlots) {
+        if (Entry.bEquipmentSlot) {
+            continue;
+        }
+        if (!Entry.SlotDefinition) {
+            continue;
+        }
+        ++NumTotal;
+        if (Entry.SlottedItemInstance != nullptr) {
+            ++NumUsed;
+        }
+    }
+    SetUsedSlots(NumUsed);
+    SetTotalSlots(NumTotal);
 }
 
 // ---------------- UInventorySelectionVM -----------------

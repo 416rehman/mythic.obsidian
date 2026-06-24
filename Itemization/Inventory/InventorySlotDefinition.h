@@ -6,6 +6,18 @@
 #include "Itemization/MythicDataAsset.h"
 #include "InventorySlotDefinition.generated.h"
 
+UENUM(BlueprintType)
+enum class EInventorySlotType : uint8 {
+    None,
+    Helmet,
+    Chest,
+    Hands,
+    Legs,
+    Feet,
+    MainHand,
+    OffHand
+};
+
 /**
  * Defines a type of inventory slot (e.g., Head, Chest, Weapon).
  */
@@ -14,15 +26,19 @@ class MYTHIC_API UInventorySlotDefinition : public UMythicDataAsset {
     GENERATED_BODY()
 
 public:
-    // Permit types of items that can be placed in this slot. To permit all items, leave this tag container empty.
+    // permit types of items that can be placed in this slot, empty accepts all
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slot", meta = (Categories = "Itemization.Type"))
     FGameplayTagContainer WhitelistedItemTypes;
 
-    // Display Name for this slot (e.g. "Head", "Weapon") - used for Tab Names in UI
+    // display name for this slot used for tab names in ui
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slot")
     FText DisplayName;
 
-    // Icon to display for this slot
+    // icon to display for this slot
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slot")
     TObjectPtr<UTexture2D> Icon = nullptr;
+
+    // the specific equipment slot category this represents
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slot")
+    EInventorySlotType SlotType = EInventorySlotType::None;
 };

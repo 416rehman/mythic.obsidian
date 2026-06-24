@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "GameplayTagContainer.h"
+#include "Kismet/BlueprintFunctionLibrary.h"
 #include "MythicUtils.generated.h"
 
 UCLASS()

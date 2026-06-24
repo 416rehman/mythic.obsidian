@@ -43,6 +43,8 @@ class MYTHIC_API UItemReward : public URewardBase {
 public:
     virtual bool Give(FRewardContext &Context) const override;
 
+    virtual FText GetPreviewText() const override;
+
     // The quantity of the item to give.
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
     int32 Quantity = 1;

@@ -7,6 +7,7 @@
 #include "AbilitySystemInterface.h"
 #include "DetourCrowdAIController.h"
 #include "Perception/AIPerceptionTypes.h"
+#include "World/LivingWorld/LivingWorldTypes.h" // FMythicCellCoord (patrol ring helper)
 #include "MythicAIController.generated.h"
 
 class UMythicAttributeSet_NPCCombat;
@@ -24,6 +25,34 @@ public:
     AMythicAIController();
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    // SERVER: apply the possessed NPC's per-type sight perception (from its NPCData) over the constructor defaults;
+    // also (re)subscribe the threat accrual to the possessed pawn's received-hit event.
+    virtual void OnPossess(APawn *InPawn) override;
+    virtual void OnUnPossess() override;
+
+    // Pure sanitiser for a sight config: clamps sight/lose-sight to >= 0, forces LoseSightRadius >= SightRadius (a
+    // smaller lose-radius makes a target sensed-then-instantly-lost — a real authoring footgun), and clamps the
+    // peripheral angle to [0,180]. Static + no engine state so the invariant is unit-testable.
+    static void SanitizePerception(float &SightRadius, float &LoseSightRadius, float &PeripheralAngleDegrees);
+
+    // Pure: index of the nearest hostile by squared distance (the default acquisition policy — engage the CLOSEST
+    // perceived threat, not whichever was sensed first). INDEX_NONE for an empty set; ties resolve to the first.
+    // Static so the selection is unit-testable; a threat-weighted policy remains the logged aggro-model design call.
+    static int32 SelectClosestHostileIndex(TConstArrayView<float> DistancesSq);
+
+    // Pure: index of the HIGHEST-threat candidate (parallel to a candidates array), for the aggro/threat-table
+    // targeting policy (a tank holding aggro off the squishy players). INDEX_NONE if empty OR no candidate has
+    // positive threat — so the caller falls back to SelectClosestHostileIndex when no threat has been accrued. Ties
+    // resolve to the first (lowest-index) max, matching the closest-policy. Static so the selection is unit-testable.
+    static int32 SelectHighestThreatIndex(TConstArrayView<float> Threats);
+
+    // Pure: the threat a single combat action adds to this NPC's threat table = Damage × ThreatPerDamage + a flat
+    // BonusThreat (e.g. a taunt forcing aggro). All inputs clamped non-negative so an action only ever RAISES threat.
+    static float ComputeThreatDelta(float Damage, float ThreatPerDamage, float BonusThreat);
+
+    // Pure: should the NPC drop its target because it was pulled too far from its engage anchor? LeashRangeSq <= 0
+    // disables the leash (infinite pursuit — the default). Static so the leash rule is unit-testable.
+    static bool ShouldReleaseLeash(float DistSqFromAnchor, float LeashRangeSq);
 
     virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override;
 
@@ -40,9 +69,16 @@ public:
     AActor *GetCurrentHostileTarget() const { return CurrentHostileTarget; }
 
     // SERVER: toggle companion-follow for this NPC. Called by the party subsystem on recruit/remove. When active, a
-    // dedicated FAST timer paces the NPC to its party leader (PlayerId) — smoother than piggybacking the 2s idle timer —
-    // and TickIdleBehavior early-outs (no schedule, no per-tick party scan). When inactive, the timer stops.
-    void SetCompanionFollow(bool bActive, int32 PlayerId);
+    // dedicated FAST timer paces the NPC to its leader's pawn — resolved by the leader's CANONICAL key via the player
+    // registry, so a co-op companion follows the player who recruited it (not always the host). TickIdleBehavior
+    // early-outs while active (no schedule, no per-tick party scan). When inactive, the timer stops and the key is unused.
+    void SetCompanionFollow(bool bActive, const FString &LeaderKey);
+
+    // The absolute patrol cell for a given leg: Anchor + the leg's cardinal-ring offset (E, N, W, S, cycling). The leg
+    // index wraps (incl. defensively for a negative index). Pure + static so the patrol-ring geometry is unit-testable;
+    // TickIdleBehavior bounds-checks the result against the grid and skips off-grid legs so an edge-anchored guard
+    // doesn't stall its whole patrol on one unreachable leg.
+    static FMythicCellCoord GetPatrolCell(FMythicCellCoord Anchor, int32 LegIndex);
 
 protected:
     // Sight perception that detects only enemies (affiliation filtered via GetTeamAttitudeTowards).
@@ -56,9 +92,38 @@ protected:
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Mythic AI|Combat")
     TObjectPtr<AActor> CurrentHostileTarget;
 
+    // Per-attacker threat (aggro table): how much each actor has provoked THIS NPC by damaging it. Server-only, bounded
+    // by the handful of distinct attackers; pruned of stale/dead/zero entries. Used by the highest-threat target policy
+    // (bThreatTargetingEnabled); empty/untouched when threat targeting is off → closest-target behaviour unchanged.
+    TMap<TWeakObjectPtr<AActor>, float> ThreatTable;
+
+    // The ASC this controller subscribed HandleThreatFromHit to (the possessed pawn's). Cached so OnUnPossess/EndPlay
+    // can unbind even if GetPawn() is already null (pooled-NPC re-possession + teardown safety).
+    TWeakObjectPtr<UAbilitySystemComponent> ThreatBoundASC;
+
+    // SERVER: received-hit event handler — accrues threat[Instigator] += ComputeThreatDelta(damage,...) when threat
+    // targeting is on. Bound to the pawn ASC's GAS_EVENT_DMG_RECEIVED in OnPossess. (Not a UFUNCTION — the generic
+    // gameplay-event delegate is a plain multicast, bound via AddUObject, mirroring UMythicLifeComponent::HandleReceivedHit.)
+    void HandleThreatFromHit(const struct FGameplayEventData *Payload);
+
+    // Drop stale (destroyed), self, and non-positive entries so the table stays small + correct.
+    void PruneThreatTable();
+
+    // Unsubscribe HandleThreatFromHit from the cached pawn ASC + clear the table (OnUnPossess / EndPlay).
+    void UnbindThreatEvent();
+
+    // World location where the NPC ACQUIRED its current target — the leash anchor. Captured at acquisition (server-only).
+    FVector EngageAnchorLocation = FVector::ZeroVector;
+
     // Distance (cm) within which the NPC attempts its melee attack on the current target.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic AI|Combat")
     float MeleeAttackRange = 180.0f;
+
+    // Leash: if the NPC is pulled farther than this (cm) from where it engaged (EngageAnchorLocation), it gives up the
+    // target and resets — prevents infinite cross-map pursuit / dragging enemy trains. 0 (default) = NO leash (infinite
+    // pursuit, the prior behaviour — zero regression); a designer sets a positive range per NPC class to enable it.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic AI|Combat", meta = (ClampMin = "0.0"))
+    float LeashRange = 0.0f;
 
     // How often (seconds) to attempt an attack while engaged. The ability's Cooldown GE gates the real rate.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic AI|Combat")
@@ -93,6 +158,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic AI|Idle")
     float IdleMoveAcceptanceRadius = 150.0f;
 
+    // Current leg of the patrol ring (index into the controller-local neighbour-offset ring) for a Patrol intention;
+    // advances each time the NPC reaches the current patrol cell. Server-only state (the AI controller is server-side).
+    int32 PatrolLegIndex = 0;
+
     // Stop-band (cm) a recruited companion holds from its party leader. Default is a shippable value; the tuned
     // follow distance / re-path cadence is a balance pass.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic AI|Idle")
@@ -109,8 +178,9 @@ protected:
     float CompanionFollowInterval = 0.3f;
     // True while this NPC is a recruited companion that should follow its leader (cached — no per-tick party scan).
     bool bCompanionFollowActive = false;
-    // The player whose pawn this companion follows (resolved via the party subsystem's GetLeaderPawn).
-    int32 CompanionLeaderPlayerId = 0;
+    // The CANONICAL key (AMythicPlayerState::GetCanonicalPlayerKey) of the leader this companion follows; resolved to
+    // the live leader pawn each tick via the player registry. Empty = no leader (companion stands put).
+    FString CompanionLeaderKey;
     // Repeating fast timer driving the follow re-anchor while bCompanionFollowActive.
     FTimerHandle FollowTimerHandle;
     // Timer callback: re-anchor the move to the live leader pawn when out of the stop-band (combat/dead preempt).

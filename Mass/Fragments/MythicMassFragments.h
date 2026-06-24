@@ -200,8 +200,13 @@ struct MYTHIC_API FMythicCreatureFragment : public FMassFragment {
     /** Pack group ID — creatures with the same PackId share pressure state */
     uint16 PackId = 0;
 
-    /** Base aggression level [0.0, 1.0]. Amplified near den by territorial boost. */
+    /** Base (authored) aggression level [0.0, 1.0]. NEVER mutated at runtime — the den boost is applied transiently
+     *  into CurrentAggression each tick so it relaxes when the creature leaves its territory. */
     float BaseAggression = 0.0f;
+
+    /** Effective aggression this tick [0.0, 1.0] = BaseAggression, boosted near the den (see CreatureEcologyProcessor).
+     *  Recomputed each ecology tick (NOT accumulated). This is the value an attack-behavior consumer should read. */
+    float CurrentAggression = 0.0f;
 
     /** Cell coordinate of this creature's den/spawning origin */
     FMythicCellCoord DenCell;

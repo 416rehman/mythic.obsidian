@@ -6,6 +6,7 @@
 #include "Mythic.h"
 #include "GAS/MythicGameplayEffectContext.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "GAS/Executions/MythicCombatRoll.h"
 
 struct FMythicDamageCalcStatics {
     /** Source Attributes */
@@ -97,10 +98,10 @@ void UMythicDamageCalculation::Execute_Implementation(const FGameplayEffectCusto
     float ApplyTerrifyOnHitChance = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageCalcStatics().ApplyTerrifyOnHitChance, EvaluateParameters, ApplyTerrifyOnHitChance);
 
-    // Proc roll: a 0% chance must NEVER fire and a 100% chance must ALWAYS fire. FMath::FRand() returns [0,1] INCLUSIVE,
-    // so a bare `<= Chance` let a 0% chance proc on an exact-0 roll; the lower-bound guard fixes that while `<=` keeps
-    // the 100% case correct (FRand() can equal 1.0, so `< Chance` would WRONGLY drop a guaranteed proc).
-    const auto ProcRoll = [](float Chance) { return Chance > 0.0f && FMath::FRand() <= Chance; };
+    // Proc roll: a 0% chance must NEVER fire and a 100% chance must ALWAYS fire (FMath::FRand() returns [0,1] INCLUSIVE).
+    // The boundary rule lives in MythicCombat::RollSucceeds (shared with the dodge + resistance gates in the application
+    // execution); the random sample is taken here so the helper stays pure + testable.
+    const auto ProcRoll = [](float Chance) { return MythicCombat::RollSucceeds(Chance, FMath::FRand()); };
 
     // Apply Critical damage
     MythicContext->SetCriticalHit(ProcRoll(CriticalHitChance));

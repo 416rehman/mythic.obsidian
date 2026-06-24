@@ -23,6 +23,7 @@
 #include "World/LivingWorld/Chronicle/MythicWorldChronicleSubsystem.h" // EventTagToReadable for the {recent_event} var
 #include "World/LivingWorld/Settlements/MythicSettlement.h" // FMythicSettlementData for the {settlement_name} var
 #include "TimerManager.h"
+#include "Engine/GameInstance.h"
 
 DEFINE_LOG_CATEGORY(LogMythCognition);
 
@@ -167,7 +168,7 @@ FText UMythicCognitiveBrainComponent::GetDisplayName() const {
     return FText::GetEmpty();
 }
 
-FText UMythicCognitiveBrainComponent::SelectDialogue(AActor *InteractingPlayer) const {
+FText UMythicCognitiveBrainComponent::SelectDialogue(AActor *InteractingPlayer, bool bCompanionCommentary, float PlayerActionMoralScore) const {
     // A brain that was never InitializeBrain'd (e.g. a pooled/designer NPC, or a client where the brain inits
     // server-side only) has default Role/Faction/pressure — scoring against that empty context would silently
     // return a generic line. Return the honest fallback deterministically instead. (Callers should pick the line
@@ -186,6 +187,12 @@ FText UMythicCognitiveBrainComponent::SelectDialogue(AActor *InteractingPlayer) 
 
     FMythicDialogueContext Context;
     Context.RoleTag = Role;
+
+    // Companion moral commentary (REQ-PTY-002): when the party subsystem detects the player's action strongly moved a
+    // companion's loyalty, it asks that companion to remark — this flips the template filter to the commentary family,
+    // gated by how morally-charged the act was. Defaults (false/0) reproduce a normal player-initiated bark exactly.
+    Context.bIsCompanionCommentary = bCompanionCommentary;
+    Context.PlayerActionMoralScore = PlayerActionMoralScore;
 
     // Resolve the faction's gameplay tag from the faction DB BEFORE template selection — otherwise Context.FactionTag
     // stays empty and SelectTemplate hard-filters out EVERY faction-gated template (RequiredFaction never matches an
@@ -209,7 +216,9 @@ FText UMythicCognitiveBrainComponent::SelectDialogue(AActor *InteractingPlayer) 
 
     FMythicDialogueResult Result = FMythicDialogueSelector::SelectTemplate(Database, Context);
     if (!Result.IsValid()) {
-        return FText::FromString(TEXT("Hello."));
+        // In commentary mode, no matching commentary template means this companion has nothing to say about the act —
+        // return empty so the caller skips the bark rather than forcing a generic "Hello.".
+        return bCompanionCommentary ? FText::GetEmpty() : FText::FromString(TEXT("Hello."));
     }
 
     FMythicDialogueVariables Vars;
@@ -248,6 +257,10 @@ FText UMythicCognitiveBrainComponent::SelectDialogue(AActor *InteractingPlayer) 
     // existing Hostile/Friendly thresholds (single source of truth — same buckets as the AI attitude routing).
     if (const APlayerController *PC = Cast<APlayerController>(InteractingPlayer)) {
         if (const AMythicPlayerState *PS = Cast<AMythicPlayerState>(PC->PlayerState)) {
+            // {target_name}: who the NPC is ADDRESSING. This dialogue is always player-initiated (InteractingPlayer),
+            // so the addressee is the player — their (character) name, the same one the save sets via SetPlayerName.
+            // This was the ONE template var the brain never filled, so any "{target_name}" template rendered blank.
+            Vars.TargetName = PS->GetPlayerName();
             if (const UMythicFactionStandingComponent *Standing = PS->GetFactionStanding()) {
                 const float Rep = Standing->GetStanding(Faction);
                 if (Rep <= Standing->GetHostileThreshold()) {
@@ -550,6 +563,9 @@ void UMythicCognitiveBrainComponent::UpdateBeliefs(double WorldTime) {
     // Decay old beliefs by the time DELTA since their last decay, NOT the full age — otherwise the per-tick exp(-rate*age)
     // multipliers compound (Σ ages grows quadratically) and beliefs evaporate in ~tens of seconds instead of the intended
     // ~10 min half-life. Telescoping: Π exp(-rate*Δᵢ) = exp(-rate*Σ Δᵢ) = exp(-rate*totalAge), the intended single curve.
+    // Rate + prune floor are data-driven (LivingWorldSettings); fall back to the prior hardcoded values if unset.
+    const float DecayRate = Settings ? Settings->BeliefConfidenceDecayRate : 0.005f;
+    const float PruneThreshold = Settings ? Settings->BeliefPruneThreshold : 0.05f;
     for (int32 i = Beliefs.Num() - 1; i >= 0; --i) {
         double &Last = Beliefs[i].LastDecayTime;
         if (Last <= 0.0) {
@@ -557,14 +573,21 @@ void UMythicCognitiveBrainComponent::UpdateBeliefs(double WorldTime) {
             // formation time so the first decay uses a correct delta, not a huge one-shot age.
             Last = Beliefs[i].FormationTime > 0.0 ? Beliefs[i].FormationTime : WorldTime;
         }
-        const double Delta = FMath::Max(0.0, WorldTime - Last);
-        Beliefs[i].Confidence *= FMath::Exp(-0.005f * static_cast<float>(Delta));
+        const double Delta = WorldTime - Last;
+        Beliefs[i].Confidence = DecayBeliefConfidence(Beliefs[i].Confidence, DecayRate, Delta);
         Last = WorldTime;
 
-        if (Beliefs[i].Confidence < 0.05f) {
+        if (Beliefs[i].Confidence < PruneThreshold) {
             Beliefs.RemoveAtSwap(i);
         }
     }
+}
+
+float UMythicCognitiveBrainComponent::DecayBeliefConfidence(float Confidence, float DecayRate, double DeltaSeconds) {
+    // Clamp the delta at 0 so a clock that went backwards (or an out-of-order LastDecayTime) can never AMPLIFY
+    // confidence via a positive exponent. exp's additivity gives the telescoping property documented above.
+    const double Delta = FMath::Max(0.0, DeltaSeconds);
+    return Confidence * FMath::Exp(-DecayRate * static_cast<float>(Delta));
 }
 
 void UMythicCognitiveBrainComponent::ScoreDesires(double WorldTime) {
@@ -614,9 +637,9 @@ void UMythicCognitiveBrainComponent::ScoreDesires(double WorldTime) {
     LastDesires[static_cast<int32>(EMythicDesireType::FollowSchedule)].Utility = ScoreFollowSchedule(WorldTime);
 
     // Give the HOME-ANCHORED desires a concrete move target so the AI controller's idle dispatch can act on them
-    // (Defend = engage the threat near home, Rest = return home). HomeCell is the NPC's real home cell.
-    // Report/Rally/Patrol/etc. have no authored cell source yet, so they stay target-less (the controller's idle
-    // dispatch only moves on Defend/Rest/FollowSchedule, never on a defaulted (0,0) cell).
+    // (Defend = engage the threat near home, Rest = return home, Patrol = the ANCHOR the controller walks a ring
+    // around). HomeCell is the NPC's real home cell. Report/Rally/etc. still have no authored cell source, so they
+    // stay target-less (the controller's idle dispatch never moves on a defaulted (0,0) cell).
     //
     // Defend routes to the witnessed THREAT cell — the highest-confidence belief near home (same within-2-cells
     // predicate ScoreDefend scores from) — so the NPC moves to WHERE the threat is rather than passively retreating
@@ -633,6 +656,9 @@ void UMythicCognitiveBrainComponent::ScoreDesires(double WorldTime) {
     }
     LastDesires[static_cast<int32>(EMythicDesireType::Defend)].TargetCell = DefendCell;
     LastDesires[static_cast<int32>(EMythicDesireType::Rest)].TargetCell = HomeCell;
+    // Patrol anchors on HomeCell (the guard's post); the AI controller walks a bounded ring of neighbour cells around
+    // it (TickIdleBehavior), so an Enforce-driven guard with nothing acute to do actively patrols instead of standing.
+    LastDesires[static_cast<int32>(EMythicDesireType::Patrol)].TargetCell = HomeCell;
     // FollowSchedule heads to the WorkCell (set high only during the Work phase, which only an embodied brain with a
     // real cached WorkCell reaches — see ScoreFollowSchedule).
     LastDesires[static_cast<int32>(EMythicDesireType::FollowSchedule)].TargetCell = CachedWorkCell;
@@ -678,6 +704,12 @@ void UMythicCognitiveBrainComponent::ValidateIntention(double WorldTime) {
     }
 }
 
+bool UMythicCognitiveBrainComponent::ShouldOverrideIntention(float BestUtility, float CurrentUtility, float Hysteresis) {
+    // Override only when the new utility clears the current by the full margin (mirrors the prior
+    // `BestUtility < CurrentUtility + Hysteresis → keep`). >= so an exact tie-plus-margin still overrides.
+    return BestUtility >= CurrentUtility + Hysteresis;
+}
+
 void UMythicCognitiveBrainComponent::CommitIntention(double WorldTime) {
     // Find highest-utility desire
     int32 BestIndex = -1;
@@ -694,15 +726,17 @@ void UMythicCognitiveBrainComponent::CommitIntention(double WorldTime) {
         return; // No viable desire
     }
 
-    // Hysteresis: new desire must beat current intention by a margin to override
-    constexpr float HysteresisMargin = 0.2f;
+    // Hysteresis: a new desire must beat the current intention by a margin to override (prevents desire flicker when
+    // two desires are near-tied). Data-driven (LivingWorldSettings::DesireHysteresis) — the margin was previously a
+    // hardcoded 0.2 that silently shadowed the designer setting; fall back to that value if Settings is unset.
+    const float Hysteresis = Settings ? Settings->DesireHysteresis : 0.2f;
 
     if (CurrentIntention.bValid) {
         // Current intention's utility from last scoring
         const int32 CurrentDesireIndex = static_cast<int32>(CurrentIntention.Desire.Type);
         if (CurrentDesireIndex < LastDesires.Num()) {
             const float CurrentUtility = LastDesires[CurrentDesireIndex].Utility;
-            if (BestUtility < CurrentUtility + HysteresisMargin) {
+            if (!ShouldOverrideIntention(BestUtility, CurrentUtility, Hysteresis)) {
                 return; // Not enough improvement to override
             }
         }
@@ -909,27 +943,37 @@ float UMythicCognitiveBrainComponent::ScoreExploit(double WorldTime) const {
 
     // Routine opportunism is a BASELINE desire, but the (1 + Opportunity) multiplier is unbounded (up to ~2.6 in a
     // belief-dense cell), which would let a high-Exploit NPC silently outscore the daily schedule (FollowSchedule=0.7,
-    // Rest=0.8) and never walk to work/home. Clamp it below the schedule anchors so only ACUTE threat desires
-    // (Survive/Flee/Defend/Avenge — intentionally unbounded) outscore the schedule. The other routine scorers
-    // (Patrol/Trade/Socialize) already top out ≤0.6, so this single clamp restores the band.
-    constexpr float RoutineDesireCeiling = 0.65f;
+    // Rest=0.8) and never walk to work/home. Cap it below the schedule anchors (RoutineDesireCeiling) so only ACUTE
+    // threat desires (Survive/Flee/Defend/Avenge — intentionally unbounded) outscore the schedule. Patrol/Trade/
+    // Socialize already top out ≤0.6; Rally/Report ARE capped too now (via ScoreRoutineDesire) — they were previously
+    // unbounded (the earlier "other routine scorers already top out" note missed them).
     return FMath::Min((ExploitWeight * 0.5f + Desire * 0.3f) * (1.0f + Opportunity), RoutineDesireCeiling);
+}
+
+float UMythicCognitiveBrainComponent::ScoreRoutineDesire(float Weight, float Pressure, float Multiplier) {
+    // Shared cap for the simple routine scorers (Rally/Report) so they never outscore the schedule/acute desires —
+    // see RoutineDesireCeiling. Max(0) guards a future signed input; weights + pressures are >= 0 today.
+    return FMath::Min(FMath::Max(0.0f, Weight * Pressure * Multiplier), RoutineDesireCeiling);
 }
 
 float UMythicCognitiveBrainComponent::ScoreRally(double WorldTime) const {
     const float RallyWeight = Personality.VentWeights[static_cast<int32>(EMythicVentChannel::Rally)];
     const float Injustice = PressureChannels[static_cast<int32>(EMythicPressureChannel::Injustice)];
 
-    // Leaders with high injustice rally others
-    return RallyWeight * Injustice * 1.5f;
+    // Leaders with high injustice rally others. Capped to RoutineDesireCeiling: Rally is ROUTINE (not in the acute
+    // Survive/Flee/Defend/Avenge set), so a high-Injustice NPC must not abandon its schedule to commit Rally — the
+    // controller has no movement for it, so it would idle in place. Was previously unbounded.
+    return ScoreRoutineDesire(RallyWeight, Injustice, 1.5f);
 }
 
 float UMythicCognitiveBrainComponent::ScoreReport(double WorldTime) const {
     const float ReportWeight = Personality.VentWeights[static_cast<int32>(EMythicVentChannel::Report)];
     const float Injustice = PressureChannels[static_cast<int32>(EMythicPressureChannel::Injustice)];
 
-    // Authority-compliant NPCs report crimes
-    return ReportWeight * Injustice * 1.2f;
+    // Authority-compliant NPCs report crimes. Capped to RoutineDesireCeiling (routine desire — see ScoreRally); was
+    // previously unbounded, letting a high-Injustice NPC outscore its schedule to commit Report (no controller
+    // movement → idles in place).
+    return ScoreRoutineDesire(ReportWeight, Injustice, 1.2f);
 }
 
 float UMythicCognitiveBrainComponent::ScoreFollowSchedule(double WorldTime) const {

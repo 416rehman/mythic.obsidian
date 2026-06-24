@@ -58,4 +58,6 @@ public:
     // Algorithm for scaling XP based on level
     static float CalculateXP(UAbilitySystemComponent *AbilitySystemComponent, UProficiencyDefinition *Proficiency, int32 TargetLvl, float OverlevelBonus,
                              float PercentageOfActionXPtoGive);
+
+    virtual FText GetPreviewText() const override;
 };

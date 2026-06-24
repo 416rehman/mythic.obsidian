@@ -12,7 +12,7 @@ UProficiencyDefinition::UProficiencyDefinition() {}
 
 float UProficiencyDefinition::CalcXPCostForLevelUp(int32 Level, const UProficiencyDefinition *Def) {
     if (!Def) {
-        UE_LOG(Myth, Error, TEXT("ProficiencyDefinition::CalcCumulativeXPForLevel: Def is null."));
+        UE_LOG(Myth, Error, TEXT("ProficiencyDefinition::CalcXPCostForLevelUp: Def is null."));
         return 0.0f;
     }
     if (Level < 1) {
@@ -43,16 +43,17 @@ int32 UProficiencyDefinition::CalcLevelAtXP(float XP, const UProficiencyDefiniti
     if (XP < 0.0f) {
         return 1;
     }
-    if (FMath::IsNearlyEqual(Def->GrowthRate, 1.0f)) {
-        return FMath::FloorToInt(XP / STARTING_XP) + 1;
+    const int32 MaxLvl = FMath::Max(1, Def->MaxLevel);
+    // Largest level whose cumulative XP requirement is met, CAPPED at MaxLevel. Walking the SAME
+    // CalcCumulativeXPForLevel the costs come from keeps this EXACTLY consistent at level boundaries — the prior
+    // closed-form log inversion (Floor(LogX(...))) could float-round a boundary like XP == Cumulative(L) down to L-1
+    // (a player with exactly enough XP failing to level) — and naturally clamps so an XP overshoot (e.g. a large
+    // single reward past the cap, evaluated before OnAttributeChanged writes the XP clamp back) can't report a level
+    // above MaxLevel to the player callout / restore. MaxLvl is a few dozen and this runs only on XP change / restore.
+    int32 Level = 1;
+    while (Level < MaxLvl && CalcCumulativeXPForLevel(Level + 1, Def) <= XP) {
+        ++Level;
     }
-    // Inverting the geometric series:
-    //   XP = STARTING_XP * ((GrowthRate^(L - 1) - 1) / (GrowthRate - 1))
-    //   => GrowthRate^(L - 1) = (XP*(GrowthRate - 1)/STARTING_XP) + 1
-    //   => L = Floor( LogBase_GrowthRate( (XP*(GrowthRate - 1)/STARTING_XP) + 1 ) ) + 1
-    int32 Level = FMath::FloorToInt(
-        FMath::LogX(Def->GrowthRate, (XP * (Def->GrowthRate - 1.0f) / STARTING_XP) + 1.0f)
-        ) + 1;
     return Level;
 }
 

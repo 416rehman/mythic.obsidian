@@ -4,7 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "MassEntityHandle.h"
+#include "Mass/EntityHandle.h"
 #include "AI/Cognition/CognitiveTypes.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "MythicPartyTypes.generated.h"

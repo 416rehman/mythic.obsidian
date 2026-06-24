@@ -178,6 +178,35 @@ void UMythicSettlementRegistry::TickShopSuccession(double CurrentWorldTime, doub
     }
 }
 
+bool UMythicSettlementRegistry::CanClaimShop(const FMythicShopSlot &Shop, const FGameplayTag &ClaimantRole) {
+    // Unowned, not player-held, and not waiting out a succession delay (VacatedTime cleared to 0 == ready / never owned).
+    if (Shop.OwnerEntityId != 0 || Shop.bPlayerOwned || Shop.VacatedTime != 0.0) {
+        return false;
+    }
+    // The slot must specify a role and the claimant must satisfy it (its tag is the required role or a more-specific child).
+    return Shop.RequiredRole.IsValid() && ClaimantRole.IsValid() && ClaimantRole.MatchesTag(Shop.RequiredRole);
+}
+
+int32 UMythicSettlementRegistry::ClaimVacantShop(int32 SettlementId, int32 ClaimantEntityId, const FGameplayTag &ClaimantRole) {
+    if (ClaimantEntityId == 0) {
+        return INDEX_NONE; // 0 is the "vacant" sentinel — a real claimant must have a non-zero entity id
+    }
+    FMythicSettlementData *Data = Settlements.Find(SettlementId);
+    if (!Data) {
+        return INDEX_NONE;
+    }
+    for (int32 i = 0; i < Data->Shops.Num(); ++i) {
+        FMythicShopSlot &Shop = Data->Shops[i];
+        if (CanClaimShop(Shop, ClaimantRole)) {
+            Shop.OwnerEntityId = ClaimantEntityId;
+            UE_LOG(LogMythSettlement, Log, TEXT("Shop '%s' in '%s' claimed by NPC %d (role %s)."),
+                   *Shop.ShopName, *Data->DisplayName.ToString(), ClaimantEntityId, *ClaimantRole.ToString());
+            return i;
+        }
+    }
+    return INDEX_NONE;
+}
+
 void UMythicSettlementRegistry::TransferSettlement(
     int32 SettlementId,
     FMythicFactionId NewFaction,
@@ -356,6 +385,13 @@ void UMythicSettlementRegistry::Serialize(FArchive &Ar) {
         LoadedGoverningFactionOverrides.Reset();
         int32 Count = 0;
         Ar << Count;
+        // Bound the stream-controlled Count before the loop: a garbage Count would otherwise spin a multi-billion-
+        // iteration loop (reading past the stream + growing the override map) → hang/OOM. 1,000,000 is far above any
+        // real settlement count; mirrors the other serialize guards.
+        if (Count < 0 || Count > 1000000) {
+            Ar.SetError();
+            return;
+        }
         for (int32 i = 0; i < Count; ++i) {
             FName Tag;
             uint8 GovFaction = 0;

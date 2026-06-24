@@ -3,6 +3,7 @@
 #include "Engine/DataTable.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
+#include "Logging/MessageLog.h"
 #include "Mythic/Utility/MythicReplicatedObject.h"
 #include "Mythic//GAS/MythicAbilitySystemComponent.h"
 #if WITH_EDITOR

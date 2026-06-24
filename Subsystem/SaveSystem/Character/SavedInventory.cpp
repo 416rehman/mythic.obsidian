@@ -2,6 +2,8 @@
 #include "Mythic/Itemization/Inventory/MythicInventoryComponent.h"
 #include "Mythic/Itemization/Inventory/MythicItemInstance.h"
 #include "Mythic/Mythic.h"
+#include "Serialization/MemoryReader.h"
+#include "Serialization/MemoryWriter.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 
 void FSerializedInventoryData::Serialize(UMythicInventoryComponent *Component, FSerializedInventoryData &OutData) {
@@ -74,6 +76,16 @@ static void ProcessSlot(UMythicInventoryComponent *Component, int32 SaveIndex, i
                    NewItem->GetStacks(),
                    NewItem->GetItemLevel());
 
+            // Clear any pre-existing occupant first. On a FRESH load slots are empty, but on an IN-SESSION reload
+            // (re-login, MythLoadCharacter) the target slot still holds the live item — and SetItemInSlotInternal
+            // REJECTS a non-null item onto an occupied slot, so the restore was silently dropped, AND the stale live
+            // item kept its affixes applied (stripping them from any proficiency-shared attribute on the next reset).
+            // The nullptr branch deactivates the old item (OnInactiveItem removes its affixes) + frees the slot, exactly
+            // like the empty-saved-slot path below, so the restored item then takes the slot + re-applies its affixes.
+            if (FoundSlot.SlottedItemInstance != nullptr) {
+                Component->SetItemInSlotInternal(TargetIndex, nullptr);
+            }
+
             // Use the component's internal API to set the item
             if (Component->SetItemInSlotInternal(TargetIndex, NewItem)) {
                 RestoredCount++;
@@ -98,6 +110,39 @@ static void ProcessSlot(UMythicInventoryComponent *Component, int32 SaveIndex, i
     }
 }
 
+TArray<int32> FSerializedInventoryData::ComputeSlotRestoreMapping(const TArray<FSoftObjectPath> &SavedSlotDefs,
+                                                                  const TArray<FSoftObjectPath> &TargetSlotDefs) {
+    TArray<int32> SaveToTarget;
+    SaveToTarget.Init(INDEX_NONE, SavedSlotDefs.Num());
+
+    TArray<bool> TargetClaimed;
+    TargetClaimed.Init(false, TargetSlotDefs.Num());
+
+    // Pass 1: index-stable match (saved slot i keeps target i when definitions agree).
+    for (int32 i = 0; i < SavedSlotDefs.Num(); ++i) {
+        if (TargetSlotDefs.IsValidIndex(i) && TargetSlotDefs[i] == SavedSlotDefs[i]) {
+            SaveToTarget[i] = i;
+            TargetClaimed[i] = true;
+        }
+    }
+
+    // Pass 2: fallback — first not-yet-claimed target with the same definition (a target is claimed at most once).
+    for (int32 i = 0; i < SavedSlotDefs.Num(); ++i) {
+        if (SaveToTarget[i] != INDEX_NONE) {
+            continue;
+        }
+        for (int32 t = 0; t < TargetSlotDefs.Num(); ++t) {
+            if (!TargetClaimed[t] && TargetSlotDefs[t] == SavedSlotDefs[i]) {
+                SaveToTarget[i] = t;
+                TargetClaimed[t] = true;
+                break;
+            }
+        }
+    }
+
+    return SaveToTarget;
+}
+
 void FSerializedInventoryData::Deserialize(UMythicInventoryComponent *Component, const FSerializedInventoryData &InData) {
     if (!Component) {
         UE_LOG(MythSaveLoad, Error, TEXT("Inventory Deserialize: Component is null"));
@@ -109,52 +154,40 @@ void FSerializedInventoryData::Deserialize(UMythicInventoryComponent *Component,
     UE_LOG(MythSaveLoad, Log, TEXT("Inventory Deserialize: Loading %d saved slots into %d target slots"),
            InData.Slots.Num(), TargetSlots.Num());
 
+    // Resolve the save→target slot mapping from definition paths only (pure + tested).
+    TArray<FSoftObjectPath> SavedDefs;
+    SavedDefs.Reserve(InData.Slots.Num());
+    for (const FSerializedSlotData &Saved : InData.Slots) {
+        SavedDefs.Add(Saved.SlotDefinition);
+    }
+    TArray<FSoftObjectPath> TargetDefs;
+    TargetDefs.Reserve(TargetSlots.Num());
+    for (const FMythicInventorySlotEntry &Target : TargetSlots) {
+        TargetDefs.Add(FSoftObjectPath(Target.SlotDefinition));
+    }
+    const TArray<int32> Mapping = FSerializedInventoryData::ComputeSlotRestoreMapping(SavedDefs, TargetDefs);
+
     int32 RestoredCount = 0;
     int32 MismatchCount = 0;
 
-    // Track which target slots have been processed to avoid multiple save slots mapping to the same target slot
-    TArray<bool> TargetProcessed;
-    TargetProcessed.SetNumZeroed(TargetSlots.Num());
-
-    // Step 1: Try to match by index first for stability
-    TArray<int32> SaveSlotsToProcess;
-    for (int32 i = 0; i < InData.Slots.Num(); ++i) {
-        bool bMatched = false;
-        if (TargetSlots.IsValidIndex(i)) {
-            if (FSoftObjectPath(TargetSlots[i].SlotDefinition) == InData.Slots[i].SlotDefinition) {
-                // Perfect match by index and definition
-                ProcessSlot(Component, i, i, InData.Slots[i], RestoredCount);
-                TargetProcessed[i] = true;
-                bMatched = true;
-            }
-        }
-
-        if (!bMatched) {
-            SaveSlotsToProcess.Add(i);
+    // Apply in two phases to preserve the prior ProcessSlot ordering (all index-stable matches, then all fallbacks):
+    // a target slot is touched by at most one ProcessSlot, but the order is kept identical to avoid any change in
+    // same-definition uniqueness resolution.
+    for (int32 i = 0; i < Mapping.Num(); ++i) {
+        if (Mapping[i] == i) {
+            ProcessSlot(Component, i, i, InData.Slots[i], RestoredCount); // index-stable (Pass 1)
         }
     }
-
-    // Step 2: For slots that didn't match by index, find the first available slot with the same definition
-    for (int32 i : SaveSlotsToProcess) {
-        const FSerializedSlotData &SavedSlot = InData.Slots[i];
-        FSoftObjectPath DefPath = SavedSlot.SlotDefinition;
-
-        int32 FoundIndex = INDEX_NONE;
-        for (int32 SlotIdx = 0; SlotIdx < TargetSlots.Num(); ++SlotIdx) {
-            if (!TargetProcessed[SlotIdx] && FSoftObjectPath(TargetSlots[SlotIdx].SlotDefinition) == DefPath) {
-                FoundIndex = SlotIdx;
-                break;
-            }
+    for (int32 i = 0; i < Mapping.Num(); ++i) {
+        if (Mapping[i] != INDEX_NONE && Mapping[i] != i) {
+            ProcessSlot(Component, i, Mapping[i], InData.Slots[i], RestoredCount); // fallback (Pass 2)
         }
-
-        if (FoundIndex != INDEX_NONE) {
-            ProcessSlot(Component, i, FoundIndex, SavedSlot, RestoredCount);
-            TargetProcessed[FoundIndex] = true;
-        }
-        else {
+    }
+    for (int32 i = 0; i < Mapping.Num(); ++i) {
+        if (Mapping[i] == INDEX_NONE) {
             MismatchCount++;
             UE_LOG(MythSaveLoad, Warning, TEXT("  Slot[%d]: No matching unprocessed slot found for def %s"),
-                   i, *DefPath.ToString());
+                   i, *InData.Slots[i].SlotDefinition.ToString());
         }
     }
 

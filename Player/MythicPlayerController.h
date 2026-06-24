@@ -7,6 +7,7 @@
 #include "CommonPlayerController.h"
 #include "Itemization/InventoryProviderInterface.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
+#include "Player/Proficiency/ProficiencyComponent.h"
 #include "MythicPlayerController.generated.h"
 
 struct FTrackedDestructibleData;
@@ -17,6 +18,100 @@ class AMythicStorageContainer;
 class AMythicNPCCharacter;
 
 class UMythicCheatManager;
+
+USTRUCT(BlueprintType)
+struct FPlayerStatsSummary {
+    GENERATED_BODY()
+
+    // power stat for offense
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float Power = 0.0f;
+
+    // base damage per hit
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float DamagePerHit = 0.0f;
+
+    // attack speed multiplier
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float AttackSpeed = 0.0f;
+
+    // critical hit chance fraction
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float CritChance = 0.0f;
+
+    // critical hit damage multiplier
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float CritDamage = 0.0f;
+
+    // armor stat for damage reduction
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float Armor = 0.0f;
+
+    // dodge chance fraction
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float DodgeChance = 0.0f;
+
+    // maximum energy shield
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float MaxShield = 0.0f;
+
+    // regeneration rate of energy shield per second
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float ShieldRegenRate = 0.0f;
+
+    // regeneration rate of health per second
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float HealthRegenRate = 0.0f;
+
+    // maximum health pool
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float MaxHealth = 0.0f;
+
+    // maximum stamina pool
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float MaxStamina = 0.0f;
+
+    // regeneration rate of stamina per second
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float StaminaRegenRate = 0.0f;
+
+    // cooldown reduction fraction
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float CooldownReduction = 0.0f;
+
+    // proficiency experience bonus multiplier
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float ProficiencyXPBonus = 0.0f;
+
+    // bonus speed multiplier while sprinting
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    float BonusSprintSpeed = 0.0f;
+
+    // canonical player level derived from proficiencies
+    UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
+    int32 PlayerLevel = 0;
+};
+
+USTRUCT(BlueprintType)
+struct FMythicPendingDeploy {
+    GENERATED_BODY()
+
+    // inventory component holding the placeable item
+    UPROPERTY(BlueprintReadOnly, Category = "Placeable")
+    TWeakObjectPtr<UMythicInventoryComponent> Inventory;
+
+    // item instance of the placeable
+    UPROPERTY(BlueprintReadOnly, Category = "Placeable")
+    TWeakObjectPtr<UMythicItemInstance> Item;
+
+    // slot index in the inventory
+    UPROPERTY(BlueprintReadOnly, Category = "Placeable")
+    int32 SlotIndex = INDEX_NONE;
+
+    // world transform to spawn the placeable at
+    UPROPERTY(BlueprintReadOnly, Category = "Placeable")
+    FTransform SpawnTransform;
+};
 
 UCLASS(Config=Game)
 class AMythicPlayerController : public ACommonPlayerController, public IAbilitySystemInterface, public IInventoryProviderInterface {
@@ -62,6 +157,7 @@ public:
     virtual UMythicInventoryComponent *GetInventoryForItemType(const FGameplayTag &ItemType) const override;
 
     virtual void OnPossess(APawn *InPawn) override;
+    virtual void OnUnPossess() override;
     virtual void OnRep_PlayerState() override;
 
     // Client-side event when the player is possessed
@@ -86,11 +182,31 @@ protected:
 
 public:
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
-    const UProficiencyComponent *GetProficiencyComponent() const;
+    class UProficiencyComponent *GetProficiencyComponent() const;
 
     // The player's primary inventory component (used by the storage move RPC's identity check + UI binding).
     UFUNCTION(BlueprintCallable, Category = "Inventory")
     UMythicInventoryComponent *GetInventoryComponent() const { return InventoryComponent; }
+
+    // The player's objective/quest tracker.
+    UFUNCTION(BlueprintCallable, Category = "Objectives")
+    class UObjectiveTracker *GetObjectiveTracker() const { return ObjectiveTracker; }
+
+    // returns the canonical player level derived from proficiency progress
+    UFUNCTION(BlueprintPure, Category = "Progression")
+    int32 GetPlayerLevel() const;
+
+    // returns the progress fraction toward the next player level
+    UFUNCTION(BlueprintPure, Category = "Progression")
+    float GetPlayerLevelProgress() const;
+
+    // returns summaries of all proficiencies for UI consumption
+    UFUNCTION(BlueprintCallable, Category = "Progression")
+    TArray<FProficiencySummary> GetProficiencySummaries() const;
+
+    // aggregates combat-relevant attributes into a single struct
+    UFUNCTION(BlueprintCallable, Category = "Progression")
+    FPlayerStatsSummary GetPlayerStats() const;
 
     // ---- Conversion station RPCs (client-owned PC -> trusted sender identity) ----
     // Registers this player as an instigator of the station (range + station-use gate enforced server-side).
@@ -110,14 +226,18 @@ public:
     void ServerConversionSetAutoRepeat(AMythicConversionStation *Station, bool bRepeat);
 
     // ---- Storage container RPCs (client-owned PC -> trusted sender identity) ----
-    // Registers this player as having the container open (range-gated server-side).
-    UFUNCTION(Server, Reliable, WithValidation, Category = "Storage")
-    void ServerOpenStorageContainer(AMythicStorageContainer *Container);
-
     // Moves an item between two inventories the player is allowed to act on (own inventory <-> an open,
     // in-range container). Both directions. Server-authoritative, identity- + range- + take-rule-gated.
     UFUNCTION(Server, Reliable, WithValidation, Category = "Storage")
     void ServerMoveItemBetweenInventories(UMythicInventoryComponent *Source, int32 SourceSlot, UMythicInventoryComponent *Target, int32 TargetSlot);
+
+    // deploy the placeable item in SlotIndex of Inventory into the world
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Placeable")
+    void ServerDeployPlaceable(UMythicInventoryComponent *Inventory, int32 SlotIndex, FVector AimOrigin, FVector AimDirection);
+
+    // routes primary interaction to the server
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Interaction")
+    void ServerInteractPrimary(AActor *Interactable);
 
     // ---- NPC dialogue (client-owned PC -> server picks the contextual line from authoritative brain state) ----
     // The NPC brain's dialogue context (Faction/Role/pressure) is server-only + non-replicated, so the line MUST
@@ -178,12 +298,22 @@ public:
     UFUNCTION(Client, Reliable, Category = "Objectives")
     void ClientNotifyObjective(const FText &DisplayText, int32 Current, int32 Required, bool bCompleted, int32 StackIndex);
 
+    UFUNCTION(Client, Reliable, Category = "Objectives")
+    void ClientNotifyObjectiveResult(const FText &DisplayText, EObjectiveNotifyCategory Category, EObjectiveOfferResult OfferResult, int32 Current, int32 Required, bool bRewardSucceeded, bool bRewardDroppedNearby, int32 StackIndex);
+
     // ---- Loot pickup feedback ----
     // Float "+N <ItemName>" (or "<ItemName>" when N==1) over the player, tinted by item rarity, on a GENUINE pickup/add.
     // Server (the inventory authority add path: AddItem / PickupItem) → the owning client. RarityColor is resolved
     // server-side from UItemDefinition::GetRarityColor (single source). Mirrors ClientNotifyObjective.
     UFUNCTION(Client, Reliable, Category = "Itemization")
     void ClientNotifyLootPickup(const FText &ItemName, int32 Quantity, FLinearColor RarityColor);
+
+    // Float a durability beat over the player: broken, low warning, or repaired
+    UFUNCTION(Client, Reliable, Category = "Itemization")
+    void ClientNotifyItemDurability(const FText &ItemName, EMythicItemDurabilityBeat Beat);
+
+    // server: emit GAS.Event.Item.Acquired on player's ASC for objectives
+    void NotifyItemAcquired(const UItemDefinition *ItemDef, int32 Quantity);
 
     // ---- Companion loss feedback ----
     // Float "<Name> has left your party" (grey) / "<Name> turns on you!" (red) over the departing companion — closing
@@ -193,6 +323,10 @@ public:
 
     UFUNCTION(Client, Reliable, Category = "Party")
     void ClientNotifyCompanionBetrayed(const FText &Name, FVector Location);
+
+    // Float an amber hazard onset or grey subsidence notification over the player
+    UFUNCTION(Client, Reliable, Category = "Environment")
+    void ClientNotifyEnvironmentHazard(const FText &HazardName, bool bOnset);
 
     // ---- NPC trade (barter) ----
     // Execute one of the merchant NPC's designer-authored barter offers: server validates range + the offer +
@@ -221,6 +355,15 @@ public:
     void ClientNotifyZoneEntry(const FText &SettlementName);
 
 private:
+    // checks if the player is allowed to access the given inventory
+    bool CanPlayerAccessInventory(UMythicInventoryComponent *Inventory) const;
+
+    // handles completion of async class loading for placeable deploy
+    void HandleDeployClassLoaded(FSoftObjectPath ClassPath, FMythicPendingDeploy Pending);
+
+    // spawns the placeable actor and consumes the item
+    void FinishDeployPlaceable(UClass *DeployedClass, const FMythicPendingDeploy &Pending);
+
     // Server-side per-player poll: maps the pawn's cell -> governing settlement and fires ClientNotifyZoneEntry on a
     // change (INDEX_NONE = wilderness/none). Game thread; CopySettlementAtCell is SimulationLock-guarded (snapshot copy).
     void CheckZoneEntry();

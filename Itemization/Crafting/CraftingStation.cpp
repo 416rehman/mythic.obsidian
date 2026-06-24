@@ -5,6 +5,7 @@
 
 #include "AbilitySystemComponent.h"
 #include "CraftingComponent.h"
+#include "Engine/GameInstance.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
 

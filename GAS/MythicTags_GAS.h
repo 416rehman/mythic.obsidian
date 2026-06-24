@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "NativeGameplayTags.h"
 
@@ -6,6 +6,7 @@
 // State tags are applied to entities to indicate their current state, such as dead, in combat, etc.
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DEAD); // The entity is dead
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DYING); // The entity is dying
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DOWNED); // Co-op down state: incapacitated but revivable (bleeds out if not revived)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_INCOMBAT); // The entity was damaged recently
 
 /** Debuffs */
@@ -25,7 +26,7 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_HEALING); // The entity is healing and g
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_RAGE); // The entity is enraged and deals increased damage
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_HASTE); // The entity is hasted and moves at an increased speed
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_FORTIFY); // The entity is fortified and takes reduced damage
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_ENLIGHTEN); // The entity is enlightened and gains increased experience
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_ENLIGHTEN); // the entity is enlightened and gains increased proficiency XP
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_INVINCIBLE); // The entity is invincible and cannot be damaged
 /// Gameplay Buffs: Changes the entity's gameplay in some way i.e Conduit of Lightning turns the entity into a conduit of lightning
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_GAMEPLAY_CONDUITOFLIGHTNING); // The entity has turned into a ball of lightning and deals damage to nearby enemies
@@ -44,8 +45,6 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_ABILITY_HEAL);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_PIPELINE_DEATH_HANDLED);
 
 /** Events */
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ACTIVATE_LEVELUP);
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ACTIVATE_XPGAIN);
 // The owner has hit an entity with a hitbox - Triggered by melee attacks, if the animation HITBOX hits a target.
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_HITBOX);
 // The owner is about to damage an entity - Triggered by Damage Pipeline DamageContainer's DamageContextEffect. Use cases: Modify damage context before applying
@@ -66,6 +65,10 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_HEAL_DELIVERED);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_HEAL_RECEIVED);
 // The owner has hit a destructible object - Triggered by ApplyDamageContainerSpec if it's target data has actors that implement the IDestructible interface
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DMG_DESTRUCTIBLE);
+// A player has genuinely acquired item(s) (AddItem / PickupItem true grant). Fired server-side on the acquiring player's
+// ASC; EventMagnitude = quantity acquired, TargetTags carries the item's ItemType. Lets the generic ObjectiveTracker
+// drive non-combat "collect N <type>" objectives (the trigger-event family was combat-only before this).
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ITEM_ACQUIRED);
 
 // The owner has started an attack
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ATTACK_BEGIN);

@@ -66,8 +66,11 @@ FMythicDialogueResult FMythicDialogueSelector::SelectTemplate(
         if (Context.RecentEventSeverity >= Template.MinSeverity
             && Context.RecentEventSeverity <= Template.MaxSeverity) {
             Score += 5;
-        } else if (Template.MinSeverity > 0) {
-            continue; // Severity out of range and template requires specific range
+        } else if (TemplateConstrainsSeverity(Template.MinSeverity, Template.MaxSeverity)) {
+            // Out of range AND the template constrains severity (tightened EITHER bound). Was `MinSeverity > 0` only,
+            // which ignored a lowered MaxSeverity when MinSeverity stayed at its default 0 → a low-severity template
+            // wrongly matched high-severity events.
+            continue;
         }
 
         // ─── Moral axis filter ───
@@ -93,6 +96,11 @@ FMythicDialogueResult FMythicDialogueSelector::SelectTemplate(
     }
 
     return Result;
+}
+
+bool FMythicDialogueSelector::TemplateConstrainsSeverity(uint8 MinSeverity, uint8 MaxSeverity) {
+    // Defaults are Min=0 / Max=0xFF ("any severity"); the template constrains severity if it tightened either bound.
+    return MinSeverity > 0 || MaxSeverity < 0xFF;
 }
 
 FText FMythicDialogueSelector::ResolveVariables(
