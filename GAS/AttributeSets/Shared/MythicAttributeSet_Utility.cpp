@@ -7,10 +7,13 @@
 #include "Net/UnrealNetwork.h"
 
 UMythicAttributeSet_Utility::UMythicAttributeSet_Utility() {
-    // Baseline so stamina is usable before any data-driven init applies (otherwise Max=0 -> regen/spend no-op).
+    // baseline so stamina is usable before any data-driven init applies (otherwise max=0 -> regen/spend no-op)
     InitMaxStamina(100.0f);
     InitCurrentStamina(100.0f);
     InitStaminaRegenRate(10.0f);
+
+    // default dynamic cooldown reduction cap to 60 percent
+    InitMaxCooldownReduction(0.60f);
 }
 
 bool UMythicAttributeSet_Utility::IsReductionFractionAttribute(const FGameplayAttribute &Attribute) {
@@ -26,12 +29,49 @@ void UMythicAttributeSet_Utility::PreAttributeChange(const FGameplayAttribute &A
     else if (Attribute == GetMaxStaminaAttribute()) {
         NewValue = FMath::Max(0.0f, NewValue);
     }
-    else if (IsReductionFractionAttribute(Attribute)) {
-        // StaminaCostReduction + CooldownReduction: reduction fractions, clamped [0,1] so a buff can't push past 100%
-        // (negative would INVERT into a penalty — e.g. CooldownReduction < 0 lengthens cooldowns) and raw readers
-        // (UI/tooltips) never see out-of-range. CooldownReduction's consumer (ApplyCooldown) also clamps to [0,MaxCDR];
-        // this enforces the same invariant StaminaCostReduction already had, at the source.
+    else if (Attribute == GetCooldownReductionAttribute()) {
+        NewValue = FMath::Clamp(NewValue, 0.0f, FMath::Max(0.0f, GetMaxCooldownReduction()));
+    }
+    else if (Attribute == GetMaxCooldownReductionAttribute()) {
+        NewValue = FMath::Max(0.0f, NewValue);
+    }
+    else if (Attribute == GetStaminaCostReductionAttribute()) {
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    }
+}
+
+void UMythicAttributeSet_Utility::PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const {
+    Super::PreAttributeBaseChange(Attribute, NewValue);
+
+    if (Attribute == GetCooldownReductionAttribute()) {
+        NewValue = FMath::Clamp(NewValue, 0.0f, FMath::Max(0.0f, GetMaxCooldownReduction()));
+    }
+    else if (Attribute == GetMaxCooldownReductionAttribute()) {
+        NewValue = FMath::Max(0.0f, NewValue);
+    }
+}
+
+void UMythicAttributeSet_Utility::PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) {
+    Super::PostAttributeChange(Attribute, OldValue, NewValue);
+
+    // apply saturation curve for diminishing returns resolve to max stamina mapping
+    if (Attribute == GetResolveAttribute()) {
+        if (!bIsUpdatingMaxStamina) {
+            bIsUpdatingMaxStamina = true;
+            const float BaseMaxStaminaValue = 100.0f;
+            float ClampedResolve = FMath::Max(0.0f, NewValue);
+            float ResolveScalar = ClampedResolve / (ClampedResolve + 40.0f);
+            float MaxStaminaBonus = 150.0f * ResolveScalar;
+            SetMaxStamina(BaseMaxStaminaValue + MaxStaminaBonus);
+            bIsUpdatingMaxStamina = false;
+        }
+    }
+
+    // if max cooldown reduction drops below current cdr, pull current cdr down to the new limit
+    if (Attribute == GetMaxCooldownReductionAttribute()) {
+        if (GetCooldownReduction() > NewValue) {
+            SetCooldownReduction(NewValue);
+        }
     }
 }
 
@@ -60,26 +100,41 @@ void UMythicAttributeSet_Utility::OnRep_CurrentStamina(const FGameplayAttributeD
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, CurrentStamina, OldValue);
 }
 
-void UMythicAttributeSet_Utility::OnRep_StaminaRegenRate(const FGameplayAttributeData &OldValue) {}
+void UMythicAttributeSet_Utility::OnRep_StaminaRegenRate(const FGameplayAttributeData &OldValue) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, StaminaRegenRate, OldValue);
+}
 
-void UMythicAttributeSet_Utility::OnRep_StaminaCostReduction(const FGameplayAttributeData &OldValue) {}
+void UMythicAttributeSet_Utility::OnRep_StaminaCostReduction(const FGameplayAttributeData &OldValue) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, StaminaCostReduction, OldValue);
+}
 
-void UMythicAttributeSet_Utility::OnRep_CooldownReduction(const FGameplayAttributeData &OldValue) {}
+void UMythicAttributeSet_Utility::OnRep_CooldownReduction(const FGameplayAttributeData &OldValue) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, CooldownReduction, OldValue);
+}
 
-void UMythicAttributeSet_Utility::OnRep_ProficiencyXPBonus(const FGameplayAttributeData &OldValue) {}
+void UMythicAttributeSet_Utility::OnRep_MaxCooldownReduction(const FGameplayAttributeData &OldValue) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, MaxCooldownReduction, OldValue);
+}
 
-void UMythicAttributeSet_Utility::OnRep_BonusSprintSpeed(const FGameplayAttributeData &OldValue) {}
+void UMythicAttributeSet_Utility::OnRep_ProficiencyXPBonus(const FGameplayAttributeData &OldValue) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, ProficiencyXPBonus, OldValue);
+}
+
+void UMythicAttributeSet_Utility::OnRep_BonusSprintSpeed(const FGameplayAttributeData &OldValue) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, BonusSprintSpeed, OldValue);
+}
 
 void UMythicAttributeSet_Utility::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-    // These were declared ReplicatedUsing but never registered, so nothing replicated (stale client HUD).
+    // register the utility attributes for network replication
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, Resolve, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, MaxStamina, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, CurrentStamina, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, StaminaRegenRate, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, StaminaCostReduction, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, CooldownReduction, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, MaxCooldownReduction, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ProficiencyXPBonus, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, BonusSprintSpeed, COND_None, REPNOTIFY_Always);
 }

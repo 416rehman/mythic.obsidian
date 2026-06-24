@@ -228,6 +228,10 @@ public:
 
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
+    virtual void PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const override;
+    
+    float ScaleProficiencyXpGain(float BaseXp, const UAbilitySystemComponent *ASC) const;
+
     virtual void PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) override;
 
     static int32 GetLevel(const UAbilitySystemComponent* ASC, bool& found);

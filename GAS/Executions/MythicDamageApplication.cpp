@@ -37,8 +37,9 @@ struct FDamageApplicationStatics {
     FGameplayEffectAttributeCaptureDefinition BonusHammerDamage;
     FGameplayEffectAttributeCaptureDefinition IncreasedDamageToEnemiesUnderStatusEffects;
     FGameplayEffectAttributeCaptureDefinition BonusDamageToSuperiorEnemies;
+    FGameplayEffectAttributeCaptureDefinition OutgoingDamageMultiplier;
 
-    // ---- TARGET (victim) defensive captures. This execution runs once per target with the victim's ASC. ----
+    // target defensive captures
     FGameplayEffectAttributeCaptureDefinition Armor;
     FGameplayEffectAttributeCaptureDefinition Shield;
     FGameplayEffectAttributeCaptureDefinition DecreasedDamageFromEnemiesUnderStatusEffects;
@@ -49,6 +50,7 @@ struct FDamageApplicationStatics {
     FGameplayEffectAttributeCaptureDefinition SlowResistance;
     FGameplayEffectAttributeCaptureDefinition FreezeResistance;
     FGameplayEffectAttributeCaptureDefinition StunResistance;
+    FGameplayEffectAttributeCaptureDefinition IncomingDamageMultiplier;
 
     FDamageApplicationStatics() {
         Power = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Offense::GetPowerAttribute(), EGameplayEffectAttributeCaptureSource::Source,
@@ -75,6 +77,8 @@ struct FDamageApplicationStatics {
             UMythicAttributeSet_Offense::GetIncreasedDamageToEnemiesUnderStatusEffectsAttribute(), EGameplayEffectAttributeCaptureSource::Source, false);
         BonusDamageToSuperiorEnemies = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Offense::GetBonusDamageToSuperiorEnemiesAttribute(),
                                                                                  EGameplayEffectAttributeCaptureSource::Source, false);
+        OutgoingDamageMultiplier = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Offense::GetOutgoingDamageMultiplierAttribute(),
+                                                                             EGameplayEffectAttributeCaptureSource::Source, false);
 
         Armor = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Defense::GetArmorAttribute(), EGameplayEffectAttributeCaptureSource::Target,
                                                           false);
@@ -96,6 +100,8 @@ struct FDamageApplicationStatics {
                                                                      EGameplayEffectAttributeCaptureSource::Target, false);
         StunResistance = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Defense::GetStunResistanceAttribute(),
                                                                    EGameplayEffectAttributeCaptureSource::Target, false);
+        IncomingDamageMultiplier = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Defense::GetIncomingDamageMultiplierAttribute(),
+                                                                             EGameplayEffectAttributeCaptureSource::Target, false);
     }
 };
 
@@ -117,6 +123,7 @@ UMythicDamageApplication::UMythicDamageApplication() {
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().BonusHammerDamage);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().IncreasedDamageToEnemiesUnderStatusEffects);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().BonusDamageToSuperiorEnemies);
+    RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().OutgoingDamageMultiplier);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().Armor);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().Shield);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().DecreasedDamageFromEnemiesUnderStatusEffects);
@@ -127,6 +134,7 @@ UMythicDamageApplication::UMythicDamageApplication() {
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().SlowResistance);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().FreezeResistance);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().StunResistance);
+    RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().IncomingDamageMultiplier);
 }
 
 void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCustomExecutionParameters &ExecutionParams,
@@ -212,6 +220,15 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     float BonusDamageToSuperiorEnemies = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().BonusDamageToSuperiorEnemies, EvaluateParameters,
                                                                BonusDamageToSuperiorEnemies);
+    float OutgoingDamageMultiplier = 1.0f;
+    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().OutgoingDamageMultiplier, EvaluateParameters,
+                                                               OutgoingDamageMultiplier);
+    OutgoingDamageMultiplier = FMath::Max(0.0f, OutgoingDamageMultiplier);
+
+    float IncomingDamageMultiplier = 1.0f;
+    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().IncomingDamageMultiplier, EvaluateParameters,
+                                                               IncomingDamageMultiplier);
+    IncomingDamageMultiplier = FMath::Max(0.0f, IncomingDamageMultiplier);
 
     auto FinalDamage = FMath::Max(1.0f, Power) * FMath::RandRange(DmgPerHit, DmgPerHit * 1.5f);
     UE_LOG(Myth, Log, TEXT("DamageApplication:: Damage %f = DmgPerHit (%f - %f) * Power (%f)"), FinalDamage, DmgPerHit, DmgPerHit * 1.5f, Power);
@@ -220,13 +237,10 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         UE_LOG(Myth, Warning, TEXT("DamageApplication:: Critical hit! Damage increased by %f Percent"), CriticalHitDamage * 100.0f);
     }
 
-    // Never negative regardless of a (mis)configured DmgPerHit - make the invariant explicit, not emergent.
-    FinalDamage = FMath::Max(0.0f, FinalDamage);
+    // prevent negative damage from bad configuration
+    FinalDamage = FMath::Max(0.0f, FinalDamage * OutgoingDamageMultiplier * IncomingDamageMultiplier);
 
-    // ===== Status-tag damage modifiers (pre-mitigation) =====
-    // Source RAGE deals more, WEAKENED deals less; target TERRIFIED takes more, FORTIFY takes less. These tags came
-    // from the GE pipeline (declared with exactly these damage semantics in MythicTags_GAS.h) but were never read
-    // here. Multipliers are designer-tunable on the GameState (mirrors MinChipDamage / the armor curve).
+    // apply status tag damage modifiers based on gamestate config
     if (GS) {
         float StatusMult = 1.0f;
         if (SourceTags) {
@@ -240,41 +254,28 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         FinalDamage = FMath::Max(0.0f, FinalDamage * StatusMult);
     }
 
-    // ===== Status-effect-conditional damage modifiers (one offensive, one defensive — both key off any GAS.Debuff.*,
-    // which HasTag matches via its children). Shared parent-tag handle. Not gated on the GameState. =====
+    // apply status effect conditional damage modifiers
     static const FGameplayTag DebuffParent = FGameplayTag::RequestGameplayTag(FName("GAS.Debuff"), /*ErrorIfNotFound=*/false);
 
-    // Source's "IncreasedDamageToEnemiesUnderStatusEffects" (source Offense attr): amplify the hit when the TARGET
-    // already carries any status effect.
+    // amplify hit if target has active status effect
     if (TargetTags && IncreasedDamageToEnemiesUnderStatusEffects != 0.0f && DebuffParent.IsValid() && TargetTags->HasTag(DebuffParent)) {
         FinalDamage = FMath::Max(0.0f, FinalDamage * (1.0f + IncreasedDamageToEnemiesUnderStatusEffects));
     }
 
-    // Target's "DecreasedDamageFromEnemiesUnderStatusEffects" (defensive MIRROR, target Defense attr): a target with
-    // this stat takes LESS damage from an ATTACKER who is under any status effect (any GAS.Debuff.* on the SOURCE).
-    // Captured inline (target capture, like Armor) only when the source is actually debuffed. Clamped so a value >= 1
-    // floors damage at 0 rather than going negative.
+    // reduce incoming damage if attacker has active status effect
     if (SourceTags && DebuffParent.IsValid() && SourceTags->HasTag(DebuffParent)) {
         float DecreasedDamageFromEnemiesUnderStatusEffects = 0.0f;
         ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().DecreasedDamageFromEnemiesUnderStatusEffects,
                                                                    EvaluateParameters, DecreasedDamageFromEnemiesUnderStatusEffects);
-        // > 0 only: a NEGATIVE value must be a no-op, never an AMPLIFIER (1 - (-x) > 1). PreAttributeChange also clamps
-        // the attr to [0,1]; this guard is belt-and-suspenders against a SetNumericAttributeBase path that bypasses it.
+        // check if reduction is positive to avoid amplifying damage
         if (DecreasedDamageFromEnemiesUnderStatusEffects > 0.0f) {
             FinalDamage = FMath::Max(0.0f, FinalDamage * FMath::Max(0.0f, 1.0f - DecreasedDamageFromEnemiesUnderStatusEffects));
         }
     }
 
-    // Weapon-class damage bonus: the WIELDING weapon's class tag (Itemization.Type.Equipment.Weapon.*) was injected
-    // into the source tags by MakeDamageContainerSpec. Apply the matching captured BonusXxxDamage (source Offense
-    // attrs, captured above but previously DISCARDED — no weapon ever changed its own damage; this also revives
-    // AffixesFragment rolls of these attrs). Keyed STRICTLY off the weapon-class tags MythicTags_Inventory already
-    // defines + every weapon ItemDefinition already sets — no invented scheme. (Superior-enemy / Elite bonus stays
-    // deferred: no enemy-tier tag scheme exists to key it off.)
+    // apply weapon class damage bonus based on source weapon tag
     if (SourceTags) {
-        // A weapon has ONE class — if/else-if applies a SINGLE class bonus (a multi-class instance from a runtime
-        // transform/conversion would otherwise stack multiplicatively). All six first-class weapon tags are covered;
-        // Hammer was added in the iter-71 review (it was a defined, selectable class with no consumer = silently dead).
+        // check each weapon class to apply a single class bonus
         float WeaponMult = 1.0f;
         if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SWORD)) { WeaponMult = (1.0f + BonusSwordDamage); }
         else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_AXE)) { WeaponMult = (1.0f + BonusAxeDamage); }
@@ -288,27 +289,49 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         }
     }
 
+    // apply skill damage multiplier if incoming hit was delivered by a skill
+    if (SourceTags && BonusSkillDamage != 0.0f) {
+        if (SourceTags->HasTag(FGameplayTag::RequestGameplayTag(FName("GAS.Ability.Type.Skill"), false))) {
+            FinalDamage = FMath::Max(0.0f, FinalDamage * (1.0f + BonusSkillDamage));
+        }
+    }
+
+    // apply superior damage bonus if target matches superior tier tag
+    FGameplayTag SuperiorRoot = FGameplayTag::RequestGameplayTag(FName("AI.Tier.Superior"), false);
+    bool bIsSuperior = false;
+    if (TargetTags) {
+        for (const FGameplayTag& Tag : *TargetTags) {
+            if ((SuperiorRoot.IsValid() && Tag.MatchesTag(SuperiorRoot)) ||
+                Tag.MatchesTag(FGameplayTag::RequestGameplayTag(FName("AI.Tier.Elite"), false)) ||
+                Tag.MatchesTag(FGameplayTag::RequestGameplayTag(FName("AI.Tier.Champion"), false)) ||
+                Tag.MatchesTag(FGameplayTag::RequestGameplayTag(FName("AI.Tier.Boss"), false))) {
+                bIsSuperior = true;
+                break;
+            }
+        }
+    }
+    if (bIsSuperior && BonusDamageToSuperiorEnemies != 0.0f) {
+        FinalDamage = FMath::Max(0.0f, FinalDamage * (1.0f + BonusDamageToSuperiorEnemies));
+    }
+
     UE_LOG(Myth, Log, TEXT("DamageApplication:: Pre-mitigation damage: %f"), FinalDamage);
 
-    // ===== Defensive mitigation (per-target; captures resolve against THIS victim's ASC) =====
+    // apply defensive mitigation checks
     auto &Statics = MythicDamageApplicationStatics();
 
-    // (0) Invincible - the victim cannot be damaged at all. Negate the hit entirely (mirrors the Dodge early-return:
-    //     no damage, no shield drain, no status). Honors GAS.Buff.Invincible, declared "cannot be damaged" but never
-    //     enforced until now — any designer GE granting the tag now works.
+    // check if target is invincible to negate hit entirely
     if (TargetTags && TargetTags->HasTag(GAS_BUFF_INVINCIBLE)) {
         UE_LOG(Myth, Log, TEXT("DamageApplication:: Target INVINCIBLE - hit negated"));
         return; // no damage, no shield drain, no status
     }
 
-    // (1) Dodge - per-target roll against the victim's DodgeChance: negates the hit entirely.
+    // perform dodge roll against targets dodge chance attribute
     float DodgeChance = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.DodgeChance, EvaluateParameters, DodgeChance);
-    if (MythicCombat::RollSucceeds(DodgeChance, FMath::FRand())) { // shared boundary rule (0% never dodges, 100% always)
+    if (MythicCombat::RollSucceeds(DodgeChance, FMath::FRand())) {
         MythicContext->SetDodged(true);
         UE_LOG(Myth, Log, TEXT("DamageApplication:: Attack DODGED (chance %.2f)"), DodgeChance);
-        // Player-facing callout: the dodge negates the hit BEFORE the damage cue runs, so push a "DODGE" float to the
-        // dodging player (server-authoritative execution -> the victim's owning client; mirrors ClientShowShieldAbsorbed).
+        // show dodge floating text feedback on client
         if (const APawn *VictimPawn = TargetASC ? Cast<APawn>(TargetASC->GetAvatarActor()) : nullptr) {
             if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(VictimPawn->GetController())) {
                 PC->ClientShowDodge();
@@ -317,16 +340,13 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         return; // no damage, no shield drain, no status
     }
 
-    // (2) Resistance-gate the source-intended status flags against the victim's resistances. The surviving
-    //     flags live on THIS per-target context for the status applier to consume (status stage).
+    // roll for status effect application based on resistance attribute
     auto GateStatus = [&](const FGameplayEffectAttributeCaptureDefinition &ResistDef, bool bSourceIntent) -> bool {
         if (!bSourceIntent) {
             return false;
         }
         float Resist = 0.0f;
         ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(ResistDef, EvaluateParameters, Resist);
-        // Two-sided: a fully-resisted status (SurviveChance <= 0) must NEVER survive; an unresisted one (>= 1) ALWAYS
-        // survives. Same boundary rule as the proc/dodge rolls — shared via MythicCombat::RollSucceeds.
         const float SurviveChance = FMath::Clamp(1.0f - Resist, 0.0f, 1.0f);
         return MythicCombat::RollSucceeds(SurviveChance, FMath::FRand());
     };
@@ -336,17 +356,15 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     MythicContext->SetSlow(GateStatus(Statics.SlowResistance, MythicContext->IsSlow()));
     MythicContext->SetFreeze(GateStatus(Statics.FreezeResistance, MythicContext->IsFreeze()));
     MythicContext->SetStun(GateStatus(Statics.StunResistance, MythicContext->IsStun()));
-    // Weaken / Terrify: unresisted in v1.
 
-    // (3) Armor mitigation - reduction fraction from a GameState curve, floored so high Armor never makes a
-    //     non-zero hit unkillable.
+    // calculate armor mitigation using gamestate mitigation curve
     float Armor = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.Armor, EvaluateParameters, Armor);
     Armor = FMath::Max(0.0f, Armor);
     float MitigationFraction = 0.0f;
     if (GS) {
         if (const FRealCurve *Curve = GS->ArmorMitigationCurveRowHandle.GetCurve(TEXT("DamageApplication.Armor"))) {
-            MitigationFraction = FMath::Clamp(Curve->Eval(Armor), 0.0f, 1.0f);
+            MitigationFraction = FMath::Clamp(Curve->Eval(Armor), 0.0f, 0.85f);
         }
     }
     FinalDamage *= (1.0f - MitigationFraction);

@@ -363,23 +363,7 @@ void UProficiencyComponent::GrantCombatXP(float Amount) {
         return;
     }
 
-    // apply ProficiencyXPBonus from utility attributes (gear/buffs)
-    if (const UMythicAttributeSet_Utility *Util = ASC->GetSet<UMythicAttributeSet_Utility>()) {
-        Amount *= FMath::Max(0.0f, 1.0f + Util->GetProficiencyXPBonus());
-    }
-
-    // apply Enlighten buff bonus
-    if (ASC->HasMatchingGameplayTag(GAS_BUFF_ENLIGHTEN)) {
-        if (const AMythicGameState *GS = GetWorld() ? GetWorld()->GetGameState<AMythicGameState>() : nullptr) {
-            Amount *= FMath::Max(0.0f, 1.0f + GS->EnlightenProficiencyBonus);
-        }
-    }
-
-    if (Amount <= 0.0f) {
-        return;
-    }
-
-    // grant via attribute base value modification, which fires OnAttributeChanged for level-up processing
+    // grant via attribute base value modification, which triggers PreAttributeBaseChange and OnAttributeChanged
     const float Current = ASC->GetNumericAttributeBase(CombatProf->ProgressAttribute);
     ASC->SetNumericAttributeBase(CombatProf->ProgressAttribute, Current + Amount);
 

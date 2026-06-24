@@ -140,6 +140,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Ability")
     UMythicAbilitySystemComponent *GetMythicAbilitySystemComponentFromActorInfo() const;
 
+    // retrieve the active attack speed scaling factor clamped to a safe range
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Ability")
+    float GetClampedAttackSpeedPlayRate() const;
+
     UFUNCTION(BlueprintCallable, Category = "Mythic|Ability")
     AMythicPlayerController *GetMythicPlayerControllerFromActorInfo() const;
 

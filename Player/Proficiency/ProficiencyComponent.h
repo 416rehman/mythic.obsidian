@@ -108,6 +108,9 @@ public:
     // find the proficiency whose ProgressAttribute matches CombatProficiency
     FProficiency* FindCombatProficiency();
 
+    // check if the component is restoring loaded values
+    bool IsRestoring() const { return bIsRestoring; }
+
     // returns a summary of the proficiency at the specified index
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     FProficiencySummary GetSummary(int32 Index) const;

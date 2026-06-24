@@ -6,6 +6,8 @@
 #include "Serialization/MemoryReader.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 #include "MythicItemInstance.h"
+#include "Itemization/MythicDataAsset.h"
+#include "Itemization/MythicTags_Inventory.h"
 #include "Mythic/Mythic.h"
 #include "Mythic/Itemization/Loot/MythicLootManagerSubsystem.h"
 #include "ViewModels/InventoryVM.h"

@@ -21,6 +21,7 @@
 #include "Itemization/MythicTags_Inventory.h"
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h" // CooldownReduction (ApplyCooldown scaling)
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GameModes/GameState/MythicGameState.h"                 // MaxCooldownReduction cap
 #include "GameplayEffect.h"                                       // FGameplayEffectSpec Get/SetDuration
 #include "Engine/World.h"                                         // World->GetGameState<AMythicGameState>()
@@ -666,4 +667,16 @@ AController *UMythicGameplayAbility::GetControllerFromActorInfo() const {
 
 AMythicPlayerController *UMythicGameplayAbility::GetMythicPlayerControllerFromActorInfo() const {
     return CurrentActorInfo ? Cast<AMythicPlayerController>(CurrentActorInfo->PlayerController.Get()) : nullptr;
+}
+
+float UMythicGameplayAbility::GetClampedAttackSpeedPlayRate() const {
+    float AttackSpeedScale = 1.0f;
+    if (UAbilitySystemComponent *ASC = GetAbilitySystemComponentFromActorInfo()) {
+        if (const UMythicAttributeSet_Offense *Offense = ASC->GetSet<UMythicAttributeSet_Offense>()) {
+            AttackSpeedScale = Offense->GetAttackSpeed();
+        }
+    }
+
+    // clamp play rate within safe limits to prevent animnotify skips
+    return FMath::Clamp(AttackSpeedScale, 0.8f, 1.4f);
 }

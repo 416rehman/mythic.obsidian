@@ -100,7 +100,7 @@ protected:
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_IncreasedDamageToEnemiesUnderStatusEffects)
     FGameplayAttributeData IncreasedDamageToEnemiesUnderStatusEffects;
 
-    // Increase damage to all superior enemies (Elites, Champions, Bosses)
+    // increase damage to all superior enemies (Elites, Champions, Bosses)
     // - Minions: Lots of them, low health, low damage - i.e goblins, zombies - default pack size 5-10. Used for player to feel powerful
     // - Elites: Lead the minions, adding complexity and requiring players to prioritize targets - each elite will have a pack of minions. Used to break up flat difficulty curve
     // - Champions: Stronger than elites, used to provide a challenge to the player - each champion will have 1-3 elites (elites will have their own pack of minions). Used for pacing.
@@ -108,7 +108,13 @@ protected:
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BonusDamageToSuperiorEnemies)
     FGameplayAttributeData BonusDamageToSuperiorEnemies;
 
+    // outgoing damage multiplier
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_OutgoingDamageMultiplier)
+    FGameplayAttributeData OutgoingDamageMultiplier;
+
 public:
+    UMythicAttributeSet_Offense();
+
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, Power);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, DamagePerHit);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, AttackSpeed);
@@ -131,13 +137,12 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusHammerDamage);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, IncreasedDamageToEnemiesUnderStatusEffects);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, OutgoingDamageMultiplier);
 
-    // Clamp probability attributes to [0,1] (mirrors the Defense set's deliberate probability clamping). Multipliers
-    // (CriticalHitDamage, weapon/skill/status damage bonuses) are intentionally NOT clamped — they legitimately exceed 1.
+    // clamp probability attributes to range
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
-    // True for the chance/probability attributes (CriticalHitChance + the 8 ApplyXxxOnHitChance) — the ones that must
-    // stay in [0,1]. Pure + static so the membership decision is unit-testable. Used by PreAttributeChange.
+    // check if attribute represents a probability
     static bool IsProbabilityAttribute(const FGameplayAttribute &Attribute);
 
     UFUNCTION()
@@ -184,6 +189,8 @@ public:
     virtual void OnRep_IncreasedDamageToEnemiesUnderStatusEffects(const FGameplayAttributeData &OldIncreasedDamageToEnemiesUnderStatusEffects);
     UFUNCTION()
     virtual void OnRep_BonusDamageToSuperiorEnemies(const FGameplayAttributeData &OldBonusDamageToSuperiorEnemies);
+    UFUNCTION()
+    virtual void OnRep_OutgoingDamageMultiplier(const FGameplayAttributeData &OldOutgoingDamageMultiplier);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 };

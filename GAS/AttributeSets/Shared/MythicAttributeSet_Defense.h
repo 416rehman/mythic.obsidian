@@ -40,6 +40,30 @@ protected:
     // Reduces chance to be stunned - Cannot move or attack
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_StunResistance)
     FGameplayAttributeData StunResistance;
+    
+    // Tracks current buildup towards Burn
+    UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_BurnBuildup)
+    FGameplayAttributeData BurnBuildup;
+    
+    // Tracks current buildup towards Bleed
+    UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_BleedBuildup)
+    FGameplayAttributeData BleedBuildup;
+    
+    // Tracks current buildup towards Poison
+    UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_PoisonBuildup)
+    FGameplayAttributeData PoisonBuildup;
+    
+    // Tracks current buildup towards Slow
+    UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_SlowBuildup)
+    FGameplayAttributeData SlowBuildup;
+    
+    // Tracks current buildup towards Freeze
+    UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_FreezeBuildup)
+    FGameplayAttributeData FreezeBuildup;
+    
+    // Tracks current buildup towards Stun
+    UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_StunBuildup)
+    FGameplayAttributeData StunBuildup;
 
     // Reduces incoming damage from enemies under status effects
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_DecreasedDamageFromEnemiesUnderStatusEffects)
@@ -70,7 +94,13 @@ protected:
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_LifePerKill)
     FGameplayAttributeData LifePerKill;
 
+    // incoming damage multiplier
+    UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_IncomingDamageMultiplier)
+    FGameplayAttributeData IncomingDamageMultiplier;
+
 public:
+    UMythicAttributeSet_Defense();
+
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, Armor);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, DodgeChance);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, BurnResistance);
@@ -79,6 +109,12 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, SlowResistance);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, FreezeResistance);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, StunResistance);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, BurnBuildup);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, BleedBuildup);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, PoisonBuildup);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, SlowBuildup);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, FreezeBuildup);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, StunBuildup);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, DecreasedDamageFromEnemiesUnderStatusEffects);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, HealthRegenRate);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, MaxShield);
@@ -86,8 +122,9 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, ShieldRegenRate);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, LifePerHit);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, LifePerKill);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, IncomingDamageMultiplier);
 
-    // Replication
+    // replication
     UFUNCTION()
     virtual void OnRep_Armor(const FGameplayAttributeData &OldArmor);
     UFUNCTION()
@@ -105,6 +142,18 @@ public:
     UFUNCTION()
     virtual void OnRep_StunResistance(const FGameplayAttributeData &OldStunResistance);
     UFUNCTION()
+    virtual void OnRep_BurnBuildup(const FGameplayAttributeData &OldBurnBuildup);
+    UFUNCTION()
+    virtual void OnRep_BleedBuildup(const FGameplayAttributeData &OldBleedBuildup);
+    UFUNCTION()
+    virtual void OnRep_PoisonBuildup(const FGameplayAttributeData &OldPoisonBuildup);
+    UFUNCTION()
+    virtual void OnRep_SlowBuildup(const FGameplayAttributeData &OldSlowBuildup);
+    UFUNCTION()
+    virtual void OnRep_FreezeBuildup(const FGameplayAttributeData &OldFreezeBuildup);
+    UFUNCTION()
+    virtual void OnRep_StunBuildup(const FGameplayAttributeData &OldStunBuildup);
+    UFUNCTION()
     virtual void OnRep_DecreasedDamageFromEnemiesUnderStatusEffects(const FGameplayAttributeData &OldDecreasedDamageFromEnemiesUnderStatusEffects);
     UFUNCTION()
     virtual void OnRep_HealthRegenRate(const FGameplayAttributeData &OldHealthRegenRate);
@@ -118,16 +167,18 @@ public:
     virtual void OnRep_LifePerHit(const FGameplayAttributeData &OldLifePerHit);
     UFUNCTION()
     virtual void OnRep_LifePerKill(const FGameplayAttributeData &OldLifePerKill);
+    UFUNCTION()
+    virtual void OnRep_IncomingDamageMultiplier(const FGameplayAttributeData &OldIncomingDamageMultiplier);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
-    // Clamp Shield to [0, MaxShield], and Armor / DodgeChance / resistances to >= 0.
+    // clamp shield to range, and armor, dodge chance, and resistances to non-negative
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
-    // Re-clamp Shield when MaxShield drops below current Shield.
+
+    // reclamp shield when max shield drops below current shield
     virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) override;
 
 private:
-    // The Shield value BEFORE the most recent change (cached in PreAttributeChange) — lets PostGameplayEffectExecute
-    // compute the EXACT amount of damage the shield absorbed (post-clamp) before firing the feedback RPC.
+    // shield value before changes cached in PreAttributeChange to compute exact damage absorbed
     float ShieldBeforeChange = 0.0f;
 };

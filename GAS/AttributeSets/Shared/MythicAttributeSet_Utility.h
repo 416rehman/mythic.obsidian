@@ -39,6 +39,10 @@ protected:
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_CooldownReduction)
     FGameplayAttributeData CooldownReduction;
 
+    // Maximum cap for cooldown reduction, defaults to 0.60 (60%)
+    UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_MaxCooldownReduction)
+    FGameplayAttributeData MaxCooldownReduction;
+
     // bonus proficiency XP gained from all sources
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_ProficiencyXPBonus)
     FGameplayAttributeData ProficiencyXPBonus;
@@ -54,6 +58,10 @@ public:
     // (StaminaCostReduction + CooldownReduction) to [0, 1].
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
+    virtual void PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const override;
+
+    virtual void PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) override;
+
     // Re-clamp CurrentStamina down when a GE changes MaxStamina (PreAttributeChange fires only for the written attr).
     virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) override;
 
@@ -68,6 +76,7 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, StaminaRegenRate)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, StaminaCostReduction)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, CooldownReduction)
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, MaxCooldownReduction)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, ProficiencyXPBonus)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, BonusSprintSpeed)
 
@@ -85,9 +94,15 @@ public:
     UFUNCTION()
     virtual void OnRep_CooldownReduction(const FGameplayAttributeData &OldValue);
     UFUNCTION()
+    virtual void OnRep_MaxCooldownReduction(const FGameplayAttributeData &OldValue);
+    UFUNCTION()
     virtual void OnRep_ProficiencyXPBonus(const FGameplayAttributeData &OldValue);
     UFUNCTION()
     virtual void OnRep_BonusSprintSpeed(const FGameplayAttributeData &OldValue);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
+
+private:
+    // guard to prevent infinite reentrancy when updating stamina
+    mutable bool bIsUpdatingMaxStamina = false;
 };

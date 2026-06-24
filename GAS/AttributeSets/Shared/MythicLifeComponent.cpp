@@ -110,10 +110,13 @@ void UMythicLifeComponent::InitializeWithAbilitySystem(UAbilitySystemComponent *
             BaseWalkSpeed = Move->MaxWalkSpeed;
         }
     }
-    const FGameplayTag MovementAffectingTags[] = {GAS_DEBUFF_STUNNED, GAS_DEBUFF_FROZEN, GAS_DEBUFF_SLOWED, GAS_BUFF_HASTE};
+    const FGameplayTag SprintTag = FGameplayTag::RequestGameplayTag(FName("GAS.State.Sprinting"), false);
+    const FGameplayTag MovementAffectingTags[] = {GAS_DEBUFF_STUNNED, GAS_DEBUFF_FROZEN, GAS_DEBUFF_SLOWED, GAS_BUFF_HASTE, SprintTag};
     for (const FGameplayTag &MoveTag : MovementAffectingTags) {
-        AbilitySystemComponent->RegisterGameplayTagEvent(MoveTag, EGameplayTagEventType::NewOrRemoved).AddUObject(
-            this, &ThisClass::HandleCrowdControlTagChanged);
+        if (MoveTag.IsValid()) {
+            AbilitySystemComponent->RegisterGameplayTagEvent(MoveTag, EGameplayTagEventType::NewOrRemoved).AddUObject(
+                this, &ThisClass::HandleCrowdControlTagChanged);
+        }
     }
 
     // Encumbrance: recompute move speed when carried weight changes, not only on CC events. This init runs post-
@@ -200,9 +203,12 @@ void UMythicLifeComponent::UninitializeFromAbilitySystem() {
     if (AbilitySystemComponent) {
         // MUST mirror the registration array in InitializeWithAbilitySystem (Stun/Frozen/Slowed + Haste). A tag missing
         // here leaks a stale HandleCrowdControlTagChanged binding on the PERSISTENT PlayerState ASC across pawn reuse.
-        const FGameplayTag MovementAffectingTags[] = {GAS_DEBUFF_STUNNED, GAS_DEBUFF_FROZEN, GAS_DEBUFF_SLOWED, GAS_BUFF_HASTE};
+        const FGameplayTag SprintTag = FGameplayTag::RequestGameplayTag(FName("GAS.State.Sprinting"), false);
+        const FGameplayTag MovementAffectingTags[] = {GAS_DEBUFF_STUNNED, GAS_DEBUFF_FROZEN, GAS_DEBUFF_SLOWED, GAS_BUFF_HASTE, SprintTag};
         for (const FGameplayTag &MoveTag : MovementAffectingTags) {
-            AbilitySystemComponent->RegisterGameplayTagEvent(MoveTag, EGameplayTagEventType::NewOrRemoved).RemoveAll(this);
+            if (MoveTag.IsValid()) {
+                AbilitySystemComponent->RegisterGameplayTagEvent(MoveTag, EGameplayTagEventType::NewOrRemoved).RemoveAll(this);
+            }
         }
     }
 
@@ -607,8 +613,7 @@ void UMythicLifeComponent::ReevaluateCrowdControl() {
     if (Move->MovementMode == MOVE_None) {
         Move->SetMovementMode(MOVE_Walking);
     }
-    // Slow (GAS.Debuff.Slowed) and Haste (GAS.Buff.Haste) compose cleanly as multipliers on the captured base speed —
-    // Haste was a declared "increased speed" buff with zero movement integration until now.
+    // slow and haste compose cleanly as multipliers on the captured base speed
     const bool bSlowed = AbilitySystemComponent->HasMatchingGameplayTag(GAS_DEBUFF_SLOWED);
     const bool bHasted = AbilitySystemComponent->HasMatchingGameplayTag(GAS_BUFF_HASTE);
     float SpeedScale = 1.0f;
@@ -618,8 +623,16 @@ void UMythicLifeComponent::ReevaluateCrowdControl() {
     if (bHasted) {
         SpeedScale *= HasteMultiplier;
     }
-    // Encumbrance: an over-capacity carry load composes as one more multiplier on the captured base, stacking with
-    // Slow/Haste. Default-OFF (bEncumbranceEnabled false → 1.0 → byte-identical to before).
+
+    // apply sprinting speed scaling factor if active
+    const FGameplayTag SprintTag = FGameplayTag::RequestGameplayTag(FName("GAS.State.Sprinting"), false);
+    if (SprintTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(SprintTag)) {
+        if (const UMythicAttributeSet_Utility *Util = AbilitySystemComponent->GetSet<UMythicAttributeSet_Utility>()) {
+            SpeedScale *= (1.0f + Util->GetBonusSprintSpeed());
+        }
+    }
+
+    // encumbrance: an over-capacity carry load composes as one more multiplier on the captured base, stacking with slow/haste
     SpeedScale *= ComputeEncumbranceSpeedScale();
     Move->MaxWalkSpeed = BaseWalkSpeed * SpeedScale;
 }

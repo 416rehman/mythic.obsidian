@@ -5,6 +5,11 @@
 
 #include "Net/UnrealNetwork.h"
 
+UMythicAttributeSet_Offense::UMythicAttributeSet_Offense() {
+    // initialize outgoing damage multiplier to standard scale
+    InitOutgoingDamageMultiplier(1.0f);
+}
+
 bool UMythicAttributeSet_Offense::IsProbabilityAttribute(const FGameplayAttribute &Attribute) {
     return Attribute == GetCriticalHitChanceAttribute()
         || Attribute == GetApplyBurnOnHitChanceAttribute()
@@ -20,9 +25,7 @@ bool UMythicAttributeSet_Offense::IsProbabilityAttribute(const FGameplayAttribut
 void UMythicAttributeSet_Offense::PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) {
     Super::PreAttributeChange(Attribute, NewValue);
 
-    // Probabilities are fractions: clamp to [0,1] so stacked buffs can't push a crit/proc chance past 100% (the damage
-    // rolls treat anything >1 as "always" anyway, and raw values feed UI/tooltips) and a negative can't underflow.
-    // Multipliers (crit damage, weapon/skill/status bonuses) are NOT clamped — they may exceed 1 by design.
+    // probabilities are fractions, clamp to range so stacked buffs cannot push past 100 percent
     if (IsProbabilityAttribute(Attribute)) {
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     }
@@ -118,12 +121,14 @@ void UMythicAttributeSet_Offense::OnRep_BonusDamageToSuperiorEnemies(const FGame
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies, OldBonusDamageToSuperiorEnemies);
 }
 
-/// ----------------
-/// Replication
-/// ----------------
+void UMythicAttributeSet_Offense::OnRep_OutgoingDamageMultiplier(const FGameplayAttributeData &OldOutgoingDamageMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, OutgoingDamageMultiplier, OldOutgoingDamageMultiplier);
+}
+
 void UMythicAttributeSet_Offense::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
+    // register the offensive attributes for replication
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, Power, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, DamagePerHit, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, AttackSpeed, COND_None, REPNOTIFY_Always);
@@ -147,4 +152,5 @@ void UMythicAttributeSet_Offense::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, IncreasedDamageToEnemiesUnderStatusEffects, COND_None,
                                    REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, OutgoingDamageMultiplier, COND_None, REPNOTIFY_Always);
 }

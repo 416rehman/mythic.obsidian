@@ -4,6 +4,11 @@
 #include "Mythic.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "Net/UnrealNetwork.h"
+#include "GAS/MythicTags_GAS.h"
+#include "GameModes/GameState/MythicGameState.h"
+#include "MythicAttributeSet_Utility.h"
+#include "Player/MythicPlayerController.h"
+#include "Player/Proficiency/ProficiencyComponent.h"
 
 void UMythicAttributeSet_Proficiencies::OnRep_CombatProficiency(const FGameplayAttributeData &OldValue) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Proficiencies, CombatProficiency, OldValue);
@@ -113,44 +118,45 @@ void UMythicAttributeSet_Proficiencies::OnRep_OverallXpMax(const FGameplayAttrib
 void UMythicAttributeSet_Proficiencies::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CombatProficiency, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CombatProficiencyMax, COND_None, REPNOTIFY_Always);
+    // register proficiency attributes for owner only replication to prevent client hacking
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CombatProficiency, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CombatProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, WoodcuttingProficiency, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, WoodcuttingProficiencyMax, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, WoodcuttingProficiency, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, WoodcuttingProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, MiningProficiency, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, MiningProficiencyMax, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, MiningProficiency, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, MiningProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, ConstructionProficiency, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, ConstructionProficiencyMax, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, ConstructionProficiency, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, ConstructionProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, TradingProficiency, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, TradingProficiencyMax, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, TradingProficiency, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, TradingProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, HuntingProficiency, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, HuntingProficiencyMax, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, HuntingProficiency, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, HuntingProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, FishingProficiency, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, FishingProficiencyMax, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, FishingProficiency, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, FishingProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, FarmingProficiency, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, FarmingProficiencyMax, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, FarmingProficiency, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, FarmingProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, HarvestingProficiency, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, HarvestingProficiencyMax, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, HarvestingProficiency, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, HarvestingProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CraftingProficiency, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CraftingProficiencyMax, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CraftingProficiency, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CraftingProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, AlchemyProficiency, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, AlchemyProficiencyMax, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, AlchemyProficiency, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, AlchemyProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CookingProficiency, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CookingProficiencyMax, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CookingProficiency, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CookingProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, OverallXp, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, OverallXpMax, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, OverallXp, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, OverallXpMax, COND_OwnerOnly, REPNOTIFY_Always);
 }
 
 float UMythicAttributeSet_Proficiencies::GetMaxValueForAttribute(const FGameplayAttribute &Attribute) {
@@ -187,33 +193,105 @@ float UMythicAttributeSet_Proficiencies::GetMaxValueForAttribute(const FGameplay
 void UMythicAttributeSet_Proficiencies::PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) {
     Super::PreAttributeChange(Attribute, NewValue);
 
-    // Don't clamp the calculated OverallXp attribute - it's calculated, not directly set
+    // skip overall level attributes as they are calculated
     if (Attribute == GetOverallXpAttribute()) {
         return;
     }
 
-    // Don't clamp max attributes - they define the limits
+    // prevent negative max values
     if (Attribute.GetName().EndsWith(TEXT("Max"))) {
-        NewValue = FMath::Max(NewValue, 0.0f); // Just ensure it's not negative
+        NewValue = FMath::Max(NewValue, 0.0f);
         return;
     }
 
-    // Clamp regular proficiency attributes to their max values
+    // clamp regular proficiency attributes to their max values
     float MaxValue = GetMaxValueForAttribute(Attribute);
     if (MaxValue > 0.0f) {
         NewValue = FMath::Clamp(NewValue, 0.0f, MaxValue);
     }
 }
 
+void UMythicAttributeSet_Proficiencies::PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const {
+    Super::PreAttributeBaseChange(Attribute, NewValue);
+
+    // skip overall level and max attributes as they do not receive direct progression xp
+    if (Attribute == GetOverallXpAttribute() || Attribute == GetOverallXpMaxAttribute() || Attribute.GetName().EndsWith(TEXT("Max"))) {
+        return;
+    }
+
+    // check if the proficiency component is currently restoring loaded values
+    const UAbilitySystemComponent *ASC = GetOwningAbilitySystemComponent();
+    if (ASC) {
+        AMythicPlayerController *MythicPC = nullptr;
+        if (AActor *OwnerActor = ASC->GetOwnerActor()) {
+            if (APawn *Pawn = Cast<APawn>(OwnerActor)) {
+                MythicPC = Cast<AMythicPlayerController>(Pawn->GetController());
+            }
+            else if (APlayerState *PS = Cast<APlayerState>(OwnerActor)) {
+                MythicPC = Cast<AMythicPlayerController>(PS->GetPlayerController());
+            }
+        }
+        if (!MythicPC) {
+            if (APawn *Avatar = Cast<APawn>(ASC->GetAvatarActor())) {
+                MythicPC = Cast<AMythicPlayerController>(Avatar->GetController());
+            }
+        }
+        if (MythicPC) {
+            if (const UProficiencyComponent *ProfComp = MythicPC->GetProficiencyComponent()) {
+                if (ProfComp->IsRestoring()) {
+                    return;
+                }
+            }
+        }
+    }
+
+    const float OldValue = Attribute.GetNumericValue(this);
+    const float Delta = NewValue - OldValue;
+    
+    auto ScaledDelta= ScaleProficiencyXpGain(Delta, GetOwningAbilitySystemComponent());
+    
+    NewValue = OldValue + ScaledDelta;
+}
+
+float UMythicAttributeSet_Proficiencies::ScaleProficiencyXpGain(
+    float BaseXp,
+    const UAbilitySystemComponent* ASC) const
+{
+    if (BaseXp <= 0.0f || !ASC)
+    {
+        return BaseXp;
+    }
+
+    float Multiplier = 1.0f;
+
+    if (const UMythicAttributeSet_Utility* Util = ASC->GetSet<UMythicAttributeSet_Utility>())
+    {
+        Multiplier += Util->GetProficiencyXPBonus();
+    }
+
+    if (ASC->HasMatchingGameplayTag(GAS_BUFF_ENLIGHTEN))
+    {
+        if (const UWorld* World = GetWorld())
+        {
+            if (const AMythicGameState* GS = World->GetGameState<AMythicGameState>())
+            {
+                Multiplier += GS->EnlightenProficiencyBonus;
+            }
+        }
+    }
+
+    return BaseXp * FMath::Max(0.0f, Multiplier);
+}
+
 void UMythicAttributeSet_Proficiencies::PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) {
     Super::PostAttributeChange(Attribute, OldValue, NewValue);
 
-    // If the attribute name ends with Max, update the OverallXpMax
+    // if the attribute name ends with Max, update OverallXpMax
     if (Attribute.GetName().EndsWith(TEXT("Max")) && Attribute != GetOverallXpMaxAttribute()) {
         SetOverallXpMax(CalculateOverallXpMax());
     }
     else {
-        // Otherwise, update the OverallXp
+        // otherwise, update OverallXp
         if (Attribute != GetOverallXpAttribute()) {
             auto OverallLevel = CalculateOverallXp();
             SetOverallXp(OverallLevel);
