@@ -11,7 +11,7 @@
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/MythicTags_GAS.h" // GAS_EVENT_ITEM_ACQUIRED (collect-objective event)
 #include "Interfaces/OnlineIdentityInterface.h"
-#include "Itemization/Crafting/CraftingComponent.h"
+
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Conversion/MythicConversionStation.h"
 #include "Itemization/Conversion/ConversionStationComponent.h"
@@ -60,10 +60,6 @@ AMythicPlayerController::AMythicPlayerController() {
     // Create the Inventory Components
     InventoryComponent = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("InventoryComponent"));
     InventoryComponent->SetIsReplicated(true);
-
-    // Create the Crafting Component
-    CraftingComponent = CreateDefaultSubobject<UCraftingComponent>(TEXT("CraftingComponent"));
-    CraftingComponent->SetIsReplicated(true);
 
     // Create the Objective/Quest Tracker (replicates owner-only; binds to GAS kill events server-side).
     ObjectiveTracker = CreateDefaultSubobject<UObjectiveTracker>(TEXT("ObjectiveTracker"));

@@ -109,8 +109,4 @@ protected:
     // tracks client-side spawned skeletal mesh components for active equipment slots
     UPROPERTY(Transient)
     TMap<EInventorySlotType, TObjectPtr<USkeletalMeshComponent>> EquippedVisualMeshes;
-
-    // tracks client-side spawned skeletal mesh components for active equipment slots
-    UPROPERTY(Transient)
-    TMap<EInventorySlotType, TObjectPtr<USkeletalMeshComponent>> EquippedVisualMeshes;
 };

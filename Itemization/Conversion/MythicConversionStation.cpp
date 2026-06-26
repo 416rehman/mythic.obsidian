@@ -12,6 +12,10 @@
 AMythicConversionStation::AMythicConversionStation() {
     PrimaryActorTick.bCanEverTick = false;
     bReplicates = true;
+    // Item-instance subobjects replicate through the registered-subobject list (matches PlayerController /
+    // GameState / StorageContainer). Required so UMythicInventoryComponent::SetItemInSlotInternal ->
+    // UMythicReplicatedObject::SetOwner(UActorComponent*) doesn't trip its IsUsingRegisteredSubObjectList ensure.
+    bReplicateUsingRegisteredSubObjectList = true;
     // Far players should not receive job / fuel deltas.
     SetNetCullDistanceSquared(FMath::Square(4000.f));
 
@@ -44,6 +48,10 @@ void AMythicConversionStation::BeginPlay() {
     Super::BeginPlay();
     
     SetupLocalViewModel();
+    if (StationViewModel) {
+        // Initialize early so world-space UI (like fire particles/progress bars) works without needing to interact first
+        StationViewModel->InitializeForStation(ConversionComponent, nullptr);
+    }
 }
 
 AController *AMythicConversionStation::ResolveController(AActor *Interactor) {
@@ -75,7 +83,8 @@ void AMythicConversionStation::OnPrimaryInteract_Implementation(AActor *Interact
     // Blueprint push the station widget.
     if (PC->IsLocalController()) {
         PC->ServerOpenConversionStation(this);
-        this->StationViewModel->InitializeForStation(this->ConversionComponent, PC);
+        // Re-evaluate recipes using the specific player's inventory capabilities
+        this->StationViewModel->RefreshForInteractor(PC);
         OnStationOpened(PC);
     }
 }

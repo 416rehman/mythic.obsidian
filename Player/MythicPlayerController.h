@@ -126,10 +126,6 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
     class UMythicInventoryComponent *InventoryComponent;
 
-    // Crafting Component
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crafting")
-    class UCraftingComponent *CraftingComponent;
-
     // Per-player quest/objective tracker (subscribes to GAS kill events, grants rewards on completion).
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Objectives")
     class UObjectiveTracker *ObjectiveTracker;

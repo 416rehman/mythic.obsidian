@@ -32,6 +32,8 @@ class MYTHIC_API UConversionIngredientVM : public UMVVMViewModelBase {
     bool Consumed = true;
     UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     FText TooltipName;
+    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    FText HaveNeedRichText;
 
 public:
     void SetIcon(UTexture2D *In);
@@ -46,6 +48,8 @@ public:
     bool GetConsumed() const { return Consumed; }
     void SetTooltipName(FText In);
     FText GetTooltipName() const { return TooltipName; }
+    void SetHaveNeedRichText(FText In);
+    FText GetHaveNeedRichText() const { return HaveNeedRichText; }
 };
 
 /** One output row of a recipe. */
@@ -235,6 +239,9 @@ public:
 
     UFUNCTION(BlueprintCallable, Category="Conversion")
     void InitializeForStation(UConversionStationComponent *Component, AController *Interactor);
+
+    UFUNCTION(BlueprintCallable, Category="Conversion")
+    void RefreshForInteractor(AController *Interactor);
 
     UFUNCTION(BlueprintCallable, Category="Conversion")
     void SelectRecipe(FGameplayTag RecipeId);

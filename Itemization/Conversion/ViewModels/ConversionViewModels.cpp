@@ -78,6 +78,10 @@ void UConversionIngredientVM::SetTooltipName(FText In) {
     if (UE_MVVM_SET_PROPERTY_VALUE(TooltipName, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(TooltipName); }
 }
 
+void UConversionIngredientVM::SetHaveNeedRichText(FText In) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(HaveNeedRichText, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HaveNeedRichText); }
+}
+
 // ==================== UConversionOutputVM ====================
 void UConversionOutputVM::SetIcon(UTexture2D *In) { if (UE_MVVM_SET_PROPERTY_VALUE(Icon, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Icon); } }
 void UConversionOutputVM::SetQuantity(int32 In) { if (UE_MVVM_SET_PROPERTY_VALUE(Quantity, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Quantity); } }
@@ -153,6 +157,11 @@ void UConversionRecipeVM::RefreshFor(UConversionRecipe *Recipe, UConversionStati
         VM->SetHaveCount(Have);
         VM->SetConsumed(Ing.bConsumed);
         VM->SetSufficient(Have >= Ing.RequiredAmount);
+
+        FString ColorTag = (Have >= Ing.RequiredAmount) ? TEXT("Pos") : TEXT("Neg");
+        FText RichText = FText::FromString(FString::Printf(TEXT("<%s>%d</> / %d"), *ColorTag, Have, Ing.RequiredAmount));
+        VM->SetHaveNeedRichText(RichText);
+
         if (Ing.MatchMode == EConversionMatchMode::ExactItem && !Ing.ExactItem.IsNull()) {
             if (UItemDefinition *Def = Ing.ExactItem.LoadSynchronous()) {
                 VM->SetIcon(LoadIcon(Def->Icon2d));
@@ -304,11 +313,16 @@ void UConversionStationVM::InitializeForStation(UConversionStationComponent *Com
 
     RebuildJobs();
     HandleFuelChanged();
-
+    
     if (!TickerHandle.IsValid()) {
         TickerHandle = FTSTicker::GetCoreTicker().AddTicker(
             FTickerDelegate::CreateUObject(this, &UConversionStationVM::TickProgress), 0.0f);
     }
+}
+
+void UConversionStationVM::RefreshForInteractor(AController *Interactor) {
+    InteractorController = Interactor;
+    RebuildRecipes();
 }
 
 void UConversionStationVM::HandleRecipesReady() {
