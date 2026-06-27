@@ -2,8 +2,10 @@
 
 #include "World/LivingWorld/LivingWorldSubsystem.h"
 #include "AI/NPCs/MythicNPCCharacter.h"
+#include "AI/Creatures/MythicCreatureCharacter.h"
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
+#include "World/LivingWorld/MythicTags_LivingWorld.h"
 #include "World/LivingWorld/CausalFabric/CausalFabric.h"
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
@@ -12,6 +14,7 @@
 #include "World/LivingWorld/Social/SocialGraph.h"
 #include "World/LivingWorld/Simulation/SchemeEngine.h"
 #include "World/LivingWorld/Persistence/PersistentNPCRegistry.h"
+#include "World/LivingWorld/Spawn/DesignerSpawnerRegistry.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "AI/Party/PartySubsystem.h"
 #include "World/LivingWorld/LivingWorldReplication.h"
@@ -55,9 +58,42 @@ void UMythicLivingWorldSubsystem::Initialize(FSubsystemCollectionBase &Collectio
     }
     else {
         StartSimulation();
+
+        // Pre-warm the embodiment actor pool (server-only) so the first town embodies without a cold-spawn hitch.
+        // Behind the loading screen at init; no-op if pooling is disabled.
+        WarmEmbodimentPools();
     }
 
     UE_LOG(LogMythLivingWorld, Log, TEXT("Living World Subsystem initialized successfully."));
+}
+
+void UMythicLivingWorldSubsystem::WarmEmbodimentPools() {
+    if (!Settings || !Settings->bEnableEmbodimentPooling || Settings->EmbodimentPoolWarmCount <= 0) {
+        return;
+    }
+
+    // Resolve the concrete humanoid class the same way the ActorSpawnProcessor does: the designer's EmbodiedNPCClass
+    // soft class wins, else the bare C++ AMythicNPCCharacter. (The processor's SpawnActorClass override is processor-
+    // local and not visible here; the settings soft class + C++ default cover every shipped configuration and the
+    // pool is keyed by concrete class anyway, so a processor that resolved to a different class simply cold-spawns the
+    // first one — correct, just unwarmed.)
+    UClass *HumanoidClass = AMythicNPCCharacter::StaticClass();
+    if (!Settings->EmbodiedNPCClass.IsNull()) {
+        if (UClass *Loaded = Settings->EmbodiedNPCClass.LoadSynchronous()) {
+            HumanoidClass = Loaded;
+        }
+    }
+    WarmEmbodimentPool(HumanoidClass, Settings->EmbodimentPoolWarmCount);
+
+    // Resolve the concrete creature class: EmbodiedCreatureClass soft class wins, else the bare C++ class. A SET-but-
+    // unloadable soft class means the designer wants creatures MASS-only (no actor) — warm nothing in that case.
+    UClass *CreatureClass = AMythicCreatureCharacter::StaticClass();
+    if (!Settings->EmbodiedCreatureClass.IsNull()) {
+        CreatureClass = Settings->EmbodiedCreatureClass.LoadSynchronous(); // may be null => MASS-only, skip warming.
+    }
+    if (CreatureClass) {
+        WarmEmbodimentPool(CreatureClass, Settings->EmbodimentPoolWarmCount);
+    }
 }
 
 void UMythicLivingWorldSubsystem::Deinitialize() {
@@ -104,6 +140,104 @@ AMythicNPCCharacter *UMythicLivingWorldSubsystem::FindEmbodiedActor(FMassEntityH
         return Found->Get();
     }
     return nullptr;
+}
+
+// ─── Embodiment actor pool ───────────────────────────────────────────────────
+// Game-thread only (the spawn/despawn processors are bRequiresGameThreadExecution). No lock. Class-keyed so a creature
+// class and a humanoid class never share a bucket — the ActorSpawnProcessor's two-query routing is preserved here.
+
+AMythicNPCCharacter *UMythicLivingWorldSubsystem::AcquireEmbodiedActor(UClass *ActorClass, const FVector &Loc, const FRotator &Rot) {
+    if (!ActorClass) {
+        return nullptr;
+    }
+    UWorld *World = GetWorld();
+    if (!World) {
+        return nullptr;
+    }
+
+    const bool bPoolingOn = Settings && Settings->bEnableEmbodimentPooling && Settings->EmbodimentPoolMaxPerClass > 0;
+
+    // Try the free list first (only when pooling is on). Pop from the back (cheap, order-irrelevant) and skip any
+    // weak entry that died while parked (level teardown / GC of a stale class bucket).
+    if (bPoolingOn) {
+        if (TArray<TWeakObjectPtr<AMythicNPCCharacter>> *Bucket = EmbodimentPool.Find(ActorClass)) {
+            while (Bucket->Num() > 0) {
+                TWeakObjectPtr<AMythicNPCCharacter> Weak = Bucket->Pop(EAllowShrinking::No);
+                AMythicNPCCharacter *Reused = Weak.Get();
+                if (!IsValid(Reused)) {
+                    continue; // parked actor was destroyed out from under the pool — drop it.
+                }
+                // Un-park: place, reveal, re-enable collision, then run the locked wake re-arm. SweepNoTest because the
+                // placement service already validated this transform as non-overlapping (the caller's FindValidSpawn).
+                Reused->SetActorLocationAndRotation(Loc, Rot, /*bSweep=*/false, nullptr, ETeleportType::TeleportPhysics);
+                Reused->SetActorHiddenInGame(false);
+                Reused->SetActorEnableCollision(true);
+                Reused->WakeFromPool();
+                return Reused;
+            }
+        }
+    }
+
+    // Cold miss (or pooling disabled): spawn a fresh actor. DeferConstruction is NOT needed — InitializeFromMassEntity
+    // runs after this returns, exactly as the original raw-spawn path did.
+    FActorSpawnParameters SpawnInfo;
+    SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    return World->SpawnActor<AMythicNPCCharacter>(ActorClass, Loc, Rot, SpawnInfo);
+}
+
+void UMythicLivingWorldSubsystem::ReleaseEmbodiedActor(FMassEntityHandle Entity, AMythicNPCCharacter *Actor) {
+    // Clear the reverse link FIRST — a pool-return parks the actor instead of destroying it, so the brain's
+    // EndPlay->UnregisterEmbodiedActor path (the usual cleanup) never fires. Always do this even for a null/dead actor
+    // so a stale key can't linger. (Calling Unregister here makes the ActorSpawnProcessor's own standalone Unregister
+    // redundant; the processor step removes it to avoid a double-unregister — harmless, but the spec calls for one sink.)
+    UnregisterEmbodiedActor(Entity);
+
+    if (!IsValid(Actor)) {
+        return; // idempotent on a null / already-pending-kill actor.
+    }
+
+    const bool bPoolingOn = Settings && Settings->bEnableEmbodimentPooling && Settings->EmbodimentPoolMaxPerClass > 0;
+    if (bPoolingOn) {
+        TArray<TWeakObjectPtr<AMythicNPCCharacter>> &Bucket = EmbodimentPool.FindOrAdd(Actor->GetClass());
+        if (Bucket.Num() < Settings->EmbodimentPoolMaxPerClass) {
+            Actor->SleepToPool(); // full teardown + park (hidden, no collision, no tick, brain stopped/reset).
+            Bucket.Add(Actor);
+            return;
+        }
+        // Bucket at cap — fall through and really destroy (keeps the pool bounded).
+    }
+
+    Actor->Destroy();
+}
+
+void UMythicLivingWorldSubsystem::WarmEmbodimentPool(UClass *ActorClass, int32 Count) {
+    if (!ActorClass || Count <= 0) {
+        return;
+    }
+    if (!Settings || !Settings->bEnableEmbodimentPooling || Settings->EmbodimentPoolMaxPerClass <= 0) {
+        return; // pooling disabled — nothing to warm.
+    }
+    UWorld *World = GetWorld();
+    if (!World || World->GetNetMode() == NM_Client) {
+        return; // server-only — clients embody nothing, so they pre-spawn nothing.
+    }
+
+    TArray<TWeakObjectPtr<AMythicNPCCharacter>> &Bucket = EmbodimentPool.FindOrAdd(ActorClass);
+    const int32 Target = FMath::Min(Count, Settings->EmbodimentPoolMaxPerClass);
+
+    FActorSpawnParameters SpawnInfo;
+    SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+    for (int32 i = Bucket.Num(); i < Target; ++i) {
+        // Park warmed actors out of sight at the origin — they are hidden + collision-disabled immediately by
+        // SleepToPool, so the spawn location is irrelevant (it never renders or collides while parked).
+        AMythicNPCCharacter *Warmed = World->SpawnActor<AMythicNPCCharacter>(ActorClass, FVector::ZeroVector, FRotator::ZeroRotator, SpawnInfo);
+        if (!Warmed) {
+            break; // bad class / spawn failure — stop warming this class.
+        }
+        Warmed->SleepToPool();
+        Bucket.Add(Warmed);
+    }
 }
 
 void UMythicLivingWorldSubsystem::SubmitWorldEvent(const FMythicWorldEvent &Event) {
@@ -163,6 +297,38 @@ void UMythicLivingWorldSubsystem::ReportLeaderCandidate(FMythicFactionId Faction
     FactionDB->ReportLeaderCandidate(FactionId, EntityId, Score);
 }
 
+void UMythicLivingWorldSubsystem::ReportNpcDeath(FMythicFactionId FactionId, FGameplayTag RoleTag) {
+    // No-op for factionless NPCs (so the death-path call site needs no guard) and if the DB / settings aren't resolved.
+    if (!FactionDB || !Settings || !FactionId.IsValid()) {
+        return;
+    }
+
+    const int32 PopLoss = FMath::Max(0, Settings->KillPopulationLoss);
+    // Soldier/Guard are the armed roles whose loss also depletes the faction's Arms reserve (its military source).
+    const bool bArmed = RoleTag == TAG_NPC_ROLE_SOLDIER || RoleTag == TAG_NPC_ROLE_GUARD;
+    const float ArmsLoss = FMath::Max(0.0f, Settings->KillMilitaryArmsLoss);
+
+    // Hold the simulation lock: this read-modify-write of the faction WriteBuffer (Population + Reserves.Arms) + the
+    // CommitWrites snapshot publish races the sim thread's faction evolution / economy recompute, which mutate the same
+    // buffer under this exact lock. Same lock + commit idiom as ReportLeaderCandidate / RegisterSettlement.
+    FScopeLock Lock(&SimulationLock);
+    FMythicFactionData *F = FactionDB->GetFactionMutable(FactionId);
+    if (!F) {
+        return;
+    }
+
+    // Population is delta-applied by the sim, so a durable decrement lowers the spawn baseline. Floor at 0.
+    F->Population = FMath::Max(0, F->Population - PopLoss);
+
+    // Decrement the DURABLE source (Reserves.Arms) — NOT MilitaryStrength, which the sim recomputes absolutely each tick
+    // (a direct write there is silently wiped). Lower Arms → lower recomputed MilitaryStrength next tick. Floor at 0.
+    if (bArmed && ArmsLoss > 0.0f) {
+        F->Reserves.Arms = FMath::Max(0.0f, F->Reserves.Arms - ArmsLoss);
+    }
+
+    FactionDB->CommitWrites();
+}
+
 void UMythicLivingWorldSubsystem::HandleNPCDeathSettlements(uint32 NameHash, double WorldTime) {
     if (!SettlementRegistry) {
         return;
@@ -202,6 +368,53 @@ bool UMythicLivingWorldSubsystem::CopySettlementById(int32 SettlementId, FMythic
         return true;
     }
     return false;
+}
+
+void UMythicLivingWorldSubsystem::CopyAllSettlementIds(TArray<int32> &OutIds) {
+    OutIds.Reset();
+    if (!SettlementRegistry) {
+        return;
+    }
+    // Hold the simulation lock: GetAllSettlementIds does a bare Settlements.GetKeys walk, which the sim thread rehashes
+    // under this same lock (RegisterSettlement Add, TransferSettlement→FactionSettlements, TickShopSuccession). An
+    // unlocked game-thread enumeration races a rehash → TMap iterator use-after-free.
+    FScopeLock Lock(&SimulationLock);
+    SettlementRegistry->GetAllSettlementIds(OutIds);
+}
+
+int32 UMythicLivingWorldSubsystem::GetSettlementCountSafe() {
+    if (!SettlementRegistry) {
+        return 0;
+    }
+    // Settlements.Num() is a bare read of the same TMap the sim thread mutates under this lock — guard it.
+    FScopeLock Lock(&SimulationLock);
+    return SettlementRegistry->GetSettlementCount();
+}
+
+AMythicSettlement *UMythicLivingWorldSubsystem::GetSettlementActorSafe(int32 SettlementId) {
+    if (!SettlementRegistry) {
+        return nullptr;
+    }
+    // GetSettlementActor does a bare SettlementActors.Find; that map is rehashed by RegisterSettlement under this lock.
+    // The returned actor pointer itself is a UObject (GC-stable for the frame), so only the Find needs the lock.
+    FScopeLock Lock(&SimulationLock);
+    return SettlementRegistry->GetSettlementActor(SettlementId);
+}
+
+bool UMythicLivingWorldSubsystem::CopySimDiagnostics(uint64 &OutTickCount, float &OutTickIntervalSeconds, bool &OutRunning) {
+    OutTickCount = 0;
+    OutTickIntervalSeconds = 0.0f;
+    OutRunning = false;
+    if (!SimThread.IsValid()) {
+        return false;
+    }
+    // TickCount is mutated on the background thread inside SimTick under this same lock — guard the read (it is a plain
+    // uint64, not atomic). IsRunning() is itself atomic, but we copy it here too so the whole snapshot is consistent.
+    FScopeLock Lock(&SimulationLock);
+    OutTickCount = SimThread->GetTickCount();
+    OutTickIntervalSeconds = SimThread->GetTickIntervalSeconds();
+    OutRunning = SimThread->IsRunning();
+    return true;
 }
 
 bool UMythicLivingWorldSubsystem::LoadSettings() {
@@ -257,6 +470,10 @@ void UMythicLivingWorldSubsystem::InitializeSharedData() {
 
     // Create Persistent NPC Registry
     PersistentNPCRegistry = NewObject<UMythicPersistentNPCRegistry>(this);
+
+    // Create Designer Spawner Registry (per-DesignerId SpawnsEver / perma-death counters). Created on clients too
+    // (harmless empty object) — it is server-mutated only, and AMythicDesignerSpawner is server-authoritative.
+    DesignerSpawnerRegistry = NewObject<UMythicDesignerSpawnerRegistry>(this);
 
     // Create Social Graph (Phase 5)
     SocialGraph = NewObject<UMythicSocialGraph>(this);
@@ -345,6 +562,16 @@ const TArray<FMythicEncounterProxyItem> &UMythicLivingWorldSubsystem::GetAllEnco
     return Replicator ? Replicator->GetAllEncounterProxies() : Empty;
 }
 
+const TArray<FMythicTerritoryProxyItem> &UMythicLivingWorldSubsystem::GetAllTerritoryProxies() const {
+    static const TArray<FMythicTerritoryProxyItem> Empty;
+    return Replicator ? Replicator->GetAllTerritoryProxies() : Empty;
+}
+
+const TArray<FMythicSettlementProxyItem> &UMythicLivingWorldSubsystem::GetAllSettlementProxies() const {
+    static const TArray<FMythicSettlementProxyItem> Empty;
+    return Replicator ? Replicator->GetAllSettlementProxies() : Empty;
+}
+
 // ─── Blueprint-facing proxy reads (thin BlueprintPure wrappers; single-source via the C++ accessors above) ───
 
 bool UMythicLivingWorldSubsystem::K2_GetFactionProxy(FMythicFactionId FactionId, FMythicFactionProxyItem &OutProxy) const {
@@ -394,7 +621,8 @@ void UMythicLivingWorldSubsystem::SaveLivingWorld(FArchive &Ar) {
     // v2 adds a section-presence bitmask: the blob is unframed and its sections are written conditionally (FactionDB and
     // TerritoryGrid are config-gated, so they can be absent), so a load whose optional-subsystem set differs from the
     // save's would read every later section from the wrong byte offset. The mask lets the load detect that and fail safe.
-    int32 MasterVersion = 2;
+    // v3 (designer spawner): appends the DesignerSpawnerRegistry under section bit 7, after the Party section.
+    int32 MasterVersion = 3;
     Ar << MasterVersion;
 
     // Section-presence bitmask — one bit per subsystem, in the SAME order they are serialized below.
@@ -410,6 +638,7 @@ void UMythicLivingWorldSubsystem::SaveLivingWorld(FArchive &Ar) {
     if (PersistentNPCRegistry) { SectionMask |= (1 << 4); }
     if (SettlementRegistry) { SectionMask |= (1 << 5); }
     if (PartySubsystemForSave) { SectionMask |= (1 << 6); }
+    if (DesignerSpawnerRegistry) { SectionMask |= (1 << 7); }
     Ar << SectionMask;
 
     // Pause the simulation thread to get a consistent snapshot
@@ -451,6 +680,11 @@ void UMythicLivingWorldSubsystem::SaveLivingWorld(FArchive &Ar) {
         }
     }
 
+    // v3 designer-spawner section (bit 7) — serialized LAST so v2 saves remain byte-aligned.
+    if (DesignerSpawnerRegistry) {
+        DesignerSpawnerRegistry->Serialize(Ar);
+    }
+
     UE_LOG(LogMythLivingWorld, Log, TEXT("Living World state saved successfully."));
 }
 
@@ -460,7 +694,7 @@ void UMythicLivingWorldSubsystem::LoadLivingWorld(FArchive &Ar) {
     int32 MasterVersion = 0;
     Ar << MasterVersion;
 
-    if (MasterVersion != 1 && MasterVersion != 2) {
+    if (MasterVersion != 1 && MasterVersion != 2 && MasterVersion != 3) {
         UE_LOG(LogMythLivingWorld, Error, TEXT("Unsupported Living World save version: %d"), MasterVersion);
         return;
     }
@@ -484,6 +718,9 @@ void UMythicLivingWorldSubsystem::LoadLivingWorld(FArchive &Ar) {
         if (PersistentNPCRegistry) { LiveMask |= (1 << 4); }
         if (SettlementRegistry) { LiveMask |= (1 << 5); }
         if (PartySubsystemForLoad) { LiveMask |= (1 << 6); }
+        // Bit 7 (designer spawner) only exists in v3+ saves. Gate the live contribution on the save version so a v2
+        // save (which never wrote bit 7) still matches the live mask and loads.
+        if (MasterVersion >= 3 && DesignerSpawnerRegistry) { LiveMask |= (1 << 7); }
 
         if (SectionMask != LiveMask) {
             UE_LOG(LogMythLivingWorld, Error,
@@ -527,6 +764,11 @@ void UMythicLivingWorldSubsystem::LoadLivingWorld(FArchive &Ar) {
         if (UMythicPartySubsystem *Party = World->GetSubsystem<UMythicPartySubsystem>()) {
             Party->Serialize(Ar);
         }
+    }
+
+    // v3 designer-spawner section (bit 7) — read LAST and ONLY for v3+ saves, so v2 saves still load byte-aligned.
+    if (MasterVersion >= 3 && DesignerSpawnerRegistry) {
+        DesignerSpawnerRegistry->Serialize(Ar);
     }
 
     UE_LOG(LogMythLivingWorld, Log, TEXT("Living World state loaded successfully."));

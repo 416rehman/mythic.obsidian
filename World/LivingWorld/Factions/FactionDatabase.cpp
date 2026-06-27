@@ -133,6 +133,8 @@ FMythicFactionId UMythicFactionDatabase::CreateFactionFromConquest(FMythicFactio
     Resistance.DisplayName = FText::Format(NSLOCTEXT("LivingWorld", "ResistanceFmt", "{0} Resistance"), Original.DisplayName);
 
     // Append .Resistance to the tag
+    // Inherent runtime-string lookup: this faction tag is generated at runtime from the parent faction's tag, so it has
+    // no native tag equivalent to reference.
     FString NewTagStr = Original.FactionTag.ToString() + TEXT(".Resistance");
     Resistance.FactionTag = FGameplayTag::RequestGameplayTag(FName(*NewTagStr), false);
 
@@ -316,8 +318,10 @@ void UMythicFactionDatabase::ReportLeaderCandidate(FMythicFactionId FactionId, u
 
 void UMythicFactionDatabase::Serialize(FArchive &Ar) {
     // Version for forward compatibility (v2: + 5 runtime-mutated faction behavior flags; v3: + BaseProduction + the
-    // 3 moral reaction thresholds, so runtime-created schism/conquest factions round-trip their economy + reactions).
-    int32 Version = 3;
+    // 3 moral reaction thresholds, so runtime-created schism/conquest factions round-trip their economy + reactions;
+    // v4: + authorable faction display color override (bOverrideFactionColor + FactionColor) so a pinned brand color
+    // round-trips. Older saves skip the v4 gate -> defaults (false / transparent) -> deterministic color path.).
+    int32 Version = 4;
     Ar << Version;
 
     Ar << MaxFactions;
@@ -401,6 +405,14 @@ void UMythicFactionDatabase::Serialize(FArchive &Ar) {
         if (Version >= 3) {
             Ar << F.BaseProduction.Food << F.BaseProduction.Materials << F.BaseProduction.Arms << F.BaseProduction.Wealth;
             Ar << F.DisapproveThreshold << F.CondemnThreshold << F.HostileThreshold;
+        }
+
+        // v4: authorable faction display color override. On load of an older (<4) save the gate is skipped so the fields
+        // keep their constructor defaults (bOverrideFactionColor=false / FactionColor=Transparent), which routes through
+        // the deterministic-from-id color path — back-compatible. FColor has an FArchive operator<<, so stream it directly.
+        if (Version >= 4) {
+            Ar << F.bOverrideFactionColor;
+            Ar << F.FactionColor;
         }
     }
 

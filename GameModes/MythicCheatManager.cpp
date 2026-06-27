@@ -223,6 +223,7 @@ void UMythicCheatManager::MythSetWeather(const FString &WeatherTag) {
         return;
     }
 
+    // Inherent runtime-string lookup: the tag NAME is a dev console argument, so no native tag reference is possible.
     FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*WeatherTag), false);
     if (!Tag.IsValid()) {
         UE_LOG(Myth, Error, TEXT(">>> Invalid tag '%s'. Use ListWeather."), *WeatherTag);
@@ -245,6 +246,7 @@ void UMythicCheatManager::MythSetWeatherInstant(const FString &WeatherTag) {
         return;
     }
 
+    // Inherent runtime-string lookup: the tag NAME is a dev console argument, so no native tag reference is possible.
     FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*WeatherTag), false);
     if (!Tag.IsValid()) {
         UE_LOG(Myth, Error, TEXT(">>> Invalid tag '%s'. Use ListWeather."), *WeatherTag);
@@ -969,6 +971,7 @@ void UMythicCheatManager::MythLivingWorldSimulateEvent(const FString &ActionTag,
     // Build the action event
     FMythicActionEvent Event;
     Event.Perpetrator = PC->GetPawn();
+    // Inherent runtime-string lookup: the action tag NAME is a dev console argument, so no native tag reference is possible.
     Event.ActionTag = FGameplayTag::RequestGameplayTag(FName(*ActionTag), false);
     if (!Event.ActionTag.IsValid()) {
         UE_LOG(Myth, Warning, TEXT(">>> Tag '%s' not registered — event will still submit with invalid tag"), *ActionTag);

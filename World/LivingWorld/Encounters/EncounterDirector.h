@@ -14,6 +14,7 @@ class UMythicFactionDatabase;
 class UMythicTerritoryGrid;
 class UMythicLivingWorldSettings;
 class UMythicLivingWorldSubsystem;
+class UObjectiveDefinition;
 
 /**
  * Encounter Director — reads cached world state and spawns encounters.
@@ -57,6 +58,9 @@ public:
     /** Get active encounter count */
     int32 GetActiveEncounterCount() const { return ActiveEncounters.Num(); }
 
+    /** Get the global active-encounter budget cap (for HUD/debug "active/cap" display) */
+    int32 GetMaxActiveEncounters() const { return MaxActiveEncounters; }
+
     /** Check if any encounter is active in the given cell */
     bool HasEncounterInCell(const FMythicCellCoord &Cell) const;
 
@@ -67,6 +71,24 @@ public:
      * @return true if the encounter was found and completed
      */
     bool ForceCompleteEncounter(uint32 EncounterId);
+
+    // ─── Objective Hook (proximity → offer → reward, now WIRED) ──
+    /**
+     * The objective offered when a player enters a live encounter's cell (the "kill the bandits / clear the patrol"
+     * quest). Resolution order:
+     *   1. UMythicLivingWorldSettings::EncounterClearObjective (an authored TSoftObjectPtr) — wins when assigned.
+     *   2. Otherwise a CODE-DEFAULT objective built once on first use (MythicEncounterObjectiveDefaults) and cached on
+     *      DefaultClearObjective, so the loop is FUNCTIONAL out of the box with no authored asset.
+     * Never returns null when Settings is available (the code default always backs it). Const-but-mutating: it lazily
+     * populates the cached default, so DefaultClearObjective is mutable.
+     *
+     * HONEST GAP: the offer loop (MaybeOfferClearObjectives) and the reward-on-defeat path are now WIRED (see below).
+     * What remains content-side: the code default grants NO reward (its Rewards holder is empty — a real reward needs an
+     * authored XP/item asset), and kill-credit is not attributed to THIS encounter's specific members (any kill while
+     * the objective is active advances it). Assigning an authored EncounterClearObjective with real rewards closes the
+     * reward gap with zero code changes.
+     */
+    UObjectiveDefinition *GetEncounterClearObjective() const;
 
 private:
     // ─── Evaluation ───────────────────────────────────────
@@ -82,6 +104,16 @@ private:
 
     /** Update active encounter lifecycle (timeout, completion) */
     void UpdateActiveEncounters();
+
+    /**
+     * SERVER: offer the encounter-clear objective to every player whose pawn currently occupies a live encounter's cell.
+     * Mirrors AMythicPlayerController::CheckZoneEntry (a server-side cell poll) but driven off the director's existing
+     * evaluation timer so no new timer is added. ServerAddObjective is idempotent (a re-offer to a player who already
+     * has it is a no-op), so calling this every EvaluationTick is safe. Resolves the player's UObjectiveTracker via the
+     * AMythicPlayerController accessor. Reward-on-completion is handled by the tracker's own GAS.Event.Kill subscription
+     * (no extra wiring needed). No-op if there are no active encounters or GetEncounterClearObjective() is null.
+     */
+    void MaybeOfferClearObjectives();
 
     /** Clean up a completed encounter */
     void CleanupEncounter(int32 Index);
@@ -134,6 +166,13 @@ private:
     TObjectPtr<UMythicTerritoryGrid> TerritoryGrid;
 
     const UMythicLivingWorldSettings *Settings = nullptr;
+
+    /** Cached CODE-DEFAULT clear objective, lazily built by GetEncounterClearObjective() when no authored
+     *  EncounterClearObjective asset is assigned. Built ONCE (stable pointer for the ObjectiveTracker's pointer-keyed
+     *  dedup); never used when an authored asset wins. The const accessor populates it via a const_cast of `this`
+     *  (rather than a `mutable` UPROPERTY, which UHT can mis-parse) — keeping it a normal reflected (GC-kept) member. */
+    UPROPERTY()
+    TObjectPtr<UObjectiveDefinition> DefaultClearObjective;
 
     /** Owning subsystem. Game-thread event writes MUST go through its thread-safe SubmitWorldEvent queue — the
      *  CausalFabric is a lock-free SINGLE-writer drained by the sim thread, so a direct game-thread AppendEvent races

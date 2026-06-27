@@ -71,6 +71,19 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Hazard")
     TArray<FEnvironmentHazardCondition> Conditions;
 
+    // Read-only debug view of the hazards CURRENTLY applied to the player: the rule index plus a readable label
+    // (the rule's DisplayName when authored, else "Hazard[<idx>]"). Surfaces the private ActiveHazardHandles map
+    // for the Living World gameplay debugger (Environment pane) without exposing the GE handles. Game thread.
+    void GetActiveHazards(TArray<int32> &OutRuleIndices, TArray<FString> &OutLabels) const {
+        OutRuleIndices.Reset();
+        OutLabels.Reset();
+        for (const TPair<int32, FActiveGameplayEffectHandle> &Pair : ActiveHazardHandles) {
+            OutRuleIndices.Add(Pair.Key);
+            const bool bNamed = Conditions.IsValidIndex(Pair.Key) && !Conditions[Pair.Key].DisplayName.IsEmpty();
+            OutLabels.Add(bNamed ? Conditions[Pair.Key].DisplayName.ToString() : FString::Printf(TEXT("Hazard[%d]"), Pair.Key));
+        }
+    }
+
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

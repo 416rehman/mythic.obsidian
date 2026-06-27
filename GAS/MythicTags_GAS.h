@@ -8,9 +8,11 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DEAD); // The entity is dead
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DYING); // The entity is dying
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DOWNED); // Co-op down state: incapacitated but revivable (bleeds out if not revived)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_INCOMBAT); // The entity was damaged recently
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_SPRINTING); // The entity is sprinting
 
 /** Debuffs */
 // Debuff tags are applied to entities to indicate that they are suffering from a negative effect, such as bleeding, burning, etc.
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF); // Parent category for all debuffs (match any active debuff)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_BLEEDING); // The entity is bleeding and taking damage over time
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_BURNING); // The entity is burning and taking damage over time
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_POISONED); // The entity is poisoned and taking damage over time
@@ -40,6 +42,7 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_RADIUS);
 
 /** Abilities */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_ABILITY_HEAL);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_ABILITY_TYPE_SKILL); // Marks an outgoing hit as delivered by a skill (vs basic attack)
 
 /** Pipelines */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_PIPELINE_DEATH_HANDLED);

@@ -8,6 +8,7 @@
 #include "Itemization/InventoryProviderInterface.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Player/Proficiency/ProficiencyComponent.h"
+#include "AI/NPCs/MythicSocialVerbs.h" // EMythicSocialVerb / EMythicSocialReaction in the RPC sigs (UHT can't FWD-declare a UENUM param)
 #include "MythicPlayerController.generated.h"
 
 struct FTrackedDestructibleData;
@@ -243,6 +244,17 @@ public:
 
     UFUNCTION(Client, Reliable, Category = "Dialogue")
     void ClientReceiveNpcDialogue(AMythicNPCCharacter *NPC, const FText &Line);
+
+    // ---- Social verbs (client-owned PC -> server resolves the trait-driven reaction + escalation) ----
+    //player→NPC verbs (Greet/Compliment/Provoke/Bully/Threaten). The NPC's personality + the player's
+    // faction standing decide the reaction SERVER-side (authoritative, non-replicated brain state), which then drives
+    // standing changes / aggro / guard alerts. The reaction round-trips back to the requesting client for the bark.
+    // Mirrors the dialogue RPC pair exactly (incl. the range gate). A BP radial menu calls ServerPerformSocialVerb.
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Social")
+    void ServerPerformSocialVerb(AMythicNPCCharacter *NPC, EMythicSocialVerb Verb);
+
+    UFUNCTION(Client, Reliable, Category = "Social")
+    void ClientReceiveSocialReaction(AMythicNPCCharacter *NPC, EMythicSocialVerb Verb, EMythicSocialReaction Reaction, const FText &Line);
 
     // ---- Party recruit ----
     // Recruit a (recruitable) NPC into the local player's party. Server-authoritative (the party subsystem is

@@ -18,9 +18,14 @@
 #include "AI/Party/PartySubsystem.h" // companion follow + leader pawn
 #include "Player/MythicPlayerRegistrySubsystem.h" // resolve leader canonical key -> pawn
 #include "World/LivingWorld/LivingWorldSubsystem.h"
+#include "World/LivingWorld/LivingWorldSettings.h"          // ActivityCatalog soft-ptr (Step 3)
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "World/LivingWorld/Settlements/MythicSettlement.h" // FMythicSettlementData (Socialize -> settlement centre)
+#include "World/LivingWorld/Activities/ActivityTypes.h"     // activity catalog + pure eligibility/selection (Step 3)
+#include "World/EnvironmentController/MythicEnvironmentSubsystem.h"  // single-source game clock (ResolveGameHour)
+#include "World/EnvironmentController/MythicEnvironmentController.h"  // GetTimespan() — read the hour without an FDateTime
+#include "EngineUtils.h"                                    // TActorIterator (bounded merchant scan)
 #include "MassEntitySubsystem.h" // FROZEN-CELL #34: the live-cell refresh writes the Identity fragment
 #include "Mass/Fragments/MythicMassFragments.h"
 #include "Engine/GameInstance.h"
@@ -195,29 +200,40 @@ void AMythicAIController::OnTargetPerceptionUpdated(AActor *Actor, FAIStimulus S
                 }
             }
 
-            CurrentHostileTarget = Target;
-            // Anchor the leash at the engage point (where we acquired). The leash check in TryAttackCurrentTarget
-            // resets the NPC if it is later pulled beyond LeashRange from here.
-            if (MyPawn) {
-                EngageAnchorLocation = MyPawn->GetActorLocation();
-            }
-            // Pursue + keep facing the target (SetFocus orients the pawn even once stopped in range, so a
-            // forward melee swing lands), then drive attack attempts on a timer. Content may also react to the
-            // engage event.
-            MoveToActor(Target, PursueAcceptanceRadius); // close to INSIDE swing range (150 stopped ~187 > 180, never swung)
-            SetFocus(Target);
-            bFleeingMove = false; // engage is a toward-the-target move
-            if (UWorld *World = GetWorld()) {
-                World->GetTimerManager().SetTimer(AttackTimerHandle, this, &AMythicAIController::TryAttackCurrentTarget,
-                                                  AttackAttemptInterval, /*bLoop=*/true, /*InitialDelay=*/0.0f);
-            }
-            OnEngageHostileTarget(Target);
+            // Commit through the shared engage path (anchor + pursue + focus + attack loop + OnEngage). The COMMIT
+            // guard above (only-acquire-when-no-valid-target) keeps this from flip-flopping between hostiles.
+            ForceEngageTarget(Target);
         }
     }
     else if (CurrentHostileTarget == Actor) {
         // Lost sight of (or no longer hostile to) the current target.
         ReleaseHostileTarget();
     }
+}
+
+void AMythicAIController::ForceEngageTarget(AActor *Target) {
+    // SERVER-only commit (AI controllers run only on the server). Refactored verbatim from the acquisition block so
+    // perception-driven engages and forced engages (social-verb aggro, guard alerts) share one set of semantics.
+    if (!HasAuthority() || !IsValid(Target)) {
+        return;
+    }
+
+    CurrentHostileTarget = Target;
+    // Anchor the leash at the engage point (where we acquired). The leash check in TryAttackCurrentTarget resets the
+    // NPC if it is later pulled beyond LeashRange from here.
+    if (const APawn *MyPawn = GetPawn()) {
+        EngageAnchorLocation = MyPawn->GetActorLocation();
+    }
+    // Pursue + keep facing the target (SetFocus orients the pawn even once stopped in range, so a forward melee swing
+    // lands), then drive attack attempts on a timer. Content may also react to the engage event.
+    MoveToActor(Target, PursueAcceptanceRadius); // close to INSIDE swing range (150 stopped ~187 > 180, never swung)
+    SetFocus(Target);
+    bFleeingMove = false; // engage is a toward-the-target move
+    if (UWorld *World = GetWorld()) {
+        World->GetTimerManager().SetTimer(AttackTimerHandle, this, &AMythicAIController::TryAttackCurrentTarget,
+                                          AttackAttemptInterval, /*bLoop=*/true, /*InitialDelay=*/0.0f);
+    }
+    OnEngageHostileTarget(Target);
 }
 
 void AMythicAIController::ReleaseHostileTarget() {
@@ -408,6 +424,22 @@ void AMythicAIController::TickIdleBehavior() {
         return;
     }
 
+    // ─── Context-driven activity dispatch (Step 3, ADDITIVE) ───
+    // For ROUTINE / neutral committed desires only (FollowSchedule/Patrol/Socialize/Trade/Rest — NEVER the acute combat
+    // desires Survive/Flee/Defend/Avenge, which own movement above), try the activity catalog first: it may steer the NPC
+    // to a richer contextual action (fish by the water, browse a merchant, work its field). If it handled steering this
+    // tick, we're done; otherwise we fall through to the EXISTING Patrol/Socialize/grounded logic verbatim (zero
+    // regression — an empty/null catalog or no eligible activity is byte-identical to the prior behaviour).
+    const bool bRoutineDesire = (DesireType == EMythicDesireType::FollowSchedule || DesireType == EMythicDesireType::Patrol
+        || DesireType == EMythicDesireType::Socialize || DesireType == EMythicDesireType::Trade
+        || DesireType == EMythicDesireType::Rest);
+    if (bRoutineDesire) {
+        const FMythicCellCoord LiveCell = Grid->WorldToCell(MyPawn->GetActorLocation());
+        if (TickActivityBehavior(Brain, LW, Grid, LiveCell)) {
+            return;
+        }
+    }
+
     // Patrol: walk a bounded ring of neighbour cells around the home anchor (Desire.TargetCell = HomeCell), stepping to
     // the next leg each time we arrive — so an Enforce-driven guard with nothing acute to do actively patrols its post
     // instead of standing still. Combat / Flee / Avenge all preempt (the CurrentHostileTarget early-return + the brain
@@ -460,6 +492,215 @@ void AMythicAIController::TickIdleBehavior() {
     if (GetMoveStatus() != EPathFollowingStatus::Moving) {
         MoveToLocation(HomeLoc, IdleMoveAcceptanceRadius);
     }
+}
+
+// ─── Context-driven activity dispatch (Step 3) ───
+
+bool AMythicAIController::IsDayHour(float Hour) {
+    // [6,20) = day. Pure boundary so the activity catalog's day/night gate is unit-testable.
+    return Hour >= 6.0f && Hour < 20.0f;
+}
+
+float AMythicAIController::ResolveGameHour() const {
+    // SINGLE SOURCE OF TRUTH: prefer the ENVIRONMENT clock (same clock the ScheduleTransitionProcessor + day/night
+    // perception read) so an activity's day/night gate AGREES with the visible sky. Read straight from the controller's
+    // timespan — never round-trip through GetDateTime() (its synthetic 30-day calendar can build an invalid real date).
+    const UWorld *World = GetWorld();
+    if (!World) {
+        return 12.0f; // safe daytime default with no world
+    }
+    if (const UGameInstance *GI = World->GetGameInstance()) {
+        if (const UMythicEnvironmentSubsystem *Env = GI->GetSubsystem<UMythicEnvironmentSubsystem>()) {
+            if (const AMythicEnvironmentController *Controller = Env->GetEnvironmentController()) {
+                const FTimespan Timespan = Controller->GetTimespan();
+                return Timespan.GetHours() + Timespan.GetMinutes() / 60.0f; // [0,24)
+            }
+        }
+        // Fallback for a clock-less level: derive the hour from elapsed game time + the configurable day length.
+        if (const UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+            if (const UMythicLivingWorldSettings *Settings = LWS->GetSettings()) {
+                const float DayLengthSeconds = Settings->DayLengthSeconds;
+                if (DayLengthSeconds > 0.0f) {
+                    const double GameTime = World->GetTimeSeconds();
+                    const float DayProgress = FMath::Fmod(static_cast<float>(GameTime), DayLengthSeconds) / DayLengthSeconds;
+                    return DayProgress * 24.0f; // [0,24)
+                }
+            }
+        }
+    }
+    return 12.0f; // no clock and no settings — assume daytime
+}
+
+AActor *AMythicAIController::ScanNearbyMerchant(float Radius, bool &bOutFound) const {
+    bOutFound = false;
+    const APawn *MyPawn = GetPawn();
+    UWorld *World = GetWorld();
+    if (!MyPawn || !World || Radius <= 0.0f) {
+        return nullptr;
+    }
+    const FVector MyLoc = MyPawn->GetActorLocation();
+    const float RadiusSq = FMath::Square(Radius);
+    AActor *BestMerchant = nullptr;
+    float BestDistSq = TNumericLimits<float>::Max();
+    // Bounded, rare (idle cadence) scan — cap examined NPCs so a dense town never makes this a spike. NOT an overlap query.
+    constexpr int32 ScanCap = 12;
+    int32 Examined = 0;
+    for (TActorIterator<AMythicNPCCharacter> It(World); It; ++It) {
+        if (Examined >= ScanCap) {
+            break;
+        }
+        AMythicNPCCharacter *NPC = *It;
+        if (!IsValid(NPC) || NPC == MyPawn) {
+            continue;
+        }
+        if (!NPC->IsMerchant()) {
+            continue;
+        }
+        ++Examined; // count only candidate merchants against the cap (cheap IsMerchant pre-filter doesn't)
+        const float DistSq = FVector::DistSquared(MyLoc, NPC->GetActorLocation());
+        if (DistSq <= RadiusSq && DistSq < BestDistSq) {
+            BestDistSq = DistSq;
+            BestMerchant = NPC;
+        }
+    }
+    bOutFound = (BestMerchant != nullptr);
+    return BestMerchant;
+}
+
+bool AMythicAIController::TickActivityBehavior(UMythicCognitiveBrainComponent *Brain, UMythicLivingWorldSubsystem *LW,
+                                              const UMythicTerritoryGrid *Grid, FMythicCellCoord LiveCell) {
+    APawn *MyPawn = GetPawn();
+    AMythicNPCCharacter *NPC = Cast<AMythicNPCCharacter>(MyPawn);
+    if (!NPC || !Brain || !Grid) {
+        return false;
+    }
+
+    // Resolve the activity SOURCE once (authored catalog or code defaults), hoisted off the per-tick path.
+    if (!bActivitySourceResolved) {
+        bActivitySourceResolved = true;
+        if (const UGameInstance *GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr) {
+            if (const UMythicLivingWorldSubsystem *Subsys = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+                if (const UMythicLivingWorldSettings *Settings = Subsys->GetSettings()) {
+                    if (UMythicActivityCatalog *Catalog = Settings->ActivityCatalog.LoadSynchronous()) {
+                        CachedActivityCatalog = Catalog;
+                    }
+                }
+            }
+        }
+        if (!CachedActivityCatalog.IsValid()) {
+            MythicActivityDefaults::BuildDefaultActivities(DefaultActivities); // code-default fallback (unauthored)
+        }
+    }
+
+    // The activity array (authored takes precedence; code defaults otherwise). TConstArrayView keeps the picker allocation-free.
+    TConstArrayView<FMythicActivityDef> Activities;
+    if (const UMythicActivityCatalog *Catalog = CachedActivityCatalog.Get()) {
+        Activities = Catalog->Activities;
+    } else {
+        Activities = DefaultActivities;
+    }
+    if (Activities.Num() == 0) {
+        return false; // nothing to pick → fall through to existing idle logic
+    }
+
+    // ─── Build the live, lock-free context ───
+    FMythicActivityContext Ctx;
+    Ctx.Role = Brain->GetRole();
+    Ctx.Biome = Grid->GetBiomeAtCell(LiveCell);
+    Ctx.bIsDay = IsDayHour(ResolveGameHour());
+    Ctx.Phase = Brain->GetCachedSchedulePhase();
+
+    // NameHash: read the source entity's identity fragment (reuse the RefreshLiveCell read pattern — game-thread safe).
+    Ctx.NameHash = 0;
+    const FMassEntityHandle SourceEntity = Brain->GetSourceEntity();
+    if (UMassEntitySubsystem *EntitySubsystem = GetWorld() ? GetWorld()->GetSubsystem<UMassEntitySubsystem>() : nullptr) {
+        FMassEntityManager &EntityManager = EntitySubsystem->GetMutableEntityManager();
+        if (SourceEntity.IsValid() && EntityManager.IsEntityValid(SourceEntity)) {
+            if (const FMythicIdentityFragment *Identity = EntityManager.GetFragmentDataPtr<FMythicIdentityFragment>(SourceEntity)) {
+                Ctx.NameHash = Identity->NameHash;
+            }
+        }
+    }
+
+    // Nearby-merchant gate: only pay the bounded scan if SOME activity actually requires a merchant (else it's wasted work).
+    bool bAnyNeedsMerchant = false;
+    for (const FMythicActivityDef &A : Activities) {
+        if (A.bRequiresNearbyMerchant) {
+            bAnyNeedsMerchant = true;
+            break;
+        }
+    }
+    AActor *NearbyMerchant = nullptr;
+    if (bAnyNeedsMerchant) {
+        bool bFound = false;
+        NearbyMerchant = ScanNearbyMerchant(MerchantScanRadius, bFound);
+        Ctx.bHasNearbyMerchant = bFound;
+    }
+
+    // ─── Pick + resolve target ───
+    const int32 ChosenIdx = MythicActivityDefaults::PickActivityIndex(Activities, Ctx);
+    if (!Activities.IsValidIndex(ChosenIdx)) {
+        return false; // none eligible → fall through to existing idle logic (zero regression)
+    }
+    const FMythicActivityDef &Chosen = Activities[ChosenIdx];
+
+    // Resolve the steering target by kind. A null/unresolvable target still commits the activity TAG (so the cosmetic
+    // plays in place) but issues no move.
+    bool bHasTargetLoc = false;
+    FVector TargetLoc = FVector::ZeroVector;
+    AActor *TargetActor = nullptr;
+    switch (Chosen.TargetKind) {
+    case EMythicActivityTargetKind::HomeCell:
+        TargetLoc = Grid->CellToWorld(Brain->GetHomeCell());
+        bHasTargetLoc = true;
+        break;
+    case EMythicActivityTargetKind::WorkCell:
+        TargetLoc = Grid->CellToWorld(Brain->GetCachedWorkCell());
+        bHasTargetLoc = true;
+        break;
+    case EMythicActivityTargetKind::SettlementCenter: {
+        FMythicSettlementData Settlement;
+        if (LW && LW->CopySettlementAtCell(LiveCell, Settlement)) {
+            TargetLoc = Grid->CellToWorld(Settlement.CenterCell);
+            bHasTargetLoc = true;
+        }
+        break;
+    }
+    case EMythicActivityTargetKind::NearbyMerchant:
+        TargetActor = NearbyMerchant; // resolved above (gate guarantees it's the same one)
+        break;
+    case EMythicActivityTargetKind::CurrentCell:
+    case EMythicActivityTargetKind::BiomeWander:
+    default:
+        // Stand at / wander around the live cell — steer to the cell centre (acceptance radius keeps it loose).
+        TargetLoc = Grid->CellToWorld(LiveCell);
+        bHasTargetLoc = true;
+        break;
+    }
+
+    // ─── Steer (anti-spam) + commit the activity tag on arrival or tag change ───
+    const FVector MyLoc = MyPawn->GetActorLocation();
+    if (TargetActor) {
+        if (FVector::DistSquared2D(MyLoc, TargetActor->GetActorLocation()) > FMath::Square(IdleMoveAcceptanceRadius)) {
+            if (GetMoveStatus() != EPathFollowingStatus::Moving) {
+                MoveToActor(TargetActor, IdleMoveAcceptanceRadius);
+            }
+        } else {
+            NPC->ServerSetActivity(Chosen.ActivityTag); // arrived at the merchant → perform
+        }
+    } else if (bHasTargetLoc) {
+        if (FVector::DistSquared2D(MyLoc, TargetLoc) > FMath::Square(IdleMoveAcceptanceRadius)) {
+            if (GetMoveStatus() != EPathFollowingStatus::Moving) {
+                MoveToLocation(TargetLoc, IdleMoveAcceptanceRadius);
+            }
+        } else {
+            NPC->ServerSetActivity(Chosen.ActivityTag); // arrived → perform (ServerSetActivity is change-gated)
+        }
+    } else {
+        // No resolvable destination (e.g. NearbyMerchant gate passed but the merchant despawned this tick) — perform in place.
+        NPC->ServerSetActivity(Chosen.ActivityTag);
+    }
+    return true; // handled this tick — TickIdleBehavior skips its legacy branches
 }
 
 void AMythicAIController::SetCompanionFollow(bool bActive, const FString &LeaderKey) {
@@ -612,6 +853,29 @@ void AMythicAIController::PruneThreatTable() {
             It.RemoveCurrent(); // stale/destroyed attacker or drained threat — drop it (keeps the table small)
         }
     }
+}
+
+int32 AMythicAIController::CopyThreatTable(TArray<TPair<TWeakObjectPtr<AActor>, float>> &OutThreats) const {
+    // Read-only by-value copy for the gameplay debugger. Server-only single-threaded actor — no lock needed.
+    OutThreats.Reset();
+    OutThreats.Reserve(ThreatTable.Num());
+    for (const TPair<TWeakObjectPtr<AActor>, float> &Pair : ThreatTable) {
+        if (Pair.Key.IsValid()) {
+            OutThreats.Add(Pair);
+        }
+    }
+    return OutThreats.Num();
+}
+
+void AMythicAIController::CopyAIDebugState(FMythicAIDebugState &Out) const {
+    // Read-only by-value copy for the gameplay debugger. Server-only single-threaded actor — no lock needed.
+    Out.EngageAnchorLocation = EngageAnchorLocation;
+    Out.LeashRange = LeashRange;
+    Out.PatrolLegIndex = PatrolLegIndex;
+    Out.bFleeingMove = bFleeingMove;
+    Out.bCompanionFollowActive = bCompanionFollowActive;
+    Out.CompanionLeaderKey = CompanionLeaderKey;
+    Out.bHasHostileTarget = (CurrentHostileTarget != nullptr);
 }
 
 UAbilitySystemComponent *AMythicAIController::GetAbilitySystemComponent() const {

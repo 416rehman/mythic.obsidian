@@ -23,6 +23,7 @@ class UMythicSettlementRegistry;
 struct FMythicSettlementData;
 class AMythicSettlement;
 class UMythicPersistentNPCRegistry;
+class UMythicDesignerSpawnerRegistry;
 class UMythicFactionDatabaseSettings;
 class UMythicTerritoryGridSettings;
 class UMythicSocialGraph;
@@ -87,6 +88,14 @@ public:
      *  Replicator. Client reads the replicated snapshot since the EncounterDirector is server-only. */
     const TArray<FMythicEncounterProxyItem> &GetAllEncounterProxies() const;
 
+    /** All currently-replicated territory proxies (changed/owned cells). Empty if no Replicator. The war-map subsystem
+     *  reads these (delta-accumulated) to build the client territory texture. */
+    const TArray<FMythicTerritoryProxyItem> &GetAllTerritoryProxies() const;
+
+    /** All currently-replicated settlements (center cell / governing faction / name / capital — for the client
+     *  war-map markers). Empty if no Replicator. */
+    const TArray<FMythicSettlementProxyItem> &GetAllSettlementProxies() const;
+
     // ─── Blueprint-facing proxy reads ───
     // BlueprintPure wrappers over the C++ accessors above (which return pointers / const refs UHT can't reflect).
     // UMG binds these + OnLivingWorldProxiesChanged to drive the faction panel / territory map / encounter markers.
@@ -123,6 +132,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Living World")
     UMythicPersistentNPCRegistry *GetPersistentNPCRegistry() const { return PersistentNPCRegistry; }
 
+    /** Get the designer-spawner registry (per-DesignerId SpawnsEver / perma-death counters). Server-mutated only. */
+    UFUNCTION(BlueprintCallable, Category = "Living World")
+    UMythicDesignerSpawnerRegistry *GetDesignerSpawnerRegistry() const { return DesignerSpawnerRegistry; }
+
     /** Get the социал graph for NPC relationship queries. */
     UMythicSocialGraph *GetSocialGraph() const { return SocialGraph; }
 
@@ -146,6 +159,36 @@ public:
     void RegisterEmbodiedActor(FMassEntityHandle Entity, AMythicNPCCharacter *Actor);
     void UnregisterEmbodiedActor(FMassEntityHandle Entity);
     AMythicNPCCharacter *FindEmbodiedActor(FMassEntityHandle Entity) const;
+
+    // ─── Embodiment actor pool (embodiment-service-LOCK-v1 §1) ───
+    // A bounded, class-keyed reuse pool for embodied NPC/creature actors, so the ActorSpawnProcessor recycles bodies
+    // instead of SpawnActor/Destroy churning them every time the proximity/significance set shifts. GAME-THREAD ONLY
+    // (the spawn/despawn processors are bRequiresGameThreadExecution=true and this subsystem is game-thread) — no lock.
+    // Keyed by CONCRETE UClass so a creature class and a humanoid class never share a bucket (the two-query routing is
+    // preserved at the pool layer). All three honor bEnableEmbodimentPooling + EmbodimentPoolMaxPerClass from settings.
+
+    /**
+     * Get an embodied actor of ActorClass at (Loc,Rot), reusing a parked one from the free list if available
+     * (un-park + reposition + WakeFromPool) or SpawnActor'ing a fresh one on a miss. The CALLER still does
+     * InitializeFromMassEntity + RegisterEmbodiedActor afterward (unchanged from the raw-spawn path). Returns null
+     * only if the spawn genuinely fails (bad class / no world). Pooling disabled => always a fresh SpawnActor.
+     */
+    AMythicNPCCharacter *AcquireEmbodiedActor(UClass *ActorClass, const FVector &Loc, const FRotator &Rot);
+
+    /**
+     * Return Actor (embodied from Entity) to the pool: UnregisterEmbodiedActor(Entity) FIRST (a pool-return bypasses
+     * EndPlay, which is where the reverse-link is normally cleared), then — if pooling is enabled and the actor's
+     * class bucket is under cap — SleepToPool() + push onto the free list; otherwise Actor->Destroy(). Idempotent on a
+     * null / already-pending-kill Actor.
+     */
+    void ReleaseEmbodiedActor(FMassEntityHandle Entity, AMythicNPCCharacter *Actor);
+
+    /**
+     * Pre-spawn Count actors of ActorClass, park them (SleepToPool), and push onto the free list — so the first town's
+     * embodiment pays no cold-spawn hitch. Called once per resolved class at subsystem init. Respects the per-class cap
+     * and the pooling kill-switch (no-op if pooling is disabled). Server-only (no parked actors on a pure client).
+     */
+    void WarmEmbodimentPool(UClass *ActorClass, int32 Count);
 
     // ─── Event Writing (from Game Thread) ─────────────────
 
@@ -181,6 +224,22 @@ public:
     void ReportLeaderCandidate(FMythicFactionId FactionId, uint32 EntityId, float Score);
 
     /**
+     * Feed an embodied NPC's perma-death back into the world simulation (kill → sim feedback). Called from the existing
+     * death path (AMythicNPCCharacter::HandleNPCDeath) AFTER the PersistentNPCRegistry::RegisterDeath perma-death record,
+     * so it composes with — never duplicates — the kill→standing + perma-death + role-succession contract.
+     *
+     * Durably decrements the governing faction's Population by Settings->KillPopulationLoss, and (only for armed roles —
+     * Soldier/Guard) its Reserves.Arms by Settings->KillMilitaryArmsLoss. Population is delta-applied and Reserves.Arms is
+     * the durable economic SOURCE the sim derives MilitaryStrength from, so both edits persist; we deliberately do NOT
+     * touch MilitaryStrength (recomputed absolutely each sim tick — a direct write is silently wiped).
+     *
+     * Thread-safe (locks SimulationLock): this is a read-modify-write of the faction WriteBuffer + CommitWrites, which the
+     * sim thread also writes under this same lock (TickFactionEvolution births/deaths, economy recompute). No-op if the
+     * faction id is invalid (factionless NPC), so no call-site guard is needed.
+     */
+    void ReportNpcDeath(FMythicFactionId FactionId, FGameplayTag RoleTag);
+
+    /**
      * Process role-vacation / shop-succession for a dead NPC. Thread-safe (locks simulation): SettlementRegistry's
      * HandleNPCDeath WALKS the Settlements TMap, which the SIM thread concurrently rehashes/mutates under the same lock
      * (RegisterSettlement Add, TickShopSuccession, TransferSettlement). Game-thread death callers MUST route here.
@@ -202,6 +261,35 @@ public:
      * @return true + fills Out if the id exists; false otherwise.
      */
     bool CopySettlementById(int32 SettlementId, FMythicSettlementData &Out);
+
+    /**
+     * Thread-safe enumeration of all registered settlement IDs. Takes SimulationLock before GetAllSettlementIds, which
+     * does a bare Settlements.GetKeys walk — the sim thread rehashes/mutates that TMap under this same lock
+     * (RegisterSettlement Add, TransferSettlement, TickShopSuccession). Game-thread enumerators (the debugger) MUST
+     * route through here, not call the registry's unlocked getter directly.
+     */
+    void CopyAllSettlementIds(TArray<int32> &OutIds);
+
+    /**
+     * Thread-safe settlement count. Takes SimulationLock before GetSettlementCount (a bare Settlements.Num() read),
+     * for the same reason as CopyAllSettlementIds.
+     */
+    int32 GetSettlementCountSafe();
+
+    /**
+     * Thread-safe resolve of a settlement's actor by runtime SettlementId. Takes SimulationLock before
+     * GetSettlementActor (a bare SettlementActors.Find), which the sim thread rehashes under this same lock.
+     * @return the actor, or nullptr if the id is unknown or the actor was destroyed.
+     */
+    AMythicSettlement *GetSettlementActorSafe(int32 SettlementId);
+
+    /**
+     * Thread-safe copy-out of the background sim thread's tick diagnostics. Takes SimulationLock before reading
+     * TickCount (mutated on the background thread inside SimTick under this same lock) — a lock-free read of that
+     * non-atomic counter would be a data race. Added for the Living World gameplay debugger (World State pane).
+     * @return true + fills the outs if a sim thread exists; false (and OutRunning=false) if none.
+     */
+    bool CopySimDiagnostics(uint64 &OutTickCount, float &OutTickIntervalSeconds, bool &OutRunning);
 
     // ─── Save/Load ───────────────────────────────────────
 
@@ -243,11 +331,23 @@ private:
     /** Seed territory grid from all registered settlements */
     void SeedTerritoryFromSettlements();
 
+    /** Resolve the embodied humanoid + creature classes from settings (mirroring the ActorSpawnProcessor's resolve
+     *  order) and pre-warm EmbodimentPoolWarmCount parked actors of each at init, so the first town has no cold-spawn
+     *  hitch. Server-only; no-op if pooling is disabled. Called once from Initialize after the sim is started. */
+    void WarmEmbodimentPools();
+
     /** Callback when the background thread completes a commit */
     void OnSimCommitted();
 
     /** Reverse link entity->embodied cognitive actor; server-only, populated by the MASS->actor bridge. */
     TMap<FMassEntityHandle, TWeakObjectPtr<AMythicNPCCharacter>> EmbodiedActors;
+
+    /** Class-keyed free list of PARKED (hidden, non-colliding, non-ticking, brain-stopped) embodied actors available
+     *  for reuse. Game-thread only, no lock. The key TObjectPtr<UClass> keeps the class alive; the values are weak so a
+     *  parked actor destroyed out-from-under us (level teardown) is skipped rather than handed out dangling. Not a
+     *  UPROPERTY (the value is a TArray of weak ptrs, which a UPROPERTY can't reflect) — that is fine: parked actors are
+     *  hidden, not unreferenced, so they are not GC candidates, and the weak guard covers the teardown edge anyway. */
+    TMap<TObjectPtr<UClass>, TArray<TWeakObjectPtr<AMythicNPCCharacter>>> EmbodimentPool;
 
     // ─── Owned Data ───────────────────────────────────────
 
@@ -279,6 +379,10 @@ private:
 
     UPROPERTY()
     TObjectPtr<UMythicPersistentNPCRegistry> PersistentNPCRegistry;
+
+    /** Designer-spawner persistence registry (per-DesignerId SpawnsEver / perma-death / last-death). Server-mutated only. */
+    UPROPERTY()
+    TObjectPtr<UMythicDesignerSpawnerRegistry> DesignerSpawnerRegistry;
 
     /** Social graph — NPC-to-NPC relationship adjacency list */
     UPROPERTY()

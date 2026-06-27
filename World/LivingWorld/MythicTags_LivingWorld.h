@@ -17,6 +17,9 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_EVENT_FACTION_FAMINE)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_EVENT_FACTION_WEAKNESS)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_EVENT_DIPLOMACY_SHIFT)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_EVENT_FACTION_ABSORPTION)
+// Permanent (perma-death) death event — witnessed by the PressureProcessor / persistence layer.
+// String uses the "World.Event.*" namespace (mirrors the "World.*"-prefixed TAG_WORLD_ACTION_BETRAYAL precedent).
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_WORLD_EVENT_DEATH_PERMANENT)
 
 // ─── Action Tags (Moral Evaluation & Crime Pipeline) ─────────
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_ACTION_VIOLENCE_ATTACK)
@@ -52,3 +55,57 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_EMOTION_JOY)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_EMOTION_DESPAIR)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_EMOTION_FEAR)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_EMOTION_GRIEF)
+
+// ─── NPC Role Tags (Dynamic-Population — role-from-context) ───
+// Stamped on FMythicIdentityFragment.RoleTag at spawn by the population/territory/traveler spawners.
+// Leaf names deliberately preserve the substrings Guard/Soldier/Merchant so NPCGenerator::GeneratePersonality's
+// RoleName.Contains() modifiers (NPCGenerator.cpp:267-285) fire unchanged on promotion. Single owner of this family.
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ROLE_CIVILIAN)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ROLE_FARMER)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ROLE_MERCHANT)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ROLE_LABORER)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ROLE_FISHER)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ROLE_GUARD)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ROLE_SOLDIER)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ROLE_TRAVELER)
+// Archetype catalog roles (sim-driven WHO spawns) — wealth/poverty-shaped urban archetypes. Noble is group-only.
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ROLE_BEGGAR)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ROLE_SOCIALITE)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ROLE_NOBLE)
+// Hostile-camp occupant role (Step 3) — stamped on every NPC the population spawner fills into a bIsHostileCamp
+// settlement's Enemy spawn points. Leaf name "Bandit" carries no GeneratePersonality substring modifier (it's neither
+// Guard/Soldier/Merchant), so it falls through to the neutral personality path — intended for a generic hostile.
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ROLE_BANDIT)
+
+// ─── NPC Group Activity Tags (clustered spawning, Step 4) ────
+// GroupTag of a code-default / authored FMythicGroupTemplate, also stamped on each member's FMythicGroupFragment.ActivityTag
+// so the debugger can tally a group's kind. NPC.Group.Activity is the parent (the FMythicGroupTemplate.GroupTag UPROPERTY
+// uses Categories="NPC.Group"). Single owner of this family.
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_GROUP_ACTIVITY)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_GROUP_RETINUE)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_GROUP_BARTER)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_GROUP_SOCIAL)
+
+// ─── NPC Activity Tags (context-driven activity catalog, Step 3) ──
+// ActivityTag of a code-default / authored FMythicActivityDef. NPC.Activity is the parent (the FMythicActivityDef.ActivityTag
+// UPROPERTY uses Categories="NPC.Activity"). Handed to the cosmetic OnPerformActivity BP hook + read by the debugger.
+// Single owner of this family.
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ACTIVITY)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ACTIVITY_FISH)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ACTIVITY_BARTER)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ACTIVITY_WORK)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ACTIVITY_REST)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ACTIVITY_SOCIALIZE)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ACTIVITY_PATROL)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_NPC_ACTIVITY_WANDER)
+
+// ─── Encounter Type Tags (EncounterDirector code-default templates) ──
+// EncounterTag for the built-in code-default encounter templates (MythicEncounterDefaults::BuildDefaultTemplates).
+// Distinct family from the LivingWorld.Event.Encounter.* LIFECYCLE beats (Spawned/Completed/Defeated) above — these
+// identify the TEMPLATE KIND, the lifecycle tags mark the chronicle beat. An authored EncounterTemplateDatabase may
+// reuse these tags (they're registered natively) or define its own; the director keys cooldown/instance-cap on whatever
+// EncounterTag a template carries, so authored and code-default tags never collide.
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_ENCOUNTER_BANDIT_AMBUSH)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_ENCOUNTER_PATROL)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_ENCOUNTER_RAID)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_LIVINGWORLD_ENCOUNTER_WILDLIFE)

@@ -30,6 +30,16 @@ public:
     // all ready), self-guarded by DoesSaveGameExist inside LoadCharacter.
     virtual void OnPostLogin(AController *NewPlayer) override;
 
+    // ─── Debug accessors (Living World gameplay debugger, World State pane) ───
+    // Server-only, game-thread reads of otherwise-protected timer state. Defined in the .cpp where the world timer
+    // manager is reachable.
+
+    /** Seconds until the next periodic autosave fires (negative/0 if the timer isn't active). */
+    float GetAutosaveTimeRemaining() const;
+
+    /** Number of controllers with a pending respawn timer. */
+    int32 GetPendingRespawnCount() const { return RespawnTimers.Num(); }
+
 protected:
     // Timer callback: restart the player and destroy the old (dead) pawn.
     void HandleRespawnTimer(AController *Controller);

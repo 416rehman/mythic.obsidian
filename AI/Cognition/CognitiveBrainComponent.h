@@ -105,8 +105,37 @@ public:
     /** Thread-safe snapshot of the NPC's beliefs (taken under BeliefsLock). Use from other threads. */
     TArray<FMythicBelief> GetBeliefsCopy() const;
 
-    /** Get the NPC's most recent desire scores (from last think tick) */
+    /** Get the NPC's most recent desire scores (from last think tick). RACY from any thread other than the think
+     *  worker — LastDesires is written on the async think worker under BeliefsLock. From the game thread (e.g. the
+     *  gameplay debugger) use GetLastDesiresCopy() instead. */
     const TArray<FMythicDesire> &GetLastDesires() const { return LastDesires; }
+
+    /** Thread-safe snapshot of the NPC's last-think desire scores (taken under BeliefsLock — the same lock the think
+     *  worker holds around ScoreDesires when it writes LastDesires). Use from other threads (the debugger). */
+    TArray<FMythicDesire> GetLastDesiresCopy() const;
+
+    // ─── Debug context (game-thread cached identity/schedule) ─────────────────
+    // These expose write-once / game-thread-cached members for the gameplay debugger's Cognition pane. No lock: Role,
+    // Faction, TrueFaction, HomeCell are write-once at InitializeBrain; CachedSchedulePhase/CachedWorkCell are written
+    // on the GAME thread in Think() (same thread the debugger's CollectData runs on). Race-free reads.
+
+    /** True if this NPC is a spy (its public Faction differs from its TrueFaction). */
+    bool IsSpyBrain() const { return TrueFaction.IsValid() && TrueFaction.Index != Faction.Index; }
+
+    /** The NPC's covert true faction (for spies). Invalid for non-spies. */
+    FMythicFactionId GetTrueFaction() const { return TrueFaction; }
+
+    /** The NPC's role tag (e.g. TAG_LivingWorld_Role_Spy). */
+    FGameplayTag GetRole() const { return Role; }
+
+    /** The brain's home cell (Rest anchor). */
+    FMythicCellCoord GetHomeCell() const { return HomeCell; }
+
+    /** Game-thread-cached schedule phase copied from the entity's FMythicScheduleFragment in Think(). */
+    EMythicSchedulePhase GetCachedSchedulePhase() const { return CachedSchedulePhase; }
+
+    /** Game-thread-cached work destination cell copied from the schedule fragment in Think(). */
+    FMythicCellCoord GetCachedWorkCell() const { return CachedWorkCell; }
 
     /** Get the MASS entity this NPC was promoted from */
     FMassEntityHandle GetSourceEntity() const { return SourceEntity; }
@@ -142,6 +171,25 @@ public:
      * guaranteed to have finished dereferencing `this` before destruction (EndPlay does the same).
      */
     void StopThinking();
+
+    /**
+     * SERVER: (re-)arm the staggered think timer. The SINGLE timer-arm site — BeginPlay calls this on first life and
+     * the actor pool's WakeFromPool calls it again on reuse (BeginPlay does NOT re-run for a recycled actor). Picks a
+     * fresh ThinkInterval in [CognitiveThinkIntervalMin, Max] with a random initial delay so reused actors re-stagger
+     * instead of all thinking on the same frame. No-op (with a warning at the BeginPlay call) if the living-world
+     * references were never cached (CausalFabric/FactionDB/Settings null) — preserves BeginPlay's early-out.
+     */
+    void StartThinking();
+
+    /**
+     * SERVER: wipe all per-life BDI state so a pooled actor's brain starts clean on its next embodiment. Clears
+     * Beliefs / LastDesires / CurrentIntention / SourceEntity, flips bInitialized=false, and resets CachedSchedulePhase
+     * to Idle. MUST be called AFTER StopThinking() has joined the async think worker (the pool's SleepToPool ordering
+     * guarantees this) — Beliefs/LastDesires are otherwise touched by that worker. Beliefs/LastDesires are cleared
+     * under BeliefsLock (the same lock the worker holds), the rest are game-thread-only members. InitializeBrain does
+     * NOT clear these, so without this a reused brain would inherit the previous occupant's beliefs/intention.
+     */
+    void ResetForReuse();
 
 private:
     // ─── Core BDI Loop ────────────────────────────────────

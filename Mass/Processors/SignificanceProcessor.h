@@ -9,6 +9,25 @@
 #include "World/LivingWorld/LivingWorldTypes.h" // FMythicCellCoord (used by value via TConstArrayView in ComputeProximityScore)
 #include "SignificanceProcessor.generated.h"
 
+class APlayerController;
+
+/**
+ * Cached per-player view for the embodiment view-gate (embodiment-service-LOCK-v1 §5b).
+ * Snapshotted once per Execute on the game thread (PlayerCameraManager reads), then dot-tested against candidate
+ * spawn positions with zero further allocation/traces. Mirrors the EXACT math in
+ * UMythicActorSpawnProcessor::IsActorInCloseView (the despawn-side gate) so spawn + despawn agree on "in close view".
+ */
+struct FMythicPlayerView {
+    /** World-space camera location. */
+    FVector CamLocation = FVector::ZeroVector;
+
+    /** Normalized camera forward (CameraRotation.Vector()). */
+    FVector CamForward = FVector::ForwardVector;
+
+    /** cos(half horizontal FOV + ViewConeMargin) — precomputed so the test is a single dot-product compare. */
+    float CosHalfCone = -1.0f;
+};
+
 /**
  * MASS processor that maintains significance scores and handles tier promotion/demotion.
  *
@@ -54,6 +73,12 @@ public:
      *  See QualifiesForPromotion for the dead-band it forms. Pure + static. */
     static bool QualifiesForDemotion(float Score, float Threshold, float Hysteresis);
 
+    /** view-cone test: is WorldPos within ViewGateMinSpawnDistance of, AND inside the (margin-widened) view cone of,
+     *  ANY cached player view? Pure + static so the spawn/despawn view-gate math is unit-testable without a live world.
+     *  Mirrors UMythicActorSpawnProcessor::IsActorInCloseView so the spawn-gate (this) and the despawn-gate (there)
+     *  agree. MinSpawnDistance is in cm (compared squared internally). Empty PlayerViews → false (nothing to gate). */
+    static bool IsInCloseView(const FVector &WorldPos, TConstArrayView<FMythicPlayerView> PlayerViews, float MinSpawnDistance);
+
 protected:
     virtual void ConfigureQueries(const TSharedRef<FMassEntityManager> &EntityManager) override;
     virtual void Execute(FMassEntityManager &EntityManager, FMassExecutionContext &Context) override;
@@ -64,4 +89,16 @@ private:
 
     /** Timer accumulator — rescoring runs at configured interval */
     float TimeSinceLastTick = 0.0f;
+
+    // ─── Stream-in grace bookkeeping (embodiment-service-LOCK-v1 §5c) ───
+    // Per-player: world time when the player was first seen OR last region-jumped (a single-tick Manhattan cell jump
+    // >= RegionEnterCellJump). While Now - FirstSeenTime < StreamInGraceSeconds the view-gate is BYPASSED for that
+    // player's window, so a town bulk-embodies behind the fade-in instead of popping in one NPC at a time. Game-thread
+    // only (this processor is bRequiresGameThreadExecution=true) — no lock. Weak keys: pruned of stale/destroyed
+    // controllers each Execute so the maps never grow unbounded. NOT UPROPERTYs (raw maps keyed on weak PC ptrs).
+    TMap<TWeakObjectPtr<const APlayerController>, double> PlayerFirstSeenTime;
+
+    /** Per-player: the player's cell on the PREVIOUS significance tick, to detect a region-enter teleport (a Manhattan
+     *  jump >= RegionEnterCellJump re-arms the grace window above). Pruned alongside PlayerFirstSeenTime. */
+    TMap<TWeakObjectPtr<const APlayerController>, FMythicCellCoord> PlayerLastCell;
 };

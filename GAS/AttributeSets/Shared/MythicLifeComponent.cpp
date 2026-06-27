@@ -110,7 +110,7 @@ void UMythicLifeComponent::InitializeWithAbilitySystem(UAbilitySystemComponent *
             BaseWalkSpeed = Move->MaxWalkSpeed;
         }
     }
-    const FGameplayTag SprintTag = FGameplayTag::RequestGameplayTag(FName("GAS.State.Sprinting"), false);
+    const FGameplayTag SprintTag = GAS_STATE_SPRINTING;
     const FGameplayTag MovementAffectingTags[] = {GAS_DEBUFF_STUNNED, GAS_DEBUFF_FROZEN, GAS_DEBUFF_SLOWED, GAS_BUFF_HASTE, SprintTag};
     for (const FGameplayTag &MoveTag : MovementAffectingTags) {
         if (MoveTag.IsValid()) {
@@ -203,7 +203,7 @@ void UMythicLifeComponent::UninitializeFromAbilitySystem() {
     if (AbilitySystemComponent) {
         // MUST mirror the registration array in InitializeWithAbilitySystem (Stun/Frozen/Slowed + Haste). A tag missing
         // here leaks a stale HandleCrowdControlTagChanged binding on the PERSISTENT PlayerState ASC across pawn reuse.
-        const FGameplayTag SprintTag = FGameplayTag::RequestGameplayTag(FName("GAS.State.Sprinting"), false);
+        const FGameplayTag SprintTag = GAS_STATE_SPRINTING;
         const FGameplayTag MovementAffectingTags[] = {GAS_DEBUFF_STUNNED, GAS_DEBUFF_FROZEN, GAS_DEBUFF_SLOWED, GAS_BUFF_HASTE, SprintTag};
         for (const FGameplayTag &MoveTag : MovementAffectingTags) {
             if (MoveTag.IsValid()) {
@@ -625,7 +625,7 @@ void UMythicLifeComponent::ReevaluateCrowdControl() {
     }
 
     // apply sprinting speed scaling factor if active
-    const FGameplayTag SprintTag = FGameplayTag::RequestGameplayTag(FName("GAS.State.Sprinting"), false);
+    const FGameplayTag SprintTag = GAS_STATE_SPRINTING;
     if (SprintTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(SprintTag)) {
         if (const UMythicAttributeSet_Utility *Util = AbilitySystemComponent->GetSet<UMythicAttributeSet_Utility>()) {
             SpeedScale *= (1.0f + Util->GetBonusSprintSpeed());

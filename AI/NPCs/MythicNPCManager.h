@@ -90,4 +90,12 @@ public:
 
     // Remove an NPC from the tracked NPCs, when the NPC dies.
     void RemoveCachedNPC(FGuid NPCId);
+
+    // ─── Roster count getters (for the Living World gameplay debugger header) ───
+    // The active/cached/family/pool containers are private; these expose only their sizes (no element access).
+    int32 GetActiveNPCCount() const { return ActiveNPCs.Num(); }
+    int32 GetCachedNPCCount() const { return CachedNPCs.Num(); }
+    int32 GetCachedFamilyCount() const { return CachedFamilies.Num(); }
+    int32 GetActiveFamilyCount() const { return ActiveFamilySpecs.Num(); }
+    int32 GetPooledNPCCount() const { return NPCCharacterPool.Num(); }
 };

@@ -78,6 +78,15 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Save System | Manifest")
     bool DeleteCharacter(const FString &CharacterID);
 
+    // ─── Debug accessors (Living World gameplay debugger, World State pane) ───
+    // Game-thread reads of the otherwise-private async-op tracking sets. Cheap counts, no mutation.
+
+    /** Number of save-slot writes currently in flight on background threads. */
+    int32 GetInFlightSaveCount() const { return InFlightSaveSlots.Num(); }
+
+    /** Number of async loads awaiting their target actor. */
+    int32 GetPendingLoadCount() const { return PendingLoadTargets.Num(); }
+
 private:
     // --- Internal Callbacks ---
 

@@ -8,7 +8,11 @@
 #include "MythicNPCData.h"
 #include "Player/MythicCharacter.h"
 #include "Interaction/IMythicInteractable.h"
+#include "AI/NPCs/MythicSocialVerbs.h" // EMythicSocialVerb / EMythicSocialReaction / FMythicSocialReactionResult (UHT-visible in UFUNCTION sigs)
+#include "World/LivingWorld/Appearance/AppearanceTypes.h" // FMythicAppearance (replicated member + UHT-visible in OnApplyAppearance sig)
 #include "MythicNPCCharacter.generated.h"
+
+struct FMythicIdentityFragment;
 
 class UMythicNPCManager;
 class UMythicAttributeSet_NPCCombat;
@@ -68,6 +72,118 @@ public:
 
     // CLIENT: surface a chosen dialogue line via the OnNpcBark Blueprint event on the interacting client.
     void FireBark(const FText &Line, APlayerController *Interactor);
+
+    // ─── Social interaction verbs (RDR2-style player→NPC verbs + trait-driven reactions) ───
+    // SERVER: resolve how this NPC reacts to a social verb, reading its (authoritative, non-replicated) personality
+    // VentWeights + the interactor's standing toward this NPC's faction. Pure mapping under the hood
+    // (UMythicSocialVerbLibrary::ResolveReaction); this wrapper just gathers the server-side inputs. Returns a
+    // neutral result off-authority or with a missing brain/personality.
+    FMythicSocialReactionResult ResolveSocialVerb(EMythicSocialVerb Verb, APlayerController *Interactor) const;
+
+    // SERVER: apply a resolved reaction — adjust the interactor's standing (ServerAdjustStanding), optionally turn
+    // hostile (the NPC's AIController ForceEngageTarget), optionally alert nearby allied guards (bounded radius scan
+    // → OnSignificantEvent + ForceEngageTarget), and surface the reaction LOCALLY (server/listen-host). The remote
+    // client surfaces it via the PC's ClientReceiveSocialReaction → FireReaction.
+    void ApplySocialReaction(const FMythicSocialReactionResult &Result, EMythicSocialVerb Verb, APlayerController *Interactor);
+
+    // CLIENT: surface a resolved social reaction via the OnNpcReaction Blueprint event on the interacting client
+    // (mirrors FireBark for dialogue). Called by AMythicPlayerController::ClientReceiveSocialReaction.
+    void FireReaction(EMythicSocialVerb Verb, EMythicSocialReaction Reaction, const FText &Line, APlayerController *Interactor);
+
+    // ─── Context-driven activity (Step 3) ───
+    // SERVER: set this NPC's current ambient activity tag (chosen by the AIController's idle dispatch from the activity
+    // catalog). Change-gated: a no-op when the tag is unchanged, so it never re-multicasts the same cosmetic. On a real
+    // change it stores the tag (server-side only — NOT replicated) and Multicast_PerformActivity's the cosmetic to all
+    // clients (+ runs OnPerformActivity locally on the server/listen-host). No-op off-authority.
+    void ServerSetActivity(FGameplayTag ActivityTag);
+
+    // The NPC's current ambient activity (debugger getter). Server-side authoritative value; clients only ever receive
+    // the transient cosmetic multicast, so this getter is meaningful on the server (where the debugger reads it).
+    UFUNCTION(BlueprintPure, Category = "Mythic NPC | Activity")
+    FGameplayTag GetCurrentActivityTag() const { return CurrentActivityTag; }
+
+    // Debugger getter for the last social reaction this NPC processed (server-side; see LastSocialVerb/LastSocialReaction).
+    // Returns false until a social verb has ever been applied to this NPC (out-params then carry the defaults). Server-only
+    // state (the debugger reads it on the authority); never replicated. Used by the Living World gameplay debugger.
+    bool GetLastSocialReaction(EMythicSocialVerb &OutVerb, EMythicSocialReaction &OutReaction, double &OutWorldTime) const {
+        OutVerb = LastSocialVerb;
+        OutReaction = LastSocialReaction;
+        OutWorldTime = LastSocialReactionTime;
+        return bHasSocialReaction;
+    }
+
+protected:
+    // Fired (via Multicast_PerformActivity) on every client + the server/listen-host when this NPC begins a new ambient
+    // activity, so the Blueprint can play the matching montage/anim/prop (a fishing-rod cast, a hammer swing, a market
+    // browse). Editor handoff (mirrors OnNpcBark) — no activity montage invented in C++. If unbound, the activity is
+    // still selected + steered (movement) but plays no cosmetic.
+    UFUNCTION(BlueprintImplementableEvent, Category = "Mythic NPC | Activity")
+    void OnPerformActivity(FGameplayTag ActivityTag);
+
+    // SERVER→ALL cosmetic broadcast: carries the chosen activity tag to clients so each plays OnPerformActivity. Unreliable
+    // (a dropped ambient cosmetic is harmless — the next activity change re-broadcasts) + bounded to an activity CHANGE
+    // (ServerSetActivity is change-gated). Drives a purely cosmetic BP hook; no sim state rides it.
+    UFUNCTION(NetMulticast, Unreliable)
+    void Multicast_PerformActivity(FGameplayTag ActivityTag);
+
+    // Current ambient activity tag (server-side only — NOT replicated; the cosmetic rides Multicast_PerformActivity, and
+    // a late-joiner simply picks up the next change). Change-gate source for ServerSetActivity + the debugger getter.
+    FGameplayTag CurrentActivityTag;
+
+    // Last social verb/reaction processed by ApplySocialReaction (server-side only — NOT replicated; surfaced by the
+    // Living World gameplay debugger via GetLastSocialReaction). Pure observability; no sim state rides these.
+    EMythicSocialVerb LastSocialVerb = EMythicSocialVerb::Greet;
+    EMythicSocialReaction LastSocialReaction = EMythicSocialReaction::Neutral;
+    double LastSocialReactionTime = 0.0; // World->GetTimeSeconds() at the time of the reaction
+    bool bHasSocialReaction = false;     // false until the first social verb is applied to this NPC
+
+    // ─── Appearance (Step 4): deterministic wardrobe descriptor + replication ───
+public:
+    // The fully-resolved, replicated per-NPC look (which modular part fills each slot, skin/hair tone, faction tint).
+    // Resolved server-side ONCE per embodiment from the stable Identity seed (ApplyAppearanceFromIdentity) and replicated
+    // to clients via OnRep_Appearance → OnApplyAppearance. Clients NEVER re-resolve — they receive this descriptor — so
+    // the look is byte-identical on every machine and stable across pool reuse / re-embody / save-load (Step 1 guarantee).
+    // BlueprintReadOnly so an art Blueprint can read it from OnApplyAppearance to drive the skeletal-mesh merge.
+    UPROPERTY(ReplicatedUsing = OnRep_Appearance, BlueprintReadOnly, Category = "Mythic NPC | Appearance")
+    FMythicAppearance Appearance;
+
+protected:
+    // Replication callback: a client received a new Appearance descriptor → hand it to the art Blueprint. Fires only on
+    // remote clients (OnRep never fires on the authority); the server/listen-host calls OnApplyAppearance directly after
+    // assigning Appearance in ApplyAppearanceFromIdentity. No sim mutation here — pure cosmetic apply.
+    UFUNCTION()
+    void OnRep_Appearance();
+
+    // Fired (via OnRep_Appearance on clients, and directly on server/listen-host) when this NPC's resolved look is ready,
+    // so the Blueprint/art can build the modular skeletal-mesh merge + apply the part indices, skin/hair tones, and the
+    // faction tint. Editor/art handoff (mirrors OnNpcBark / OnPerformActivity) — NO mesh or skeletal-merge invented in
+    // C++ (that stays BP/art, keeping the C++ module free of an art dependency). If unbound, the descriptor is still
+    // resolved + replicated but plays no visible wardrobe (honest art boundary).
+    UFUNCTION(BlueprintImplementableEvent, Category = "Mythic NPC | Appearance")
+    void OnApplyAppearance(const FMythicAppearance &Desc);
+
+    // SERVER: resolve this NPC's appearance from its stable Identity seed (NameHash + demographics + role + faction) and
+    // assign the replicated Appearance member, then (on server/listen-host) call OnApplyAppearance directly since OnRep
+    // doesn't fire on the authority. Called from InitializeFromMassEntity after the identity read, inside the existing
+    // HasAuthority guard. virtual so a non-humanoid subclass (AMythicCreatureCharacter) can skip wardrobe — though
+    // creatures already skip it by overriding InitializeFromMassEntity without calling Super. No-op off-authority.
+    virtual void ApplyAppearanceFromIdentity(const FMythicIdentityFragment &Id);
+
+protected:
+    // Fired (via FireReaction, from the PC's ClientReceiveSocialReaction — which also runs locally on a listen-host)
+    // with the NPC's reaction to a social verb, so the Blueprint can play the matching face/anim/bark UI. Editor
+    // handoff (mirrors OnNpcBark) — no dedicated reaction widget invented in C++. If unbound, the reaction is still
+    // computed + applied (standing/aggro/guards) but not surfaced.
+    UFUNCTION(BlueprintImplementableEvent, Category = "Mythic NPC | Social")
+    void OnNpcReaction(EMythicSocialVerb Verb, EMythicSocialReaction Reaction, const FText &Line, APlayerController *Interactor);
+
+    // Radius (cm) within which a hostile social verb that triggers CallGuards alerts allied NPCs. Designer-tunable.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic NPC | Social", meta = (ClampMin = "0.0"))
+    float GuardAlertRadius = 1500.0f;
+
+    // Cap on how many allied NPCs a single guard-alert may rouse (bounds the one-shot radius scan).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic NPC | Social", meta = (ClampMin = "0"))
+    int32 GuardAlertMaxResponders = 8;
 
 protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
@@ -129,6 +245,12 @@ protected:
 
     // Latches the one-shot OnDeath bind (InitializeASC runs up to 3x: BeginPlay + PossessedBy + OnSpawnedFromPool).
     bool bBoundDeath = false;
+
+    // The AI controller retained across a pool park/wake cycle. SleepToPool captures the controller BEFORE
+    // OnReturnedToPool unpossesses it, so WakeFromPool can RE-POSSESS the same controller instead of churning a new
+    // one (and leaking the old). Weak so a controller destroyed during a level teardown is detected; WakeFromPool
+    // falls back to SpawnDefaultController if it's gone. Only ever set/read on the server pool path.
+    TWeakObjectPtr<AController> PooledController;
 
     // Timer that destroys the corpse after death cosmetics. Delayed (not immediate) because OnDeath broadcasts
     // BEFORE StartDeath finishes awarding XP/loot, so the actor must outlive the broadcast.
@@ -218,6 +340,37 @@ public:
     virtual void OnReturnedToPool();
     //~ End IPoolableNPC Interface
 
+    // ─── Embodiment pool lifecycle (embodiment-service-LOCK-v1 §1) ───
+    // The reuse-pool teardown/re-arm pair used by UMythicLivingWorldSubsystem::Release/AcquireEmbodiedActor. They
+    // bracket the existing OnReturnedToPool / InitializeASC GAS plumbing with the cognition-brain join+reset and the
+    // park/un-park (hide + collision + tick) so a recycled actor carries NO stale state from its previous occupant.
+    // AMythicCreatureCharacter inherits both unchanged: its CognitiveBrain is never InitializeBrain'd, so the
+    // brain calls are guarded no-ops. virtual so a mesh-bearing BP subclass can extend (must call Super).
+
+    /**
+     * RELEASE teardown — return this actor to the parked pool. Order is LOCKED:
+     *   (1) HasAuthority guard;
+     *   (2) StopThinking() FIRST (joins the async BDI worker before anything else touches the actor);
+     *   (3) OnReturnedToPool() (existing GAS / timer / UnPossess teardown);
+     *   (4) ResetForReuse() (clear beliefs/intention/source-entity — only safe after the worker join in step 2);
+     *   (5) park: disable collision, hide in game, disable tick.
+     */
+    virtual void SleepToPool();
+
+    /**
+     * ACQUIRE re-arm — wake this actor from the parked pool. Runs BEFORE the spawn processor's InitializeFromMassEntity.
+     * The caller (AcquireEmbodiedActor) has already un-hidden + re-enabled collision + repositioned the actor. Order
+     * is LOCKED:
+     *   (1) HasAuthority guard;
+     *   (2) InitializeASC() (re-grant attack ability, re-wire LifeComponent idempotently; death-bind is SKIPPED by the
+     *       bBoundDeath latch so HandleNPCDeath is never double-bound);
+     *   (3) ResetForRespawn() on LifeAttributes (snap Health to the re-seeded MaxHealth);
+     *   (4) RestoreAfterDeath() on LifeComponent (re-enable movement/collision a prior StartDeath disabled);
+     *   (5) re-enable tick per the ctor's bCanEverTick.
+     * StartThinking() is re-armed last (BeginPlay does not re-run on reuse).
+     */
+    virtual void WakeFromPool();
+
     // Get the NPC Id
     UFUNCTION(BlueprintCallable, Category = "Mythic NPC | Data")
     const FGuid &GetNPCId() const;
@@ -235,7 +388,7 @@ public:
      * Initializes the character from its Mass entity counterpart upon promotion to a fully simulated actor.
      * Hooks up the Cognitive Brain, Faction bindings, and Personality.
      */
-    void InitializeFromMassEntity(const FMassEntityHandle &InEntityHandle);
+    virtual void InitializeFromMassEntity(const FMassEntityHandle &InEntityHandle);
 
     // Sets default values for this character's properties
     AMythicNPCCharacter();

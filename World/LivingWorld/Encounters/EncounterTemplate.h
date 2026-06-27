@@ -147,3 +147,23 @@ struct FMythicActiveEncounter {
         return (CurrentWorldTime - ActivationTime) > static_cast<double>(MaxDurationSeconds);
     }
 };
+
+// ─────────────────────────────────────────────────────────────
+// Code-default encounter templates (no authored asset required)
+// ─────────────────────────────────────────────────────────────
+
+namespace MythicEncounterDefaults {
+/**
+ * Fill Out with a built-in, all-zero-prerequisite encounter template set (Patrol / BanditAmbush / Wildlife / Raid).
+ * The EncounterDirector uses this as a FALLBACK when no EncounterTemplateDatabase asset is assigned (or the assigned
+ * asset yields zero templates) — so the encounter system is FUNCTIONAL out of the box with no designer authoring.
+ *
+ * These are deliberately generic CODE DEFAULTS: every member embodies as the generic EmbodiedNPCClass (the humanoid
+ * gate path), NOT a bandit/wolf-specific mesh. KIND-per-encounter visuals (a wolf pack that actually looks like wolves)
+ * is a downstream content slice; an authored database always WINS over these defaults (the director prefers the asset
+ * and only falls back when it's absent/empty). All prerequisites are zeroed so they spawn on any map/faction state.
+ *
+ * Pure (writes only to Out from compile-time constants) → deterministic + unit-testable.
+ */
+MYTHIC_API void BuildDefaultTemplates(TArray<FMythicEncounterTemplate>& Out);
+} // namespace MythicEncounterDefaults

@@ -6,9 +6,11 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DEAD, "GAS.State.Dead", "The entity is 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DYING, "GAS.State.Dying", "The entity is dying");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DOWNED, "GAS.State.Downed", "Co-op down state: incapacitated but revivable (bleeds out if not revived)");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_INCOMBAT, "GAS.State.InCombat", "The entity was damaged recently");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_SPRINTING, "GAS.State.Sprinting", "The entity is sprinting");
 
 /** Debuffs */
 // Debuff tags are applied to entities to indicate that they are suffering from a negative effect, such as bleeding, burning, etc.
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF, "GAS.Debuff", "Parent category for all debuffs");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF_BLEEDING, "GAS.Debuff.Bleeding", "The entity is bleeding and taking damage over time");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF_BURNING, "GAS.Debuff.Burning", "The entity is burning and taking damage over time");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF_POISONED, "GAS.Debuff.Poisoned", "The entity is poisoned and taking damage over time");
@@ -34,6 +36,7 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_GAMEPLAY_GAMBIT, "GAS.Buff.Gameplay.Gamb
 
 /** GAS Abilities */
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_ABILITY_HEAL, "GAS.Ability.Heal", "The entity heals another entity");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_ABILITY_TYPE_SKILL, "GAS.Ability.Type.Skill", "Marks an outgoing hit as delivered by a skill");
 
 /** SetByCaller */
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(SETBYCALLER_GENERIC, "SetByCaller.Generic", "Generic SetByCaller tag to use when no other tag is appropriate");

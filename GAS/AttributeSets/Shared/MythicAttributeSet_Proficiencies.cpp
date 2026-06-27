@@ -9,6 +9,7 @@
 #include "MythicAttributeSet_Utility.h"
 #include "Player/MythicPlayerController.h"
 #include "Player/Proficiency/ProficiencyComponent.h"
+#include "GameFramework/PlayerState.h"
 
 void UMythicAttributeSet_Proficiencies::OnRep_CombatProficiency(const FGameplayAttributeData &OldValue) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Proficiencies, CombatProficiency, OldValue);

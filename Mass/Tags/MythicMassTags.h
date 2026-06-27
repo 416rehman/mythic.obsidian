@@ -50,3 +50,39 @@ USTRUCT()
 struct MYTHIC_API FMythicActorDespawnRequestTag : public FMassTag {
     GENERATED_BODY()
 };
+
+/**
+ * KIND marker for a faction soldier / patrol member spawned over faction-controlled territory.
+ * Soldiers ALSO carry FMythicNPCTag (so they embody as the humanoid EmbodiedNPCClass and are counted by the
+ * population spawner's per-cell density + far-from-player despawn). This tag is purely for fast kind tallies and
+ * archetype filtering (e.g. the debugger's soldier-by-faction count) — it NEVER replaces the humanoid tag.
+ */
+USTRUCT()
+struct MYTHIC_API FMythicSoldierTag : public FMassTag {
+    GENERATED_BODY()
+};
+
+/**
+ * KIND marker for an inter-settlement traveler (caravan/merchant or escorting patrol) moving between towns.
+ * Travelers ALSO carry FMythicNPCTag (so they embody as the humanoid class). This tag does double duty:
+ *   1. Despawn EXEMPTION — the ambient PopulationSpawnerProcessor excludes FMythicTravelerTag entities from its
+ *      far-from-player despawn so a traveler isn't culled mid-journey on the open road.
+ *   2. Route-query marker — the traveler route processor selects exactly these entities to advance along their path.
+ * It NEVER replaces the humanoid tag.
+ */
+USTRUCT()
+struct MYTHIC_API FMythicTravelerTag : public FMassTag {
+    GENERATED_BODY()
+};
+
+/**
+ * KIND marker for an NPC spawned as part of a group (a noble's retinue, a merchant's barter party, a friend trio).
+ * Group members ALSO carry FMythicNPCTag (so they embody as the humanoid EmbodiedNPCClass, are counted by the population
+ * spawner's per-cell density, and are culled by its far-from-player despawn — the SINGLE despawn authority) and carry the
+ * data-bearing FMythicGroupFragment. This tag is purely for fast kind tallies / archetype filtering (e.g. the debugger's
+ * group-member count) — it NEVER replaces the humanoid tag and adds NO embodiment branch.
+ */
+USTRUCT()
+struct MYTHIC_API FMythicGroupMemberTag : public FMassTag {
+    GENERATED_BODY()
+};

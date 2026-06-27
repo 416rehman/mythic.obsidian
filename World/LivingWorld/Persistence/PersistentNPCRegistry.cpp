@@ -5,6 +5,7 @@
 #include "World/LivingWorld/CausalFabric/CausalFabric.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
+#include "World/LivingWorld/MythicTags_LivingWorld.h"
 
 void UMythicPersistentNPCRegistry::RegisterDeath(
     uint32 NameHash,
@@ -47,7 +48,7 @@ void UMythicPersistentNPCRegistry::RegisterDeath(
         DeathEvent.WorldTime = WorldTime;
         DeathEvent.Cell = Cell;
         DeathEvent.PrimaryFaction = Faction;
-        DeathEvent.EventTag = FGameplayTag::RequestGameplayTag(FName("World.Event.Death.Permanent"));
+        DeathEvent.EventTag = TAG_WORLD_EVENT_DEATH_PERMANENT;
         DeathEvent.PerpEntityId = NameHash;
         DeathEvent.Significance = 1.0f; // Max significance — permanent death
         DeathEvent.CategoryFlags = EMythicEventCategory::Death;
@@ -68,7 +69,11 @@ void UMythicPersistentNPCRegistry::RegisterDeath(
 }
 
 void UMythicPersistentNPCRegistry::Serialize(FArchive &Ar) {
-    int32 Version = 2; // v2 (R18-M7): appends NextSpawnSerial after the death records
+    // v2 (R18-M7): appends NextSpawnSerial after the death records.
+    // v3: RoleTag is serialized as a native FGameplayTag (Ar << FGameplayTag) instead of a String→RequestGameplayTag
+    //     round-trip. This eliminates the runtime tag lookup on load (no more literal-string→tag resolution). The
+    //     on-disk layout for the RoleTag field changes, so v1/v2 saves are still read via the legacy FString path below.
+    int32 Version = 3;
     Ar << Version;
 
     int32 Count = DeathRecords.Num();
@@ -79,14 +84,14 @@ void UMythicPersistentNPCRegistry::Serialize(FArchive &Ar) {
             // Serialize each field explicitly for version stability
             uint32 Hash = Record.NameHash;
             int32 FactionIdx = Record.Faction.Index;
-            FString RoleStr = Record.RoleTag.ToString();
+            FGameplayTag RoleTag = Record.RoleTag; // v3: native tag round-trip (no string→RequestGameplayTag)
             double Time = Record.DeathTime;
             int32 CellX = Record.DeathCell.X;
             int32 CellY = Record.DeathCell.Y;
 
             Ar << Hash;
             Ar << FactionIdx;
-            Ar << RoleStr;
+            Ar << RoleTag;
             Ar << Time;
             Ar << CellX;
             Ar << CellY;
@@ -107,13 +112,27 @@ void UMythicPersistentNPCRegistry::Serialize(FArchive &Ar) {
         for (int32 i = 0; i < Count; ++i) {
             uint32 Hash;
             int32 FactionIdx;
-            FString RoleStr;
+            FGameplayTag RoleTag;
             double Time;
             int32 CellX, CellY;
 
             Ar << Hash;
             Ar << FactionIdx;
-            Ar << RoleStr;
+            if (Version >= 3) {
+                // v3+: RoleTag was saved as a native FGameplayTag — round-trips with no runtime lookup.
+                Ar << RoleTag;
+            }
+            else {
+                // Legacy (v1/v2) saves stored the role as a string. Read it and resolve with ErrorIfNotFound=false:
+                // a death record's RoleTag is historical display/succession data. Most perma-dead NPCs are non-leaders
+                // with NO role, so the string round-trips as "None" — and a tag could also be removed between save and
+                // load. The default-true call logged an Error on EVERY load of such a record (and the tag still resolved
+                // to empty anyway). This is the one unavoidable string→tag deserialization lookup, scoped to old saves
+                // only; v3+ saves never hit it.
+                FString RoleStr;
+                Ar << RoleStr;
+                RoleTag = FGameplayTag::RequestGameplayTag(FName(*RoleStr), /*ErrorIfNotFound=*/false);
+            }
             Ar << Time;
             Ar << CellX;
             Ar << CellY;
@@ -121,11 +140,7 @@ void UMythicPersistentNPCRegistry::Serialize(FArchive &Ar) {
             FMythicPersistentDeathRecord &Record = DeathRecords[i];
             Record.NameHash = Hash;
             Record.Faction.Index = FactionIdx;
-            // ErrorIfNotFound=false: a death record's RoleTag is historical display/succession data. Most perma-dead
-            // NPCs are non-leaders with NO role, so RoleStr round-trips as "None" — and a tag could also be removed
-            // between save and load. The old default-true call logged an Error on EVERY load of such a record (and the
-            // tag still resolved to empty anyway). Resolve quietly to an empty tag instead.
-            Record.RoleTag = FGameplayTag::RequestGameplayTag(FName(*RoleStr), /*ErrorIfNotFound=*/false);
+            Record.RoleTag = RoleTag;
             Record.DeathTime = Time;
             Record.DeathCell = FMythicCellCoord(CellX, CellY);
 

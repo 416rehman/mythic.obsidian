@@ -14,6 +14,7 @@
 #include "World/LivingWorld/Social/SocialGraph.h"
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/Morality/MoralSignature.h"
+#include "World/LivingWorld/MythicTags_LivingWorld.h" // native TAG_WORLD_ACTION_BETRAYAL (no literal string lookups)
 // Slice-7: post-load companion entity re-creation (create + force-hydrate to Tier2 + request embodiment)
 #include "MassEntitySubsystem.h"
 #include "MassCommandBuffer.h"
@@ -740,7 +741,7 @@ void UMythicPartySubsystem::HandleCompanionBetrayal(const FString &PlayerKey, in
     if (LivingWorld) {
         FMythicWorldEvent Event;
         Event.WorldTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-        Event.EventTag = FGameplayTag::RequestGameplayTag(FName("World.Action.Betrayal"));
+        Event.EventTag = TAG_WORLD_ACTION_BETRAYAL;
         Event.PrimaryFaction = Member.OriginalFaction;
         Event.Significance = 0.9f;
         Event.CategoryFlags = EMythicEventCategory::Social | EMythicEventCategory::Combat;
@@ -775,7 +776,7 @@ void UMythicPartySubsystem::HandleCompanionBetrayal(const FString &PlayerKey, in
                 // Inject a high-confidence hostile belief: "player is my enemy" — the BDI brain naturally generates
                 // Fight/Flee/Exploit/Avenge desires from it, routed to BetrayalCell.
                 FMythicBelief HostileBelief;
-                HostileBelief.EventTag = FGameplayTag::RequestGameplayTag(FName("World.Action.Betrayal"));
+                HostileBelief.EventTag = TAG_WORLD_ACTION_BETRAYAL;
                 HostileBelief.Cell = BetrayalCell;
                 HostileBelief.Confidence = 1.0f;
                 HostileBelief.FormationTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
@@ -784,7 +785,7 @@ void UMythicPartySubsystem::HandleCompanionBetrayal(const FString &PlayerKey, in
 
                 // Force an immediate re-think so the NPC reacts right away
                 Brain->OnSignificantEvent(
-                    FGameplayTag::RequestGameplayTag(FName("World.Action.Betrayal")),
+                    TAG_WORLD_ACTION_BETRAYAL,
                     BetrayalCell);
 
                 UE_LOG(LogMythParty, Log,

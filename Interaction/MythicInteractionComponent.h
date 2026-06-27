@@ -67,9 +67,11 @@ protected:
     UMythicInteractionPromptWidget *InteractionPromptWidget;
 
 public:
-    // The UI Layer responsible for input handling during interaction
+    // The UI Layer responsible for input handling during interaction.
+    // Initialized to the native UI_LAYER_GAME tag in the constructor (a header default-member-initializer
+    // cannot reliably reference a native gameplay tag at static-init time).
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Interaction")
-    FGameplayTag GameUILayerName = FGameplayTag::RequestGameplayTag("UI.Layer.Game");
+    FGameplayTag GameUILayerName;
 
     // The class of the widget to display when interacting with an actor
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Interaction")

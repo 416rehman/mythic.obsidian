@@ -12,6 +12,11 @@ void UMythicTerritoryGrid::Initialize(const UMythicTerritoryGridSettings *Settin
     InfluenceBleedRate = Settings->InfluenceBleedRate;
     MinControlThreshold = Settings->MinControlThreshold;
 
+    // Cache the immutable biome settings so GetBiomeAtCell stays lock-free + allocation-free.
+    BiomeWorldSeed = Settings->BiomeWorldSeed;
+    BiomeNoiseFrequency = Settings->BiomeNoiseFrequency;
+    BiomeThresholds = Settings->BiomeThresholds;
+
     const int32 TotalCells = Width * Height;
     WriteBuffer.SetNum(TotalCells);
     ReadBuffer.SetNum(TotalCells);
@@ -267,6 +272,87 @@ FVector UMythicTerritoryGrid::CellToWorld(const FMythicCellCoord &Coord) const {
 
 bool UMythicTerritoryGrid::IsValidCoord(const FMythicCellCoord &Coord) const {
     return Coord.X >= 0 && Coord.X < Width && Coord.Y >= 0 && Coord.Y < Height;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Biome (pure, lock-free, allocation-free)
+// ─────────────────────────────────────────────────────────────
+
+uint32 UMythicTerritoryGrid::BiomeHash2D(int32 X, int32 Y, uint32 Seed) {
+    // Fold the 2D coord + seed, then apply the EXACT Wang mix from FMythicNPCGenerator::HashStep (re-implemented inline
+    // so the two stay independent — no cross-include). Same avalanche, deterministic.
+    uint32 H = Seed;
+    H = HashCombine(H, ::GetTypeHash(X));
+    H = HashCombine(H, ::GetTypeHash(Y));
+    H = (H ^ 61u) ^ (H >> 16u);
+    H *= 9u;
+    H = H ^ (H >> 4u);
+    H *= 0x27d4eb2du;
+    H = H ^ (H >> 15u);
+    return H;
+}
+
+float UMythicTerritoryGrid::BiomeValueNoise(int32 X, int32 Y, uint32 Seed, float Frequency) {
+    // Value noise: hash the four integer lattice corners around the scaled sample point, smoothstep-interpolate.
+    const float SampleX = static_cast<float>(X) * Frequency;
+    const float SampleY = static_cast<float>(Y) * Frequency;
+
+    const int32 X0 = FMath::FloorToInt(SampleX);
+    const int32 Y0 = FMath::FloorToInt(SampleY);
+    const int32 X1 = X0 + 1;
+    const int32 Y1 = Y0 + 1;
+
+    const float Fx = SampleX - static_cast<float>(X0);
+    const float Fy = SampleY - static_cast<float>(Y0);
+
+    // Hermite smoothstep weights.
+    const float Wx = Fx * Fx * (3.0f - 2.0f * Fx);
+    const float Wy = Fy * Fy * (3.0f - 2.0f * Fy);
+
+    // Map each corner hash to [0,1].
+    constexpr float InvU32 = 1.0f / 4294967295.0f;
+    const float V00 = static_cast<float>(BiomeHash2D(X0, Y0, Seed)) * InvU32;
+    const float V10 = static_cast<float>(BiomeHash2D(X1, Y0, Seed)) * InvU32;
+    const float V01 = static_cast<float>(BiomeHash2D(X0, Y1, Seed)) * InvU32;
+    const float V11 = static_cast<float>(BiomeHash2D(X1, Y1, Seed)) * InvU32;
+
+    const float Top = FMath::Lerp(V00, V10, Wx);
+    const float Bottom = FMath::Lerp(V01, V11, Wx);
+    return FMath::Clamp(FMath::Lerp(Top, Bottom, Wy), 0.0f, 1.0f);
+}
+
+EMythicBiome UMythicTerritoryGrid::ComputeBiome(float Elevation, float Moisture, const FMythicBiomeThresholds &T) {
+    if (Elevation > T.MountainElevation) {
+        return EMythicBiome::Mountain;
+    }
+    if (Moisture < T.WastelandMoisture && Elevation > T.DesertElevation) {
+        return EMythicBiome::Desert;
+    }
+    if (Moisture > T.WetlandMoisture) {
+        return EMythicBiome::Wetland;
+    }
+    if (Moisture > T.ForestMoisture) {
+        return EMythicBiome::Forest;
+    }
+    if (Moisture < T.WastelandMoisture) {
+        return EMythicBiome::Wasteland;
+    }
+    return EMythicBiome::Plains;
+}
+
+EMythicBiome UMythicTerritoryGrid::GetBiomeAtCell(const FMythicCellCoord &Coord) const {
+    if (!IsValidCoord(Coord)) {
+        return EMythicBiome::Plains;
+    }
+    // Two decorrelated channels at the cached frequency: the elevation + moisture seeds XOR distinct constants so the
+    // two noise fields are independent. Classification is delegated to the single-source-of-truth ComputeBiome.
+    const float Elevation = BiomeValueNoise(Coord.X, Coord.Y, BiomeWorldSeed ^ 0xA5A5A5A5u, BiomeNoiseFrequency);
+    const float Moisture = BiomeValueNoise(Coord.X, Coord.Y, BiomeWorldSeed ^ 0x5A5A5A5Au, BiomeNoiseFrequency);
+    return ComputeBiome(Elevation, Moisture, BiomeThresholds);
+}
+
+EMythicBiome UMythicTerritoryGrid::GetBiomeAtWorld(const FVector &WorldPos) const {
+    return GetBiomeAtCell(WorldToCell(WorldPos));
 }
 
 void UMythicTerritoryGrid::GetFactionCells(FMythicFactionId Faction, int32 MaxResults, TArray<FMythicCellCoord> &OutCells) const {

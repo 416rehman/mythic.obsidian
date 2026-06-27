@@ -5,12 +5,16 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "GameplayTagContainer.h"
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "LivingWorldSettings.generated.h"
 
 class UMythicSettlementSettings;
 class UMythicEncounterTemplateDatabase;
+class AMythicNPCCharacter;
+class AMythicCreatureCharacter;
+class UObjectiveDefinition;
 
 /**
  * Master settings for the Living World System.
@@ -33,6 +37,44 @@ public:
     /** Role definition database for spy, merchant, guard behaviors */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shared Configuration")
     TSoftObjectPtr<class UMythicRoleDatabase> RoleDatabase;
+
+    /**
+     * Sim-driven archetype catalog: the weighted rows the population spawner draws an ambient NPC's role from
+     * (faction wealth/military × settlement economy × biome × time-of-day). When unset, the spawner falls back to the
+     * built-in code-default archetype set, so role-from-context runs unauthored.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shared Configuration")
+    TSoftObjectPtr<class UMythicArchetypeCatalog> ArchetypeCatalog;
+
+    /**
+     * Context-driven activity catalog: the weighted activity defs an embodied, non-combat NPC picks from when its
+     * committed routine intention leaves it free (role × biome × time-of-day × schedule phase × surroundings). Consumed
+     * by AMythicAIController::TickActivityBehavior. When unset, the controller falls back to the built-in code-default
+     * activity set (MythicActivityDefaults::BuildDefaultActivities), so contextual idle behavior runs unauthored.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shared Configuration")
+    TSoftObjectPtr<class UMythicActivityCatalog> ActivityCatalog;
+
+    /**
+     * Appearance/wardrobe library: the authored outfit sets the NPC appearance resolver draws each embodied NPC's modular
+     * look from (role × wealth-tier gated). Consumed server-side by AMythicNPCCharacter::ApplyAppearanceFromIdentity (the
+     * resolved descriptor then replicates to clients). When unset, the resolver falls back to the built-in code-default
+     * outfit sets (MythicAppearanceDefaults::GetCodeDefaultOutfitSets), so wardrobe variation runs unauthored.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shared Configuration")
+    TSoftObjectPtr<class UMythicAppearanceLibrary> AppearanceLibrary;
+
+    /**
+     * Skin-tone palette the appearance resolver indexes into (each NPC deterministically picks one entry). Empty => the
+     * built-in code-default skin palette (MythicAppearanceDefaults::GetCodeDefaultSkinTonePalette). FColor (sRGB) so the
+     * value drives a material tint directly in the art Blueprint.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shared Configuration")
+    TArray<FColor> DefaultSkinTonePalette;
+
+    /** Hair-tone palette the appearance resolver indexes into. Empty => the built-in code-default hair palette. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shared Configuration")
+    TArray<FColor> DefaultHairTonePalette;
 
     /** Causal Fabric ring buffer capacity. Determines how many events are in active memory. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Causal Fabric", meta = (ClampMin = "256", ClampMax = "65536"))
@@ -300,6 +342,23 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population", meta = (ClampMin = "0.0"))
     float RecruitmentPerWealth = 0.5f;
 
+    /**
+     * Population the governing faction durably loses when one of its embodied NPCs is killed (perma-death feedback).
+     * Decrements FMythicFactionData::Population, which is delta-applied by the sim (births/deaths/migration), so the
+     * loss durably lowers the baseline → ComputeTargetDensity yields fewer future spawns. Default 1 = one body, one head.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population", meta = (ClampMin = "0"))
+    int32 KillPopulationLoss = 1;
+
+    /**
+     * Arms reserves the governing faction loses when an ARMED NPC (Soldier/Guard role) is killed. Decrements
+     * FMythicFactionData::Reserves.Arms — the DURABLE economic source — NOT MilitaryStrength, which the sim recomputes
+     * absolutely from reserves each tick (a direct MilitaryStrength write would be wiped). Lower Arms → lower recomputed
+     * MilitaryStrength → fewer armed archetypes + weaker war/scheme formulas. Civilian deaths leave Arms untouched.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population", meta = (ClampMin = "0.0"))
+    float KillMilitaryArmsLoss = 0.75f;
+
     // ─── Diplomacy ───────────────────────────────────────
     // RelationshipScore = -(IdeologyDist × IdeologyWeight) + (EconDep × DepWeight) + (EventScore × EventWeight)
     // Score is compared against tier thresholds to determine relationship.
@@ -501,6 +560,21 @@ public:
     /** Interval in seconds between population spawner ticks (not per-frame) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population Spawner", meta = (ClampMin = "0.1", ClampMax = "5.0"))
     float PopulationSpawnIntervalSeconds = 0.5f;
+
+    /**
+     * Default number of navmesh-validated spawn points a settlement generates PER covered cell at BeginPlay when the
+     * settlement actor doesn't override it (AMythicSettlement::SpawnPointsPerCell). Each point is a precomputed valid
+     * foot position the population spawner anchors NPCs to (the embodiment fast-path), tagged civilian/guard/enemy.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population Spawner", meta = (ClampMin = "1"))
+    int32 DefaultSpawnPointsPerCell = 4;
+
+    /**
+     * Role stamped on NPCs filled into a HOSTILE settlement (camp) — bandits/raiders rather than peaceful townsfolk.
+     * Falls back to TAG_NPC_ROLE_BANDIT when left unset, so hostile camps work unauthored. (Categories="NPC.Role".)
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population Spawner", meta = (Categories = "NPC.Role"))
+    FGameplayTag BanditRoleTag;
 
     // ─── Event Pipeline ──────────────────────────────────
 
@@ -857,6 +931,28 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline | Significance", meta = (ClampMin = "0.5", ClampMax = "1.0"))
     float Tier2PromotionThreshold = 0.9f;
 
+    // ─── Proximity-driven embodiment (populated world) ───
+    // The significance Score (proximity + events + emotion, weighted) is a NARRATIVE measure: a quiet ambient NPC with
+    // no events/emotion caps at ProximityWeight (0.4) — below Tier2PromotionThreshold (0.9), so it could NEVER embody
+    // and the world stayed unpopulated. Embodiment is really a SPATIAL concern ("is this NPC close enough to a player
+    // to need a visible body?"). When enabled, the SignificanceProcessor force-embodies any ambient NPC within
+    // EmbodimentRadiusCells of a player regardless of narrative score; demotion still keys off the (now proximity-aware)
+    // Score so NPCs despawn cleanly when players leave. Set false to restore the prior purely event-driven promotion.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline | Significance")
+    bool bProximityForcesEmbodiment = true;
+
+    /** Cell radius around any player within which ambient NPCs are force-embodied (see bProximityForcesEmbodiment).
+     *  Total visible NPCs are bounded by MaxCognitiveActors regardless of how many fall inside this band. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline | Significance", meta = (ClampMin = "1", ClampMax = "16", EditCondition = "bProximityForcesEmbodiment"))
+    int32 EmbodimentRadiusCells = 3;
+
+    /** The VISIBLE NPC actor class the ActorSpawnProcessor embodies promoted entities as. Point this at your
+     *  mesh-bearing NPC Blueprint (it inherits AI possession from AMythicNPCCharacter's default controller, so no
+     *  Blueprint wiring is needed for it to perceive + move). Null = the bare C++ AMythicNPCCharacter, which is
+     *  functional and AI-possessed but has no skeletal mesh (an invisible-but-real NPC). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline | Significance")
+    TSoftClassPtr<AMythicNPCCharacter> EmbodiedNPCClass;
+
     // ─── Data Asset References (Phase 6) ─────────────────
 
 
@@ -866,4 +962,275 @@ public:
      */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology")
     TSoftObjectPtr<UDataTable> CreatureAggressionMatrix;
+
+    // ─── Creature Ecology — Spawning & Embodiment ────────
+    // Wilderness wildlife (true unowned, non-settlement cells). Creatures carry FMythicCreatureTag (NOT FMythicNPCTag)
+    // and embody as EmbodiedCreatureClass via the ActorSpawnProcessor's creature query branch.
+
+    /** VISIBLE creature actor class the ActorSpawnProcessor embodies promoted creatures as. Null => creatures stay
+     *  MASS-only (no actor, force-embodiment consumes the tag but spawns nothing). Subclass of AMythicNPCCharacter. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology")
+    TSoftClassPtr<AMythicCreatureCharacter> EmbodiedCreatureClass;
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    //  EMBODIMENT SERVICE (quality layer) — pooling, view-gated streaming, rigorous navmesh placement.
+    //  All fields below are the FROZEN cross-step contract (embodiment-service-LOCK-v1 §1). Names/types/defaults are
+    //  read verbatim by the placement service, the pool (LivingWorldSubsystem), the ActorSpawnProcessor routing, and
+    //  the SignificanceProcessor view-gate. Do NOT rename or change defaults without re-locking the spec.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    // ─── Embodiment | Limits ─────────────────────────────
+    /**
+     * Hard ceiling on simultaneously EMBODIED (Tier2) actors. Distinct from MaxCognitiveActors, which caps HYDRATED
+     * (Tier1+) entities. Enforced at BOTH Tier2-promotion sites in SignificanceProcessor — a refused promotion stays
+     * Tier1 and emits no spawn-request tag (so the spawn queue never grows unbounded).
+     * Doc rule: keep <= MaxCognitiveActors, since the Tier2 set is a subset of Tier1+.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | Limits", meta = (ClampMin = "1", ClampMax = "200"))
+    int32 MaxEmbodiedActors = 40;
+
+    /**
+     * Hard ceiling on simultaneously active (Tier1+) CREATURES (wildlife), SEPARATE from the humanoid
+     * MaxCognitiveActors / MaxEmbodiedActors budgets. Without a separate cap, creature-dense wilderness fills the
+     * shared cognitive cap and STARVES humanoid NPCs/travelers — a merchant crossing the wild could never promote
+     * because ~30 nearby (often invisible) creatures had already taken every cognitive slot. Creatures are gated
+     * against THIS count at both their Tier1 and Tier2 promotions in SignificanceProcessor.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | Limits", meta = (ClampMin = "0", ClampMax = "200"))
+    int32 MaxCreatureActors = 12;
+
+    // ─── Embodiment | Placement ──────────────────────────
+    /** Radius (cm) for the GetRandomReachablePointInRadius scatter inside the entity's cell, so a town's NPCs don't
+     *  stack on cell centers. 0 => no scatter (snap to the projected cell center). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | Placement", meta = (ClampMin = "0.0"))
+    float SpawnScatterRadius = 250.0f;
+
+    /** Candidate spawn positions attempted per embodiment before the entity is deferred. The placement service
+     *  re-rolls a reachable scatter point each try and falls back to the projected anchor on the last try so sparse
+     *  cells get a valid (un-scattered) spawn instead of defer-storming. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | Placement", meta = (ClampMin = "1", ClampMax = "32"))
+    int32 SpawnRetryBudget = 6;
+
+    /** Seconds an entity waits, after exhausting SpawnRetryBudget, before the ActorSpawnProcessor retries its spawn.
+     *  This is the kill-switch for the infinite spawn-retry loop — a failing cell is retried at most once per window. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | Placement", meta = (ClampMin = "0.1", ClampMax = "30.0"))
+    float SpawnDeferCooldownSeconds = 2.0f;
+
+    /** Per-Execute cap on navmesh/overlap validations across ALL spawn requests in one ActorSpawnProcessor tick.
+     *  Bounds the no-hitch budget: when spent, the remaining requests re-queue (via the spawn-request tag) for the
+     *  next tick. One FindValidSpawn call costs up to (1 projection + SpawnRetryBudget*(1 reachable-point + 1 overlap)). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | Placement", meta = (ClampMin = "1", ClampMax = "200"))
+    int32 MaxPlacementValidationsPerTick = 20;
+
+    /** Extent (cm) for the ProjectPointToNavigation snap of the (Z=0) cell center onto the navmesh. The tall Z component
+     *  lets a flat cell-center probe find terrain at any height; X/Y bound the horizontal search to roughly one cell. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | Placement")
+    FVector NavProjectionExtent = FVector(250.0f, 250.0f, 100000.0f);
+
+    /** Require the scatter point to be REACHABLE from the projected cell anchor (same connected navmesh island) via
+     *  GetRandomReachablePointInRadius — rejects isolated islands the player can't actually walk to. false uses the
+     *  cheaper GetRandomPointInNavigableRadius (on-navmesh but not necessarily connected). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | Placement")
+    bool bRequireReachability = true;
+
+    // ─── Embodiment | View Gate (streaming) ────
+    /** Master toggle for the view-gate that governs INCREMENTAL spawning: never pop an actor in (or despawn one
+     *  out) inside a player's view within ViewGateMinSpawnDistance. false restores pure proximity behavior. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | ViewGate")
+    bool bViewGateEmbodiment = true;
+
+    /** Only gate spawns/despawns CLOSER than this (cm) to a player — beyond it, a pop is imperceptible and allowed.
+     *  Single source of truth used by BOTH the spawn-gate and the despawn (no-vanish-in-front) gate. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | ViewGate", meta = (ClampMin = "0.0", ClampMax = "20000.0", EditCondition = "bViewGateEmbodiment"))
+    float ViewGateMinSpawnDistance = 4000.0f;
+
+    /** Degrees added to the camera's horizontal half-FOV when testing the view cone, to conservatively cover the
+     *  vertical frustum plus an off-screen skirt (so an actor doesn't pop just outside the literal edge of view). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | ViewGate", meta = (ClampMin = "0.0", ClampMax = "60.0", EditCondition = "bViewGateEmbodiment"))
+    float ViewConeMarginDeg = 20.0f;
+
+    // ─── Embodiment | Stream-In (pre-populate on arrival) ─
+    /** After a player first appears or region-jumps, BYPASS the view-gate for this long so a town bulk-embodies behind
+     *  the fade-in and is alive on arrival. The view-gate only governs incremental spawning during active play. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | StreamIn", meta = (ClampMin = "0.0", ClampMax = "15.0", EditCondition = "bViewGateEmbodiment"))
+    float StreamInGraceSeconds = 3.0f;
+
+    /** A single-tick player Manhattan cell jump >= this is treated as a teleport / region-enter, which re-arms the
+     *  stream-in grace window (so a fast-travel destination also bulk-embodies behind the fade). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | StreamIn", meta = (ClampMin = "1", ClampMax = "32", EditCondition = "bViewGateEmbodiment"))
+    int32 RegionEnterCellJump = 4;
+
+    // ─── Embodiment | Pool (actor reuse, no spawn/destroy churn) ─
+    /** Master pool kill-switch. false => AcquireEmbodiedActor always SpawnActor, ReleaseEmbodiedActor always Destroy
+     *  (A/B testing + bring-up isolation). true => reuse parked actors from the per-class free list. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | Pool")
+    bool bEnableEmbodimentPooling = true;
+
+    /** Bounded free-list size PER concrete actor UClass. A Release over this cap really Destroys the actor (so the pool
+     *  never grows unbounded). 0 disables pooling at runtime (same effect as the kill-switch). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | Pool", meta = (ClampMin = "0", ClampMax = "200"))
+    int32 EmbodimentPoolMaxPerClass = 32;
+
+    /** Actors pre-spawned and parked per resolved class at subsystem init, so the first town has no cold-spawn hitch.
+     *  Keep <= MaxCognitiveActors. 0 => warm nothing (first embodiment of each class pays the spawn cost). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Living World | Embodiment | Pool", meta = (ClampMin = "0", ClampMax = "64"))
+    int32 EmbodimentPoolWarmCount = 4;
+
+    /** Wildlife species table (rowstruct FMythicCreatureSpeciesRow). Null => the built-in code-default species set. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology")
+    TSoftObjectPtr<UDataTable> CreatureSpeciesTable;
+
+    /** Cells around each player within which wilderness creatures are spawned. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "1.0", ClampMax = "20.0"))
+    float CreatureSpawnRadius = 4.0f;
+
+    /** Cells beyond any player at which wilderness creatures are despawned. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "1.0", ClampMax = "30.0"))
+    float CreatureDespawnDistance = 6.0f;
+
+    /** Max creature spawns per processor tick (budget cap). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "1", ClampMax = "200"))
+    int32 MaxCreatureSpawnsPerTick = 20;
+
+    /** Target creature density per wilderness biome cell (before density scale + system cap). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "0", ClampMax = "50"))
+    int32 MaxCreaturesPerBiomeCell = 6;
+
+    /** Interval in seconds between creature spawner ticks. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float CreatureSpawnIntervalSeconds = 1.0f;
+
+    /** Global multiplier on per-cell creature density (1.0 = use MaxCreaturesPerBiomeCell as-is). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "0.0", ClampMax = "4.0"))
+    float CreatureSpawnDensityScale = 1.0f;
+
+    // ─── Territory Population — Faction patrols / soldiers ─
+    // Faction-controlled NON-settlement cells get that faction's soldiers (count scaled by MilitaryStrength × Influence)
+    // plus occasional travelers. Soldiers carry FMythicNPCTag + FMythicSoldierTag.
+
+    /** Cells around each player within which faction-controlled territory is populated with patrols/soldiers. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory Population", meta = (ClampMin = "1.0", ClampMax = "20.0"))
+    float TerritoryPatrolSpawnRadius = 3.0f;
+
+    /** Max soldiers per faction-controlled cell at full military strength + influence. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory Population", meta = (ClampMin = "0", ClampMax = "50"))
+    int32 MaxSoldiersPerControlledCell = 4;
+
+    /** Per-cell chance to also spawn a roaming traveler in faction-controlled territory. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory Population", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TravelerSpawnChancePerCell = 0.1f;
+
+    /** Role tag stamped on territory soldiers (author default NPC.Role.Soldier). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory Population", meta = (Categories = "NPC.Role"))
+    FGameplayTag SoldierRoleTag;
+
+    /** Role tag stamped on territory travelers (author default NPC.Role.Traveler). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory Population", meta = (Categories = "NPC.Role"))
+    FGameplayTag TravelerRoleTag;
+
+    /** Interval in seconds between territory patrol spawner ticks. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory Population", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float TerritoryPatrolSpawnIntervalSeconds = 0.5f;
+
+    /** Max patrol/soldier spawns per processor tick (budget cap). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory Population", meta = (ClampMin = "1", ClampMax = "200"))
+    int32 MaxPatrolSpawnsPerTick = 30;
+
+    /**
+     * Garrison multiplier for a faction-controlled cell that borders a cell held by a faction it is AT WAR with
+     * (EMythicFactionRelation::Hostile). Frontline cells field more soldiers so wars visibly thicken the garrison along
+     * the front. Floored at 1.0 internally (never shrinks a garrison); the boosted target is re-clamped to
+     * min(MaxSoldiersPerControlledCell, MaxEntitiesPerCell), so it can only thicken UP TO the per-cell cap.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory Population", meta = (ClampMin = "1.0", ClampMax = "5.0"))
+    float ContestedBorderSoldierMultiplier = 2.0f;
+
+    // ─── Travelers — Inter-settlement caravans / patrols ──
+    // Travelers move BETWEEN towns. They carry FMythicNPCTag + FMythicTravelerTag + FMythicTravelerFragment, and are
+    // exempt from the ambient population despawn so they survive the open road.
+
+    /** Interval in seconds between traveler spawner ticks. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Travelers", meta = (ClampMin = "0.1", ClampMax = "30.0"))
+    float TravelerSpawnIntervalSeconds = 4.0f;
+
+    /** Max new travelers spawned per spawner tick. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Travelers", meta = (ClampMin = "1", ClampMax = "20"))
+    int32 MaxTravelersPerTick = 2;
+
+    /** Hard cap on simultaneously active travelers across the world. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Travelers", meta = (ClampMin = "0", ClampMax = "100"))
+    int32 MaxActiveTravelers = 12;
+
+    /** A settlement must be within this many cells of a player to seed a traveler from/to it. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Travelers", meta = (ClampMin = "1.0", ClampMax = "64.0"))
+    float TravelerSpawnPlayerRadiusCells = 8.0f;
+
+    /** MINIMUM seconds per cell step (a floor / how often the route processor may wake). The ACTUAL cadence derives from
+     *  TravelerSpeedCmPerSec + the grid cell size (see UMythicTravelerRouteProcessor), so it scales with cell size. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Travelers", meta = (ClampMin = "0.05", ClampMax = "10.0"))
+    float TravelerStepIntervalSeconds = 0.75f;
+
+    /** Off-screen dead-reckon travel speed (cm/s) for UN-embodied travelers; the per-cell cadence = cellSize / this.
+     *  ~350 ≈ a brisk walk. Keep it near the embodied NPC walk speed so the off-screen→embodied handoff has no visible
+     *  speed jump. (The old behaviour — one 5000cm cell per fixed 0.75s — was ~67 m/s, which teleport-walked travelers
+     *  straight past a player's embodiment window so they never spawned.) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Travelers", meta = (ClampMin = "10.0", ClampMax = "5000.0"))
+    float TravelerSpeedCmPerSec = 350.0f;
+
+    /** Max route length in cells; settlement pairs farther apart than this are rejected. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Travelers", meta = (ClampMin = "1", ClampMax = "256"))
+    int32 MaxRouteCellLength = 40;
+
+    /** Fraction of travelers that are caravans (merchants) vs patrols (the remainder). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Travelers", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float CaravanPatrolRatio = 0.5f;
+
+    /** Role tag stamped on caravan travelers (author default NPC.Role.Merchant). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Travelers", meta = (Categories = "NPC.Role"))
+    FGameplayTag CaravanRoleTag;
+
+    /** Role tag stamped on patrol travelers (author default NPC.Role.Guard). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Travelers", meta = (Categories = "NPC.Role"))
+    FGameplayTag PatrolRoleTag;
+
+    // ─── Group Spawning — clustered NPCs (retinues / barter parties / friend trios) ──
+    // The GroupSpawnerProcessor runs in SETTLEMENT cells (opposite of the patrol spawner) AFTER the population spawner.
+    // Per chance-passing settlement cell it weighted-picks one eligible group template, rolls each member spec's count,
+    // and spawns the members into the cell — they share Identity.Cell so existing scatter cohesion + the embodiment gate
+    // + the shared per-cell cap apply unchanged, and the social graph is wired with the template's IntraRelation edges.
+
+    /** Authored group template database. When unset, MythicGroupDefaults::BuildDefaultTemplates() supplies code defaults
+     *  (a noble retinue, a merchant barter party, a friend trio) so clustered spawning runs unauthored. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Group Spawning")
+    TSoftObjectPtr<class UMythicGroupTemplateDatabase> GroupTemplateDatabase;
+
+    /** Interval in seconds between group spawner ticks (not per-frame). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Group Spawning", meta = (ClampMin = "0.1", ClampMax = "30.0"))
+    float GroupSpawnIntervalSeconds = 1.0f;
+
+    /** Cells around each player to consider for group spawning. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Group Spawning", meta = (ClampMin = "1.0", ClampMax = "20.0"))
+    float GroupSpawnRadius = 3.0f;
+
+    /** Deterministic per-(faction,cell) chance a settlement cell seeds a group this tick. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Group Spawning", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float GroupSpawnChancePerCell = 0.04f;
+
+    /** Max GROUPS spawned per processor tick (each group is one chance-passing cell). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Group Spawning", meta = (ClampMin = "0", ClampMax = "50"))
+    int32 MaxGroupSpawnsPerTick = 2;
+
+    /** Hard cap on simultaneously active groups across the world (distinct GroupIds among existing group members). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Group Spawning", meta = (ClampMin = "0", ClampMax = "200"))
+    int32 MaxActiveGroups = 16;
+
+    /** Max group MEMBER entities created per processor tick (budget cap across all groups spawned this tick). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Group Spawning", meta = (ClampMin = "0", ClampMax = "200"))
+    int32 MaxGroupMemberSpawnsPerTick = 12;
+
+    // ─── Encounters — Objective hook (data only) ──────────
+
+    /** Objective offered when the player clears an encounter. Null default; offer-wiring is deferred to a later slice. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Encounters")
+    TSoftObjectPtr<UObjectiveDefinition> EncounterClearObjective;
 };

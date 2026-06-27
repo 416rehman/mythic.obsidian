@@ -111,6 +111,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Faction Standing")
     float GetKillStandingPenalty() const { return KillStandingPenalty; }
 
+    // Read-only view of the per-faction standing entries (replicated to the owner). Exposed for the Living World
+    // gameplay debugger (Companions & Players pane). The protected Standings array is otherwise UI-internal.
+    const TArray<FMythicFactionStandingEntry> &GetStandings() const { return Standings; }
+
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
 protected:

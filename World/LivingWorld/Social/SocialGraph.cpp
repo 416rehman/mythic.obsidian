@@ -214,6 +214,14 @@ int32 UMythicSocialGraph::GetTotalEdgeCount() const {
     return Total;
 }
 
+int32 UMythicSocialGraph::GetEntityCount() const {
+    // Read-lock before AdjacencyMap.Num(): the BDI cognition worker Adds/Removes/rehashes this map off the game thread
+    // (AddOrStrengthenEdge / RemoveEdge / RemoveAllEdges / PruneStaleEdges all take the write lock), so a bare unlocked
+    // .Num() read races a concurrent rehash. Mirrors GetTotalEdgeCount.
+    FReadScopeLock Lock(GraphLock);
+    return AdjacencyMap.Num();
+}
+
 // ─────────────────────────────────────────────────────────────
 // Maintenance
 // ─────────────────────────────────────────────────────────────

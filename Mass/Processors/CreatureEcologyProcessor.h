@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "MassProcessor.h"
 #include "MassEntityQuery.h"
+#include "World/LivingWorld/Creatures/CreatureAggressionTypes.h"
 #include "CreatureEcologyProcessor.generated.h"
 
 /**
@@ -35,6 +36,10 @@ public:
      *  for unit testing. */
     static float ComputeTerritorialAggression(float BaseAggression, bool bNearDen, float TerritorialBoost);
 
+    /** Build the flattened (Attacker,Target)->aggression lookup from an authored aggression DataTable. Static + pure so
+     *  it is unit-testable; null table => empty matrix (no cross-species aggression, current behavior). */
+    static void BuildAggressionMatrix(const class UDataTable *Table, FMythicCreatureAggressionMatrix &OutMatrix);
+
 protected:
     virtual void ConfigureQueries(const TSharedRef<FMassEntityManager> &EntityManager) override;
     virtual void Execute(FMassEntityManager &EntityManager, FMassExecutionContext &Context) override;
@@ -48,4 +53,11 @@ private:
 
     /** Timer accumulator for throttling */
     float TimeSinceLastTick = 0.0f;
+
+    /** Cached species×species aggression matrix, built ONCE from Settings->CreatureAggressionMatrix (or left empty when
+     *  no table is authored). Flattened to a packed-key TMap so the per-creature lookup is alloc-free. */
+    FMythicCreatureAggressionMatrix AggressionMatrix;
+
+    /** Latches that the (one-time, sync) aggression-table load + flatten has run, so it isn't retried every tick. */
+    bool bAggressionMatrixResolved = false;
 };

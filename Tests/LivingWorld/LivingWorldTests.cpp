@@ -12,6 +12,7 @@
 #include "World/LivingWorld/Morality/MoralSignature.h"
 #include "World/LivingWorld/Settlements/SettlementRegistry.h"
 #include "World/LivingWorld/MythicTags_LivingWorld.h"
+#include "GAS/MythicTags_GAS.h" // GAS_STATE_DEAD / GAS_STATE_DOWNED (stand-in registered tags for tag-identity tests)
 #include "World/LivingWorld/Simulation/WorldSimThread.h"
 #include "World/LivingWorld/Social/SocialGraph.h"
 #include "World/LivingWorld/Simulation/SchemeEngine.h"
@@ -33,6 +34,10 @@
 #include "Mass/Processors/ScheduleTransitionProcessor.h"
 #include "Mass/Processors/CreatureEcologyProcessor.h"
 #include "Mass/Processors/PopulationSpawnerProcessor.h"
+#include "Mass/Processors/TerritoryPatrolSpawnerProcessor.h" // UMythicTerritoryPatrolSpawnerProcessor::ApplyContestedBorderBoost
+#include "World/LivingWorld/Roles/ArchetypeTypes.h" // UMythicArchetypeCatalog + weighted archetype draw
+#include "World/LivingWorld/Settlements/MythicSettlement.h" // EMythicSettlementEconomy (for archetype context)
+#include "World/LivingWorld/Territory/MythicBiome.h"        // EMythicBiome (for archetype context)
 #include "World/LivingWorld/LivingWorldReplication.h"
 #include "GAS/Executions/MythicCombatRoll.h"
 #include "GAS/Executions/MythicDamageApplication.h" // ShouldNegateFriendlyFire
@@ -1741,8 +1746,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicWeatherCanTransitionTest::RunTest(const FString &Parameters) {
     // CanTransitionTo only compares tag IDENTITY, so any two distinct registered tags stand in for weather states.
-    const FGameplayTag TagA = FGameplayTag::RequestGameplayTag(FName("GAS.State.Dead"), /*ErrorIfNotFound*/ false);
-    const FGameplayTag TagB = FGameplayTag::RequestGameplayTag(FName("GAS.State.Downed"), /*ErrorIfNotFound*/ false);
+    const FGameplayTag TagA = GAS_STATE_DEAD;
+    const FGameplayTag TagB = GAS_STATE_DOWNED;
     TestTrue(TEXT("test tags resolve + differ (prerequisite)"), TagA.IsValid() && TagB.IsValid() && TagA != TagB);
     if (!(TagA.IsValid() && TagB.IsValid() && TagA != TagB)) {
         return false;
@@ -2294,8 +2299,8 @@ bool FMythicDialogueSelectTemplateTest::RunTest(const FString &Parameters) {
     }
 
     // Two distinct REGISTERED tags stand in for role tags (MatchesTag compares hierarchy, not the editor category).
-    const FGameplayTag RoleX = FGameplayTag::RequestGameplayTag(FName("GAS.State.Dead"), /*ErrorIfNotFound*/ false);
-    const FGameplayTag RoleY = FGameplayTag::RequestGameplayTag(FName("GAS.State.Downed"), /*ErrorIfNotFound*/ false);
+    const FGameplayTag RoleX = GAS_STATE_DEAD;
+    const FGameplayTag RoleY = GAS_STATE_DOWNED;
     TestTrue(TEXT("stand-in role tags resolve + differ"), RoleX.IsValid() && RoleY.IsValid() && RoleX != RoleY);
     if (RoleX.IsValid() && RoleY.IsValid() && RoleX != RoleY) {
         // Role hard-filter: a role-gated template is SKIPPED when the context role doesn't match → nothing selected.
@@ -2333,6 +2338,182 @@ bool FMythicDialogueSelectTemplateTest::RunTest(const FString &Parameters) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Role-from-context — UMythicPopulationSpawnerProcessor::ResolveEconomy / DeriveArchetype
+// (sim-driven weighted archetype draw: faction wealth/military × settlement economy × biome × time-of-day; deterministic)
+// ═══════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicRoleFromContextTest,
+    "Mythic.LivingWorld.Population.RoleFromContext",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicRoleFromContextTest::RunTest(const FString &Parameters) {
+    using P = UMythicPopulationSpawnerProcessor;
+
+    // ─── ResolveEconomy ───
+    {
+        // Authored non-Generic always wins, regardless of production.
+        FMythicResourceStock Prod; Prod.Food = 5.0f; // would derive Farming
+        TestEqual(TEXT("authored Trade overrides derived"),
+                  (int32)P::ResolveEconomy(EMythicSettlementEconomy::Trade, Prod), (int32)EMythicSettlementEconomy::Trade);
+
+        // Generic derives from the dominant base-production resource.
+        FMythicResourceStock Farm; Farm.Food = 1.0f; Farm.Materials = 0.3f;
+        TestEqual(TEXT("Food-dominant → Farming"),
+                  (int32)P::ResolveEconomy(EMythicSettlementEconomy::Generic, Farm), (int32)EMythicSettlementEconomy::Farming);
+
+        FMythicResourceStock Mine; Mine.Materials = 1.0f; Mine.Food = 0.2f;
+        TestEqual(TEXT("Materials-dominant → Mining"),
+                  (int32)P::ResolveEconomy(EMythicSettlementEconomy::Generic, Mine), (int32)EMythicSettlementEconomy::Mining);
+
+        FMythicResourceStock Arms; Arms.Arms = 1.0f; Arms.Food = 0.5f;
+        TestEqual(TEXT("Arms-dominant → Military"),
+                  (int32)P::ResolveEconomy(EMythicSettlementEconomy::Generic, Arms), (int32)EMythicSettlementEconomy::Military);
+
+        FMythicResourceStock Coin; Coin.Wealth = 1.0f;
+        TestEqual(TEXT("Wealth-dominant → Trade"),
+                  (int32)P::ResolveEconomy(EMythicSettlementEconomy::Generic, Coin), (int32)EMythicSettlementEconomy::Trade);
+
+        FMythicResourceStock Empty; // bandits produce nothing
+        TestEqual(TEXT("all-zero production → Generic"),
+                  (int32)P::ResolveEconomy(EMythicSettlementEconomy::Generic, Empty), (int32)EMythicSettlementEconomy::Generic);
+    }
+
+    // ─── DeriveArchetype — sim-driven weighted role draw over the code-default catalog ───
+    {
+        const TConstArrayView<FMythicArchetypeRow> Catalog = MythicArchetypeDefaults::GetCodeDefaultArchetypes();
+        TestTrue(TEXT("code-default catalog is non-empty"), Catalog.Num() > 0);
+
+        // Helper: a baseline daytime, mid-context settlement draw.
+        auto MakeCtx = [](EMythicSettlementEconomy Eco, float Wealth, float Military) {
+            FMythicArchetypeContext Ctx;
+            Ctx.Economy = Eco;
+            Ctx.Biome = EMythicBiome::Plains;
+            Ctx.WealthNorm = Wealth;
+            Ctx.Military = Military;
+            Ctx.DayFactor = 1.0f; // midday
+            Ctx.bWildernessContext = false;
+            return Ctx;
+        };
+
+        // Determinism: same (catalog, context, hash) → same role.
+        {
+            FMythicArchetypeContext Ctx = MakeCtx(EMythicSettlementEconomy::Farming, 0.5f, 0.0f);
+            const FMythicArchetypeRow *RA = nullptr; const FMythicArchetypeRow *RB = nullptr;
+            const FGameplayTag A = P::DeriveArchetype(Catalog, Ctx, 12345u, RA);
+            const FGameplayTag B = P::DeriveArchetype(Catalog, Ctx, 12345u, RB);
+            TestEqual(TEXT("DeriveArchetype is deterministic"), A, B);
+            TestTrue(TEXT("DeriveArchetype returns a valid role"), A.IsValid());
+        }
+
+        // Empty catalog → always-safe civilian fallback, null OutChosen.
+        {
+            FMythicArchetypeContext Ctx = MakeCtx(EMythicSettlementEconomy::Generic, 0.5f, 0.0f);
+            FMythicArchetypeRow Sentinel; // non-null starting value so we prove OutChosen is actively cleared
+            const FMythicArchetypeRow *Chosen = &Sentinel;
+            const FGameplayTag R = P::DeriveArchetype(TConstArrayView<FMythicArchetypeRow>(), Ctx, 777u, Chosen);
+            TestTrue(TEXT("empty catalog → Civilian fallback"), R == TAG_NPC_ROLE_CIVILIAN);
+            TestNull(TEXT("empty catalog → null OutChosen"), Chosen);
+        }
+
+        // Economy mix: a zero-military farming town is dominated by farmers over a large sample (Farming row has a 4x
+        // economy multiplier; soldier/guard rows collapse to base with zero military). It need not be exclusive (the
+        // always-eligible civilian row + traveler keep some non-farmer mass), but farmers must be the plurality.
+        {
+            FMythicArchetypeContext Ctx = MakeCtx(EMythicSettlementEconomy::Farming, 0.4f, 0.0f);
+            int32 Farmers = 0; int32 Soldiers = 0; const int32 Samples = 2000;
+            for (int32 i = 0; i < Samples; ++i) {
+                const FMythicArchetypeRow *Chosen = nullptr;
+                const FGameplayTag R = P::DeriveArchetype(Catalog, Ctx, (uint32)(i + 1) * 2654435761u, Chosen);
+                if (R == TAG_NPC_ROLE_FARMER) { ++Farmers; }
+                if (R == TAG_NPC_ROLE_SOLDIER || R == TAG_NPC_ROLE_GUARD) { ++Soldiers; }
+            }
+            TestTrue(TEXT("zero-military farming town → farmers are the plurality"), Farmers > Samples / 3);
+            TestTrue(TEXT("zero-military town → near-zero armed share"), Soldiers < Samples / 20);
+        }
+
+        // Military axis: a strong-military Military-economy fortress yields a large armed (soldier/guard) share — the
+        // MilitaryFavor + economy multipliers on the soldier/guard rows dominate.
+        {
+            FMythicArchetypeContext Ctx = MakeCtx(EMythicSettlementEconomy::Military, 0.5f, 1.0f);
+            int32 Armed = 0; const int32 Samples = 2000;
+            for (int32 i = 0; i < Samples; ++i) {
+                const FMythicArchetypeRow *Chosen = nullptr;
+                const FGameplayTag R = P::DeriveArchetype(Catalog, Ctx, (uint32)(i + 1) * 2246822519u, Chosen);
+                if (R == TAG_NPC_ROLE_SOLDIER || R == TAG_NPC_ROLE_GUARD) { ++Armed; }
+            }
+            TestTrue(TEXT("strong military fortress → armed majority"), Armed > Samples / 2);
+        }
+
+        // Wealth axis: a poor town surfaces beggars (poverty-favored, settlement-only) that a rich town never does at
+        // the same hash sweep — the WealthDisfavor/WealthFavor lerps flip the beggar weight by an order of magnitude.
+        {
+            FMythicArchetypeContext Poor = MakeCtx(EMythicSettlementEconomy::Generic, 0.0f, 0.0f);
+            FMythicArchetypeContext Rich = MakeCtx(EMythicSettlementEconomy::Generic, 1.0f, 0.0f);
+            int32 PoorBeggars = 0; int32 RichBeggars = 0; const int32 Samples = 2000;
+            for (int32 i = 0; i < Samples; ++i) {
+                const FMythicArchetypeRow *C1 = nullptr; const FMythicArchetypeRow *C2 = nullptr;
+                if (P::DeriveArchetype(Catalog, Poor, (uint32)(i + 1) * 0x9E3779B9u, C1) == TAG_NPC_ROLE_BEGGAR) { ++PoorBeggars; }
+                if (P::DeriveArchetype(Catalog, Rich, (uint32)(i + 1) * 0x9E3779B9u, C2) == TAG_NPC_ROLE_BEGGAR) { ++RichBeggars; }
+            }
+            TestTrue(TEXT("poor town surfaces more beggars than a rich town"), PoorBeggars > RichBeggars);
+        }
+
+        // Wilderness gate: in a wilderness context, settlement-only (beggar/socialite/noble) and group-only (noble)
+        // archetypes are excluded entirely — they must never be drawn for a lone open-road spawn.
+        {
+            FMythicArchetypeContext Wild = MakeCtx(EMythicSettlementEconomy::Generic, 1.0f, 0.0f);
+            Wild.bWildernessContext = true;
+            bool bNoSettlementOnly = true;
+            for (int32 i = 0; i < 2000; ++i) {
+                const FMythicArchetypeRow *Chosen = nullptr;
+                const FGameplayTag R = P::DeriveArchetype(Catalog, Wild, (uint32)(i + 1) * 2654435761u, Chosen);
+                if (R == TAG_NPC_ROLE_BEGGAR || R == TAG_NPC_ROLE_SOCIALITE || R == TAG_NPC_ROLE_NOBLE) {
+                    bNoSettlementOnly = false; break;
+                }
+            }
+            TestTrue(TEXT("wilderness context excludes settlement-only / group-only archetypes"), bNoSettlementOnly);
+        }
+
+        // RequiredFactionTags gate: a row with an unmet faction requirement is removed from the draw. Build a tiny
+        // catalog of two rows — one civilian (no requirement) + one gated soldier — and confirm a faction that fails
+        // the gate never draws the soldier.
+        {
+            FMythicArchetypeRow Civ;
+            Civ.RoleTag = TAG_NPC_ROLE_CIVILIAN; Civ.BaseWeight = 1.0f;
+            FMythicArchetypeRow Sol;
+            Sol.RoleTag = TAG_NPC_ROLE_SOLDIER; Sol.BaseWeight = 100.0f; // would dominate if eligible
+            Sol.RequiredFactionTags.AddTag(TAG_NPC_ROLE_GUARD); // arbitrary registered tag used as a requirement marker
+            TArray<FMythicArchetypeRow> Mini = { Civ, Sol };
+
+            FMythicArchetypeContext Ctx = MakeCtx(EMythicSettlementEconomy::Generic, 0.5f, 1.0f);
+            Ctx.FactionTag = TAG_NPC_ROLE_FARMER; // does NOT satisfy the soldier's requirement
+            bool bNeverSoldier = true;
+            for (int32 i = 0; i < 500; ++i) {
+                const FMythicArchetypeRow *Chosen = nullptr;
+                if (P::DeriveArchetype(Mini, Ctx, (uint32)(i + 1) * 40503u, Chosen) == TAG_NPC_ROLE_SOLDIER) {
+                    bNeverSoldier = false; break;
+                }
+            }
+            TestTrue(TEXT("unmet RequiredFactionTags removes the row from the draw"), bNeverSoldier);
+
+            // And when the faction DOES satisfy the requirement, the heavy soldier row dominates.
+            Ctx.FactionTag = TAG_NPC_ROLE_GUARD;
+            int32 SoldierHits = 0;
+            for (int32 i = 0; i < 500; ++i) {
+                const FMythicArchetypeRow *Chosen = nullptr;
+                if (P::DeriveArchetype(Mini, Ctx, (uint32)(i + 1) * 40503u, Chosen) == TAG_NPC_ROLE_SOLDIER) {
+                    ++SoldierHits;
+                }
+            }
+            TestTrue(TEXT("met RequiredFactionTags → heavy row dominates"), SoldierHits > 400);
+        }
+    }
+
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // World Chronicle event-tag formatting — UMythicWorldChronicleSubsystem::EventTagToReadable
 // (player-facing news + NPC {recent_event}: last two tag segments as "Parent Leaf"; invalid → safe default)
 // ═══════════════════════════════════════════════════════════════
@@ -2350,8 +2531,8 @@ bool FMythicChronicleEventReadableTest::RunTest(const FString &Parameters) {
 
     // Dominant path: render the last TWO segments ("Parent Leaf") so the category survives. Any registered
     // multi-segment tag exercises the formatting — semantics aside, GAS.State.Dead → "State Dead".
-    const FGameplayTag Dead = FGameplayTag::RequestGameplayTag(FName("GAS.State.Dead"), /*ErrorIfNotFound*/ false);
-    const FGameplayTag Downed = FGameplayTag::RequestGameplayTag(FName("GAS.State.Downed"), /*ErrorIfNotFound*/ false);
+    const FGameplayTag Dead = GAS_STATE_DEAD;
+    const FGameplayTag Downed = GAS_STATE_DOWNED;
     TestTrue(TEXT("stand-in tags registered (prereq)"), Dead.IsValid() && Downed.IsValid());
     if (Dead.IsValid()) {
         TestEqual(TEXT("GAS.State.Dead → 'State Dead'"), C::EventTagToReadable(Dead), FString(TEXT("State Dead")));
@@ -2747,7 +2928,7 @@ bool FMythicEquipRequirementTest::RunTest(const FString &Parameters) {
     FGameplayTagContainer NoTags;
     TestTrue(TEXT("empty requirement passes with no owner tags"), Meets(FGameplayTag(), NoTags));
 
-    const FGameplayTag Req = FGameplayTag::RequestGameplayTag(FName("GAS.State.Dead"), /*ErrorIfNotFound*/ false);
+    const FGameplayTag Req = GAS_STATE_DEAD;
     TestTrue(TEXT("native tag resolves (test prerequisite)"), Req.IsValid());
     if (Req.IsValid()) {
         FGameplayTagContainer HasReq;
@@ -3531,6 +3712,106 @@ bool FLivingWorldFactionDBRegisterAnnihilateTest::RunTest(const FString &Paramet
     DB->GetFaction(NewId, Annihilated);
     TestFalse(TEXT("Annihilated faction should not be alive"), Annihilated.bAlive);
     TestEqual(TEXT("Annihilated faction pop = 0"), Annihilated.Population, 0);
+
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Kill → world-sim feedback — UMythicLivingWorldSubsystem::ReportNpcDeath (Step 5)
+// ReportNpcDeath is an instance method gated on the subsystem's private FactionDB/Settings + SimulationLock, so it can't
+// be invoked free-standing in a unit test. This test drives the SAME faction-DB read-modify-write the method performs
+// (GetFactionMutable → decrement Population / Reserves.Arms → CommitWrites) against a real UMythicFactionDatabase, and
+// asserts the kill-feedback CONTRACT verbatim: Population decrements with a floor at 0; Reserves.Arms decrements ONLY for
+// armed roles, floored at 0; MilitaryStrength is NEVER written (it is recomputed absolutely by the sim from the durable
+// Arms source each tick, so the method must leave it alone).
+// ═══════════════════════════════════════════════════════════════
+
+namespace KillFeedbackTestHelpers {
+    // Mirrors the armed-role classification + arithmetic inside ReportNpcDeath. Pure, so the contract is unit-testable
+    // without the subsystem's private state. Applies the decrement to F exactly as the method does under SimulationLock.
+    void ApplyKillFeedback(FMythicFactionData &F, const FGameplayTag &RoleTag, int32 KillPopulationLoss,
+                           float KillMilitaryArmsLoss) {
+        const int32 PopLoss = FMath::Max(0, KillPopulationLoss);
+        const bool bArmed = RoleTag == TAG_NPC_ROLE_SOLDIER || RoleTag == TAG_NPC_ROLE_GUARD;
+        const float ArmsLoss = FMath::Max(0.0f, KillMilitaryArmsLoss);
+        F.Population = FMath::Max(0, F.Population - PopLoss);
+        if (bArmed && ArmsLoss > 0.0f) {
+            F.Reserves.Arms = FMath::Max(0.0f, F.Reserves.Arms - ArmsLoss);
+        }
+    }
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FLivingWorldReportNpcDeathTest,
+    "Mythic.LivingWorld.Phase5.KillFeedback.ReportNpcDeath",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FLivingWorldReportNpcDeathTest::RunTest(const FString &Parameters) {
+    auto *DB = NewObject<UMythicFactionDatabase>();
+    DB->Initialize(LivingWorldTestHelpers::CreateFactionSettings(20, 3));
+
+    const FMythicFactionId Id = LivingWorldTestHelpers::MakeFactionId(0);
+
+    // Seed a known economic baseline on the write buffer.
+    {
+        FMythicFactionData *W = DB->GetFactionMutable(Id);
+        TestNotNull(TEXT("Seed faction should exist"), W);
+        W->Population = 100;          // CreateFactionSettings seeds faction 0 to 100, but be explicit.
+        W->Reserves.Arms = 5.0f;
+        W->MilitaryStrength = 0.5f;   // Derived field — must stay untouched by kill feedback.
+        DB->CommitWrites();
+    }
+
+    // (1) Civilian death: Population -1, Arms unchanged.
+    {
+        FMythicFactionData *W = DB->GetFactionMutable(Id);
+        KillFeedbackTestHelpers::ApplyKillFeedback(*W, TAG_NPC_ROLE_CIVILIAN, /*PopLoss*/ 1, /*ArmsLoss*/ 0.75f);
+        DB->CommitWrites();
+
+        FMythicFactionData R;
+        DB->GetFaction(Id, R);
+        TestEqual(TEXT("Civilian death decrements Population by 1"), R.Population, 99);
+        TestEqual(TEXT("Civilian death leaves Arms untouched"), R.Reserves.Arms, 5.0f);
+        TestEqual(TEXT("Civilian death leaves MilitaryStrength untouched"), R.MilitaryStrength, 0.5f);
+    }
+
+    // (2) Soldier death (armed): Population -1, Arms -0.75, MilitaryStrength NOT written.
+    {
+        FMythicFactionData *W = DB->GetFactionMutable(Id);
+        KillFeedbackTestHelpers::ApplyKillFeedback(*W, TAG_NPC_ROLE_SOLDIER, /*PopLoss*/ 1, /*ArmsLoss*/ 0.75f);
+        DB->CommitWrites();
+
+        FMythicFactionData R;
+        DB->GetFaction(Id, R);
+        TestEqual(TEXT("Soldier death decrements Population by 1"), R.Population, 98);
+        TestTrue(TEXT("Soldier death decrements Arms by 0.75"), FMath::IsNearlyEqual(R.Reserves.Arms, 4.25f));
+        TestEqual(TEXT("Soldier death leaves MilitaryStrength untouched"), R.MilitaryStrength, 0.5f);
+    }
+
+    // (3) Guard death is also armed.
+    {
+        FMythicFactionData *W = DB->GetFactionMutable(Id);
+        KillFeedbackTestHelpers::ApplyKillFeedback(*W, TAG_NPC_ROLE_GUARD, /*PopLoss*/ 1, /*ArmsLoss*/ 0.75f);
+        DB->CommitWrites();
+
+        FMythicFactionData R;
+        DB->GetFaction(Id, R);
+        TestTrue(TEXT("Guard death decrements Arms"), FMath::IsNearlyEqual(R.Reserves.Arms, 3.5f));
+    }
+
+    // (4) Floors: Population can't go below 0, Arms can't go below 0.
+    {
+        FMythicFactionData *W = DB->GetFactionMutable(Id);
+        W->Population = 0;
+        W->Reserves.Arms = 0.25f;
+        KillFeedbackTestHelpers::ApplyKillFeedback(*W, TAG_NPC_ROLE_SOLDIER, /*PopLoss*/ 5, /*ArmsLoss*/ 1.0f);
+        DB->CommitWrites();
+
+        FMythicFactionData R;
+        DB->GetFaction(Id, R);
+        TestEqual(TEXT("Population floors at 0"), R.Population, 0);
+        TestEqual(TEXT("Arms floors at 0"), R.Reserves.Arms, 0.0f);
+    }
 
     return true;
 }
@@ -4626,6 +4907,50 @@ bool FLivingWorldSchemeEngineSkipsDeadTargetTest::RunTest(const FString &Paramet
     // Faction 1 was faction 0's only valid target and factions 2/3 are Neutral toward everyone, so no scheme should be
     // generated at all this tick.
     TestEqual(TEXT("No schemes generated when the only hostile target is dead"), Engine->GetActiveSchemeCount(), 0);
+
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Contested-border soldier density — UMythicTerritoryPatrolSpawnerProcessor::ApplyContestedBorderBoost
+// A faction-controlled cell bordering an at-war (Hostile) faction's cell fields a boosted garrison, clamped to the same
+// per-cell ceilings the base target honors. Pure + deterministic (no RNG).
+// ═══════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicContestedBorderBoostTest,
+    "Mythic.LivingWorld.Territory.ContestedBorderBoost",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicContestedBorderBoostTest::RunTest(const FString &Parameters) {
+    using P = UMythicTerritoryPatrolSpawnerProcessor;
+
+    // Not contested → base target passes through unchanged (identical to a no-op), regardless of multiplier.
+    TestEqual(TEXT("uncontested passthrough"), P::ApplyContestedBorderBoost(3, /*bContested*/ false, 2.0f, 10, 20), 3);
+    TestEqual(TEXT("uncontested passthrough (high mult ignored)"),
+              P::ApplyContestedBorderBoost(3, false, 5.0f, 10, 20), 3);
+
+    // Contested → multiplied (CeilToInt) when there is per-cell headroom.
+    TestEqual(TEXT("contested 3 ×2 = 6"), P::ApplyContestedBorderBoost(3, true, 2.0f, 10, 20), 6);
+    TestEqual(TEXT("contested 2 ×2.5 = ceil(5) = 5"), P::ApplyContestedBorderBoost(2, true, 2.5f, 10, 20), 5);
+    TestEqual(TEXT("contested 3 ×1.5 = ceil(4.5) = 5"), P::ApplyContestedBorderBoost(3, true, 1.5f, 10, 20), 5);
+
+    // A cell that fields 0 soldiers in peacetime fields 0 even on a frontline (no phantom war garrison).
+    TestEqual(TEXT("contested 0 stays 0"), P::ApplyContestedBorderBoost(0, true, 4.0f, 10, 20), 0);
+
+    // Boost is re-clamped to min(MaxSoldiersPerControlledCell, MaxEntitiesPerCell) — never exceeds the per-cell cap.
+    TestEqual(TEXT("contested boost clamped to MaxSoldiers ceiling"),
+              P::ApplyContestedBorderBoost(4, true, 3.0f, /*MaxSoldiers*/ 5, /*MaxEntities*/ 20), 5);
+    TestEqual(TEXT("contested boost clamped to MaxEntities ceiling"),
+              P::ApplyContestedBorderBoost(4, true, 3.0f, /*MaxSoldiers*/ 20, /*MaxEntities*/ 6), 6);
+
+    // Multiplier is floored at 1.0 — a misconfigured sub-1.0 value can never SHRINK a frontline garrison.
+    TestEqual(TEXT("contested multiplier floored at 1.0"), P::ApplyContestedBorderBoost(4, true, 0.25f, 10, 20), 4);
+
+    // Determinism: same inputs → same output.
+    TestEqual(TEXT("deterministic re-eval"),
+              P::ApplyContestedBorderBoost(3, true, 2.0f, 10, 20),
+              P::ApplyContestedBorderBoost(3, true, 2.0f, 10, 20));
 
     return true;
 }

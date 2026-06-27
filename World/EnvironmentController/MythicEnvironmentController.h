@@ -310,6 +310,24 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Time of Day Controller")
     UWeatherType *GetCurrentWeather() const { return this->CurrentWeather; }
 
+    // The active "guaranteed" weather goal set via SetTargetWeather (the next transitions chain toward it), or null if
+    // no goal is pending. Exposed read-only for the Living World gameplay debugger (Environment pane).
+    UWeatherType *GetGuaranteedTargetWeather() const { return this->GuaranteedTargetWeather; }
+
+    // Read-only snapshot of the in-flight weather TRANSITION for the gameplay debugger (Environment pane). The
+    // WeatherTransition / TransitionStartedAt members are private; this surfaces them without exposing setters.
+    // bActive = a transition is in progress (TransitionToWeather set). TargetTag = the weather being transitioned
+    // toward (NAME_None when none). Progress = the same [0,1] lerp alpha the tick uses. ElapsedMinutes / LengthMinutes
+    // describe the elapsed/total transition window. No side effects; safe to call any time on the game thread.
+    void GetWeatherTransitionInfo(bool &bActive, FGameplayTag &TargetTag, float &Progress, double &ElapsedMinutes, float &LengthMinutes) const {
+        bActive = !this->WeatherTransition.TransitionToWeather.IsNull();
+        const UWeatherType *Target = this->WeatherTransition.TransitionToWeather.Get();
+        TargetTag = (Target && Target->Tag.IsValid()) ? Target->Tag : FGameplayTag();
+        ElapsedMinutes = (this->Time - this->TransitionStartedAt).GetTotalMinutes();
+        LengthMinutes = this->TransitionDurationInMins;
+        Progress = ComputeWeatherTransitionProgress(this->WeatherTransition.bSetInstantly, ElapsedMinutes, LengthMinutes);
+    }
+
     const TArray<TObjectPtr<UWeatherType>> &GetWeatherTypes() const { return WeatherTypes; }
 
     UWeatherType *GetWeatherTypeByTag(FGameplayTag Tag) const;

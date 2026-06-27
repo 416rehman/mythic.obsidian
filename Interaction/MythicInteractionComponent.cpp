@@ -10,6 +10,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Components/WidgetComponent.h"
 #include "GameFramework/Pawn.h"
+#include "UI/MythicTags_UI.h"
 
 ////////////// HOW IT WORKS /////////////////////
 /// InteractionComponent takes a Tag for the GameUILayerName and finds the first widget, UI_LayerRootWidget, in that layer (This layer should only have one widget, the HUD)
@@ -21,6 +22,9 @@ UMythicInteractionComponent::UMythicInteractionComponent() : UI_LayerRootWidget(
     // Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
     // off to improve performance if you don't need them.
     PrimaryComponentTick.bCanEverTick = true;
+
+    // Native UI layer tag for input handling during interaction (was a header literal RequestGameplayTag).
+    GameUILayerName = UI_LAYER_GAME;
 }
 
 void UMythicInteractionComponent::UpdateUILayerRootWidget(ACommonPlayerController *CommonPlayerController) {

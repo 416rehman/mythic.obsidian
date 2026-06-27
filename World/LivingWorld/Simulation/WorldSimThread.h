@@ -72,6 +72,14 @@ public:
     /** Is the thread currently running? */
     bool IsRunning() const { return bRunning.load(std::memory_order_relaxed); }
 
+    /** Monotonic sim-tick counter (diagnostics). The caller MUST hold the SimulationLock — TickCount is mutated on the
+     *  background thread inside SimTick; this getter only exposes it so a SimulationLock-guarded copy-out (the Living
+     *  World subsystem's CopySimDiagnostics) can read it race-free. NOT atomic; do not read lock-free. */
+    uint64 GetTickCount() const { return TickCount; }
+
+    /** Configured real-time interval between sim ticks (seconds). Set once at Setup; safe to read under SimulationLock. */
+    float GetTickIntervalSeconds() const { return TickIntervalSeconds; }
+
     // ─── FRunnable Interface ──────────────────────────────
 
     virtual bool Init() override;

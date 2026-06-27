@@ -181,8 +181,9 @@ public:
      */
     int32 GetTotalEdgeCount() const;
 
-    /** Get number of entities that have at least one edge */
-    int32 GetEntityCount() const { return AdjacencyMap.Num(); }
+    /** Get number of entities that have at least one edge. Read-locks GraphLock (the BDI cognition worker mutates
+     *  AdjacencyMap off the game thread) — defined in the .cpp so it can lock, matching GetTotalEdgeCount. */
+    int32 GetEntityCount() const;
 
     // ─── Maintenance ──────────────────────────────────────
 

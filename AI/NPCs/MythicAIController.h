@@ -14,6 +14,23 @@ class UMythicAttributeSet_NPCCombat;
 class UMythicAbilitySystemComponent;
 class UAIPerceptionComponent;
 class UAISenseConfig_Sight;
+class UMythicActivityCatalog;
+struct FMythicActivityDef;
+
+/**
+ * Read-only snapshot of an AI controller's non-combat runtime state, for the Living World gameplay debugger
+ * (Companions/Players pane). AI controllers are server-only, single-threaded actors, so a plain by-value copy is
+ * race-free. Carries the leash anchor + idle/patrol/flee/companion-follow state that is otherwise protected.
+ */
+struct FMythicAIDebugState {
+    FVector EngageAnchorLocation = FVector::ZeroVector;
+    float LeashRange = 0.0f;
+    int32 PatrolLegIndex = 0;
+    bool bFleeingMove = false;
+    bool bCompanionFollowActive = false;
+    FString CompanionLeaderKey;
+    bool bHasHostileTarget = false;
+};
 
 /// Every NPC will have a name, and an Ability System Component with LifeAttributeSet
 /// AIController's are not replicated, so values needed on the clients should go in the NPCCharacter
@@ -68,6 +85,23 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic AI|Combat")
     AActor *GetCurrentHostileTarget() const { return CurrentHostileTarget; }
 
+    // Copy-out of the per-attacker aggro table (read-only debug accessor). AI controllers are server-only,
+    // single-threaded actors, so a plain by-value copy is race-free. Returns the number of entries copied.
+    // Added for the Living World gameplay debugger (Party/Companions pane) so it can surface real threat numbers.
+    int32 CopyThreatTable(TArray<TPair<TWeakObjectPtr<AActor>, float>> &OutThreats) const;
+
+    // Copy-out of the non-combat runtime state (leash anchor, idle/patrol/flee/companion-follow) for the gameplay
+    // debugger. Server-only single-threaded actor — a plain by-value copy is race-free. Mirrors CopyThreatTable.
+    void CopyAIDebugState(FMythicAIDebugState &Out) const;
+
+    // SERVER: commit this NPC to engaging Target as a hostile (anchor the leash, pursue + face, start the attack
+    // loop, fire OnEngageHostileTarget). Refactored out of OnTargetPerceptionUpdated so non-perception callers — a
+    // social verb that angers the NPC (AMythicNPCCharacter::ApplySocialReaction), a guard-alert, future scripting —
+    // can force a fight through the SAME path. Guarded by HasAuthority + IsValid(Target). The COMMIT guard
+    // (only-acquire-when-no-valid-target) stays in the perception caller; this method assumes Target was already
+    // chosen. No-op off-authority or with an invalid target.
+    void ForceEngageTarget(AActor *Target);
+
     // SERVER: toggle companion-follow for this NPC. Called by the party subsystem on recruit/remove. When active, a
     // dedicated FAST timer paces the NPC to its leader's pawn — resolved by the leader's CANONICAL key via the player
     // registry, so a co-op companion follows the player who recruited it (not always the host). TickIdleBehavior
@@ -79,6 +113,10 @@ public:
     // TickIdleBehavior bounds-checks the result against the grid and skips off-grid legs so an edge-anchored guard
     // doesn't stall its whole patrol on one unreachable leg.
     static FMythicCellCoord GetPatrolCell(FMythicCellCoord Anchor, int32 LegIndex);
+
+    // Pure: is this game hour daytime? [6,20) = day. Static + no engine state so the day/night boundary is unit-testable
+    // (the activity catalog's day/night gate keys off it). Mirrors the env clock's day/night sense at a coarse grain.
+    static bool IsDayHour(float Hour);
 
 protected:
     // Sight perception that detects only enemies (affiliation filtered via GetTeamAttitudeTowards).
@@ -172,6 +210,40 @@ protected:
 
     // Timer callback: when NOT engaged, steer the NPC toward its committed home-anchored desire's (Defend/Rest) cell.
     void TickIdleBehavior();
+
+    // ─── Context-driven activity dispatch (Step 3) ───
+    // SERVER: additive idle branch. For a ROUTINE/neutral committed desire only, build the activity context (role/biome/
+    // time/phase/nearby-merchant/NameHash from the brain + grid + env clock), weighted-pick an eligible activity from the
+    // (cached) catalog, steer the NPC to the activity's resolved target, and ServerSetActivity(tag) on arrival/change. A
+    // null/empty catalog or no eligible activity returns false → TickIdleBehavior falls through to its EXISTING grounded/
+    // Socialize/Patrol logic verbatim (strictly additive, zero regression). Returns true if it handled steering this tick.
+    bool TickActivityBehavior(class UMythicCognitiveBrainComponent *Brain, class UMythicLivingWorldSubsystem *LW,
+                              const class UMythicTerritoryGrid *Grid, FMythicCellCoord LiveCell);
+
+    // SERVER: bounded scan for the nearest MERCHANT NPC within Radius (cm) of this pawn. bOutFound is set true when one is
+    // found. Capped at 12 examined NPCs (a rare idle-cadence event, not a tick path) — uses TActorIterator + an early cap,
+    // NOT an overlap query. Returns the merchant actor or nullptr. Only called when a merchant-gated activity is in play.
+    AActor *ScanNearbyMerchant(float Radius, bool &bOutFound) const;
+
+    // SERVER: resolve the current game hour [0,24) from the SAME single-source env clock the ScheduleTransitionProcessor
+    // uses (UMythicEnvironmentSubsystem → controller GetTimespan), falling back to world-time % DayLength when no
+    // environment controller is placed. Game-thread only.
+    float ResolveGameHour() const;
+
+    // Radius (cm) within which a context activity's nearby-merchant gate searches. Designer-tunable.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic AI|Idle", meta = (ClampMin = "0.0"))
+    float MerchantScanRadius = 1500.0f;
+
+    // Lazily-resolved authored activity catalog (Settings->ActivityCatalog.LoadSynchronous, hoisted once). Weak so a GC of
+    // the data asset is detected; DefaultActivities is the code-default fallback used when the catalog is unset.
+    TWeakObjectPtr<UMythicActivityCatalog> CachedActivityCatalog;
+
+    // Code-default activity defs, built once (MythicActivityDefaults::BuildDefaultActivities) on first activity dispatch
+    // when no authored catalog is assigned. Server-only state.
+    TArray<FMythicActivityDef> DefaultActivities;
+
+    // Latches the one-time catalog/defaults resolution so we don't re-LoadSynchronous / rebuild every idle tick.
+    bool bActivitySourceResolved = false;
 
     // ── Companion follow (dedicated fast timer, set via SetCompanionFollow) ──
     // Cadence (seconds) of the follow re-anchor. Fast so the companion paces the leader without the 2s idle-tick lag.

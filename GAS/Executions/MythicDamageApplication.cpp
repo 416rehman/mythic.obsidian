@@ -6,6 +6,7 @@
 #include "Mythic.h"
 #include "GAS/MythicGameplayEffectContext.h"
 #include "GAS/MythicTags_GAS.h"
+#include "AI/MythicTags_AI.h"
 #include "Itemization/MythicTags_Inventory.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
@@ -255,7 +256,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     }
 
     // apply status effect conditional damage modifiers
-    static const FGameplayTag DebuffParent = FGameplayTag::RequestGameplayTag(FName("GAS.Debuff"), /*ErrorIfNotFound=*/false);
+    static const FGameplayTag DebuffParent = GAS_DEBUFF;
 
     // amplify hit if target has active status effect
     if (TargetTags && IncreasedDamageToEnemiesUnderStatusEffects != 0.0f && DebuffParent.IsValid() && TargetTags->HasTag(DebuffParent)) {
@@ -291,20 +292,20 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
 
     // apply skill damage multiplier if incoming hit was delivered by a skill
     if (SourceTags && BonusSkillDamage != 0.0f) {
-        if (SourceTags->HasTag(FGameplayTag::RequestGameplayTag(FName("GAS.Ability.Type.Skill"), false))) {
+        if (SourceTags->HasTag(GAS_ABILITY_TYPE_SKILL)) {
             FinalDamage = FMath::Max(0.0f, FinalDamage * (1.0f + BonusSkillDamage));
         }
     }
 
     // apply superior damage bonus if target matches superior tier tag
-    FGameplayTag SuperiorRoot = FGameplayTag::RequestGameplayTag(FName("AI.Tier.Superior"), false);
+    FGameplayTag SuperiorRoot = AI_TIER_SUPERIOR;
     bool bIsSuperior = false;
     if (TargetTags) {
         for (const FGameplayTag& Tag : *TargetTags) {
             if ((SuperiorRoot.IsValid() && Tag.MatchesTag(SuperiorRoot)) ||
-                Tag.MatchesTag(FGameplayTag::RequestGameplayTag(FName("AI.Tier.Elite"), false)) ||
-                Tag.MatchesTag(FGameplayTag::RequestGameplayTag(FName("AI.Tier.Champion"), false)) ||
-                Tag.MatchesTag(FGameplayTag::RequestGameplayTag(FName("AI.Tier.Boss"), false))) {
+                Tag.MatchesTag(AI_TIER_ELITE) ||
+                Tag.MatchesTag(AI_TIER_CHAMPION) ||
+                Tag.MatchesTag(AI_TIER_BOSS)) {
                 bIsSuperior = true;
                 break;
             }

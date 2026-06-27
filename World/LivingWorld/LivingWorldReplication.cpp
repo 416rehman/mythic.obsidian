@@ -4,6 +4,7 @@
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "World/LivingWorld/Encounters/EncounterDirector.h"
+#include "World/LivingWorld/Settlements/MythicSettlement.h" // FMythicSettlementData (complete type for settlement sync)
 #include "Net/UnrealNetwork.h"
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "Engine/GameInstance.h"
@@ -19,6 +20,7 @@ AMythicLivingWorldReplicator::AMythicLivingWorldReplicator() {
     FactionProxies.OwnerReplicator = this;
     TerritoryProxies.OwnerReplicator = this;
     EncounterProxies.OwnerReplicator = this;
+    SettlementProxies.OwnerReplicator = this;
 }
 
 void AMythicLivingWorldReplicator::BeginPlay() {
@@ -113,12 +115,25 @@ void FMythicEncounterProxyItem::PreReplicatedRemove(const FMythicEncounterProxyA
     if (InArraySerializer.OwnerReplicator) { InArraySerializer.OwnerReplicator->NotifyClientProxiesChanged(); }
 }
 
+void FMythicSettlementProxyItem::PostReplicatedAdd(const FMythicSettlementProxyArray &InArraySerializer) {
+    if (InArraySerializer.OwnerReplicator) { InArraySerializer.OwnerReplicator->NotifyClientProxiesChanged(); }
+}
+
+void FMythicSettlementProxyItem::PostReplicatedChange(const FMythicSettlementProxyArray &InArraySerializer) {
+    if (InArraySerializer.OwnerReplicator) { InArraySerializer.OwnerReplicator->NotifyClientProxiesChanged(); }
+}
+
+void FMythicSettlementProxyItem::PreReplicatedRemove(const FMythicSettlementProxyArray &InArraySerializer) {
+    if (InArraySerializer.OwnerReplicator) { InArraySerializer.OwnerReplicator->NotifyClientProxiesChanged(); }
+}
+
 void AMythicLivingWorldReplicator::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
     DOREPLIFETIME(AMythicLivingWorldReplicator, FactionProxies);
     DOREPLIFETIME(AMythicLivingWorldReplicator, TerritoryProxies);
     DOREPLIFETIME(AMythicLivingWorldReplicator, EncounterProxies);
+    DOREPLIFETIME(AMythicLivingWorldReplicator, SettlementProxies);
 }
 
 bool AMythicLivingWorldReplicator::TerritoryProxyNeedsUpdate(const FMythicTerritoryProxyItem &Existing, FMythicFactionId NewFaction, uint8 NewContestedLevel) {
@@ -296,6 +311,53 @@ void AMythicLivingWorldReplicator::SyncProxies(UMythicLivingWorldSubsystem *Subs
 
         if (bEncountersChanged) {
             EncounterProxies.MarkArrayDirty();
+        }
+    }
+
+    // ─── Sync Settlements (added on registration; GoverningFaction / capital can change on conquest) ───
+    // Walk the registry through the subsystem's thread-safe copy-out helpers (the sim thread mutates Settlements under
+    // SimulationLock — CopyAllSettlementIds / CopySettlementById snapshot by value under that lock). Settlement counts
+    // are tiny, so the linear scans / by-value copies are trivial. Settlements persist for the level's life (placed
+    // actors), so unlike encounters they are not removed here; only adds + field updates are synced.
+    {
+        TArray<int32> SettlementIds;
+        Subsystem->CopyAllSettlementIds(SettlementIds);
+
+        bool bSettlementsChanged = false;
+        for (const int32 SettlementId : SettlementIds) {
+            FMythicSettlementData SData;
+            if (!Subsystem->CopySettlementById(SettlementId, SData)) {
+                continue;
+            }
+
+            FMythicSettlementProxyItem *Proxy = SettlementProxies.Items.FindByPredicate(
+                [SettlementId](const FMythicSettlementProxyItem &P) { return P.SettlementId == SettlementId; });
+
+            if (!Proxy) {
+                FMythicSettlementProxyItem NewProxy;
+                NewProxy.SettlementId = SettlementId;
+                NewProxy.CenterCell = SData.CenterCell;
+                NewProxy.GoverningFaction = SData.GoverningFaction;
+                NewProxy.DisplayName = SData.DisplayName;
+                NewProxy.bIsCapital = SData.bIsCapital;
+                const int32 NewIdx = SettlementProxies.Items.Add(NewProxy);
+                SettlementProxies.MarkItemDirty(SettlementProxies.Items[NewIdx]);
+                bSettlementsChanged = true;
+            }
+            else if (Proxy->GoverningFaction.Index != SData.GoverningFaction.Index ||
+                     Proxy->bIsCapital != SData.bIsCapital ||
+                     Proxy->CenterCell != SData.CenterCell) {
+                // Conquest flips GoverningFaction; CenterCell/capital can change after a (re)rasterize. Name is static.
+                Proxy->CenterCell = SData.CenterCell;
+                Proxy->GoverningFaction = SData.GoverningFaction;
+                Proxy->bIsCapital = SData.bIsCapital;
+                SettlementProxies.MarkItemDirty(*Proxy);
+                bSettlementsChanged = true;
+            }
+        }
+
+        if (bSettlementsChanged) {
+            SettlementProxies.MarkArrayDirty();
         }
     }
 }

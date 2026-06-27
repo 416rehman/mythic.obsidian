@@ -19,6 +19,11 @@
 #include "World/LivingWorld/MythicTags_LivingWorld.h" // TAG_LIVINGWORLD_EVENT_ENCOUNTER_COMPLETED
 #include "GAS/Executions/MythicCombatRoll.h"          // MythicCombat::RollSucceeds (shared 0/100% boundary rule)
 #include "Mass/Tags/MythicMassTags.h"
+#include "Objectives/ObjectiveDefinition.h"            // EncounterClearObjective hook
+#include "Objectives/ObjectiveTracker.h"               // ServerAddObjective (proximity offer)
+#include "World/LivingWorld/Encounters/MythicEncounterObjectiveDefaults.h" // code-default clear objective fallback
+#include "Player/MythicPlayerController.h"             // GetObjectiveTracker() (proximity-offer target)
+#include "GameFramework/Pawn.h"                        // player pawn location for the cell poll
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Engine/GameInstance.h"
@@ -72,7 +77,8 @@ void UMythicEncounterDirector::Initialize(FSubsystemCollectionBase &Collection) 
 
     ActiveEncounters.Reserve(MaxActiveEncounters);
 
-    // Load encounter templates from data asset
+    // Load encounter templates from the authored data asset (if any). The authored asset ALWAYS wins — we only fall
+    // back to code defaults below when it's absent or yields zero templates.
     if (!Settings->EncounterTemplateDatabase.IsNull()) {
         if (UMythicEncounterTemplateDatabase *DB = Settings->EncounterTemplateDatabase.LoadSynchronous()) {
             for (const FMythicEncounterTemplate &Template : DB->Templates) {
@@ -81,6 +87,22 @@ void UMythicEncounterDirector::Initialize(FSubsystemCollectionBase &Collection) 
             UE_LOG(LogMythEncounter, Log,
                    TEXT("EncounterDirector: Loaded %d templates from data asset"), DB->GetTemplateCount());
         }
+    }
+
+    // Code-default fallback: if no authored database was assigned (the shipped-config reality — EncounterTemplateDatabase
+    // has always been null, so the director registered ZERO templates and the world had no encounters), seed the built-in
+    // template set so encounters fire out of the box. RegisterTemplate's invalid-tag guard is satisfied because every
+    // default carries a registered native EncounterTag. This is a FALLBACK only — any authored template above wins.
+    if (Templates.Num() == 0) {
+        TArray<FMythicEncounterTemplate> DefaultTemplates;
+        MythicEncounterDefaults::BuildDefaultTemplates(DefaultTemplates);
+        for (const FMythicEncounterTemplate &Template : DefaultTemplates) {
+            RegisterTemplate(Template);
+        }
+        UE_LOG(LogMythEncounter, Log,
+               TEXT("EncounterDirector: no authored templates — registered %d CODE-DEFAULT templates (assign an "
+                    "EncounterTemplateDatabase in LivingWorldSettings to override)."),
+               DefaultTemplates.Num());
     }
 
     UE_LOG(LogMythEncounter, Log,
@@ -93,14 +115,13 @@ void UMythicEncounterDirector::Deinitialize() {
         GetWorld()->GetTimerManager().ClearTimer(EvaluationTimerHandle);
     }
 
-    // Tear down every active encounter via CleanupEncounter (destroys MASS entities + any embodied actors + clears the
-    // EmbodiedActors map entries) instead of just dropping the array — Empty() alone would orphan promoted actors and
-    // leak their registry entries (the same leak the iter-105/108 fixes close on the timeout + population-despawn paths).
-    // CleanupEncounter(last) RemoveAtSwaps the last index (no swap → clean pop); it null-checks GetWorld()/LivingWorld,
-    // so it degrades safely if the world is already tearing down.
-    while (ActiveEncounters.Num() > 0) {
-        CleanupEncounter(ActiveEncounters.Num() - 1);
-    }
+    // Deinitialize on a WorldSubsystem ONLY runs during world teardown. Do NOT route through CleanupEncounter here: it
+    // destroys MASS entities + embodied actors, but at teardown the MASS subsystem's EntityManager shared-ptr is already
+    // released — GetMutableEntityManager()'s check(EntityManager) crashes (observed on EndPlay). The engine destroys all
+    // entities + actors itself and the LivingWorld EmbodiedActors map is torn down with its own subsystem, so there is
+    // nothing to leak here — just drop our tracking. (The in-play completion/timeout path still calls CleanupEncounter
+    // for proper entity+actor teardown while the world is live.)
+    ActiveEncounters.Empty();
     Templates.Empty();
     TemplateCooldowns.Empty();
 
@@ -146,6 +167,34 @@ bool UMythicEncounterDirector::ForceCompleteEncounter(uint32 EncounterId) {
     return false;
 }
 
+UObjectiveDefinition *UMythicEncounterDirector::GetEncounterClearObjective() const {
+    // Settings unavailable (a startup/teardown transient) → nothing to offer.
+    if (!Settings) {
+        return nullptr;
+    }
+
+    // 1) Authored asset wins. LoadSynchronous is acceptable here — this is a deliberate on-demand reader called from the
+    //    director's throttled evaluation timer, NOT a per-frame hot loop.
+    if (!Settings->EncounterClearObjective.IsNull()) {
+        if (UObjectiveDefinition *Authored = Settings->EncounterClearObjective.LoadSynchronous()) {
+            return Authored;
+        }
+        // Soft-ptr set but failed to load (a stale/broken path) — fall through to the code default rather than no-op.
+    }
+
+    // 2) Code-default fallback: build ONCE and cache so the loop runs out of the box with no authored asset. The cached
+    //    pointer is stable across offers (the ObjectiveTracker dedups by definition pointer). RequiredCount is a generic
+    //    starting target — the code default is NOT per-encounter (one shared objective; an authored asset can be richer).
+    //    The cache is populated via a const_cast of `this` (the accessor is logically const — it lazily memoizes).
+    if (!DefaultClearObjective) {
+        constexpr int32 DefaultClearKills = 3; // matches the most common code-default encounter EntityCount (patrol/wildlife)
+        UMythicEncounterDirector *MutableThis = const_cast<UMythicEncounterDirector *>(this);
+        MutableThis->DefaultClearObjective =
+            MythicEncounterObjectiveDefaults::BuildDefaultEncounterClearObjective(MutableThis, DefaultClearKills);
+    }
+    return DefaultClearObjective;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Evaluation
 // ─────────────────────────────────────────────────────────────
@@ -161,6 +210,10 @@ void UMythicEncounterDirector::EvaluationTick() {
 
     // Step 1: Update existing encounters (timeout, lifecycle)
     UpdateActiveEncounters();
+
+    // Step 1b: Offer the clear objective to any player standing in a live encounter's cell (proximity → offer). Runs
+    // before the budget early-out so the offer fires even when the world is at the active-encounter cap. Idempotent.
+    MaybeOfferClearObjectives();
 
     // Step 2: Check global budget
     if (ActiveEncounters.Num() >= MaxActiveEncounters) {
@@ -496,6 +549,45 @@ void UMythicEncounterDirector::UpdateActiveEncounters() {
     }
 }
 
+void UMythicEncounterDirector::MaybeOfferClearObjectives() {
+    // SERVER-only (the director's timer only ticks where the subsystem exists; offers mutate authoritative tracker state).
+    // Bail cheaply when there is nothing to offer.
+    if (ActiveEncounters.Num() == 0) {
+        return;
+    }
+    UObjectiveDefinition *ClearObjective = GetEncounterClearObjective();
+    if (!ClearObjective) {
+        return; // no authored asset and code default unavailable (Settings down) — nothing to hand out
+    }
+    const UWorld *World = GetWorld();
+    if (!World || !TerritoryGrid) {
+        return;
+    }
+
+    // For each local/remote player, map the pawn's cell → live-encounter check → offer. Mirrors CheckZoneEntry's poll;
+    // O(players × activeEncounters), both small + bounded (MaxActiveEncounters), on the throttled eval timer. We only
+    // act on the authority: a listen-server host's PCs include the remote clients', and a dedicated server owns them all.
+    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It) {
+        AMythicPlayerController *PC = Cast<AMythicPlayerController>(It->Get());
+        if (!PC || !PC->HasAuthority()) {
+            continue; // only the server-authoritative PC proxy may assign objectives
+        }
+        const APawn *Pawn = PC->GetPawn();
+        if (!Pawn) {
+            continue; // not possessed yet
+        }
+        const FMythicCellCoord PawnCell = TerritoryGrid->WorldToCell(Pawn->GetActorLocation());
+        if (!HasEncounterInCell(PawnCell)) {
+            continue; // player isn't standing in a live encounter
+        }
+        if (UObjectiveTracker *Tracker = PC->GetObjectiveTracker()) {
+            // Idempotent — re-offering an objective the player already tracks (active OR completed) is a no-op, so
+            // standing in the cell across multiple eval ticks won't re-add or reset it.
+            Tracker->ServerAddObjective(ClearObjective);
+        }
+    }
+}
+
 void UMythicEncounterDirector::CleanupEncounter(int32 Index) {
     if (!ActiveEncounters.IsValidIndex(Index)) {
         return;
@@ -505,7 +597,12 @@ void UMythicEncounterDirector::CleanupEncounter(int32 Index) {
 
     // Destroy spawned MASS entities
     if (Encounter.SpawnedEntities.Num() > 0) {
-        UMassEntitySubsystem *MassSubsystem = GetWorld() ? GetWorld()->GetSubsystem<UMassEntitySubsystem>() : nullptr;
+        // Defense-in-depth: never touch the MASS entity manager while the world is tearing down. The subsystem object
+        // still resolves during teardown, but its EntityManager shared-ptr is already released, so GetMutableEntityManager()
+        // would check()-crash (and IsEntityValid would deref freed storage). The teardown path is handled in Deinitialize;
+        // this guards any other teardown-time caller. In-play (bIsTearingDown false) this is unchanged.
+        UWorld *World = GetWorld();
+        UMassEntitySubsystem *MassSubsystem = (World && !World->bIsTearingDown) ? World->GetSubsystem<UMassEntitySubsystem>() : nullptr;
         if (MassSubsystem) {
             FMassEntityManager &EntityManager = MassSubsystem->GetMutableEntityManager();
             int32 DestroyedCount = 0;

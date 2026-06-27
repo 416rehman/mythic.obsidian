@@ -325,6 +325,10 @@ public:
      */
     void DrawDamageNumbers(UCanvas *Canvas, APlayerController *PC);
 
+    // Number of damage numbers currently alive in the pool (exposes the protected ActiveDamageNumbers size only).
+    // For the Living World gameplay debugger header.
+    int32 GetActiveDamageNumberCount() const { return ActiveDamageNumbers.Num(); }
+
     // Callback for HUD post-render delegate
     void OnHUDPostRender(AHUD *HUD, UCanvas *Canvas);
 

@@ -635,6 +635,45 @@ void AMythicPlayerController::ClientReceiveNpcDialogue_Implementation(AMythicNPC
     }
 }
 
+// ---- Social verbs ----
+
+bool AMythicPlayerController::ServerPerformSocialVerb_Validate(AMythicNPCCharacter *NPC, EMythicSocialVerb Verb) {
+    // Mirror ServerRequestNpcDialogue_Validate: cheap non-null gate; the real (range/auth) checks run in _Implementation.
+    return NPC != nullptr;
+}
+
+void AMythicPlayerController::ServerPerformSocialVerb_Implementation(AMythicNPCCharacter *NPC, EMythicSocialVerb Verb) {
+    if (!HasAuthority() || !IsValid(NPC)) {
+        return;
+    }
+    // Same proximity gate the dialogue/recruit/barter verbs use — the interaction scanner only enforces range
+    // client-side, so a modded client could otherwise provoke NPCs across the map.
+    if (!NPC->IsActorInTradeRange(GetPawn())) {
+        return;
+    }
+    // Bound the enum (a hand-crafted packet could carry COUNT/garbage).
+    if (Verb >= EMythicSocialVerb::COUNT) {
+        return;
+    }
+
+    // Resolve + apply server-side (the brain personality + standing are authoritative). ApplySocialReaction performs
+    // all sim mutation (standing/aggro/guard alert) only — the UI surfacing is the client RPC below.
+    const FMythicSocialReactionResult Result = NPC->ResolveSocialVerb(Verb, this);
+    NPC->ApplySocialReaction(Result, Verb, this);
+
+    // Round-trip the reaction to the requesting client for its bark/face/anim (mirrors ClientReceiveNpcDialogue;
+    // runs locally on a listen-host too, so it is the single UI surfacing path for all net modes).
+    ClientReceiveSocialReaction(NPC, Verb, Result.Reaction, UMythicSocialVerbLibrary::DefaultBarkFor(Verb, Result.Reaction));
+}
+
+void AMythicPlayerController::ClientReceiveSocialReaction_Implementation(AMythicNPCCharacter *NPC, EMythicSocialVerb Verb, EMythicSocialReaction Reaction, const FText &Line) {
+    if (IsValid(NPC)) {
+        // Surface the reaction on the requesting client (runs locally on a listen-host too — the single UI path,
+        // mirroring ClientReceiveNpcDialogue → FireBark).
+        NPC->FireReaction(Verb, Reaction, Line, this);
+    }
+}
+
 bool AMythicPlayerController::ServerRecruitNpc_Validate(AMythicNPCCharacter *NPC) {
     return NPC != nullptr;
 }

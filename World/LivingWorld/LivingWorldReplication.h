@@ -172,6 +172,58 @@ struct TStructOpsTypeTraits<FMythicEncounterProxyArray> : public TStructOpsTypeT
 };
 
 // ─────────────────────────────────────────────────────────────
+// Settlement Proxy — Networked settlement state (client war-map / minimap markers)
+// ─────────────────────────────────────────────────────────────
+
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicSettlementProxyItem : public FFastArraySerializerItem {
+    GENERATED_BODY()
+
+    // Stable runtime settlement id (the dedup/removal key). Settlements are placed actors that persist for the level's
+    // life, so this is effectively stable per session. Not BP-relevant on its own (UI keys off cell/name/faction).
+    UPROPERTY()
+    int32 SettlementId = INDEX_NONE;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Living World|Settlement")
+    FMythicCellCoord CenterCell;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Living World|Settlement")
+    FMythicFactionId GoverningFaction;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Living World|Settlement")
+    FText DisplayName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Living World|Settlement")
+    bool bIsCapital = false;
+
+    // Client-side ingest hooks (see faction proxy). Defined out-of-line.
+    void PreReplicatedRemove(const struct FMythicSettlementProxyArray &InArraySerializer);
+    void PostReplicatedAdd(const struct FMythicSettlementProxyArray &InArraySerializer);
+    void PostReplicatedChange(const struct FMythicSettlementProxyArray &InArraySerializer);
+};
+
+/** Fast array for replicating settlements (added on registration, GoverningFaction updated on conquest). */
+USTRUCT()
+struct MYTHIC_API FMythicSettlementProxyArray : public FFastArraySerializer {
+    GENERATED_BODY()
+
+    UPROPERTY()
+    TArray<FMythicSettlementProxyItem> Items;
+
+    // Non-replicated back-pointer to the owning replicator (set in the replicator's ctor). Not a UPROPERTY.
+    class AMythicLivingWorldReplicator *OwnerReplicator = nullptr;
+
+    bool NetDeltaSerialize(FNetDeltaSerializeInfo &DeltaParms) {
+        return FFastArraySerializer::FastArrayDeltaSerialize<FMythicSettlementProxyItem, FMythicSettlementProxyArray>(Items, DeltaParms, *this);
+    }
+};
+
+template <>
+struct TStructOpsTypeTraits<FMythicSettlementProxyArray> : public TStructOpsTypeTraitsBase2<FMythicSettlementProxyArray> {
+    enum { WithNetDeltaSerializer = true };
+};
+
+// ─────────────────────────────────────────────────────────────
 // Replicator Actor — Server->Client sync manager
 // ─────────────────────────────────────────────────────────────
 
@@ -202,6 +254,10 @@ public:
     /** The replicated list of currently-active encounters (added on spawn, removed on completion). */
     UPROPERTY(Replicated)
     FMythicEncounterProxyArray EncounterProxies;
+
+    /** The replicated list of settlements (added on registration; GoverningFaction updated on conquest). */
+    UPROPERTY(Replicated)
+    FMythicSettlementProxyArray SettlementProxies;
 
     /** Fast lookup for faction proxies */
     TMap<FMythicFactionId, int32> FactionProxyIndex;
@@ -235,6 +291,9 @@ public:
 
     /** All currently-replicated active encounters (for a client map/HUD: type, state, cell, faction). */
     const TArray<FMythicEncounterProxyItem> &GetAllEncounterProxies() const { return EncounterProxies.Items; }
+
+    /** All currently-replicated settlements (for a client war-map/minimap: center cell, faction, name, capital). */
+    const TArray<FMythicSettlementProxyItem> &GetAllSettlementProxies() const { return SettlementProxies.Items; }
 
     /** Called by the FastArray item callbacks on the CLIENT when proxies replicate in — broadcasts the subsystem's
      *  change delegate so UI/gameplay can react. No-op on the server (it is the source). */

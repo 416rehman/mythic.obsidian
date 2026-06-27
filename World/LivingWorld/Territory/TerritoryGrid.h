@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
+#include "World/LivingWorld/Territory/MythicBiome.h"
 #include "TerritoryGrid.generated.h"
 
 // ─────────────────────────────────────────────────────────────
@@ -64,6 +65,22 @@ public:
     /** Minimum influence threshold for a faction to maintain control */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MinControlThreshold = 0.1f;
+
+    // ─── Biome (procedural, immutable) ────────────────────
+    // Biomes are a PURE deterministic function of (CellX, CellY, BiomeWorldSeed) — never simulated, never mutated.
+    // They classify wilderness for wildlife selection. Change the seed to reshuffle the whole world's terrain.
+
+    /** Seed for the procedural biome value-noise. Same seed => same biome map across runs/saves. */
+    UPROPERTY(EditDefaultsOnly)
+    uint32 BiomeWorldSeed = 1337;
+
+    /** Spatial frequency of the biome noise lattice (cells^-1). Lower = larger, smoother biome regions. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.001", ClampMax = "1.0"))
+    float BiomeNoiseFrequency = 0.08f;
+
+    /** Designer-tunable elevation/moisture bands that map the two noise channels to a biome. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+    FMythicBiomeThresholds BiomeThresholds;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -131,6 +148,19 @@ public:
     /** Check if a cell coordinate is valid (within grid bounds) */
     bool IsValidCoord(const FMythicCellCoord &Coord) const;
 
+    // ─── Biome Read (Game Thread — Lock-Free, pure) ───────
+
+    /**
+     * Biome of a cell. PURE function of (X, Y, cached BiomeWorldSeed/Frequency/Thresholds) — takes NO lock, allocates
+     * nothing, never reads sim-mutated state, so it is safe to call from any game-thread hot loop. Returns Plains for
+     * out-of-bounds coords (well-defined fallback).
+     */
+    UFUNCTION(BlueprintCallable, Category = "Living World|Biome")
+    EMythicBiome GetBiomeAtCell(const FMythicCellCoord &Coord) const;
+
+    /** Convenience: biome at a world position (= GetBiomeAtCell(WorldToCell(WorldPos))). */
+    EMythicBiome GetBiomeAtWorld(const FVector &WorldPos) const;
+
     /** Get grid dimensions */
     int32 GetWidth() const { return Width; }
     int32 GetHeight() const { return Height; }
@@ -163,6 +193,24 @@ private:
     FVector2D WorldOrigin = FVector2D::ZeroVector;
     float InfluenceBleedRate = 0.05f;
     float MinControlThreshold = 0.1f;
+
+    // ─── Biome cache (immutable after Initialize) ─────────
+    uint32 BiomeWorldSeed = 0;
+    float BiomeNoiseFrequency = 0.08f;
+    FMythicBiomeThresholds BiomeThresholds;
+
+    /**
+     * Classify from two already-sampled noise channels (Elevation, Moisture each in [0,1]) via the threshold bands.
+     * Pure + static + frequency-agnostic — the single source of truth for the Elev/Moist -> biome mapping, so it's
+     * trivially unit-testable independent of the noise sampler.
+     */
+    static EMythicBiome ComputeBiome(float Elevation, float Moisture, const FMythicBiomeThresholds &T);
+
+    /** 2D integer hash for the noise lattice. Wang-mix identical to FMythicNPCGenerator::HashStep (inlined, no include). */
+    static uint32 BiomeHash2D(int32 X, int32 Y, uint32 Seed);
+
+    /** Smoothstep-interpolated lattice value noise in [0,1] at (X*Frequency, Y*Frequency). Pure + static. */
+    static float BiomeValueNoise(int32 X, int32 Y, uint32 Seed, float Frequency);
 
     /** Write buffer — background thread only */
     TArray<FMythicTerritoryCell> WriteBuffer;

@@ -18,15 +18,26 @@
 #include "MassEntitySubsystem.h"
 #include "Mass/Fragments/MythicMassFragments.h"
 #include "AI/Cognition/CognitiveBrainComponent.h"
+#include "AI/NPCs/MythicNPCAIController.h"
 #include "AI/Party/PartySubsystem.h" // remove a dead companion from its party
 #include "World/LivingWorld/LivingWorldSubsystem.h"
+#include "World/LivingWorld/LivingWorldSettings.h"            // AppearanceLibrary + skin/hair palette fields (Step 4)
 #include "World/LivingWorld/Persistence/PersistentNPCRegistry.h"
+#include "World/LivingWorld/Appearance/AppearanceTypes.h"     // FMythicAppearanceResolver + code-default outfit/palettes
+#include "World/LivingWorld/Factions/FactionDatabase.h"       // GetFaction snapshot (faction color override flag)
+#include "World/LivingWorld/Factions/FactionColor.h"          // MythicFactionColor::GetFactionColor (resolved tint)
 #include "TimerManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Player/MythicPlayerController.h"
+#include "Player/MythicPlayerState.h"                 // resolve interactor standing component
+#include "Player/MythicFactionStandingComponent.h"    // ServerAdjustStanding / GetStanding / thresholds
+#include "AI/NPCs/MythicAIController.h"                // ForceEngageTarget (social-verb aggro + guard alert)
+#include "AI/NPCs/MythicSocialVerbs.h"                // pure ResolveReaction + DefaultBarkFor
+#include "World/LivingWorld/MythicTags_LivingWorld.h" // TAG_LIVINGWORLD_ACTION_VIOLENCE_ATTACK (guard-alert signal)
+#include "EngineUtils.h"                              // TActorIterator (bounded guard-alert scan)
 
 
 const FMythicNPCData AMythicNPCCharacter::GetNPCData() const {
@@ -216,6 +227,94 @@ void AMythicNPCCharacter::OnReturnedToPool() {
     AttackAbilityHandle = FGameplayAbilitySpecHandle();
 }
 
+void AMythicNPCCharacter::SleepToPool() {
+    // Pool RELEASE teardown. Order is LOCKED (embodiment-service-LOCK-v1 §1) and the comments call out WHY each step
+    // is where it is — reordering reintroduces the cross-thread / stale-state traps this pair was built to close.
+    if (!HasAuthority()) {
+        return;
+    }
+
+    // (2) Halt cognition FIRST. StopThinking() clears the think timer AND joins the in-flight async BDI worker, so by
+    //     the time the steps below tear down GAS / clear beliefs, no background thread is still dereferencing `this`.
+    //     A creature's brain is never InitializeBrain'd, but StopThinking is a safe no-op then (clears an empty timer,
+    //     waits on an invalid task).
+    if (CognitiveBrain) {
+        CognitiveBrain->StopThinking();
+    }
+
+    // Capture the AI controller BEFORE OnReturnedToPool unpossesses it (UnPossess clears GetController() but does NOT
+    // destroy the controller). WakeFromPool re-possesses this same controller, so a park/wake cycle reuses one
+    // controller instead of spawning + leaking a fresh one each time (the whole point of pooling — no churn).
+    PooledController = GetController();
+
+    // (3) Existing pooled-NPC GAS / timer / controller teardown: cancel abilities, strip all GEs + loose tags,
+    //     UninitializeFromAbilitySystem, ClearAllTimersForObject (self + controller), UnPossess, reset combat latches.
+    OnReturnedToPool();
+
+    // (4) Wipe per-life BDI state so the next occupant starts clean. Only safe AFTER the worker join in step 2.
+    if (CognitiveBrain) {
+        CognitiveBrain->ResetForReuse();
+    }
+
+    // (5) Park the actor: invisible, non-colliding, non-ticking until re-acquired. The pool keeps it alive (the LWS
+    //     EmbodimentPool holds a weak ref; the actor stays rooted as a normal UWorld actor — it is hidden, not GC'd).
+    SetActorEnableCollision(false);
+    SetActorHiddenInGame(true);
+    SetActorTickEnabled(false);
+}
+
+void AMythicNPCCharacter::WakeFromPool() {
+    // Pool ACQUIRE re-arm. Runs AFTER AcquireEmbodiedActor has repositioned + un-hidden + re-enabled collision, and
+    // BEFORE the spawn processor calls InitializeFromMassEntity. Order is LOCKED (embodiment-service-LOCK-v1 §1).
+    if (!HasAuthority()) {
+        return;
+    }
+
+    // (2) Re-init the ASC: re-grant the attack ability (idempotent via AttackAbilityHandle) + re-wire the life
+    //     component (idempotent via LifeComponent->IsInitialized). The OnDeath bind is SKIPPED by the bBoundDeath
+    //     latch — it persists with the object across pooling, so HandleNPCDeath is bound exactly once for the
+    //     actor's whole lifetime (no double-fire of the perma-death contract on reuse).
+    InitializeASC();
+
+    // (2b) Re-establish AI possession. SleepToPool's OnReturnedToPool ran AIController->UnPossess(), and BeginPlay's
+    //      AutoPossessAI=PlacedInWorldOrSpawned does NOT re-fire for a recycled actor — so without this the woken NPC
+    //      has no controller and would sit inert (no perception / patrol / companion-follow). Re-possess the SAME
+    //      controller captured at park time (no churn); if it was destroyed (level teardown), spawn a fresh default
+    //      one. Possess/SpawnDefaultController re-run PossessedBy -> InitializeASC, but InitializeASC is fully
+    //      idempotent (CombatInit/life/death-bind all latched), so that second call is a safe no-op.
+    if (!GetController()) {
+        if (AController *Retained = PooledController.Get()) {
+            Retained->Possess(this);
+        }
+        else {
+            SpawnDefaultController();
+        }
+    }
+    PooledController = nullptr;
+
+    // (3) A previously-pooled actor may have died in its last life; snap Health back up to the (re-seeded) MaxHealth
+    //     so it does not wake already dead. CombatInit ran inside InitializeASC above, so MaxHealth is in place first.
+    if (LifeAttributes) {
+        LifeAttributes->ResetForRespawn();
+    }
+
+    // (4) Re-enable movement + collision that a prior StartDeath disabled, so the reused actor can move/attack/be-hit.
+    if (LifeComponent) {
+        LifeComponent->RestoreAfterDeath();
+    }
+
+    // (5) Restore tick per the class default. PrimaryActorTick.bCanEverTick gates this, so for the base class (after
+    //     the STEP 7 tick audit flips it false) this is a harmless no-op; a subclass that re-enabled tick in its ctor
+    //     gets its tick back.
+    SetActorTickEnabled(PrimaryActorTick.bCanEverTick);
+
+    // Re-arm the staggered think loop (BeginPlay — the only OTHER arm site — does not re-run for a recycled actor).
+    // The brain is re-bound to its new source entity by InitializeFromMassEntity, which the processor calls next.
+    if (CognitiveBrain) {
+        CognitiveBrain->StartThinking();
+    }
+}
+
 const FGuid &AMythicNPCCharacter::GetNPCId() const {
     return this->NPCData.NPCId;
 }
@@ -226,8 +325,17 @@ const FGameplayTag &AMythicNPCCharacter::GetNPCType() const {
 
 // Sets default values
 AMythicNPCCharacter::AMythicNPCCharacter() {
-    // Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-    PrimaryActorTick.bCanEverTick = true;
+    // Tick audit (embodiment-service-LOCK-v1 §3 STEP 7): per-frame AActor::Tick is UNUSED on this class, so disable it.
+    // There is no AActor::Tick / TickActor override on AMythicNPCCharacter (or its only subclass AMythicCreatureCharacter,
+    // which already defaults bCanEverTick=false). All AI is fully timer-driven and self-throttling, NOT per-frame:
+    //   - AMythicAIController: Idle / Attack / Companion-follow run on IdleTimerHandle / AttackTimerHandle /
+    //     FollowTimerHandle (the "Tick*" method names there are timer callbacks, not engine tick).
+    //   - UMythicCognitiveBrainComponent: PrimaryComponentTick.bCanEverTick=false; the BDI loop runs on ThinkTimerHandle.
+    // CharacterMovementComponent ticks on its OWN component tick (independent of the actor's bCanEverTick), so locomotion
+    // and animation are unaffected — this only removes a dead per-actor tick that would otherwise scale with embodied
+    // NPC count. WakeFromPool's SetActorTickEnabled(PrimaryActorTick.bCanEverTick) therefore becomes a no-op for the base
+    // while still honoring any future BP/native subclass that re-enables tick in its own ctor for authored per-frame work.
+    PrimaryActorTick.bCanEverTick = false;
 
     AbilitySystemComponent = CreateDefaultSubobject<UMythicAbilitySystemComponent>("AbilitySystemComponent");
     AbilitySystemComponent->SetIsReplicated(true);
@@ -244,6 +352,13 @@ AMythicNPCCharacter::AMythicNPCCharacter() {
 
     // Vitals: death consumer + regen + kill XP.
     LifeComponent = CreateDefaultSubobject<UMythicLifeComponent>("LifeComponent");
+
+    // AI possession: embodied Living-World NPCs (spawned by ActorSpawnProcessor as this class or a mesh-bearing BP
+    // subclass) auto-possess a CONCRETE controller so perception / idle-patrol / companion-follow actually run. The
+    // base AMythicAIController is Abstract (built to be subclassed by a combat BP); AMythicNPCAIController is its
+    // spawnable concretization. A combat NPC BP may override AIControllerClass for authored attack behavior.
+    AIControllerClass = AMythicNPCAIController::StaticClass();
+    AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 
     // Re-assert the Pawn-profile default (Visibility = Block) so the player's interaction scanner (sphere-sweeps
     // on ECC_Visibility) can focus this NPC even if a BP subclass overrode the capsule to ignore Visibility. The
@@ -296,6 +411,140 @@ FText AMythicNPCCharacter::SelectDialogueFor(APlayerController *Interactor) cons
 
 void AMythicNPCCharacter::FireBark(const FText &Line, APlayerController *Interactor) {
     OnNpcBark(Line, Interactor);
+}
+
+// ─── Social interaction verbs ─────────────────────────────────
+
+FMythicSocialReactionResult AMythicNPCCharacter::ResolveSocialVerb(EMythicSocialVerb Verb, APlayerController *Interactor) const {
+    FMythicSocialReactionResult Result; // neutral default
+
+    // The personality VentWeights live on the (authoritative, non-replicated) brain — resolution is SERVER-side.
+    if (!HasAuthority() || !CognitiveBrain) {
+        return Result;
+    }
+
+    // The interacting player's standing toward THIS NPC's faction (0 if no entry / no component / no faction). The
+    // standing component also owns the Hostile/Friendly thresholds the friendly-verb bands key on.
+    float Standing = 0.0f;
+    float HostileThreshold = -50.0f; // component defaults; overwritten below when the component is present
+    float FriendlyThreshold = 50.0f;
+    const FMythicFactionId MyFaction = CognitiveBrain->GetFaction();
+    if (Interactor) {
+        if (const AMythicPlayerState *PS = Interactor->GetPlayerState<AMythicPlayerState>()) {
+            if (const UMythicFactionStandingComponent *Standings = PS->GetFactionStanding()) {
+                HostileThreshold = Standings->GetHostileThreshold();
+                FriendlyThreshold = Standings->GetFriendlyThreshold();
+                if (MyFaction.IsValid()) {
+                    Standing = Standings->GetStanding(MyFaction);
+                }
+            }
+        }
+    }
+
+    Result = UMythicSocialVerbLibrary::ResolveReaction(Verb, CognitiveBrain->GetPersonality(), Standing,
+                                                       HostileThreshold, FriendlyThreshold);
+    return Result;
+}
+
+void AMythicNPCCharacter::ApplySocialReaction(const FMythicSocialReactionResult &Result, EMythicSocialVerb Verb, APlayerController *Interactor) {
+    if (!HasAuthority()) {
+        return;
+    }
+
+    // (0) Cache the verb/reaction for the gameplay debugger (server-side observability only; not replicated, no sim state).
+    LastSocialVerb = Verb;
+    LastSocialReaction = Result.Reaction;
+    LastSocialReactionTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+    bHasSocialReaction = true;
+
+    // (1) Reputation: move the interactor's standing toward this NPC's faction by the resolved (signed) delta.
+    if (Result.StandingDelta != 0.0f && Interactor && CognitiveBrain) {
+        const FMythicFactionId MyFaction = CognitiveBrain->GetFaction();
+        if (MyFaction.IsValid()) {
+            if (AMythicPlayerState *PS = Interactor->GetPlayerState<AMythicPlayerState>()) {
+                if (UMythicFactionStandingComponent *Standings = PS->GetFactionStanding()) {
+                    Standings->ServerAdjustStanding(MyFaction, Result.StandingDelta);
+                }
+            }
+        }
+    }
+
+    APawn *InteractorPawn = Interactor ? Interactor->GetPawn() : nullptr;
+
+    // (2) Aggro: an Angered NPC turns hostile on the interacting player via the shared engage path.
+    if (Result.bSetHostile && InteractorPawn) {
+        if (AMythicAIController *AI = Cast<AMythicAIController>(GetController())) {
+            AI->ForceEngageTarget(InteractorPawn);
+        }
+    }
+
+    // (3) Guard alert: rouse nearby ALLIED NPCs (those whose AI treats the interacting player as Hostile). Bounded by
+    // radius + responder cap; a rare one-shot social event, never a tick — TActorIterator is acceptable here.
+    if (Result.bAlertGuards && InteractorPawn) {
+        const float RadiusSq = GuardAlertRadius * GuardAlertRadius;
+        const FVector MyLoc = GetActorLocation();
+        int32 Roused = 0;
+        for (TActorIterator<AMythicNPCCharacter> It(GetWorld()); It; ++It) {
+            if (Roused >= GuardAlertMaxResponders) {
+                break;
+            }
+            AMythicNPCCharacter *Responder = *It;
+            if (!IsValid(Responder) || Responder == this) {
+                continue;
+            }
+            if (GuardAlertRadius > 0.0f &&
+                FVector::DistSquared(MyLoc, Responder->GetActorLocation()) > RadiusSq) {
+                continue;
+            }
+            AMythicAIController *RespAI = Cast<AMythicAIController>(Responder->GetController());
+            if (!RespAI) {
+                continue;
+            }
+            // Only allies respond: an ally is an NPC whose attitude toward the interacting player is Hostile (faction-
+            // + reputation-aware, the single source of truth). This naturally excludes the player's own companions and
+            // factions the player is in good standing with.
+            if (RespAI->GetTeamAttitudeTowards(*InteractorPawn) != ETeamAttitude::Hostile) {
+                continue;
+            }
+            // Force an immediate re-think (cognitive context) AND commit the responder to the fight.
+            if (Responder->CognitiveBrain) {
+                Responder->CognitiveBrain->OnSignificantEvent(TAG_LIVINGWORLD_ACTION_VIOLENCE_ATTACK,
+                                                              Responder->CognitiveBrain->GetHomeCell());
+            }
+            RespAI->ForceEngageTarget(InteractorPawn);
+            ++Roused;
+        }
+    }
+
+    // (4) NOTE: surfacing the bark/reaction to the player is done by the PC's ClientReceiveSocialReaction RPC (which
+    // runs locally on a listen-host too), mirroring the dialogue path — so we do NOT fire OnNpcReaction here, to avoid
+    // a double-fire on a listen-host. ApplySocialReaction is sim-mutation only.
+}
+
+void AMythicNPCCharacter::FireReaction(EMythicSocialVerb Verb, EMythicSocialReaction Reaction, const FText &Line, APlayerController *Interactor) {
+    OnNpcReaction(Verb, Reaction, Line, Interactor);
+}
+
+// ─── Context-driven activity (Step 3) ───
+
+void AMythicNPCCharacter::ServerSetActivity(FGameplayTag ActivityTag) {
+    // SERVER-only (the AIController that drives this is server-side). Change-gated: only broadcast on a real change so we
+    // never re-multicast the same cosmetic every idle dispatch while the NPC keeps performing the same activity.
+    if (!HasAuthority()) {
+        return;
+    }
+    if (CurrentActivityTag == ActivityTag) {
+        return;
+    }
+    CurrentActivityTag = ActivityTag;
+    // Cosmetic to all clients (Unreliable). _Implementation runs OnPerformActivity on each client; on the server/listen-host
+    // a NetMulticast also executes locally, so the host's own NPC plays the cosmetic too (no separate direct call needed).
+    Multicast_PerformActivity(ActivityTag);
+}
+
+void AMythicNPCCharacter::Multicast_PerformActivity_Implementation(FGameplayTag ActivityTag) {
+    // Purely cosmetic: hand the tag to the Blueprint so it can play the matching montage/anim/prop. No sim state.
+    OnPerformActivity(ActivityTag);
 }
 
 void AMythicNPCCharacter::OnSecondaryInteract_Implementation(AActor *Interactor) {
@@ -414,6 +663,12 @@ void AMythicNPCCharacter::HandleNPCDeath(AActor *DeadActor) {
                     Reg->RegisterDeath(Id->NameHash, Id->Faction, Id->RoleTag, Id->Cell,
                                        GetWorld()->GetTimeSeconds(), LWS);
                 }
+                // Kill → world-sim feedback: durably decrement the governing faction's Population (and Arms reserve for
+                // armed roles) so this death lowers future spawn density + military strength. Composes with — does not
+                // duplicate — the kill→standing (MythicLifeComponent::StartDeath) + perma-death (RegisterDeath above)
+                // paths; reuses the already-resolved Id + LWS (zero new lookups). Internally SimulationLock-guarded and
+                // a no-op for a factionless NPC, so no guard is needed here.
+                LWS->ReportNpcDeath(Id->Faction, Id->RoleTag);
             }
         }
     }
@@ -447,6 +702,9 @@ void AMythicNPCCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimePrope
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
     DOREPLIFETIME(AMythicNPCCharacter, AbilitySystemComponent);
+    // Step 4: the resolved wardrobe descriptor. The ONLY new replicated property this cluster adds (single edit, per the
+    // GetLifetimeReplicatedProps single-owner contract). Server resolves + assigns it; clients apply via OnRep_Appearance.
+    DOREPLIFETIME(AMythicNPCCharacter, Appearance);
 }
 
 void AMythicNPCCharacter::PossessedBy(AController *NewController) {
@@ -493,4 +751,101 @@ void AMythicNPCCharacter::InitializeFromMassEntity(const FMassEntityHandle &InEn
             IdentityFrag->RoleTag
             );
     }
+
+    // ─── Appearance (Step 4) ───
+    // Resolve + assign + replicate the wardrobe from the stable identity seed. Server-only (we're already inside the
+    // HasAuthority guard at the top of this function). Runs on EVERY embodiment, so a pooled actor reused for a new
+    // occupant overwrites the previous look (no carry-over). Skipped naturally by AMythicCreatureCharacter, which
+    // overrides InitializeFromMassEntity without calling Super.
+    if (IdentityFrag) {
+        ApplyAppearanceFromIdentity(*IdentityFrag);
+    }
+}
+
+void AMythicNPCCharacter::OnRep_Appearance() {
+    // Client received a new descriptor → hand it to the art Blueprint. The replication system already dirty-checks via the
+    // struct's operator==, so a redundant assignment of an identical descriptor won't fire this. Pure cosmetic; no auth needed.
+    OnApplyAppearance(Appearance);
+}
+
+void AMythicNPCCharacter::ApplyAppearanceFromIdentity(const FMythicIdentityFragment &Id) {
+    // SERVER ONLY. Caller (InitializeFromMassEntity) is already authority-guarded, but guard again so a direct call is safe.
+    if (!HasAuthority()) {
+        return;
+    }
+
+    // ─── Resolve the faction colors (null-tolerant) ───
+    // Default to neutral white tints; upgraded to the faction's resolved color when the faction DB has this faction.
+    FColor PrimaryColor = FColor::White;
+    const uint8 FactionIndex = Id.Faction.Index;
+
+    UMythicLivingWorldSubsystem *LWS = nullptr;
+    if (const UWorld *World = GetWorld()) {
+        if (UGameInstance *GI = World->GetGameInstance()) {
+            LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>();
+        }
+    }
+
+    if (LWS) {
+        if (const UMythicFactionDatabase *FactionDB = LWS->GetFactionDatabase()) {
+            FMythicFactionData FactionData;
+            if (Id.Faction.IsValid() && FactionDB->GetFaction(Id.Faction, FactionData)) {
+                // Resolved faction display color (authored override or deterministic-from-id). Single source of truth
+                // shared with the war-map / UI so a faction's livery is identical everywhere.
+                PrimaryColor = MythicFactionColor::GetFactionColor(FactionData, FactionIndex);
+            } else if (Id.Faction.IsValid()) {
+                // Faction has an index but no DB row (resistance/transient) → still give it a stable deterministic color.
+                PrimaryColor = MythicFactionColor::DeterministicColorForId(FactionIndex);
+            }
+        }
+    }
+
+    // Derive a secondary/accent tint from the primary: a darkened shade (trim/accents read as a deeper version of the
+    // livery). Deterministic (pure function of the primary), so it's stable wherever the appearance is rebuilt.
+    const FColor SecondaryColor = (FLinearColor(PrimaryColor) * 0.6f).ToFColor(true);
+
+    // ─── Resolve the outfit-set + palette source (authored library, else code defaults) ───
+    // Hoist the soft-ptr load: LoadSynchronous is a one-time resolve of the configured library; we do NOT load per-NPC
+    // per-frame (this whole function runs once per embodiment). Null library / null settings → code defaults.
+    TConstArrayView<FMythicOutfitSet> OutfitSets = MythicAppearanceDefaults::GetCodeDefaultOutfitSets();
+    TConstArrayView<FColor> SkinPalette = MythicAppearanceDefaults::GetCodeDefaultSkinTonePalette();
+    TConstArrayView<FColor> HairPalette = MythicAppearanceDefaults::GetCodeDefaultHairTonePalette();
+
+    if (LWS) {
+        if (const UMythicLivingWorldSettings *Settings = LWS->GetSettings()) {
+            if (!Settings->AppearanceLibrary.IsNull()) {
+                if (const UMythicAppearanceLibrary *Library = Settings->AppearanceLibrary.LoadSynchronous()) {
+                    if (Library->OutfitSets.Num() > 0) {
+                        OutfitSets = Library->OutfitSets;
+                    }
+                }
+            }
+            if (Settings->DefaultSkinTonePalette.Num() > 0) {
+                SkinPalette = Settings->DefaultSkinTonePalette;
+            }
+            if (Settings->DefaultHairTonePalette.Num() > 0) {
+                HairPalette = Settings->DefaultHairTonePalette;
+            }
+        }
+    }
+
+    // ─── Pure deterministic resolve (no allocations beyond the resolver's locals) ───
+    const uint8 WealthTier = FMythicAppearanceResolver::WealthTierFromHash(Id.NameHash);
+    const FMythicAppearance Resolved = FMythicAppearanceResolver::Resolve(
+        Id.NameHash,
+        Id.DemographicFlags,
+        Id.RoleTag,
+        FactionIndex,
+        WealthTier,
+        PrimaryColor,
+        SecondaryColor,
+        OutfitSets,
+        SkinPalette,
+        HairPalette);
+
+    Appearance = Resolved;
+
+    // OnRep doesn't fire on the authority, so apply directly on the server/listen-host. The art BP no-ops on a dedicated
+    // server (no mesh), so this is harmless there; on a listen-host it builds the host's view of the NPC.
+    OnApplyAppearance(Appearance);
 }

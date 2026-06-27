@@ -51,6 +51,14 @@ void AMythicGameMode::RequestRespawn(AController *Controller, float Delay) {
     GetWorldTimerManager().SetTimer(Handle, Del, Delay, false);
 }
 
+float AMythicGameMode::GetAutosaveTimeRemaining() const {
+    // Game-thread read for the Living World gameplay debugger. GetTimerRemaining returns -1 when the timer is inactive.
+    if (const UWorld *W = GetWorld()) {
+        return W->GetTimerManager().GetTimerRemaining(AutosaveTimerHandle);
+    }
+    return -1.0f;
+}
+
 void AMythicGameMode::HandleRespawnTimer(AController *Controller) {
     RespawnTimers.Remove(Controller);
 

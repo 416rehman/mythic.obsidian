@@ -216,6 +216,20 @@ struct MYTHIC_API FMythicFactionData {
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
     FGameplayTag FactionTag;
 
+    // ─── Display ──────────────────────────────────────────
+
+    /**
+     * If set, FactionColor below is used as this faction's display color (war-map, minimap, NPC appearance tint) instead
+     * of the deterministic-from-id color. Lets designers pin iconic factions to brand colors while every other faction
+     * still gets a stable, hue-separated automatic color. Resolved via MythicFactionColor::GetFactionColor.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Display")
+    bool bOverrideFactionColor = false;
+
+    /** Authored display color, used only when bOverrideFactionColor is true. Otherwise the deterministic color applies. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Display", meta = (EditCondition = "bOverrideFactionColor"))
+    FColor FactionColor = FColor::Transparent;
+
     /** Is this faction still alive? False = annihilated */
     UPROPERTY(BlueprintReadOnly)
     bool bAlive = true;

@@ -23,6 +23,10 @@
  */
 class MYTHIC_API FMythicNPCGenerator {
 public:
+    /** Simple hash step for deterministic pseudo-random sequences. Public: the deterministic spawn/appearance/activity
+     *  resolvers (archetype, group, appearance, activity) all seed their rolls through this shared hash. */
+    static uint32 HashStep(uint32 Seed);
+
     // ─── Name Generation ─────────────────────────────────
 
     /**
@@ -111,7 +115,4 @@ private:
 
     /** Get the number of syllable options for the given culture and position */
     static int32 GetSyllableCount(uint8 CultureIndex, bool bIsFirst);
-
-    /** Simple hash step for deterministic pseudo-random sequences */
-    static uint32 HashStep(uint32 Seed);
 };

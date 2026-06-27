@@ -1,6 +1,7 @@
 // ItemDefinition.cpp
 #include "ItemDefinition.h"
 #include "Fragments/ItemFragment.h"
+#include "Itemization/MythicTags_Inventory.h"
 #include "Misc/DataValidation.h"
 
 UItemDefinition::UItemDefinition() {
@@ -138,7 +139,7 @@ EDataValidationResult UItemDefinition::IsDataValid(FDataValidationContext &Conte
     }
 
     if (ItemType.IsValid()) {
-        FGameplayTag ParentTag = FGameplayTag::RequestGameplayTag(FName("Itemization.Type"));
+        const FGameplayTag ParentTag = ITEMIZATION_TYPE;
         if (!ItemType.MatchesTag(ParentTag)) {
             Context.AddError(FText::Format(
                 NSLOCTEXT("ItemDefinition", "InvalidItemTypeError", "ItemType '{0}' is not a child of 'Itemization.Type'"),

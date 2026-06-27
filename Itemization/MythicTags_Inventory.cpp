@@ -2,6 +2,7 @@
 
 
 /* ----------------------------- ITEM TYPE ---------------------------- */
+UE_DEFINE_GAMEPLAY_TAG(ITEMIZATION_TYPE, "Itemization.Type");
 /* Equipment */
 UE_DEFINE_GAMEPLAY_TAG(ITEMIZATION_TYPE_EQUIPMENT, "Itemization.Type.Equipment");
 UE_DEFINE_GAMEPLAY_TAG(ITEMIZATION_TYPE_EQUIPMENT_GEAR, "Itemization.Type.Equipment.Gear");

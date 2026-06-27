@@ -60,8 +60,51 @@ struct MYTHIC_API FMythicIdentityFragment : public FMassFragment {
      */
     uint8 ActionCategory = 0;
 
+    /**
+     * Precomputed, navmesh-validated foot position to embody at (settlement spawn-point fast-path, Step 3).
+     * When bHasSpawnOverride is true, the ActorSpawnProcessor builds the spawn transform from this position with ONLY a
+     * cheap capsule overlap re-test (via MythicPlacement::ValidateExistingPoint) — skipping the full
+     * ProjectPointToNavigation + reachable-scatter pipeline FindValidSpawn runs for the cell-center path. If the point is
+     * now occupied (a player/another NPC moved onto it), embodiment FALLS THROUGH to the existing cell-center placement,
+     * so this is a pure perf fast-path, never a new embodiment branch. Only ever set by the PopulationSpawnerProcessor
+     * when the governing settlement has generated spawn points; left zero/false otherwise (cell-center path verbatim).
+     */
+    FVector SpawnOverridePos = FVector::ZeroVector;
+
+    /** True when SpawnOverridePos holds a settlement-generated, pre-validated spawn anchor (see SpawnOverridePos). */
+    bool bHasSpawnOverride = false;
+
     /** Convenience: is this entity a spy (undercover in enemy faction)? */
     bool IsSpy() const { return Faction.Index != TrueFaction.Index && TrueFaction.IsValid(); }
+};
+
+// ─────────────────────────────────────────────────────────────
+// Group Fragment — clustered-spawn membership (Step 4)
+// Only on entities spawned as part of a group (~12B)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Marks a MASS entity as a member of a spawned group (a noble's retinue, a merchant's barter party, a friend trio).
+ * Members ALSO carry FMythicNPCTag (so they embody/despawn through the existing population path) and FMythicGroupMemberTag
+ * (a kind marker). This fragment carries the membership data: which group (GroupId), the group's activity/kind tag, and
+ * whether this member is the leader. Purely informational — drives the debugger tally + lets behavior systems recognise
+ * a group at a glance; it does NOT add an embodiment branch.
+ */
+USTRUCT()
+struct MYTHIC_API FMythicGroupFragment : public FMassFragment {
+    GENERATED_BODY()
+
+    /** Deterministic-per-spawn group identifier shared by all members of one group (0 = unset). */
+    uint32 GroupId = 0;
+
+    /** The group's activity/kind tag (the template's GroupTag — e.g. NPC.Group.Retinue). */
+    FGameplayTag ActivityTag;
+
+    /** True for the group's leader (the noble / merchant the social edges orient toward). */
+    uint8 bIsLeader : 1;
+
+    // Bitfield member requires an explicit ctor to default-initialize (mirrors FMythicSignificanceFragment::bDirty).
+    FMythicGroupFragment() : bIsLeader(0) {}
 };
 
 // ─────────────────────────────────────────────────────────────

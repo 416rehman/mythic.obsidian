@@ -2,6 +2,7 @@
 #include "NativeGameplayTags.h"
 
 /* ----------------------------- ITEM TYPE ---------------------------- */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(ITEMIZATION_TYPE); // Parent of all item-type tags (used by IsDataValid child-check)
 /* Equipment */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(ITEMIZATION_TYPE_EQUIPMENT); // Gear, weapons, tools, accessories, artifacts
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(ITEMIZATION_TYPE_EQUIPMENT_GEAR);

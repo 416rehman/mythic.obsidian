@@ -62,24 +62,59 @@ void UMythicCognitiveBrainComponent::BeginPlay() {
         return;
     }
 
-    // Stagger think timer — random offset prevents all NPCs from thinking at the same time
+    Beliefs.Reserve(MaxBeliefsPerNPC);
+    LastDesires.Reserve(DesireTypeCount);
+
+    // Arm the staggered think timer through the single shared arm site (the actor pool re-arms via StartThinking()
+    // on reuse, since BeginPlay does not re-run for a recycled actor).
+    StartThinking();
+}
+
+void UMythicCognitiveBrainComponent::StartThinking() {
+    // Preserve BeginPlay's early-out: with no living-world references cached there is nothing to think about. (A
+    // pooled actor that reaches here always has them cached — BeginPlay ran on its first life — so this guard only
+    // ever trips on the genuine "brain disabled" path.)
+    if (!CausalFabric || !FactionDB || !Settings) {
+        return;
+    }
+
+    UWorld *World = GetWorld();
+    if (!World) {
+        return;
+    }
+
+    // Stagger the think timer — a random offset prevents all NPCs (and all reused actors) from thinking on the same
+    // frame. Re-rolled on every arm so a recycled actor re-staggers rather than inheriting its predecessor's phase.
     const float MinInterval = Settings->CognitiveThinkIntervalMin;
     const float MaxInterval = Settings->CognitiveThinkIntervalMax;
     ThinkInterval = FMath::RandRange(MinInterval, MaxInterval);
 
-    // Random initial delay for staggering
     const float InitialDelay = FMath::RandRange(0.0f, ThinkInterval);
 
-    GetWorld()->GetTimerManager().SetTimer(
+    World->GetTimerManager().SetTimer(
         ThinkTimerHandle,
         this,
         &UMythicCognitiveBrainComponent::Think,
         ThinkInterval,
         /*bLoop=*/true,
         InitialDelay);
+}
 
-    Beliefs.Reserve(MaxBeliefsPerNPC);
-    LastDesires.Reserve(DesireTypeCount);
+void UMythicCognitiveBrainComponent::ResetForReuse() {
+    // Caller (AMythicNPCCharacter::SleepToPool) MUST have already run StopThinking() — which clears the think timer
+    // AND joins the in-flight async worker — before this point. With the worker joined, no other thread touches
+    // Beliefs/LastDesires, but we still take BeliefsLock to satisfy the documented invariant (and to be correct if a
+    // future caller reorders). The remaining members are written only on the game thread.
+    {
+        FScopeLock Lock(&BeliefsLock);
+        Beliefs.Reset();
+        LastDesires.Reset();
+    }
+    CurrentIntention = FMythicIntention();
+    SourceEntity = FMassEntityHandle();
+    bInitialized = false;
+    // Match the ctor default so a reused, not-yet-thought brain never scores the Work-phase boost (see ctor comment).
+    CachedSchedulePhase = EMythicSchedulePhase::Idle;
 }
 
 void UMythicCognitiveBrainComponent::EndPlay(const EEndPlayReason::Type EndPlayReason) {
@@ -320,6 +355,14 @@ void UMythicCognitiveBrainComponent::InjectBelief(const FMythicBelief &Belief) {
 TArray<FMythicBelief> UMythicCognitiveBrainComponent::GetBeliefsCopy() const {
     FScopeLock Lock(&BeliefsLock);
     return Beliefs;
+}
+
+TArray<FMythicDesire> UMythicCognitiveBrainComponent::GetLastDesiresCopy() const {
+    // BeliefsLock guards LastDesires too: the async think worker writes it inside the same coarse BeliefsScope it
+    // holds around ScoreDesires (next to the Beliefs writes), so a by-value snapshot here is race-free for the
+    // game-thread debugger reader. Mirrors GetBeliefsCopy().
+    FScopeLock Lock(&BeliefsLock);
+    return LastDesires;
 }
 
 void UMythicCognitiveBrainComponent::InjectBeliefInternal(const FMythicBelief &Belief) {
