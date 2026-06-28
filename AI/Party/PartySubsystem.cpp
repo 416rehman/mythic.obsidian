@@ -64,6 +64,8 @@ void UMythicPartySubsystem::Initialize(FSubsystemCollectionBase &Collection) {
     MaxPartySize = Settings->MaxPartySize;
     LoyaltyDepartureThreshold = Settings->LoyaltyDepartureThreshold;
     BetrayalThreshold = Settings->BetrayalPressureThreshold;
+    RestLoyaltyRecovery = Settings->CompanionRestLoyaltyRecovery;
+    RestBetrayalDecay = Settings->CompanionRestBetrayalDecay;
     BeliefPropagationDecay = Settings->BeliefPropagationDecay;
     MaxBeliefPropagationHops = Settings->MaxBeliefPropagationHops;
 
@@ -493,12 +495,11 @@ void UMythicPartySubsystem::EnterRestPhase(const FString &PlayerKey) {
     // Propagate beliefs between companions during rest
     PropagateBeliefs(PlayerKey);
 
-    // Slight loyalty recovery during rest (bonding over campfire)
+    // Slight loyalty recovery + betrayal cool-off during rest (bonding over campfire). Rates are designer-tunable
+    // (cached RestLoyaltyRecovery / RestBetrayalDecay); the clamp invariants live in the pure helpers below.
     for (FMythicPartyMember &Member : *Party) {
-        Member.LoyaltyScore = FMath::Min(Member.LoyaltyScore + 0.02f, 1.0f);
-
-        // Slight betrayal pressure decay during rest
-        Member.BetrayalPressure = FMath::Max(0.0f, Member.BetrayalPressure - 0.1f);
+        Member.LoyaltyScore = ComputeRestedLoyalty(Member.LoyaltyScore, RestLoyaltyRecovery);
+        Member.BetrayalPressure = ComputeDecayedBetrayal(Member.BetrayalPressure, RestBetrayalDecay);
     }
 
     UE_LOG(LogMythParty, Verbose,
@@ -677,6 +678,16 @@ float UMythicPartySubsystem::ComputeLoyaltyDelta(EMythicMoralSeverity Severity, 
         }
         return 0.01f; // Mild approval
     }
+}
+
+float UMythicPartySubsystem::ComputeRestedLoyalty(float CurrentLoyalty, float Recovery) {
+    // Campfire bonding: add the per-rest recovery, clamped to the 1.0 loyalty ceiling.
+    return FMath::Min(CurrentLoyalty + Recovery, 1.0f);
+}
+
+float UMythicPartySubsystem::ComputeDecayedBetrayal(float CurrentPressure, float Decay) {
+    // Betrayal pressure cools off during rest, clamped to the 0 floor (never negative).
+    return FMath::Max(0.0f, CurrentPressure - Decay);
 }
 
 void UMythicPartySubsystem::CheckCompanionThresholds(const FString &PlayerKey, int32 MemberIndex) {

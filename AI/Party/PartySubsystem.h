@@ -133,6 +133,15 @@ public:
     static float ComputeLoyaltyDelta(EMythicMoralSeverity Severity, float MercyAxisValue, float TendWeight);
 
     /**
+     * PURE rest-phase recovery policies (Mythic.Party.RestRecovery). ComputeRestedLoyalty adds the per-rest "campfire
+     * bonding" recovery and clamps to the 1.0 ceiling; ComputeDecayedBetrayal cools off betrayal pressure and clamps to
+     * the 0 floor. Both rates are designer-tunable via LivingWorldSettings (CompanionRestLoyaltyRecovery /
+     * CompanionRestBetrayalDecay) — the curve stays here so the clamp invariants are unit-testable.
+     */
+    static float ComputeRestedLoyalty(float CurrentLoyalty, float Recovery);
+    static float ComputeDecayedBetrayal(float CurrentPressure, float Decay);
+
+    /**
      * Single source of truth for one belief's save/load byte layout (used by both branches of Serialize so the field
      * order can never desync between save and load). Reads/writes the original 3 fields (EventTag/Confidence/
      * FormationTime) for all versions and the full semantic state (Cell/InvolvedFaction/LastDecayTime/PropagationHops/
@@ -290,6 +299,10 @@ private:
 
     /** Betrayal pressure above which companion acts against the player */
     float BetrayalThreshold = 5.0f;
+
+    /** Cached rest-phase recovery rates (from LivingWorldSettings; designer-tunable, conservative defaults). */
+    float RestLoyaltyRecovery = 0.02f;
+    float RestBetrayalDecay = 0.1f;
 
     /** A single player action whose |loyalty impact| on a STAYING companion meets/exceeds this makes that companion
      *  remark on it (moral commentary). Just above the betrayal-pressure trigger (0.1) so only notably-charged acts —

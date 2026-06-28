@@ -47,3 +47,33 @@ bool FMythicPartyLoyaltyDeltaTest::RunTest(const FString &Parameters) {
 
     return true;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Rest-phase recovery — UMythicPartySubsystem::ComputeRestedLoyalty / ComputeDecayedBetrayal
+// (campfire bonding adds loyalty up to the 1.0 ceiling; betrayal pressure cools off down to the 0 floor)
+// ═══════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicPartyRestRecoveryTest,
+    "Mythic.Party.RestRecovery",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicPartyRestRecoveryTest::RunTest(const FString &Parameters) {
+    auto Rested = &UMythicPartySubsystem::ComputeRestedLoyalty;
+    auto Decayed = &UMythicPartySubsystem::ComputeDecayedBetrayal;
+    const float Tol = 1.e-4f;
+
+    // Loyalty recovery: linear in the interior, clamped to the 1.0 ceiling (never exceeds full loyalty).
+    TestEqual(TEXT("interior recovery adds"), Rested(0.50f, 0.02f), 0.52f, Tol);
+    TestEqual(TEXT("recovery clamps at 1.0"), Rested(0.99f, 0.02f), 1.0f, Tol);
+    TestEqual(TEXT("already-full stays 1.0"), Rested(1.0f, 0.02f), 1.0f, Tol);
+    TestEqual(TEXT("zero recovery is a no-op"), Rested(0.40f, 0.0f), 0.40f, Tol);
+
+    // Betrayal decay: linear in the interior, clamped to the 0 floor (never negative).
+    TestEqual(TEXT("interior pressure cools"), Decayed(5.0f, 0.1f), 4.9f, Tol);
+    TestEqual(TEXT("decay clamps at 0"), Decayed(0.05f, 0.1f), 0.0f, Tol);
+    TestEqual(TEXT("already-zero stays 0"), Decayed(0.0f, 0.1f), 0.0f, Tol);
+    TestEqual(TEXT("zero decay is a no-op"), Decayed(3.0f, 0.0f), 3.0f, Tol);
+
+    return true;
+}

@@ -726,6 +726,14 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "0.5", ClampMax = "20.0"))
     float BetrayalPressureThreshold = 5.0f;
 
+    /** Loyalty regained per companion each rest phase ("campfire bonding"); the final score is clamped to 1.0. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float CompanionRestLoyaltyRecovery = 0.02f;
+
+    /** Betrayal pressure that cools off per companion each rest phase; the final pressure is clamped to >= 0. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "0.0", ClampMax = "20.0"))
+    float CompanionRestBetrayalDecay = 0.1f;
+
     /** Confidence reduction per belief propagation hop during rest phase [0.0, 1.0]. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "0.0", ClampMax = "0.9"))
     float BeliefPropagationDecay = 0.3f;
