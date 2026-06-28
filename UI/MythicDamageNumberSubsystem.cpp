@@ -82,7 +82,7 @@ void UMythicDamageNumberSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
     DrawNameplates(Canvas, PC);
     DrawPlayerHud(Canvas, PC);           // bottom-centre player resource bars (chip + contextual)
     DrawScreenNotifications(Canvas, PC); // screen UI (toasts/banners) layers on top of world-anchored elements
-    DrawAmbient(Canvas);                 // auto-hiding time/weather corner cluster
+    DrawAmbient(Canvas, PC);             // auto-hiding time/weather corner cluster
 }
 
 // Swap-remove every expired entry. Declared in the header but previously never defined — the ONLY pruning was inside
@@ -937,13 +937,14 @@ float UMythicDamageNumberSubsystem::StepGhostFill(float GhostFrac, float TargetF
     return FMath::Max(TargetFrac, GhostFrac - MaxDrain); // drain toward the fill, no undershoot
 }
 
-void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas) {
+void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas, APlayerController *PC) {
     UWorld *World = GetWorld();
     UGameInstance *GI = World ? World->GetGameInstance() : nullptr;
     UMythicEnvironmentSubsystem *Env = GI ? GI->GetSubsystem<UMythicEnvironmentSubsystem>() : nullptr;
     if (!Env || !Env->GetEnvironmentController()) {
         return; // no env system (menu map) OR controller not registered yet — never show real-world wall-clock time
     }
+    FMythicLocalHud &Hud = GetLocalHud(PC); // per-local-player surfacing state (split-screen safe)
 
     const FDateTime Now = Env->GetCurrentTime();
     const FGameplayTag Weather = Env->GetWeather();
@@ -951,15 +952,15 @@ void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas) {
     const float CurrentTime = World->GetTimeSeconds();
 
     // Surface the cluster whenever the hour or the weather changes (and on first sight); then it auto-hides.
-    if (Hour != LastAmbientHour || Weather != LastAmbientWeather) {
-        AmbientShownTime = CurrentTime;
-        LastAmbientHour = Hour;
-        LastAmbientWeather = Weather;
+    if (Hour != Hud.LastAmbientHour || Weather != Hud.LastAmbientWeather) {
+        Hud.AmbientShownTime = CurrentTime;
+        Hud.LastAmbientHour = Hour;
+        Hud.LastAmbientWeather = Weather;
     }
 
     const float Hold = 3.0f;
     const float Fade = 1.5f;
-    const float Elapsed = CurrentTime - AmbientShownTime;
+    const float Elapsed = CurrentTime - Hud.AmbientShownTime;
     float Alpha = 0.0f;
     if (Elapsed < Hold) {
         Alpha = 1.0f;
@@ -1007,6 +1008,16 @@ void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas) {
     TextItem.bOutlined = Config ? Config->bEnableOutline : true;
     TextItem.OutlineColor = Config ? Config->OutlineColor : FLinearColor::Black;
     Canvas->DrawItem(TextItem);
+}
+
+FMythicLocalHud &UMythicDamageNumberSubsystem::GetLocalHud(APlayerController *PC) {
+    // Prune buckets whose local player went away (controller destroyed), then find-or-add this PC's bucket.
+    for (auto It = LocalHuds.CreateIterator(); It; ++It) {
+        if (!It.Key().IsValid()) {
+            It.RemoveCurrent();
+        }
+    }
+    return LocalHuds.FindOrAdd(TWeakObjectPtr<APlayerController>(PC));
 }
 
 void UMythicDamageNumberSubsystem::DrawStatusBadges(UCanvas *Canvas, float CenterX, float RowCenterY, UAbilitySystemComponent *ASC, float Alpha) {
@@ -1114,6 +1125,7 @@ void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerControl
     if (!Pawn) {
         return;
     }
+    FMythicLocalHud &Hud = GetLocalHud(PC); // per-local-player state (split-screen safe)
     UAbilitySystemComponent *ASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Pawn);
     if (!ASC) {
         return;
@@ -1152,14 +1164,14 @@ void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerControl
         C.Ghost = StepGhostFill(C.Ghost, Target, Dt, ChipDrainSpeed, C.Hold);
         C.Last = Target;
     };
-    UpdateChip(PlayerHealthChip, HealthFrac);
-    UpdateChip(PlayerStaminaChip, StaminaFrac);
+    UpdateChip(Hud.HealthChip, HealthFrac);
+    UpdateChip(Hud.StaminaChip, StaminaFrac);
 
     // Contextual visibility: health when hurt / a chip is draining; stamina when sprinting / exhausted / not-full.
-    const bool bHealthRelevant = (HealthFrac < 0.995f) || (PlayerHealthChip.Ghost > HealthFrac + 0.001f) || (ShieldFrac > 0.0f);
+    const bool bHealthRelevant = (HealthFrac < 0.995f) || (Hud.HealthChip.Ghost > HealthFrac + 0.001f) || (ShieldFrac > 0.0f);
     const bool bStaminaRelevant = bSprinting || bExhausted || (StaminaFrac < 0.995f);
-    PlayerHealthVis = StepNameplateAlpha(PlayerHealthVis, bHealthRelevant ? 1.0f : 0.0f, Dt, 4.0f);
-    PlayerStaminaVis = StepNameplateAlpha(PlayerStaminaVis, bStaminaRelevant ? 1.0f : 0.0f, Dt, 4.0f);
+    Hud.HealthVis = StepNameplateAlpha(Hud.HealthVis, bHealthRelevant ? 1.0f : 0.0f, Dt, 4.0f);
+    Hud.StaminaVis = StepNameplateAlpha(Hud.StaminaVis, bStaminaRelevant ? 1.0f : 0.0f, Dt, 4.0f);
 
     const float CX = Canvas->ClipX * 0.5f;
     const float BaseY = Canvas->ClipY - 70.0f;
@@ -1190,17 +1202,17 @@ void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerControl
 
     // Health (green at full -> red when low), with a thin shield sliver above it.
     const FLinearColor HealthCol = FMath::Lerp(FLinearColor(0.85f, 0.2f, 0.15f), FLinearColor(0.3f, 0.8f, 0.35f), HealthFrac);
-    DrawBar(BaseY, HealthFrac, PlayerHealthChip.Ghost, HealthCol, PlayerHealthVis);
-    if (ShieldFrac > 0.0f && PlayerHealthVis > 0.01f) {
+    DrawBar(BaseY, HealthFrac, Hud.HealthChip.Ghost, HealthCol, Hud.HealthVis);
+    if (ShieldFrac > 0.0f && Hud.HealthVis > 0.01f) {
         const float X = CX - BarW * 0.5f;
-        FCanvasTileItem Shield(FVector2D(X, BaseY - 5.0f), GWhiteTexture, FVector2D(BarW * ShieldFrac, 3.0f), FLinearColor(0.4f, 0.7f, 1.0f, PlayerHealthVis));
+        FCanvasTileItem Shield(FVector2D(X, BaseY - 5.0f), GWhiteTexture, FVector2D(BarW * ShieldFrac, 3.0f), FLinearColor(0.4f, 0.7f, 1.0f, Hud.HealthVis));
         Shield.BlendMode = SE_BLEND_Translucent;
         Canvas->DrawItem(Shield);
     }
 
     // Stamina below (amber; burnt-orange while exhausted).
     const FLinearColor StamCol = bExhausted ? FLinearColor(0.85f, 0.4f, 0.1f) : FLinearColor(0.85f, 0.75f, 0.3f);
-    DrawBar(BaseY + BarH + Gap, StaminaFrac, PlayerStaminaChip.Ghost, StamCol, PlayerStaminaVis);
+    DrawBar(BaseY + BarH + Gap, StaminaFrac, Hud.StaminaChip.Ghost, StamCol, Hud.StaminaVis);
 
     // Player status badges above the bars — always shown while a status is building (you must know you're poisoned).
     DrawStatusBadges(Canvas, CX, BaseY - 16.0f, ASC, 1.0f);
@@ -1210,20 +1222,20 @@ void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerControl
         if (const UMythicInventoryComponent *Inv = MPC->GetInventoryComponent()) {
             const int32 Balance = Inv->GetTotalCurrency();
             const float Now = World ? World->GetTimeSeconds() : 0.0f;
-            if (CurrencyLast < 0) {
-                CurrencyDisplayed = static_cast<float>(Balance);
-                CurrencyLast = Balance;
+            if (Hud.CurrencyLast < 0) {
+                Hud.CurrencyDisplayed = static_cast<float>(Balance);
+                Hud.CurrencyLast = Balance;
             }
-            else if (Balance != CurrencyLast) {
-                CurrencyDelta = Balance - CurrencyLast;
-                CurrencyLast = Balance;
-                CurrencyShownTime = Now;
+            else if (Balance != Hud.CurrencyLast) {
+                Hud.CurrencyDelta = Balance - Hud.CurrencyLast;
+                Hud.CurrencyLast = Balance;
+                Hud.CurrencyShownTime = Now;
             }
             // Roll the displayed value toward the real balance (faster the bigger the gap) — the count-up/down animation.
-            const float RollSpeed = FMath::Max(8.0f, FMath::Abs(static_cast<float>(Balance) - CurrencyDisplayed) * 6.0f);
-            CurrencyDisplayed = FMath::FInterpConstantTo(CurrencyDisplayed, static_cast<float>(Balance), Dt, RollSpeed);
+            const float RollSpeed = FMath::Max(8.0f, FMath::Abs(static_cast<float>(Balance) - Hud.CurrencyDisplayed) * 6.0f);
+            Hud.CurrencyDisplayed = FMath::FInterpConstantTo(Hud.CurrencyDisplayed, static_cast<float>(Balance), Dt, RollSpeed);
 
-            const float CElapsed = Now - CurrencyShownTime;
+            const float CElapsed = Now - Hud.CurrencyShownTime;
             const float CAlpha = (CElapsed < 2.5f) ? 1.0f : (CElapsed < 4.0f ? 1.0f - (CElapsed - 2.5f) / 1.5f : 0.0f);
             if (CAlpha > 0.01f) {
                 UFont *Font = (Config && Config->Font) ? Config->Font.Get() : nullptr;
@@ -1231,7 +1243,7 @@ void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerControl
                     Font = GEngine->GetMediumFont();
                 }
                 if (Font) {
-                    const FString Amount = FString::Printf(TEXT("%d"), FMath::RoundToInt(CurrencyDisplayed));
+                    const FString Amount = FString::Printf(TEXT("%d"), FMath::RoundToInt(Hud.CurrencyDisplayed));
                     const float FontScale = Config ? Config->FontScaleMultiplier : 1.0f;
                     float TW = 0.0f, TH = 0.0f;
                     Canvas->TextSize(Font, Amount, TW, TH, FontScale, FontScale);
@@ -1251,10 +1263,10 @@ void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerControl
                     Canvas->DrawItem(Amt);
 
                     // +N / -N flyout: floats up and fades over the first ~1.2s after a change.
-                    if (CElapsed < 1.2f && CurrencyDelta != 0) {
+                    if (CElapsed < 1.2f && Hud.CurrencyDelta != 0) {
                         const float FlyA = CAlpha * FMath::Clamp(1.0f - CElapsed / 1.2f, 0.0f, 1.0f);
-                        const FString DeltaStr = FString::Printf(TEXT("%s%d"), CurrencyDelta > 0 ? TEXT("+") : TEXT(""), CurrencyDelta);
-                        const FLinearColor DeltaCol = CurrencyDelta > 0 ? FLinearColor(0.4f, 0.9f, 0.45f, FlyA) : FLinearColor(0.95f, 0.4f, 0.3f, FlyA);
+                        const FString DeltaStr = FString::Printf(TEXT("%s%d"), Hud.CurrencyDelta > 0 ? TEXT("+") : TEXT(""), Hud.CurrencyDelta);
+                        const FLinearColor DeltaCol = Hud.CurrencyDelta > 0 ? FLinearColor(0.4f, 0.9f, 0.45f, FlyA) : FLinearColor(0.95f, 0.4f, 0.3f, FlyA);
                         FCanvasTextItem Fly(FVector2D(OX + TotalW + 8.0f, OY - CElapsed * 18.0f), FText::FromString(DeltaStr), Font, DeltaCol);
                         Fly.Scale = FVector2D(FontScale * 0.85f, FontScale * 0.85f);
                         Canvas->DrawItem(Fly);
@@ -1280,16 +1292,17 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
     if (!World) {
         return;
     }
+    FMythicLocalHud &Hud = GetLocalHud(PC); // per-local-player state (split-screen safe)
     APawn *LocalPawn = PC->GetPawn();
     if (!LocalPawn) {
-        NameplateStates.Reset();
-        LastNameplateTime = -1.0f; // restart the fade clock so the first frame after respawn doesn't spike Dt (no pop-in)
+        Hud.NameplateStates.Reset();
+        Hud.LastNameplateTime = -1.0f; // restart the fade clock so the first frame after respawn doesn't spike Dt (no pop-in)
         return;
     }
 
     const float CurrentTime = World->GetTimeSeconds();
-    const float Dt = (LastNameplateTime < 0.0f) ? 0.0f : FMath::Max(0.0f, CurrentTime - LastNameplateTime);
-    LastNameplateTime = CurrentTime;
+    const float Dt = (Hud.LastNameplateTime < 0.0f) ? 0.0f : FMath::Max(0.0f, CurrentTime - Hud.LastNameplateTime);
+    Hud.LastNameplateTime = CurrentTime;
 
     // Code-default tuning (no asset needed). Distances in cm; FadeRate is alpha/sec.
     const float FullDistance = 1500.0f;
@@ -1433,8 +1446,8 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
     };
 
     // Update existing states: fade toward their candidate target (0 if no longer a candidate), draw, prune.
-    for (int32 i = NameplateStates.Num() - 1; i >= 0; --i) {
-        FMythicNameplateState &S = NameplateStates[i];
+    for (int32 i = Hud.NameplateStates.Num() - 1; i >= 0; --i) {
+        FMythicNameplateState &S = Hud.NameplateStates[i];
         AActor *Npc = S.Actor.Get();
         float Target = 0.0f;
         if (Npc) {
@@ -1445,7 +1458,7 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
         }
         S.CurrentAlpha = StepNameplateAlpha(S.CurrentAlpha, Target, Dt, FadeRate);
         if (!Npc || (S.CurrentAlpha <= 0.01f && Target <= 0.0f)) {
-            NameplateStates.RemoveAtSwap(i, EAllowShrinking::No);
+            Hud.NameplateStates.RemoveAtSwap(i, EAllowShrinking::No);
             continue;
         }
         if (S.CurrentAlpha > 0.01f) {
@@ -1469,6 +1482,6 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
             const float Dim = (FocusedActor && !bFocused) ? DimFactor : 1.0f;
             DrawPlate(Pair.Key, NewState, NewState.CurrentAlpha * Dim, bFocused);
         }
-        NameplateStates.Add(NewState);
+        Hud.NameplateStates.Add(NewState);
     }
 }

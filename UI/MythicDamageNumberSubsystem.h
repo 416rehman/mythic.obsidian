@@ -394,6 +394,34 @@ struct FMythicNameplateState {
 };
 
 /**
+ * All transient HUD render state for ONE local player — kept in a per-PlayerController map so split-screen co-op players
+ * don't share (and corrupt) each other's nameplate fades, resource chip bars, currency counter, or ambient surfacing.
+ * (The subsystem is one instance per world but AHUD::OnHUDPostRender fires once per local player.)
+ */
+struct FMythicLocalHud {
+    // Nameplates.
+    TArray<FMythicNameplateState> NameplateStates;
+    float LastNameplateTime = -1.0f;
+
+    // Player resource bars (chip + contextual-visibility fade).
+    FMythicChipBar HealthChip;
+    FMythicChipBar StaminaChip;
+    float HealthVis = 0.0f;
+    float StaminaVis = 0.0f;
+
+    // Currency rolling counter.
+    float CurrencyDisplayed = -1.0f;
+    int32 CurrencyLast = -1;
+    int32 CurrencyDelta = 0;
+    float CurrencyShownTime = -1000.0f;
+
+    // Ambient cluster surfacing.
+    int32 LastAmbientHour = -1;
+    FGameplayTag LastAmbientWeather;
+    float AmbientShownTime = -1000.0f;
+};
+
+/**
  * UMythicDamageNumberSubsystem
  *
  * The unified, high-performance, NON-WBP feedback subsystem. Combat damage numbers (world-projected, floating off the
@@ -557,10 +585,13 @@ protected:
     bool IsNameplateRelevant(AActor *Npc, AActor *LocalPawn) const;
 
     // Draws the auto-hiding ambient cluster (time of day / weather / day) — surfaces on change, then fades out.
-    void DrawAmbient(UCanvas *Canvas);
+    void DrawAmbient(UCanvas *Canvas, APlayerController *PC);
 
     // Draws the bottom-centre player resource HUD (health / stamina / shield) — chip bars + contextual visibility.
     void DrawPlayerHud(UCanvas *Canvas, APlayerController *PC);
+
+    // Finds-or-adds the transient HUD bucket for a local player's controller (and prunes stale ones).
+    FMythicLocalHud &GetLocalHud(APlayerController *PC);
 
     // Draws a centered row of circular status-effect badges (the 6 buildup types) for an entity's ASC, at the given
     // alpha. Shared by enemy nameplates and the player HUD. Each badge's opacity ramps with its buildup-toward-proc.
@@ -579,28 +610,10 @@ protected:
     UPROPERTY()
     TArray<FMythicWorldCallout> ActiveWorldCallouts;
 
-    // Per-entity nameplate render state (smoothed alpha). Transient; NOT a UPROPERTY (TWeakObjectPtr auto-nulls).
-    TArray<FMythicNameplateState> NameplateStates;
-
-    // World time of the previous nameplate draw, for the per-frame fade delta (-1 = not drawn yet).
-    float LastNameplateTime = -1.0f;
-
-    // Ambient cluster (time/weather) auto-hide state: last seen hour/weather + when the cluster was last surfaced.
-    int32 LastAmbientHour = -1;
-    FGameplayTag LastAmbientWeather;
-    float AmbientShownTime = -1000.0f;
-
-    // Player resource HUD: chip-bar state + contextual-visibility fade (health/stamina shown only when relevant).
-    FMythicChipBar PlayerHealthChip;
-    FMythicChipBar PlayerStaminaChip;
-    float PlayerHealthVis = 0.0f;
-    float PlayerStaminaVis = 0.0f;
-
-    // Currency display: a rolling counter that surfaces + animates on a balance change, then auto-hides.
-    float CurrencyDisplayed = -1.0f; // <0 = uninitialised
-    int32 CurrencyLast = -1;
-    int32 CurrencyDelta = 0;
-    float CurrencyShownTime = -1000.0f;
+    // All transient per-local-player HUD state (nameplates / resource bars / currency / ambient), keyed by the local
+    // player's controller so split-screen co-op players never share or corrupt each other's state. Stale (invalid) keys
+    // are pruned in GetLocalHud. NOT a UPROPERTY (TWeakObjectPtr keys auto-null; the values hold only weak/POD state).
+    TMap<TWeakObjectPtr<APlayerController>, FMythicLocalHud> LocalHuds;
 
     // Configuration
     UPROPERTY()
