@@ -954,6 +954,8 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
     const float HeadZ = 110.0f;
     const float BarW = 88.0f;
     const float BarH = 7.0f;
+    const float FocusRadiusPx = 220.0f; // a plate within this many px of screen-centre is "focused"
+    const float DimFactor = 0.5f;       // non-focused plates dim to this when something is focused
 
     const FVector LocalLoc = LocalPawn->GetActorLocation();
 
@@ -972,6 +974,27 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
         Targets.Add(Npc, ComputeNameplateTargetAlpha(bRelevant, Dist, FullDistance, CullDistance));
     }
 
+    // FOCUS: among the relevant on-screen plates, the one nearest screen-centre is what the player is looking at.
+    // It stays full while the others dim — so attention reads at a glance without hiding the rest.
+    AActor *FocusedActor = nullptr;
+    {
+        const FVector2D Center(Canvas->ClipX * 0.5f, Canvas->ClipY * 0.5f);
+        float BestD2 = FocusRadiusPx * FocusRadiusPx;
+        for (const TPair<AActor *, float> &P : Targets) {
+            if (P.Value <= 0.0f || !IsValid(P.Key)) {
+                continue;
+            }
+            FVector2D SP;
+            if (UGameplayStatics::ProjectWorldToScreen(PC, P.Key->GetActorLocation() + FVector(0.0f, 0.0f, HeadZ), SP, true)) {
+                const float D2 = FVector2D::DistSquared(SP, Center);
+                if (D2 < BestD2) {
+                    BestD2 = D2;
+                    FocusedActor = P.Key;
+                }
+            }
+        }
+    }
+
     UFont *Font = (Config && Config->Font) ? Config->Font.Get() : nullptr;
     if (!Font) {
         Font = GEngine->GetMediumFont();
@@ -987,7 +1010,7 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
     };
 
     // Draw a full nameplate (name + health bar + active status-buildup bars) above an entity's head at the given alpha.
-    auto DrawPlate = [&](AActor *Npc, float Alpha, const FText &Name) {
+    auto DrawPlate = [&](AActor *Npc, float Alpha, const FText &Name, bool bFocused) {
         UAbilitySystemComponent *ASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Npc);
         float HealthFrac = 1.0f;
         if (ASC) {
@@ -1014,6 +1037,14 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
             NameItem.bOutlined = true;
             NameItem.OutlineColor = FLinearColor(0.0f, 0.0f, 0.0f, Alpha);
             Canvas->DrawItem(NameItem);
+        }
+
+        // Focus highlight — a bright frame behind the bar (the dark bg draws on top, leaving a 1px bright border).
+        if (bFocused) {
+            FCanvasTileItem Frame(FVector2D(X - 2.0f, Y - 2.0f), GWhiteTexture, FVector2D(BarW + 4.0f, BarH + 4.0f),
+                                  FLinearColor(1.0f, 0.95f, 0.7f, 0.9f * Alpha));
+            Frame.BlendMode = SE_BLEND_Translucent;
+            Canvas->DrawItem(Frame);
         }
 
         // Health bar background (1px inset frame).
@@ -1096,7 +1127,9 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
             continue;
         }
         if (S.CurrentAlpha > 0.01f) {
-            DrawPlate(Npc, S.CurrentAlpha, S.CachedName);
+            const bool bFocused = (Npc == FocusedActor);
+            const float Dim = (FocusedActor && !bFocused) ? DimFactor : 1.0f;
+            DrawPlate(Npc, S.CurrentAlpha * Dim, S.CachedName, bFocused);
         }
     }
 
@@ -1110,7 +1143,9 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
         NewState.CachedName = ReadNpcName(Pair.Key);
         NewState.CurrentAlpha = StepNameplateAlpha(0.0f, Pair.Value, Dt, FadeRate);
         if (NewState.CurrentAlpha > 0.01f) {
-            DrawPlate(Pair.Key, NewState.CurrentAlpha, NewState.CachedName);
+            const bool bFocused = (Pair.Key == FocusedActor);
+            const float Dim = (FocusedActor && !bFocused) ? DimFactor : 1.0f;
+            DrawPlate(Pair.Key, NewState.CurrentAlpha * Dim, NewState.CachedName, bFocused);
         }
         NameplateStates.Add(NewState);
     }
