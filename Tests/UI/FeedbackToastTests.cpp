@@ -103,3 +103,68 @@ bool FMythicFeedbackToastStackTest::RunTest(const FString &Parameters) {
 
     return true;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Hero-banner easing — EaseOutBack / ComputeBannerScale / ComputeBannerSweepX
+// (entrance pop + slide sweep for major-beat banners)
+// ═══════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicFeedbackEaseOutBackTest,
+    "Mythic.UI.Feedback.EaseOutBack",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicFeedbackEaseOutBackTest::RunTest(const FString &Parameters) {
+    auto E = &UMythicDamageNumberSubsystem::EaseOutBack;
+    const float Tol = 1.e-3f;
+
+    // Anchored endpoints.
+    TestEqual(TEXT("ease(0) -> 0"), E(0.0f), 0.0f, Tol);
+    TestEqual(TEXT("ease(1) -> 1"), E(1.0f), 1.0f, Tol);
+    // The signature "back" overshoot: rises past 1.0 before settling.
+    TestTrue(TEXT("overshoots past 1.0 near the end"), E(0.8f) > 1.0f);
+    // Generally rising through the entrance.
+    TestTrue(TEXT("rises through entrance"), E(0.5f) > E(0.2f));
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicFeedbackBannerScaleTest,
+    "Mythic.UI.Feedback.BannerScale",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicFeedbackBannerScaleTest::RunTest(const FString &Parameters) {
+    auto S = &UMythicDamageNumberSubsystem::ComputeBannerScale;
+    const float Tol = 1.e-3f;
+    const float Ent = 0.35f, Start = 0.85f;
+
+    TestEqual(TEXT("t<=0 -> StartScale"), S(0.0f, Ent, Start), Start, Tol);
+    TestEqual(TEXT("t=Entrance -> 1.0"), S(0.35f, Ent, Start), 1.0f, Tol);
+    TestEqual(TEXT("t past Entrance -> 1.0"), S(1.0f, Ent, Start), 1.0f, Tol);
+    TestEqual(TEXT("Entrance<=0 -> 1.0"), S(0.1f, 0.0f, Start), 1.0f, Tol);
+    // Starts small and grows; overshoots above 1.0 late in the entrance (the pop).
+    TestTrue(TEXT("starts below 1.0"), S(0.05f, Ent, Start) < 1.0f);
+    TestTrue(TEXT("overshoots above 1.0 late in entrance"), S(0.30f, Ent, Start) > 1.0f);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicFeedbackBannerSweepTest,
+    "Mythic.UI.Feedback.BannerSweep",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicFeedbackBannerSweepTest::RunTest(const FString &Parameters) {
+    auto W = &UMythicDamageNumberSubsystem::ComputeBannerSweepX;
+    const float Tol = 1.e-3f;
+    const float Ent = 0.35f, Width = 300.0f;
+
+    TestEqual(TEXT("t=0 -> 0"), W(0.0f, Ent, Width), 0.0f, Tol);
+    TestEqual(TEXT("t=half -> half width"), W(0.175f, Ent, Width), 150.0f, Tol);
+    TestEqual(TEXT("t=Entrance -> full width"), W(0.35f, Ent, Width), Width, Tol);
+    TestEqual(TEXT("t past Entrance -> full width (clamped)"), W(2.0f, Ent, Width), Width, Tol);
+    TestEqual(TEXT("Entrance<=0 -> full width"), W(0.1f, 0.0f, Width), Width, Tol);
+
+    return true;
+}

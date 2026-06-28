@@ -297,6 +297,10 @@ struct FMythicScreenNotification {
     UPROPERTY()
     FText CachedText;
 
+    // Optional second line, used by hero banners (e.g. "Reached level 12"). Empty for toasts.
+    UPROPERTY()
+    FText Subtitle;
+
     // Optional icon drawn to the left of the label (null = text only).
     UPROPERTY()
     TObjectPtr<UTexture2D> Icon = nullptr;
@@ -385,6 +389,14 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Feedback")
     void AddScreenToast(const FText &Text, FLinearColor Color, UTexture2D *Icon = nullptr, float DurationOverride = 0.0f);
 
+    /**
+     * Queue a screen-space HERO BANNER (major non-combat beat: level-up, objective complete, zone entry, faction shift).
+     * Center-screen, procedurally animated (slide-in + scale-overshoot pop + fade + entrance specular sweep). Subtitle +
+     * icon optional. DurationOverride <= 0 uses a sensible default.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Feedback")
+    void AddScreenBanner(const FText &Title, const FText &Subtitle, FLinearColor AccentColor, UTexture2D *Icon = nullptr, float DurationOverride = 0.0f);
+
     // ─── Pure presentation math for screen notifications (public + static so it is unit-testable) ──────────────────
 
     /** Toast opacity over its life: ramp 0->1 over FadeInTime, hold 1, ramp 1->0 over FadeOutTime; clamp [0,1]; Lifetime<=0 -> 0. */
@@ -395,6 +407,15 @@ public:
 
     /** Vertical pixel offset of a toast at stack slot SlotFromAnchor (0 = nearest the anchor edge); negative slots clamp to 0. */
     static float ComputeToastStackOffset(int32 SlotFromAnchor, float EntryStep);
+
+    /** Cubic "ease-out-back" curve: 0 -> 1 with a slight overshoot past 1 before settling. EaseOutBack(0)=0, EaseOutBack(1)=1. */
+    static float EaseOutBack(float T);
+
+    /** Banner scale over its entrance: StartScale -> 1.0 with an overshoot pop (ease-out-back) across EntranceTime; 1.0 after. */
+    static float ComputeBannerScale(float Elapsed, float EntranceTime, float StartScale);
+
+    /** Horizontal position (0 -> Width) of the entrance specular sweep across EntranceTime; clamps to Width once done. */
+    static float ComputeBannerSweepX(float Elapsed, float EntranceTime, float Width);
 
     /**
      * Called by HUD to draw all damage numbers. Do not call directly.

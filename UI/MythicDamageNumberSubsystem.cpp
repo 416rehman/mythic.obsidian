@@ -199,6 +199,49 @@ float UMythicDamageNumberSubsystem::ComputeToastStackOffset(int32 SlotFromAnchor
     return FMath::Max(0, SlotFromAnchor) * EntryStep;
 }
 
+void UMythicDamageNumberSubsystem::AddScreenBanner(const FText &Title, const FText &Subtitle, FLinearColor AccentColor, UTexture2D *Icon, float DurationOverride) {
+    CleanupExpired();
+
+    FMythicScreenNotification N;
+    N.CachedText = Title;
+    N.Subtitle = Subtitle;
+    N.Icon = Icon;
+    N.Color = AccentColor;
+    N.SpawnTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    N.Lifetime = DurationOverride > 0.0f ? DurationOverride : 3.5f; // major beats hold a touch longer than toasts
+    N.Kind = EMythicScreenNotifyKind::Banner;
+    N.ID = NextID++;
+
+    ActiveNotifications.Add(MoveTemp(N));
+}
+
+float UMythicDamageNumberSubsystem::EaseOutBack(float T) {
+    // Standard ease-out-back: settles to 1.0 with a small overshoot past it near the end (the "pop").
+    const float C1 = 1.70158f;
+    const float C3 = C1 + 1.0f;
+    const float T1 = T - 1.0f;
+    return 1.0f + C3 * T1 * T1 * T1 + C1 * T1 * T1;
+}
+
+float UMythicDamageNumberSubsystem::ComputeBannerScale(float Elapsed, float EntranceTime, float StartScale) {
+    if (EntranceTime <= 0.0f || Elapsed >= EntranceTime) {
+        return 1.0f;
+    }
+    if (Elapsed <= 0.0f) {
+        return StartScale;
+    }
+    const float E = EaseOutBack(Elapsed / EntranceTime); // 0..~1 with a late overshoot
+    return FMath::Lerp(StartScale, 1.0f, E);
+}
+
+float UMythicDamageNumberSubsystem::ComputeBannerSweepX(float Elapsed, float EntranceTime, float Width) {
+    if (EntranceTime <= 0.0f) {
+        return Width;
+    }
+    const float T = FMath::Clamp(Elapsed / EntranceTime, 0.0f, 1.0f);
+    return T * Width;
+}
+
 void UMythicDamageNumberSubsystem::DrawScreenNotifications(UCanvas *Canvas, APlayerController *PC) {
     if (ActiveNotifications.Num() == 0) {
         return;
@@ -305,6 +348,90 @@ void UMythicDamageNumberSubsystem::DrawScreenNotifications(UCanvas *Canvas, APla
         TextItem.bOutlined = bOutline;
         TextItem.OutlineColor = OutlineColor;
         Canvas->DrawItem(TextItem);
+    }
+
+    // ── Hero banners (major beats) — center-screen, procedurally animated. Drawn over the toasts. ──
+    const float CX = Canvas->ClipX * 0.5f;
+    const float BannerBaseY = Canvas->ClipY * 0.28f; // upper third
+    const float BEntrance = 0.35f;
+    const float BFadeIn = 0.2f;
+    const float BFadeOut = 0.5f;
+    const float TitleScaleBase = FontScale * 1.9f;
+    const float SubScaleBase = FontScale * 1.0f;
+    int32 BannerSlot = 0;
+    for (int32 i = 0; i < ActiveNotifications.Num(); ++i) {
+        const FMythicScreenNotification &N = ActiveNotifications[i];
+        if (N.Kind != EMythicScreenNotifyKind::Banner || N.IsExpired(CurrentTime)) {
+            continue;
+        }
+        const float Elapsed = CurrentTime - N.SpawnTime;
+        const float Alpha = ComputeToastAlpha(Elapsed, N.Lifetime, BFadeIn, BFadeOut);
+        const float PopScale = ComputeBannerScale(Elapsed, BEntrance, 0.85f);
+        const float Drop = ComputeToastSlideOffset(Elapsed, BEntrance, 40.0f); // slides down into place
+        const float TitleScale = TitleScaleBase * PopScale;
+
+        float TW = 0.0f, TH = 0.0f;
+        Canvas->TextSize(Font, N.CachedText.ToString(), TW, TH, TitleScale, TitleScale);
+        const bool bSub = !N.Subtitle.IsEmpty();
+        float SW = 0.0f, SH = 0.0f;
+        if (bSub) {
+            Canvas->TextSize(Font, N.Subtitle.ToString(), SW, SH, SubScaleBase, SubScaleBase);
+        }
+        const float ContentW = FMath::Max(TW, SW);
+        const float ContentH = TH + (bSub ? SH + 4.0f : 0.0f);
+        const float PadX = 28.0f, PadY = 14.0f;
+        const float BarW = ContentW + PadX * 2.0f;
+        const float BarH = ContentH + PadY * 2.0f;
+        const float BarX = CX - BarW * 0.5f;
+        const float BarY = (BannerBaseY - Drop) + BannerSlot * (BarH + 12.0f);
+
+        // Backing panel.
+        FLinearColor Bg(0.04f, 0.05f, 0.07f, 0.82f * Alpha);
+        FCanvasTileItem BgItem(FVector2D(BarX, BarY), GWhiteTexture, FVector2D(BarW, BarH), Bg);
+        BgItem.BlendMode = SE_BLEND_Translucent;
+        Canvas->DrawItem(BgItem);
+
+        // Left accent strip (category color).
+        FLinearColor Accent = N.Color;
+        Accent.A *= Alpha;
+        FCanvasTileItem AccItem(FVector2D(BarX, BarY), GWhiteTexture, FVector2D(4.0f, BarH), Accent);
+        AccItem.BlendMode = SE_BLEND_Translucent;
+        Canvas->DrawItem(AccItem);
+
+        // Entrance specular sweep (only while entering).
+        if (Elapsed < BEntrance) {
+            const float SweepX = ComputeBannerSweepX(Elapsed, BEntrance, BarW);
+            const float SweepW = 26.0f;
+            FLinearColor Sweep(1.0f, 1.0f, 1.0f, 0.10f * Alpha);
+            FCanvasTileItem SwItem(FVector2D(BarX + SweepX - SweepW * 0.5f, BarY), GWhiteTexture, FVector2D(SweepW, BarH), Sweep);
+            SwItem.BlendMode = SE_BLEND_Translucent;
+            Canvas->DrawItem(SwItem);
+        }
+
+        // Title (centered) with a drop shadow for legibility over any scene.
+        const float TitleX = CX - TW * 0.5f;
+        const float TitleY = BarY + PadY;
+        FCanvasTextItem Shadow(FVector2D(TitleX + 2.0f, TitleY + 2.0f), N.CachedText, Font, FLinearColor(0.0f, 0.0f, 0.0f, 0.6f * Alpha));
+        Shadow.Scale = FVector2D(TitleScale, TitleScale);
+        Canvas->DrawItem(Shadow);
+        FLinearColor TitleCol = N.Color;
+        TitleCol.A *= Alpha;
+        FCanvasTextItem TitleItem(FVector2D(TitleX, TitleY), N.CachedText, Font, TitleCol);
+        TitleItem.Scale = FVector2D(TitleScale, TitleScale);
+        TitleItem.bOutlined = bOutline;
+        TitleItem.OutlineColor = OutlineColor;
+        Canvas->DrawItem(TitleItem);
+
+        // Subtitle (centered, muted).
+        if (bSub) {
+            const float SubX = CX - SW * 0.5f;
+            const float SubY = TitleY + TH + 4.0f;
+            FCanvasTextItem SubItem(FVector2D(SubX, SubY), N.Subtitle, Font, FLinearColor(0.82f, 0.82f, 0.86f, Alpha));
+            SubItem.Scale = FVector2D(SubScaleBase, SubScaleBase);
+            Canvas->DrawItem(SubItem);
+        }
+
+        ++BannerSlot;
     }
 }
 
