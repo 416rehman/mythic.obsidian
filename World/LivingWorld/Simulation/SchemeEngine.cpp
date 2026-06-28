@@ -33,6 +33,17 @@ void UMythicSchemeEngine::Initialize(
         SchemeBaseProbability = Settings->SchemeBaseProbability;
     }
 
+    // GenerationTickInterval is the divisor of `SimTickIndex % GenerationTickInterval` on the sim thread (see Tick). A
+    // misconfigured <= 0 value (a designer zeroing it to "disable" generation, or a typo) would be an integer
+    // modulo-by-zero — a server FPE crash on the first sim tick. Clamp to >= 1 (generate every tick) and log so the
+    // misconfiguration is visible; a positive interval passes through unchanged.
+    if (GenerationTickInterval <= 0) {
+        UE_LOG(LogMythScheme, Warning,
+               TEXT("SchemeGenerationTickInterval misconfigured (%d <= 0); clamping to 1 to avoid a modulo-by-zero on the sim thread."),
+               GenerationTickInterval);
+        GenerationTickInterval = 1;
+    }
+
     ActiveSchemes.Reserve(MaxTotalSchemes);
 
     UE_LOG(LogMythScheme, Log, TEXT("SchemeEngine initialized: MaxTotal=%d, MaxPerFaction=%d, GenInterval=%d"),
