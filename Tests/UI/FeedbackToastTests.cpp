@@ -168,3 +168,61 @@ bool FMythicFeedbackBannerSweepTest::RunTest(const FString &Parameters) {
 
     return true;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Contextual nameplates — ComputeNameplateTargetAlpha / StepNameplateAlpha
+// (engaged-only visibility, distance fade, and smooth fade-in/out)
+// ═══════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicFeedbackNameplateAlphaTest,
+    "Mythic.UI.Feedback.NameplateAlpha",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicFeedbackNameplateAlphaTest::RunTest(const FString &Parameters) {
+    auto A = &UMythicDamageNumberSubsystem::ComputeNameplateTargetAlpha;
+    const float Tol = 1.e-4f;
+    const float Full = 1000.0f, Cull = 3000.0f;
+
+    // Not relevant (not engaged) -> never shown, regardless of distance.
+    TestEqual(TEXT("not relevant -> 0 (close)"), A(false, 100.0f, Full, Cull), 0.0f, Tol);
+    TestEqual(TEXT("not relevant -> 0 (far)"), A(false, 5000.0f, Full, Cull), 0.0f, Tol);
+
+    // Relevant: full opacity within FullDistance, linear fade in the band, 0 past CullDistance.
+    TestEqual(TEXT("relevant within full -> 1"), A(true, 500.0f, Full, Cull), 1.0f, Tol);
+    TestEqual(TEXT("relevant at full edge -> 1"), A(true, 1000.0f, Full, Cull), 1.0f, Tol);
+    TestEqual(TEXT("relevant mid-band -> 0.5"), A(true, 2000.0f, Full, Cull), 0.5f, Tol);
+    TestEqual(TEXT("relevant at cull edge -> 0"), A(true, 3000.0f, Full, Cull), 0.0f, Tol);
+    TestEqual(TEXT("relevant beyond cull -> 0"), A(true, 9000.0f, Full, Cull), 0.0f, Tol);
+
+    // Degenerate band (cull <= full) -> hard cutoff at full.
+    TestEqual(TEXT("degenerate band within -> 1"), A(true, 900.0f, 1000.0f, 1000.0f), 1.0f, Tol);
+    TestEqual(TEXT("degenerate band beyond -> 0"), A(true, 1100.0f, 1000.0f, 1000.0f), 0.0f, Tol);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicFeedbackNameplateFadeTest,
+    "Mythic.UI.Feedback.NameplateFade",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicFeedbackNameplateFadeTest::RunTest(const FString &Parameters) {
+    auto Step = &UMythicDamageNumberSubsystem::StepNameplateAlpha;
+    const float Tol = 1.e-4f;
+    const float Rate = 4.0f; // alpha/sec
+
+    // Fade IN: moves toward a higher target by Rate*Dt, never overshooting.
+    TestEqual(TEXT("fade in by rate*dt"), Step(0.0f, 1.0f, 0.1f, Rate), 0.4f, Tol);
+    TestEqual(TEXT("fade in clamps to target"), Step(0.9f, 1.0f, 1.0f, Rate), 1.0f, Tol);
+
+    // Fade OUT: moves toward a lower target, never undershooting.
+    TestEqual(TEXT("fade out by rate*dt"), Step(1.0f, 0.0f, 0.1f, Rate), 0.6f, Tol);
+    TestEqual(TEXT("fade out clamps to target"), Step(0.1f, 0.0f, 1.0f, Rate), 0.0f, Tol);
+
+    // No-ops: zero dt, already-at-target.
+    TestEqual(TEXT("dt=0 -> unchanged"), Step(0.5f, 1.0f, 0.0f, Rate), 0.5f, Tol);
+    TestEqual(TEXT("already at target -> unchanged"), Step(0.7f, 0.7f, 0.1f, Rate), 0.7f, Tol);
+
+    return true;
+}

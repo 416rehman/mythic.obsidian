@@ -12,6 +12,12 @@
 #include "GameFramework/HUD.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "EngineUtils.h" // TActorIterator (nameplate candidate sweep)
+#include "AbilitySystemComponent.h"
+#include "AbilitySystemBlueprintLibrary.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
+#include "AI/NPCs/MythicNPCCharacter.h"
+#include "AI/NPCs/MythicAIController.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMythicDamageNumbers, Log, All);
 
@@ -67,7 +73,8 @@ void UMythicDamageNumberSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
 
     DrawDamageNumbers(Canvas, PC);
     DrawWorldCallouts(Canvas, PC);
-    DrawScreenNotifications(Canvas, PC);
+    DrawNameplates(Canvas, PC);
+    DrawScreenNotifications(Canvas, PC); // screen UI (toasts/banners) layers on top of world-anchored elements
 }
 
 // Swap-remove every expired entry. Declared in the header but previously never defined — the ONLY pruning was inside
@@ -878,4 +885,157 @@ float UMythicDamageNumberSubsystem::CalculateAnimationScale(const FMythicDamageN
     const float PulseFrequency = 6.0f;
     const float PulseAmount = 0.1f * (1.0f - NormalizedAge); // Dampen over time
     return 1.0f + FMath::Sin(Age * PulseFrequency) * PulseAmount;
+}
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Contextual nameplates — health bars shown ONLY for entities ENGAGED with the local player, faded by relevance/distance.
+// ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+float UMythicDamageNumberSubsystem::ComputeNameplateTargetAlpha(bool bRelevant, float Distance, float FullDistance, float CullDistance) {
+    if (!bRelevant) {
+        return 0.0f;
+    }
+    if (CullDistance <= FullDistance) {
+        return Distance <= FullDistance ? 1.0f : 0.0f; // degenerate band -> hard cutoff
+    }
+    if (Distance <= FullDistance) {
+        return 1.0f;
+    }
+    if (Distance >= CullDistance) {
+        return 0.0f;
+    }
+    return 1.0f - (Distance - FullDistance) / (CullDistance - FullDistance); // linear fade in the band
+}
+
+float UMythicDamageNumberSubsystem::StepNameplateAlpha(float CurrentAlpha, float TargetAlpha, float DeltaSeconds, float FadeRate) {
+    const float MaxStep = FMath::Max(0.0f, FadeRate) * FMath::Max(0.0f, DeltaSeconds);
+    if (CurrentAlpha < TargetAlpha) {
+        return FMath::Min(TargetAlpha, CurrentAlpha + MaxStep);
+    }
+    if (CurrentAlpha > TargetAlpha) {
+        return FMath::Max(TargetAlpha, CurrentAlpha - MaxStep);
+    }
+    return CurrentAlpha;
+}
+
+bool UMythicDamageNumberSubsystem::IsNameplateRelevant(AActor *Npc, AActor *LocalPawn) const {
+    // ENGAGED = the NPC's AI is actively fighting the local player (its current hostile target is us). Cheap + reliable;
+    // broader signals (threat table, faction-hostile-and-near, focus) are layered on in follow-up slices.
+    const APawn *NpcPawn = Cast<APawn>(Npc);
+    if (!NpcPawn) {
+        return false;
+    }
+    if (const AMythicAIController *AICtrl = Cast<AMythicAIController>(NpcPawn->GetController())) {
+        return AICtrl->GetCurrentHostileTarget() == LocalPawn;
+    }
+    return false;
+}
+
+void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerController *PC) {
+    UWorld *World = GetWorld();
+    if (!World) {
+        return;
+    }
+    APawn *LocalPawn = PC->GetPawn();
+    if (!LocalPawn) {
+        NameplateStates.Reset();
+        return;
+    }
+
+    const float CurrentTime = World->GetTimeSeconds();
+    const float Dt = (LastNameplateTime < 0.0f) ? 0.0f : FMath::Max(0.0f, CurrentTime - LastNameplateTime);
+    LastNameplateTime = CurrentTime;
+
+    // Code-default tuning (no asset needed). Distances in cm; FadeRate is alpha/sec.
+    const float FullDistance = 1500.0f;
+    const float CullDistance = 3500.0f;
+    const float FadeRate = 3.5f;
+    const float HeadZ = 110.0f;
+    const float BarW = 88.0f;
+    const float BarH = 7.0f;
+
+    const FVector LocalLoc = LocalPawn->GetActorLocation();
+
+    // This frame's candidate target alphas (raw ptr keys valid only within this frame).
+    TMap<AActor *, float> Targets;
+    for (TActorIterator<AMythicNPCCharacter> It(World); It; ++It) {
+        AActor *Npc = *It;
+        if (!IsValid(Npc) || Npc == LocalPawn) {
+            continue;
+        }
+        const float Dist = FVector::Dist(Npc->GetActorLocation(), LocalLoc);
+        if (Dist > CullDistance) {
+            continue; // far enough that even a fading plate is gone
+        }
+        const bool bRelevant = IsNameplateRelevant(Npc, LocalPawn);
+        Targets.Add(Npc, ComputeNameplateTargetAlpha(bRelevant, Dist, FullDistance, CullDistance));
+    }
+
+    // Draw one health-bar nameplate above an entity's head at the given alpha.
+    auto DrawPlate = [&](AActor *Npc, float Alpha) {
+        float HealthFrac = 1.0f;
+        if (UAbilitySystemComponent *ASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Npc)) {
+            if (const UMythicAttributeSet_Life *Life = ASC->GetSet<UMythicAttributeSet_Life>()) {
+                const float MaxH = Life->GetMaxHealth();
+                HealthFrac = MaxH > 0.0f ? FMath::Clamp(Life->GetHealth() / MaxH, 0.0f, 1.0f) : 0.0f;
+            }
+        }
+        FVector2D ScreenPos;
+        const FVector HeadWorld = Npc->GetActorLocation() + FVector(0.0f, 0.0f, HeadZ);
+        if (!UGameplayStatics::ProjectWorldToScreen(PC, HeadWorld, ScreenPos, true)) {
+            return; // off-screen / behind camera
+        }
+        const float X = ScreenPos.X - BarW * 0.5f;
+        const float Y = ScreenPos.Y;
+
+        // Background (1px inset frame).
+        FCanvasTileItem Bg(FVector2D(X - 1.0f, Y - 1.0f), GWhiteTexture, FVector2D(BarW + 2.0f, BarH + 2.0f),
+                           FLinearColor(0.0f, 0.0f, 0.0f, 0.6f * Alpha));
+        Bg.BlendMode = SE_BLEND_Translucent;
+        Canvas->DrawItem(Bg);
+
+        // Fill — green at full health, red when low.
+        const FLinearColor LowCol(0.85f, 0.2f, 0.15f);
+        const FLinearColor FullCol(0.25f, 0.85f, 0.35f);
+        FLinearColor FillCol = FMath::Lerp(LowCol, FullCol, HealthFrac);
+        FillCol.A = Alpha;
+        FCanvasTileItem Fill(FVector2D(X, Y), GWhiteTexture, FVector2D(BarW * HealthFrac, BarH), FillCol);
+        Fill.BlendMode = SE_BLEND_Translucent;
+        Canvas->DrawItem(Fill);
+    };
+
+    // Update existing states: fade toward their candidate target (0 if no longer a candidate), draw, prune.
+    for (int32 i = NameplateStates.Num() - 1; i >= 0; --i) {
+        FMythicNameplateState &S = NameplateStates[i];
+        AActor *Npc = S.Actor.Get();
+        float Target = 0.0f;
+        if (Npc) {
+            if (const float *Found = Targets.Find(Npc)) {
+                Target = *Found;
+                Targets.Remove(Npc); // mark handled
+            }
+        }
+        S.CurrentAlpha = StepNameplateAlpha(S.CurrentAlpha, Target, Dt, FadeRate);
+        if (!Npc || (S.CurrentAlpha <= 0.01f && Target <= 0.0f)) {
+            NameplateStates.RemoveAtSwap(i, EAllowShrinking::No);
+            continue;
+        }
+        if (S.CurrentAlpha > 0.01f) {
+            DrawPlate(Npc, S.CurrentAlpha);
+        }
+    }
+
+    // New candidates that don't yet have a state (start at 0 and fade in).
+    for (const TPair<AActor *, float> &Pair : Targets) {
+        if (Pair.Value <= 0.0f) {
+            continue; // disengaged-but-near: nothing to show, don't spawn an invisible state
+        }
+        FMythicNameplateState NewState;
+        NewState.Actor = Pair.Key;
+        NewState.CurrentAlpha = StepNameplateAlpha(0.0f, Pair.Value, Dt, FadeRate);
+        if (NewState.CurrentAlpha > 0.01f) {
+            DrawPlate(Pair.Key, NewState.CurrentAlpha);
+        }
+        NameplateStates.Add(NewState);
+    }
 }

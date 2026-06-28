@@ -366,6 +366,16 @@ struct FMythicWorldCallout {
 };
 
 /**
+ * Per-entity nameplate render state — holds the SMOOTHED alpha so a nameplate fades in/out instead of popping when an
+ * entity becomes (ir)relevant. Plain struct (NOT a UPROPERTY): the TWeakObjectPtr auto-nulls and must NOT keep the actor
+ * alive; this is purely transient render bookkeeping rebuilt each frame.
+ */
+struct FMythicNameplateState {
+    TWeakObjectPtr<AActor> Actor;
+    float CurrentAlpha = 0.0f;
+};
+
+/**
  * UMythicDamageNumberSubsystem
  *
  * The unified, high-performance, NON-WBP feedback subsystem. Combat damage numbers (world-projected, floating off the
@@ -461,6 +471,14 @@ public:
     /** Horizontal position (0 -> Width) of the entrance specular sweep across EntranceTime; clamps to Width once done. */
     static float ComputeBannerSweepX(float Elapsed, float EntranceTime, float Width);
 
+    // ─── Contextual nameplates (health bars shown ONLY for engaged entities; relevance-driven, smoothly faded) ──────
+
+    /** Target nameplate opacity: 0 if not relevant or beyond CullDistance; 1 within FullDistance; linear fade between. */
+    static float ComputeNameplateTargetAlpha(bool bRelevant, float Distance, float FullDistance, float CullDistance);
+
+    /** Step CurrentAlpha toward TargetAlpha by FadeRate*DeltaSeconds without overshoot (the smooth fade in/out). */
+    static float StepNameplateAlpha(float CurrentAlpha, float TargetAlpha, float DeltaSeconds, float FadeRate);
+
     /**
      * Called by HUD to draw all damage numbers. Do not call directly.
      */
@@ -507,6 +525,12 @@ protected:
     // Draws the world-anchored non-combat callouts (gather/hazard). Called from OnHUDPostRender.
     void DrawWorldCallouts(UCanvas *Canvas, APlayerController *PC);
 
+    // Draws contextual nameplates (engaged-only health bars, faded by relevance). Called from OnHUDPostRender.
+    void DrawNameplates(UCanvas *Canvas, APlayerController *PC);
+
+    // True if this NPC is currently ENGAGED with the local player (its AI is fighting us) — drives nameplate visibility.
+    bool IsNameplateRelevant(AActor *Npc, AActor *LocalPawn) const;
+
 protected:
     // Active damage numbers
     UPROPERTY()
@@ -519,6 +543,12 @@ protected:
     // Active world-anchored non-combat callouts (gather/hazard).
     UPROPERTY()
     TArray<FMythicWorldCallout> ActiveWorldCallouts;
+
+    // Per-entity nameplate render state (smoothed alpha). Transient; NOT a UPROPERTY (TWeakObjectPtr auto-nulls).
+    TArray<FMythicNameplateState> NameplateStates;
+
+    // World time of the previous nameplate draw, for the per-frame fade delta (-1 = not drawn yet).
+    float LastNameplateTime = -1.0f;
 
     // Configuration
     UPROPERTY()
