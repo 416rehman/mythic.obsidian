@@ -77,3 +77,38 @@ bool FMythicPartyRestRecoveryTest::RunTest(const FString &Parameters) {
 
     return true;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Betrayal build-up — UMythicPartySubsystem::ComputeBetrayalPressureGain
+// (only acts that damage loyalty BELOW the trigger threshold build pressure, scaled by |delta| * multiplier)
+// ═══════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicPartyBetrayalPressureGainTest,
+    "Mythic.Party.BetrayalPressureGain",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicPartyBetrayalPressureGainTest::RunTest(const FString &Parameters) {
+    auto Gain = &UMythicPartySubsystem::ComputeBetrayalPressureGain;
+    const float Tol = 1.e-4f;
+    const float Trigger = -0.1f, Mult = 2.0f; // current defaults
+
+    // Below the trigger (sufficiently objectionable): pressure scales with |delta| * multiplier.
+    TestEqual(TEXT("delta -0.2 -> 0.4"), Gain(-0.2f, Trigger, Mult), 0.4f, Tol);
+    TestEqual(TEXT("delta -0.5 -> 1.0"), Gain(-0.5f, Trigger, Mult), 1.0f, Tol);
+
+    // At/above the trigger: no pressure (forgiving region). Boundary is STRICT (< trigger).
+    TestEqual(TEXT("delta exactly -0.1 (not < -0.1) -> 0"), Gain(-0.1f, Trigger, Mult), 0.0f, Tol);
+    TestEqual(TEXT("mild negative -0.05 -> 0"), Gain(-0.05f, Trigger, Mult), 0.0f, Tol);
+
+    // Aligned / positive acts never build pressure.
+    TestEqual(TEXT("positive delta +0.3 -> 0"), Gain(0.3f, Trigger, Mult), 0.0f, Tol);
+    TestEqual(TEXT("zero delta -> 0"), Gain(0.0f, Trigger, Mult), 0.0f, Tol);
+
+    // Tuning levers behave: a more forgiving trigger (-0.3) ignores a -0.2 act the default would punish.
+    TestEqual(TEXT("forgiving trigger -0.3 ignores -0.2"), Gain(-0.2f, -0.3f, Mult), 0.0f, Tol);
+    // A higher multiplier scales the gain.
+    TestEqual(TEXT("multiplier 3.0 on -0.2 -> 0.6"), Gain(-0.2f, Trigger, 3.0f), 0.6f, Tol);
+
+    return true;
+}

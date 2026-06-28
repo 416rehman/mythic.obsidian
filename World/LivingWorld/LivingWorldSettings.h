@@ -734,6 +734,15 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "0.0", ClampMax = "20.0"))
     float CompanionRestBetrayalDecay = 0.1f;
 
+    /** A player act builds a companion's betrayal pressure only if its loyalty impact drops BELOW this (negative)
+     *  threshold — i.e. it was sufficiently objectionable to that companion. Less negative = more forgiving. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "-1.0", ClampMax = "0.0"))
+    float CompanionBetrayalTriggerDelta = -0.1f;
+
+    /** Betrayal pressure gained per unit of loyalty damage from an objectionable act (|loyalty delta| * this). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "0.0", ClampMax = "20.0"))
+    float CompanionBetrayalPressureMultiplier = 2.0f;
+
     /** Confidence reduction per belief propagation hop during rest phase [0.0, 1.0]. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "0.0", ClampMax = "0.9"))
     float BeliefPropagationDecay = 0.3f;

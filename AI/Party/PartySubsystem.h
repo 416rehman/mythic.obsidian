@@ -142,6 +142,14 @@ public:
     static float ComputeDecayedBetrayal(float CurrentPressure, float Decay);
 
     /**
+     * PURE betrayal build-up policy (Mythic.Party.BetrayalPressureGain): a player act builds a companion's betrayal
+     * pressure only when it damaged loyalty by MORE than TriggerDelta (a sufficiently objectionable act); the gain
+     * scales with |LoyaltyDelta| * Multiplier. Both are designer-tunable via LivingWorldSettings. Public + static so the
+     * build-up curve is unit-testable.
+     */
+    static float ComputeBetrayalPressureGain(float LoyaltyDelta, float TriggerDelta, float Multiplier);
+
+    /**
      * Single source of truth for one belief's save/load byte layout (used by both branches of Serialize so the field
      * order can never desync between save and load). Reads/writes the original 3 fields (EventTag/Confidence/
      * FormationTime) for all versions and the full semantic state (Cell/InvolvedFaction/LastDecayTime/PropagationHops/
@@ -303,6 +311,11 @@ private:
     /** Cached rest-phase recovery rates (from LivingWorldSettings; designer-tunable, conservative defaults). */
     float RestLoyaltyRecovery = 0.02f;
     float RestBetrayalDecay = 0.1f;
+
+    /** Cached betrayal build-up tuning (from LivingWorldSettings): the loyalty-delta threshold an act must drop BELOW to
+     *  build pressure, and the |delta|->pressure multiplier. Conservative defaults preserve current behavior. */
+    float BetrayalTriggerDelta = -0.1f;
+    float BetrayalPressureMultiplier = 2.0f;
 
     /** A single player action whose |loyalty impact| on a STAYING companion meets/exceeds this makes that companion
      *  remark on it (moral commentary). Just above the betrayal-pressure trigger (0.1) so only notably-charged acts —

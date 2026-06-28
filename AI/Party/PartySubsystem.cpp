@@ -66,6 +66,8 @@ void UMythicPartySubsystem::Initialize(FSubsystemCollectionBase &Collection) {
     BetrayalThreshold = Settings->BetrayalPressureThreshold;
     RestLoyaltyRecovery = Settings->CompanionRestLoyaltyRecovery;
     RestBetrayalDecay = Settings->CompanionRestBetrayalDecay;
+    BetrayalTriggerDelta = Settings->CompanionBetrayalTriggerDelta;
+    BetrayalPressureMultiplier = Settings->CompanionBetrayalPressureMultiplier;
     BeliefPropagationDecay = Settings->BeliefPropagationDecay;
     MaxBeliefPropagationHops = Settings->MaxBeliefPropagationHops;
 
@@ -433,11 +435,10 @@ void UMythicPartySubsystem::OnPlayerAction(
         const float LoyaltyDelta = EvaluateLoyaltyImpact(Member, MoralAction);
         Member.LoyaltyScore = FMath::Clamp(Member.LoyaltyScore + LoyaltyDelta, 0.0f, 1.0f);
 
-        // Track betrayal pressure for severe moral violations
-        if (LoyaltyDelta < -0.1f) {
-            // The action was significantly against the companion's morals
-            Member.BetrayalPressure += FMath::Abs(LoyaltyDelta) * 2.0f;
-        }
+        // Track betrayal pressure for severe moral violations (an act sufficiently against the companion's morals). The
+        // trigger threshold + pressure multiplier are designer-tunable (cached BetrayalTriggerDelta / Multiplier); the
+        // formula is the pure, unit-tested ComputeBetrayalPressureGain (Mythic.Party.BetrayalPressureGain).
+        Member.BetrayalPressure += ComputeBetrayalPressureGain(LoyaltyDelta, BetrayalTriggerDelta, BetrayalPressureMultiplier);
 
         // Commentary candidate: a companion that REMAINS (loyalty still above the departure floor) and was strongly
         // moved — for or against. A departing one isn't a commenter; it gets its own "left/turned on you" callout.
@@ -688,6 +689,16 @@ float UMythicPartySubsystem::ComputeRestedLoyalty(float CurrentLoyalty, float Re
 float UMythicPartySubsystem::ComputeDecayedBetrayal(float CurrentPressure, float Decay) {
     // Betrayal pressure cools off during rest, clamped to the 0 floor (never negative).
     return FMath::Max(0.0f, CurrentPressure - Decay);
+}
+
+float UMythicPartySubsystem::ComputeBetrayalPressureGain(float LoyaltyDelta, float TriggerDelta, float Multiplier) {
+    // An act builds betrayal pressure only when it damaged loyalty MORE than the trigger threshold (a sufficiently
+    // objectionable act); the gain scales with how badly it landed. A neutral/positive act (or a mild negative above
+    // the threshold) adds nothing. Pure so the betrayal build-up curve is unit-tested + regression-locked.
+    if (LoyaltyDelta < TriggerDelta) {
+        return FMath::Abs(LoyaltyDelta) * Multiplier;
+    }
+    return 0.0f;
 }
 
 void UMythicPartySubsystem::CheckCompanionThresholds(const FString &PlayerKey, int32 MemberIndex) {
