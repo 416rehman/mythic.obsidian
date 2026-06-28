@@ -1128,6 +1128,26 @@ void AMythicPlayerController::ClientShowDodge_Implementation() {
     }
 }
 
+void AMythicPlayerController::ClientNotifyExhausted_Implementation(bool bExhausted) {
+    const APawn *AvatarPawn = GetPawn();
+    if (!AvatarPawn) {
+        return;
+    }
+    UWorld *World = AvatarPawn->GetWorld();
+    if (!World) {
+        return;
+    }
+    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+        const FVector Loc = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 90.0f);
+        if (bExhausted) {
+            DamageNumbers->AddDamageNumberCustom(Loc, TEXT("Winded!"), FLinearColor(1.0f, 0.55f, 0.1f), 1.2f); // orange warning
+        }
+        else {
+            DamageNumbers->AddDamageNumberCustom(Loc, TEXT("Recovered"), FLinearColor(0.45f, 0.9f, 0.45f), 1.0f); // green relief
+        }
+    }
+}
+
 void AMythicPlayerController::CheckZoneEntry() {
     // Server-authoritative poll (the timer is only armed on authority). Map the pawn's cell -> governing settlement and,
     // on a change of the stable runtime SettlementId, announce it to the owning client.

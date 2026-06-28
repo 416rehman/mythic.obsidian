@@ -311,6 +311,12 @@ public:
     UFUNCTION(Client, Reliable, Category = "Combat")
     void ClientShowDodge();
 
+    // Float a "Winded!" / "Recovered" callout when the player enters / leaves stamina exhaustion (stamina-gated sprint).
+    // Without it the suppressed sprint speed is a silent slowdown — the player can't tell WHY they slowed. The server
+    // owns GAS.State.Exhausted and pushes this beat on the transition. bExhausted true = just winded, false = recovered.
+    UFUNCTION(Client, Reliable, Category = "Combat")
+    void ClientNotifyExhausted(bool bExhausted);
+
     // ---- Progression feedback ----
     // Float a "<Skill> Lv N" callout (+ a "<Milestone> unlocked!" beat when a key milestone is crossed) over the player
     // on a proficiency level-up. Server (the ProficiencyComponent reward path, authority-gated) → the owning client.

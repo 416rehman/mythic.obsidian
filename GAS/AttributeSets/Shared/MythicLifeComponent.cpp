@@ -807,6 +807,13 @@ void UMythicLifeComponent::ApplyRegen() {
                 // Winded: suppress the sprint speed bonus (ReevaluateCrowdControl reads GAS.State.Exhausted) until recovery.
                 AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_EXHAUSTED, 1);
                 ReevaluateCrowdControl();
+                // Legibility beat: tell the owning player they're winded (silent slowdown otherwise). Player pawns only —
+                // an AI controller casts to null. Fires once per episode (the drain branch is gated on !bExhausted above).
+                if (const APawn *OwnerPawn = Cast<APawn>(GetOwner())) {
+                    if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(OwnerPawn->GetController())) {
+                        PC->ClientNotifyExhausted(true);
+                    }
+                }
             }
         }
         else {
@@ -818,6 +825,12 @@ void UMythicLifeComponent::ApplyRegen() {
             if (bSprintGate && bExhausted && ShouldRecoverFromExhaustion(NewV, Util->GetMaxStamina(), Settings->SprintRecoverStaminaFraction)) {
                 AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_EXHAUSTED, 0);
                 ReevaluateCrowdControl();
+                // Recovery beat: paired with the Winded callout; only reached when bExhausted was true (edge-correct).
+                if (const APawn *OwnerPawn = Cast<APawn>(GetOwner())) {
+                    if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(OwnerPawn->GetController())) {
+                        PC->ClientNotifyExhausted(false);
+                    }
+                }
             }
         }
     }
