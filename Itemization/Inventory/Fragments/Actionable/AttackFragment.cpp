@@ -130,6 +130,12 @@ void UAttackFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
         UE_LOG(Myth, Log, TEXT("  -> Cleared ability"));
     }
 
+    // Invalidate the MEMBER handle so a later re-equip is recognized as a fresh grant. ClearAbility removes the spec from
+    // the ASC but does NOT invalidate the caller's handle value — without this reset, the stale member handle still reads
+    // IsValid()==true, so PlanAttackActivation (which gates the re-grant on AbilityHandle.IsValid()) returns bGrantAbility
+    // = false on re-equip, and the re-equipped weapon never gets its attack ability back (unarmed after unequip/re-equip).
+    this->AttackRuntimeReplicatedData.AbilityHandle = FGameplayAbilitySpecHandle();
+
     // Remove the ability component
     this->AttackRuntimeReplicatedData.ASC = nullptr;
 }

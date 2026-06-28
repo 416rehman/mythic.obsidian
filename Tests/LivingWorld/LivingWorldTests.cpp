@@ -1814,6 +1814,13 @@ bool FMythicAttackActivationPlanTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("ability live, damage missing: apply damage"), Plan.bApplyDamage);
     TestFalse(TEXT("ability live: do NOT double-grant"), Plan.bGrantAbility);
 
+    // Re-equip cycle: OnItemDeactivated now resets the member handle to invalid (it previously left a stale valid handle
+    // after ClearAbility, so a re-equipped weapon read bAbilityHandleValid==true and never re-granted its ability). After a
+    // clean deactivate, re-activating the same weapon must look like a fresh equip again — grant the ability + re-apply damage.
+    Plan = UAttackFragment::PlanAttackActivation(/*bDamageApplied (reset on deactivate)*/ false, /*bAbilityHandleValid (reset on deactivate)*/ false);
+    TestTrue(TEXT("re-equip after a clean deactivate: GRANT the ability again"), Plan.bGrantAbility);
+    TestTrue(TEXT("re-equip after a clean deactivate: re-apply the damage attribute"), Plan.bApplyDamage);
+
     return true;
 }
 
