@@ -585,9 +585,12 @@ void UMythicLifeComponent::ReevaluateCrowdControl() {
     if (!AbilitySystemComponent) {
         return;
     }
-    // Death owns movement (StartDeath set MOVE_None + the Dead tag) — never resurrect movement from here. Respawn
-    // clears the ASC tags, so a respawned owner re-evaluates cleanly when a CC tag next changes.
-    if (AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_DEAD)) {
+    // Death AND the co-op down state own movement (StartDeath / EnterDownedState set MOVE_None) — never resurrect
+    // movement from here, or a recompute triggered while downed/dead (e.g. stamina exhaustion clearing, a Slow tag
+    // expiring) would let an incapacitated body walk. Respawn clears the ASC tags; ServerReviveFromDowned re-enables
+    // MOVE_Walking itself, so revive is unaffected.
+    if (AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_DEAD)
+        || AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_DOWNED)) {
         return;
     }
     ACharacter *Char = Cast<ACharacter>(GetOwner());
@@ -624,9 +627,12 @@ void UMythicLifeComponent::ReevaluateCrowdControl() {
         SpeedScale *= HasteMultiplier;
     }
 
-    // apply sprinting speed scaling factor if active
+    // apply sprinting speed scaling factor if active — but NOT while exhausted (winded from a stamina-gated sprint;
+    // the GAS.State.Exhausted tag is set server-side in ApplyRegen when stamina hits 0, cleared on recovery). When
+    // stamina-gated sprint is disabled the Exhausted tag is never set, so this is byte-identical to before.
     const FGameplayTag SprintTag = GAS_STATE_SPRINTING;
-    if (SprintTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(SprintTag)) {
+    if (SprintTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(SprintTag)
+        && !AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_EXHAUSTED)) {
         if (const UMythicAttributeSet_Utility *Util = AbilitySystemComponent->GetSet<UMythicAttributeSet_Utility>()) {
             SpeedScale *= (1.0f + Util->GetBonusSprintSpeed());
         }
@@ -774,12 +780,45 @@ void UMythicLifeComponent::ApplyRegen() {
         }
     }
 
-    // Stamina (recharges from 0 — no alive gate).
+    // Stamina — drained by active sprinting (when stamina-gated sprint is enabled), else regenerated. The drain folds
+    // into this existing server-side regen tick (no per-pawn sprint tick).
     if (const UMythicAttributeSet_Utility *Util = AbilitySystemComponent->GetSet<UMythicAttributeSet_Utility>()) {
+        const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+        const bool bSprintGate = Settings && Settings->bStaminaGatedSprint;
+        const bool bExhausted = AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_EXHAUSTED);
+
+        // Actively sprinting = the sprint tag is set AND the owner is actually moving (no drain while standing still).
+        // Also require a POSITIVE stamina regen rate: an entity that can never regen must never exhaust, or it would be
+        // stranded winded forever (the recovery path needs regen to climb back over the threshold). Fails open.
+        bool bActivelySprinting = false;
+        if (bSprintGate && !bExhausted && Util->GetStaminaRegenRate() > 0.0f
+            && AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_SPRINTING)) {
+            const AActor *OwnerActor = GetOwner();
+            bActivelySprinting = OwnerActor && OwnerActor->GetVelocity().SizeSquared2D() > 100.0f; // (10 cm/s)^2 — ignore drift
+        }
+
         const float Cur = Util->GetCurrentStamina();
-        const float NewV = ComputeRegenTarget(Cur, Util->GetMaxStamina(), Util->GetStaminaRegenRate(), RegenInterval);
-        if (NewV > Cur) {
-            AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Utility::GetCurrentStaminaAttribute(), NewV);
+        if (bActivelySprinting) {
+            const float NewV = ComputeStaminaAfterSprintTick(Cur, Settings->SprintStaminaDrainPerSecond, RegenInterval);
+            if (NewV != Cur) {
+                AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Utility::GetCurrentStaminaAttribute(), NewV);
+            }
+            if (NewV <= 0.0f) {
+                // Winded: suppress the sprint speed bonus (ReevaluateCrowdControl reads GAS.State.Exhausted) until recovery.
+                AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_EXHAUSTED, 1);
+                ReevaluateCrowdControl();
+            }
+        }
+        else {
+            const float NewV = ComputeRegenTarget(Cur, Util->GetMaxStamina(), Util->GetStaminaRegenRate(), RegenInterval);
+            if (NewV > Cur) {
+                AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Utility::GetCurrentStaminaAttribute(), NewV);
+            }
+            // Recover from exhaustion once stamina climbs back to the hysteresis threshold → sprint allowed again.
+            if (bSprintGate && bExhausted && ShouldRecoverFromExhaustion(NewV, Util->GetMaxStamina(), Settings->SprintRecoverStaminaFraction)) {
+                AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_EXHAUSTED, 0);
+                ReevaluateCrowdControl();
+            }
         }
     }
 }
@@ -790,6 +829,19 @@ float UMythicLifeComponent::ComputeRegenTarget(float Cur, float Max, float Rate,
         return Cur;
     }
     return FMath::Min(Cur + Rate * DeltaSeconds, Max); // clamp so a large rate/interval never overshoots Max
+}
+
+float UMythicLifeComponent::ComputeStaminaAfterSprintTick(float Cur, float DrainPerSecond, float DeltaSeconds) {
+    const float Drain = FMath::Max(0.0f, DrainPerSecond) * FMath::Max(0.0f, DeltaSeconds);
+    return FMath::Max(0.0f, Cur - Drain); // never below 0 (the exhaustion floor)
+}
+
+bool UMythicLifeComponent::ShouldRecoverFromExhaustion(float CurrentStamina, float MaxStamina, float RecoverFraction) {
+    if (MaxStamina <= 0.0f) {
+        return false; // no stamina pool — never sprint-recovers (degenerate)
+    }
+    const float Threshold = FMath::Clamp(RecoverFraction, 0.0f, 1.0f) * MaxStamina;
+    return CurrentStamina >= Threshold;
 }
 
 bool UMythicLifeComponent::CanSpendStamina(float Cost) const {
@@ -844,6 +896,7 @@ void UMythicLifeComponent::ClearGameplayTags() const {
     if (AbilitySystemComponent && AbilitySystemComponent->IsOwnerActorAuthoritative()) {
         AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DYING, 0);
         AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DEAD, 0);
+        AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_EXHAUSTED, 0); // a respawned/pooled owner is never stuck winded
     }
 }
 

@@ -229,6 +229,15 @@ public:
     // math shared by Health/Shield/Stamina in ApplyRegen. Pure + static for unit testing.
     static float ComputeRegenTarget(float Cur, float Max, float Rate, float DeltaSeconds);
 
+    // Stamina remaining after one sprint-drain tick: Cur − DrainPerSecond×DeltaSeconds, clamped to >= 0 (both inputs
+    // clamped non-negative). The drain counterpart to ComputeRegenTarget. Pure + static for unit testing.
+    static float ComputeStaminaAfterSprintTick(float Cur, float DrainPerSecond, float DeltaSeconds);
+
+    // True once an exhausted entity's stamina has recovered to RecoverFraction of max — the hysteresis gate that
+    // re-enables sprinting. A non-positive Max never recovers (degenerate / no stamina). RecoverFraction clamped [0,1].
+    // Pure + static for unit testing.
+    static bool ShouldRecoverFromExhaustion(float CurrentStamina, float MaxStamina, float RecoverFraction);
+
     // Tear down any in-flight stagger: clear the recovery timer, remove the transient loose STUNNED tag, reset state.
     // Single source for the stagger teardown — called by StartDeath, Uninitialize, AND the pool-return path (so a
     // reused actor never inherits a leftover loose STUNNED tag + orphaned timer and spawn movement-frozen).

@@ -7,6 +7,7 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DYING, "GAS.State.Dying", "The entity i
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DOWNED, "GAS.State.Downed", "Co-op down state: incapacitated but revivable (bleeds out if not revived)");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_INCOMBAT, "GAS.State.InCombat", "The entity was damaged recently");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_SPRINTING, "GAS.State.Sprinting", "The entity is sprinting");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_EXHAUSTED, "GAS.State.Exhausted", "Winded: out of stamina from sprinting — the sprint speed bonus is suppressed until stamina recovers");
 
 /** Debuffs */
 // Debuff tags are applied to entities to indicate that they are suffering from a negative effect, such as bleeding, burning, etc.

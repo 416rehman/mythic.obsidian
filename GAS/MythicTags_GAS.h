@@ -9,6 +9,7 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DYING); // The entity is dying
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DOWNED); // Co-op down state: incapacitated but revivable (bleeds out if not revived)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_INCOMBAT); // The entity was damaged recently
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_SPRINTING); // The entity is sprinting
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_EXHAUSTED); // Winded: out of stamina from sprinting — the sprint speed bonus is suppressed until stamina recovers
 
 /** Debuffs */
 // Debuff tags are applied to entities to indicate that they are suffering from a negative effect, such as bleeding, burning, etc.

@@ -137,6 +137,25 @@ public:
     float EncumbranceOverloadedSpeedMultiplier = 0.3f;
 
     /**
+     * Stamina-gated sprint. When FALSE (default), sprinting (GAS.State.Sprinting) is free — today's behaviour. When TRUE,
+     * sprinting drains CurrentStamina while the entity is actually moving; at 0 stamina the sprint speed bonus is
+     * suppressed (GAS.State.Exhausted) until stamina recovers to SprintRecoverStaminaFraction of max. Server-authoritative,
+     * folded into the existing stamina-regen tick + the move-speed recompute. Gameplay-affecting → off by default.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Stamina")
+    bool bStaminaGatedSprint = false;
+
+    /** Stamina drained per second while actively sprinting (only applied when bStaminaGatedSprint is true). */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Stamina", meta = (ClampMin = "0.0"))
+    float SprintStaminaDrainPerSecond = 15.0f;
+
+    /** Fraction of max stamina an exhausted entity must recover before it can sprint again — hysteresis so the sprint
+     *  speed bonus doesn't stutter on/off at 0 stamina. A small positive ClampMin enforces a non-zero recovery band
+     *  (a 0 fraction would re-allow sprinting the instant stamina leaves 0, flickering the bonus every regen tick). */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Stamina", meta = (ClampMin = "0.05", ClampMax = "1.0"))
+    float SprintRecoverStaminaFraction = 0.2f;
+
+    /**
      * Aggro/threat targeting. When FALSE (default), an NPC targets the geometrically CLOSEST perceived hostile (today's
      * behaviour). When TRUE, each NPC accrues per-attacker threat (damage dealt to it) and targets the HIGHEST-threat
      * perceived hostile instead — letting a tank hold aggro off the squishy players. Falls back to closest when no
