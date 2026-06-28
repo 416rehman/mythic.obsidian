@@ -245,6 +245,11 @@ public:
     UFUNCTION(Server, Reliable, WithValidation, Category = "Vendor")
     void ServerVendorRepair(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex);
 
+    // Repair ALL damaged items in one of the player's OWN inventories at the vendor (a "Repair All" convenience), charging
+    // cheapest-first within the player's budget. Same authorization as single repair (vendor open + in range, own inventory).
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Vendor")
+    void ServerVendorRepairAll(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory);
+
     // deploy the placeable item in SlotIndex of Inventory into the world
     UFUNCTION(Server, Reliable, WithValidation, Category = "Placeable")
     void ServerDeployPlaceable(UMythicInventoryComponent *Inventory, int32 SlotIndex, FVector AimOrigin, FVector AimDirection);

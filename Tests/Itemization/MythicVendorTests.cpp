@@ -251,5 +251,42 @@ bool FMythicVendorRepairTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("NothingToRepair is shown to the player"), IsFailureWorthShowing(EMythicTradeResult::NothingToRepair));
     TestFalse(TEXT("NothingToRepair has a message"), DescribeResult(EMythicTradeResult::NothingToRepair).IsEmpty());
 
+    // ── ComputeRepairAllPlan(CostsAscending, PayerCurrency): cheapest-first greedy "Repair All" ──
+    {
+        const FMythicTradePlan P = ComputeRepairAllPlan(TArray<int32>{}, 100);
+        TestEqual(TEXT("repair-all: nothing damaged -> NothingToRepair"), P.Result, EMythicTradeResult::NothingToRepair);
+        TestEqual(TEXT("repair-all: nothing repaired"), P.Quantity, 0);
+    }
+    {
+        const FMythicTradePlan P = ComputeRepairAllPlan(TArray<int32>{10, 20, 30}, 100);
+        TestEqual(TEXT("repair-all: affords everything -> Success"), P.Result, EMythicTradeResult::Success);
+        TestEqual(TEXT("repair-all: all 3 repaired"), P.Quantity, 3);
+        TestEqual(TEXT("repair-all: total 60"), P.TotalPrice, 60);
+    }
+    {
+        const FMythicTradePlan P = ComputeRepairAllPlan(TArray<int32>{10, 20, 30}, 35); // 10+20=30 ok, +30=60 > 35
+        TestEqual(TEXT("repair-all: partial budget -> Success (subset)"), P.Result, EMythicTradeResult::Success);
+        TestEqual(TEXT("repair-all: cheapest 2 repaired"), P.Quantity, 2);
+        TestEqual(TEXT("repair-all: spent 30, not over budget"), P.TotalPrice, 30);
+    }
+    {
+        const FMythicTradePlan P = ComputeRepairAllPlan(TArray<int32>{50, 60}, 40); // can't afford even the cheapest
+        TestEqual(TEXT("repair-all: can't afford the cheapest -> InsufficientFunds"), P.Result, EMythicTradeResult::InsufficientFunds);
+        TestEqual(TEXT("repair-all: nothing repaired / charged"), P.Quantity, 0);
+        TestEqual(TEXT("repair-all: no charge on reject"), P.TotalPrice, 0);
+    }
+    {
+        const FMythicTradePlan P = ComputeRepairAllPlan(TArray<int32>{10, 20, 30}, 60); // exact budget
+        TestEqual(TEXT("repair-all: exact budget repairs all"), P.Quantity, 3);
+        TestEqual(TEXT("repair-all: exact spend"), P.TotalPrice, 60);
+    }
+    {
+        // Overflow guard: two MAX_int32 costs with a MAX_int32 budget — the 64-bit running total stops after the first
+        // (MAX + MAX would overflow int32 but is compared in int64), so it never wraps and over-charges.
+        const FMythicTradePlan P = ComputeRepairAllPlan(TArray<int32>{MAX_int32, MAX_int32}, MAX_int32);
+        TestEqual(TEXT("repair-all: huge costs don't overflow the budget compare"), P.Quantity, 1);
+        TestEqual(TEXT("repair-all: charges exactly the one affordable cost"), P.TotalPrice, MAX_int32);
+    }
+
     return true;
 }

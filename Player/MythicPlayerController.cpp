@@ -524,6 +524,30 @@ void AMythicPlayerController::ServerVendorRepair_Implementation(AMythicVendor *V
     }
 }
 
+bool AMythicPlayerController::ServerVendorRepairAll_Validate(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory) {
+    return Vendor != nullptr && PlayerInventory != nullptr;
+}
+
+void AMythicPlayerController::ServerVendorRepairAll_Implementation(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory) {
+    if (!HasAuthority() || !Vendor || !PlayerInventory) {
+        return;
+    }
+    if (!CanPlayerAccessInventory(Vendor->GetContainerInventory())) {
+        return; // vendor not open to this player / out of range
+    }
+    if (!GetAllInventoryComponents().Contains(PlayerInventory)) {
+        return; // the target inventory must be one of the requester's OWN
+    }
+    const FMythicTradePlan Plan = Vendor->Server_ExecuteRepairAll(this, PlayerInventory);
+    // Whole-batch feedback (not per item): a generic "items repaired" durability beat on Success, else the failure reason.
+    if (Plan.Result == EMythicTradeResult::Success) {
+        ClientNotifyItemDurability(FText::GetEmpty(), EMythicItemDurabilityBeat::Repaired);
+    }
+    else if (MythicTrade::IsFailureWorthShowing(Plan.Result)) {
+        ClientNotifyTradeResult(Plan.Result);
+    }
+}
+
 bool AMythicPlayerController::ServerDeployPlaceable_Validate(UMythicInventoryComponent *Inventory, int32 SlotIndex,
                                                             FVector AimOrigin, FVector AimDirection) {
     return Inventory != nullptr && SlotIndex >= 0 && !AimDirection.IsNearlyZero();

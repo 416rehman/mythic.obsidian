@@ -112,6 +112,11 @@ public:
     // restores durability via the item's UDurabilityFragment::ServerRepair. Returns the trade plan. Requires bCanRepair.
     FMythicTradePlan Server_ExecuteRepair(AMythicPlayerController *Payer, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex);
 
+    // SERVER: repair ALL damaged repairable items in PlayerInventory, cheapest-first within the player's budget
+    // (MythicTrade::ComputeRepairAllPlan). Charges the total once + restores each. Returns a plan: Quantity = items
+    // repaired, TotalPrice = total charged, Result = Success / NothingToRepair / InsufficientFunds. Requires bCanRepair.
+    FMythicTradePlan Server_ExecuteRepairAll(AMythicPlayerController *Payer, UMythicInventoryComponent *PlayerInventory);
+
 protected:
     // Price multiplier applied to an item's Value when a player BUYS from this vendor (1.0 = at value, >1.0 = margin).
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vendor", meta = (ClampMin = "0.0"))

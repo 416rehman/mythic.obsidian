@@ -48,6 +48,12 @@ namespace MythicTrade {
     MYTHIC_API FMythicTradePlan PlanRepair(int32 CurrentDurability, int32 MaxDurability, int32 ItemValue,
                                            float RepairCostFraction, int32 PayerCurrency);
 
+    // Pure REPAIR-ALL decision: given each damaged item's full-repair cost (POSITIVE, sorted ASCENDING) and the payer's
+    // currency, repair the most items the budget allows (cheapest-first greedy prefix). Quantity = item count, TotalPrice =
+    // total charged (64-bit accumulation so a huge cost list can't overflow the budget compare). NothingToRepair on an empty
+    // list, InsufficientFunds when not even the cheapest is affordable, else Success (possibly a partial subset).
+    MYTHIC_API FMythicTradePlan ComputeRepairAllPlan(const TArray<int32> &CostsAscending, int32 PayerCurrency);
+
     // True when a result is a hard reject (Quantity always 0) worth a player-facing failure callout. Successes and partial
     // fills are NOT failures (the "+N" pickup callout already covers them). InvalidRequest stays silent (a bad-input edge).
     MYTHIC_API bool IsFailureWorthShowing(EMythicTradeResult Result);

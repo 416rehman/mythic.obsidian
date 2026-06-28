@@ -319,6 +319,10 @@ FMythicTradePlan AMythicVendor::Server_ExecuteRepair(AMythicPlayerController *Pa
         Reject.Result = EMythicTradeResult::NothingToRepair; // the item has no durability to repair
         return Reject;
     }
+    if (Def->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY)) {
+        Reject.Result = EMythicTradeResult::NothingToRepair; // currency is never a repair target (charging would free it)
+        return Reject;
+    }
 
     const FMythicTradePlan Plan = MythicTrade::PlanRepair(Dura->GetCurrentDurability(), Dura->GetMaxDurability(),
                                                           Def->Value, RepairCostFraction, SumPlayerCurrency(Payer));
@@ -330,5 +334,69 @@ FMythicTradePlan AMythicVendor::Server_ExecuteRepair(AMythicPlayerController *Pa
     // mirrors the wear chokepoint — the durability fragment's only writers are the authoritative wear/repair edges.
     ChargePlayerCurrency(Payer, Plan.TotalPrice);
     const_cast<UDurabilityFragment *>(Dura)->ServerRepair(Plan.Quantity); // restores Missing points, clears broken, replicates
+    return Plan;
+}
+
+FMythicTradePlan AMythicVendor::Server_ExecuteRepairAll(AMythicPlayerController *Payer, UMythicInventoryComponent *PlayerInventory) {
+    FMythicTradePlan Reject;
+    if (!HasAuthority() || !Payer || !PlayerInventory || !bCanRepair) {
+        return Reject; // InvalidRequest (incl. a vendor that doesn't repair)
+    }
+
+    // Gather damaged, repairable items + their full-repair cost (mirrors the single-item GetRepairCostForItem).
+    struct FRepairCandidate {
+        const UDurabilityFragment *Dura = nullptr;
+        int32 RestoreAmount = 0;
+        int32 Cost = 0;
+    };
+    TArray<FRepairCandidate> Candidates;
+    const int32 NumSlots = PlayerInventory->GetNumSlots();
+    for (int32 i = 0; i < NumSlots; ++i) {
+        UMythicItemInstance *Item = PlayerInventory->GetItem(i);
+        if (!Item) {
+            continue;
+        }
+        const UItemDefinition *Def = Item->GetItemDefinition();
+        const UDurabilityFragment *Dura = Item->GetFragment<UDurabilityFragment>();
+        if (!Def || !Dura) {
+            continue;
+        }
+        if (Def->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY)) {
+            continue; // never treat spendable currency as a repair target — the charge would destroy this very instance,
+                      // freeing the fragment we'd then ServerRepair (mirrors the sell path's currency guard)
+        }
+        const int32 Cur = Dura->GetCurrentDurability();
+        const int32 Max = Dura->GetMaxDurability();
+        if (Max <= 0 || Cur >= Max) {
+            continue; // no durability concept / already full
+        }
+        const int32 Cost = MythicCurrency::ComputeRepairCost(Cur, Max, Def->Value, RepairCostFraction);
+        if (Cost <= 0) {
+            continue; // valueless/free — left to the single-item path; the batch is for priced repairs
+        }
+        Candidates.Add({Dura, Max - Cur, Cost});
+    }
+    if (Candidates.Num() == 0) {
+        Reject.Result = EMythicTradeResult::NothingToRepair;
+        return Reject;
+    }
+
+    // Cheapest-first so a limited budget repairs the MOST items; the pure plan decides how many are affordable.
+    Candidates.Sort([](const FRepairCandidate &A, const FRepairCandidate &B) { return A.Cost < B.Cost; });
+    TArray<int32> CostsAscending;
+    CostsAscending.Reserve(Candidates.Num());
+    for (const FRepairCandidate &C : Candidates) {
+        CostsAscending.Add(C.Cost);
+    }
+    const FMythicTradePlan Plan = MythicTrade::ComputeRepairAllPlan(CostsAscending, SumPlayerCurrency(Payer));
+    if (Plan.Result != EMythicTradeResult::Success) {
+        return Plan; // InsufficientFunds (can't afford even the cheapest) — nothing charged or mutated
+    }
+
+    // Charge the total once, then restore the cheapest Plan.Quantity items (synchronous; affordability decided this frame).
+    ChargePlayerCurrency(Payer, Plan.TotalPrice);
+    for (int32 i = 0; i < Plan.Quantity && i < Candidates.Num(); ++i) {
+        const_cast<UDurabilityFragment *>(Candidates[i].Dura)->ServerRepair(Candidates[i].RestoreAmount);
+    }
     return Plan;
 }

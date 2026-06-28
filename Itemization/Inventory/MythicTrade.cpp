@@ -103,6 +103,29 @@ namespace MythicTrade {
         return Plan;
     }
 
+    FMythicTradePlan ComputeRepairAllPlan(const TArray<int32> &CostsAscending, int32 PayerCurrency) {
+        FMythicTradePlan Plan;
+        if (CostsAscending.Num() == 0) {
+            Plan.Result = EMythicTradeResult::NothingToRepair; // no damaged items to repair
+            return Plan;
+        }
+        // Cheapest-first greedy prefix (the caller passes positive costs sorted ascending). 64-bit running total so a long
+        // / large cost list can't overflow the budget compare (gotcha (e)); TotalPrice fits int32 since it's <= PayerCurrency.
+        int64 Running = 0;
+        int32 Count = 0;
+        for (const int32 Cost : CostsAscending) {
+            if (Running + static_cast<int64>(Cost) > static_cast<int64>(PayerCurrency)) {
+                break; // can't afford this (or any costlier) item — stop
+            }
+            Running += Cost;
+            ++Count;
+        }
+        Plan.Quantity = Count;
+        Plan.TotalPrice = static_cast<int32>(Running);
+        Plan.Result = (Count > 0) ? EMythicTradeResult::Success : EMythicTradeResult::InsufficientFunds;
+        return Plan;
+    }
+
     bool IsFailureWorthShowing(EMythicTradeResult Result) {
         switch (Result) {
             case EMythicTradeResult::InsufficientFunds:
