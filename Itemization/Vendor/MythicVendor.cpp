@@ -13,6 +13,8 @@
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
 #include "Itemization/MythicTags_Inventory.h" // ITEMIZATION_TYPE_CURRENCY
 #include "Player/MythicPlayerController.h"
+#include "Player/MythicPlayerState.h"                 // resolve the patron's standing component
+#include "Player/MythicFactionStandingComponent.h"    // EMythicStandingTier + TierForStanding + GetStanding
 
 namespace {
     // Sum a buyer's currency across all of their inventories (the player's wallet may span backpack + extra bags).
@@ -82,23 +84,72 @@ AMythicVendor::AMythicVendor() {
     // AMythicStorageContainer constructor. The vendor adds only the priced trade behaviour on top.
 }
 
-int32 AMythicVendor::GetBuyPriceForSlot(int32 StockSlotIndex, int32 Quantity) const {
+float AMythicVendor::ComputeReputationAdjustedMultiplier(float BaseMultiplier, EMythicStandingTier Tier, float HostileMult, float NeutralMult, float FriendlyMult) {
+    float TierMult;
+    switch (Tier) {
+    case EMythicStandingTier::Hostile:
+        TierMult = HostileMult;
+        break;
+    case EMythicStandingTier::Friendly:
+        TierMult = FriendlyMult;
+        break;
+    case EMythicStandingTier::Neutral:
+    default:
+        TierMult = NeutralMult;
+        break;
+    }
+    return BaseMultiplier * FMath::Max(0.0f, TierMult);
+}
+
+float AMythicVendor::EnforceBuyAboveSellRate(float EffBuyMultiplier, float EffSellRate) {
+    // The sell side pays floor(Value × clamp(EffSellRate,0,1)); flooring the buy multiplier at that same clamped rate
+    // guarantees ceil(Value × BuyPriceMultiplier × EffBuyMultiplier) ≥ the sell payout, so buy ≥ sell (no money pump).
+    return FMath::Max(EffBuyMultiplier, FMath::Clamp(EffSellRate, 0.0f, 1.0f));
+}
+
+EMythicStandingTier AMythicVendor::ResolvePatronTier(AMythicPlayerController *Patron) const {
+    if (!Patron || !VendorFaction.IsValid()) {
+        return EMythicStandingTier::Neutral; // no patron / unpriced vendor → reputation pricing is a no-op
+    }
+    const AMythicPlayerState *PS = Patron->GetPlayerState<AMythicPlayerState>();
+    const UMythicFactionStandingComponent *Standing = PS ? PS->GetFactionStanding() : nullptr;
+    if (!Standing) {
+        return EMythicStandingTier::Neutral;
+    }
+    return Standing->TierForStanding(Standing->GetStanding(VendorFaction));
+}
+
+float AMythicVendor::ResolveEffectiveBuyMultiplier(AMythicPlayerController *Buyer) const {
+    const EMythicStandingTier Tier = ResolvePatronTier(Buyer);
+    const float EffBuy = ComputeReputationAdjustedMultiplier(BuyPriceMultiplier, Tier,
+        ReputationPricing.HostileBuyMultiplier, ReputationPricing.NeutralBuyMultiplier, ReputationPricing.FriendlyBuyMultiplier);
+    const float EffSell = ComputeReputationAdjustedMultiplier(SellRate, Tier,
+        ReputationPricing.HostileSellMultiplier, ReputationPricing.NeutralSellMultiplier, ReputationPricing.FriendlySellMultiplier);
+    return EnforceBuyAboveSellRate(EffBuy, EffSell); // same-tier buy>sell guard
+}
+
+float AMythicVendor::ResolveEffectiveSellRate(AMythicPlayerController *Seller) const {
+    return ComputeReputationAdjustedMultiplier(SellRate, ResolvePatronTier(Seller),
+        ReputationPricing.HostileSellMultiplier, ReputationPricing.NeutralSellMultiplier, ReputationPricing.FriendlySellMultiplier);
+}
+
+int32 AMythicVendor::GetBuyPriceForSlot(int32 StockSlotIndex, int32 Quantity, AMythicPlayerController *Buyer) const {
     if (UMythicInventoryComponent *Stock = GetContainerInventory()) {
         if (UMythicItemInstance *Item = Stock->GetItem(StockSlotIndex)) {
             if (const UItemDefinition *Def = Item->GetItemDefinition()) {
-                return MythicCurrency::ComputeBuyPrice(Def->Value, Quantity, BuyPriceMultiplier);
+                return MythicCurrency::ComputeBuyPrice(Def->Value, Quantity, ResolveEffectiveBuyMultiplier(Buyer));
             }
         }
     }
     return 0;
 }
 
-int32 AMythicVendor::GetSalePriceForItem(const UMythicItemInstance *Item, int32 Quantity) const {
+int32 AMythicVendor::GetSalePriceForItem(const UMythicItemInstance *Item, int32 Quantity, AMythicPlayerController *Seller) const {
     if (!CurrencyItemDefinition || !Item) {
         return 0; // a vendor with no currency def can't buy from players
     }
     if (const UItemDefinition *Def = Item->GetItemDefinition()) {
-        return MythicCurrency::ComputeSalePrice(Def->Value, Quantity, SellRate);
+        return MythicCurrency::ComputeSalePrice(Def->Value, Quantity, ResolveEffectiveSellRate(Seller));
     }
     return 0;
 }
@@ -136,8 +187,12 @@ FMythicTradePlan AMythicVendor::Server_ExecuteBuy(AMythicPlayerController *Buyer
         }
     }
 
+    // Fold the buyer's reputation tier into the buy markup (server-authoritative; the display accessor mirrors this).
+    // ResolveEffectiveBuyMultiplier also floors the result above the same-tier sell rate (no buy-low/resell money pump).
+    const float EffBuyMult = ResolveEffectiveBuyMultiplier(Buyer);
+
     // Decide the outcome + quantity from live inputs (pure, unit-tested). Charges nothing on a hard reject.
-    const FMythicTradePlan Plan = MythicTrade::PlanBuy(Quantity, Def->Value, BuyPriceMultiplier, StockItem->GetStacks(),
+    const FMythicTradePlan Plan = MythicTrade::PlanBuy(Quantity, Def->Value, EffBuyMult, StockItem->GetStacks(),
                                                        SumPlayerCurrency(Buyer), Target != nullptr);
     if (Plan.Quantity <= 0) {
         return Plan; // hard reject — nothing mutated; the result carries the reason
@@ -194,9 +249,13 @@ FMythicTradePlan AMythicVendor::Server_ExecuteSell(AMythicPlayerController *Sell
         return Reject; // malformed item
     }
 
+    // Fold the seller's reputation tier into the sell rate (server-authoritative). PlanSell still clamps the effective
+    // rate to [0,1], so a friendly bonus never pays above item value (no money pump).
+    const float EffSellRate = ResolveEffectiveSellRate(Seller);
+
     // Decide the outcome (pure). Gated inputs: stacks, value, sell rate, vendor-can-pay, take-rule, currency guard.
     const bool bIsCurrency = Def->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY);
-    const FMythicTradePlan Plan = MythicTrade::PlanSell(Quantity, Item->GetStacks(), Def->Value, SellRate,
+    const FMythicTradePlan Plan = MythicTrade::PlanSell(Quantity, Item->GetStacks(), Def->Value, EffSellRate,
                                                         CurrencyItemDefinition != nullptr,
                                                         PlayerInventory->CanPlayerTakeFromSlot(PlayerSlotIndex), bIsCurrency);
     if (Plan.Quantity <= 0) {

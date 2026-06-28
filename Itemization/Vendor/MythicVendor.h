@@ -12,12 +12,34 @@
 #include "CoreMinimal.h"
 #include "Itemization/Inventory/MythicTrade.h" // EMythicTradeResult + FMythicTradePlan (buy/sell outcome)
 #include "Itemization/Storage/MythicStorageContainer.h"
+#include "World/LivingWorld/LivingWorldTypes.h" // FMythicFactionId (the vendor's faction, for reputation pricing)
 #include "MythicVendor.generated.h"
 
 class UItemDefinition;
 class UMythicItemInstance;
 class UMythicInventoryComponent;
 class AMythicPlayerController;
+enum class EMythicStandingTier : uint8; // resolved from the buyer's standing toward VendorFaction
+
+// Per-standing-tier price multipliers for a vendor. Each scales the vendor's base BuyPriceMultiplier (buy) or SellRate
+// (sell) by the buyer's reputation tier toward the vendor's faction. 1.0 = no effect (the default → reputation pricing
+// is opt-in: a default vendor with an unset VendorFaction or all-1.0 mults prices identically to before). Friendly < 1
+// on buy = a loyalty discount; Hostile > 1 = a markup (or refusal at a high enough value).
+USTRUCT(BlueprintType)
+struct FVendorReputationPricing {
+    GENERATED_BODY()
+
+    // Multipliers on the BUY price by buyer tier (×BuyPriceMultiplier). <1 = discount, >1 = surcharge.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "0.0")) float HostileBuyMultiplier = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "0.0")) float NeutralBuyMultiplier = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "0.0")) float FriendlyBuyMultiplier = 1.0f;
+
+    // Multipliers on the SELL payout by seller tier (×SellRate). >1 = better payout for liked players. The sale-price
+    // decision still clamps the effective rate to [0,1], so a friendly bonus never pays above item value.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "0.0")) float HostileSellMultiplier = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "0.0")) float NeutralSellMultiplier = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "0.0")) float FriendlySellMultiplier = 1.0f;
+};
 
 UCLASS()
 class MYTHIC_API AMythicVendor : public AMythicStorageContainer {
@@ -30,12 +52,36 @@ public:
     //     unaffordable buys / show the payout. The server independently re-validates on the actual transaction. ---
 
     // What it costs the player to buy Quantity units of the item in StockSlotIndex (0 if the slot is empty/unpriced).
+    // Pass Buyer to fold in their reputation discount/surcharge (null = base price; the UI should pass the local PC so the
+    // shown price matches what the server charges).
     UFUNCTION(BlueprintPure, Category = "Vendor")
-    int32 GetBuyPriceForSlot(int32 StockSlotIndex, int32 Quantity) const;
+    int32 GetBuyPriceForSlot(int32 StockSlotIndex, int32 Quantity, AMythicPlayerController *Buyer = nullptr) const;
 
     // What this vendor pays the player for Quantity units of Item (0 if worthless/unsellable or no currency def set).
+    // Pass Seller to fold in their reputation payout bonus (null = base payout).
     UFUNCTION(BlueprintPure, Category = "Vendor")
-    int32 GetSalePriceForItem(const UMythicItemInstance *Item, int32 Quantity) const;
+    int32 GetSalePriceForItem(const UMythicItemInstance *Item, int32 Quantity, AMythicPlayerController *Seller = nullptr) const;
+
+    // Pure: scale BaseMultiplier by the per-tier multiplier selected for Tier (clamped non-negative). Hostile/Neutral/
+    // Friendly map to the three args; any other value falls back to NeutralMult. Static + unit-testable.
+    static float ComputeReputationAdjustedMultiplier(float BaseMultiplier, EMythicStandingTier Tier, float HostileMult, float NeutralMult, float FriendlyMult);
+
+    // Pure: the effective buy multiplier floored so the buy price can never fall to/below the SAME-tier sell payout (else
+    // a liked player could money-pump by buying then reselling to the same vendor). EffSellRate is clamped [0,1] to match
+    // ComputeSalePrice. Floors EffBuyMultiplier at that clamped rate → buy rate ≥ sell rate → buy price ≥ sell payout.
+    // Static + unit-testable.
+    static float EnforceBuyAboveSellRate(float EffBuyMultiplier, float EffSellRate);
+
+    // Resolve the buyer/seller's standing tier toward this vendor's faction (Neutral when no controller / no standing
+    // component / unset VendorFaction — i.e. reputation pricing is a no-op by default). Reads the COND_OwnerOnly standing
+    // on the player state, so it's valid on both server (authoritative) and the owning client (display).
+    EMythicStandingTier ResolvePatronTier(AMythicPlayerController *Patron) const;
+
+    // The single source of truth for reputation-adjusted rates (so the buy>sell guard can't be forgotten at a call site):
+    // resolve the patron's tier once, scale the base buy markup / sell rate, and (buy only) floor the buy multiplier above
+    // the same-tier sell rate. Used by both the display accessors and the authoritative Server_Execute paths.
+    float ResolveEffectiveBuyMultiplier(AMythicPlayerController *Buyer) const;
+    float ResolveEffectiveSellRate(AMythicPlayerController *Seller) const;
 
     // True iff this vendor can pay out (has a currency definition assigned). UI can hide the Sell tab when false.
     UFUNCTION(BlueprintPure, Category = "Vendor")
@@ -80,6 +126,16 @@ protected:
     // selling; when null this vendor only sells goods (player sells are rejected — honest, never a fake payout).
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vendor")
     TObjectPtr<UItemDefinition> CurrencyItemDefinition = nullptr;
+
+    // Which faction's standing this vendor prices on (the buyer's reputation toward THIS faction selects the tier
+    // multiplier). Unset (default invalid) → reputation pricing is inert (Neutral tier → 1.0). Makes the otherwise
+    // debug-only EMythicStandingTier classification matter to the economy.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vendor|Reputation")
+    FMythicFactionId VendorFaction;
+
+    // Per-tier price multipliers (all 1.0 by default → no effect). See FVendorReputationPricing.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vendor|Reputation")
+    FVendorReputationPricing ReputationPricing;
 
     // When true (default) items a player sells are added to this vendor's stock so it can resell them; when the stock
     // can't accept them they are consumed and the player is still paid. Pure policy knob.

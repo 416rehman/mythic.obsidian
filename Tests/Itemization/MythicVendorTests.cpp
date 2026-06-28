@@ -6,6 +6,8 @@
 #include "Misc/AutomationTest.h"
 #include "Itemization/Inventory/MythicCurrency.h"
 #include "Itemization/Inventory/MythicTrade.h"
+#include "Itemization/Vendor/MythicVendor.h"               // ComputeReputationAdjustedMultiplier (reputation pricing)
+#include "Player/MythicFactionStandingComponent.h"         // EMythicStandingTier
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicVendorPricingTest,
@@ -47,6 +49,50 @@ bool FMythicVendorPricingTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("balance after an affordable spend"), ComputeBalanceAfterSpend(200, 125), 75);
     TestEqual(TEXT("an unaffordable spend is a no-op (never goes negative)"), ComputeBalanceAfterSpend(100, 125), 100);
     TestEqual(TEXT("a free spend (price 0) is a no-op"), ComputeBalanceAfterSpend(50, 0), 50);
+
+    return true;
+}
+
+// ─── Reputation pricing: the buyer/seller's standing tier scales the vendor's base markup / sell rate ───
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicVendorReputationPricingTest,
+    "Mythic.Itemization.Vendor.ReputationPricing",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicVendorReputationPricingTest::RunTest(const FString &Parameters) {
+    using namespace MythicCurrency;
+    using V = AMythicVendor;
+    using ET = EMythicStandingTier;
+
+    // ── ComputeReputationAdjustedMultiplier(Base, Tier, Hostile, Neutral, Friendly) = Base × clamp0(tier's mult) ──
+    TestEqual(TEXT("neutral with all-1.0 mults leaves the base unchanged"), V::ComputeReputationAdjustedMultiplier(1.25f, ET::Neutral, 1.0f, 1.0f, 1.0f), 1.25f);
+    TestEqual(TEXT("friendly discount scales the base down"), V::ComputeReputationAdjustedMultiplier(1.25f, ET::Friendly, 1.0f, 1.0f, 0.8f), 1.0f);
+    TestEqual(TEXT("hostile surcharge scales the base up"), V::ComputeReputationAdjustedMultiplier(1.25f, ET::Hostile, 1.5f, 1.0f, 0.8f), 1.875f);
+    TestEqual(TEXT("a negative tier mult clamps to 0"), V::ComputeReputationAdjustedMultiplier(1.25f, ET::Friendly, 1.0f, 1.0f, -2.0f), 0.0f);
+
+    // ── End-to-end: a Friendly buyer pays strictly less than a Neutral one for the same goods ──
+    const float NeutralBuyMult = V::ComputeReputationAdjustedMultiplier(1.25f, ET::Neutral, 1.0f, 1.0f, 0.8f);
+    const float FriendlyBuyMult = V::ComputeReputationAdjustedMultiplier(1.25f, ET::Friendly, 1.0f, 1.0f, 0.8f);
+    TestTrue(TEXT("friendly buy price < neutral buy price"), ComputeBuyPrice(100, 1, FriendlyBuyMult) < ComputeBuyPrice(100, 1, NeutralBuyMult));
+
+    // ── Economic integrity: an over-generous friendly SELL bonus still can't pay above item value (ComputeSalePrice
+    //    clamps the effective rate to [0,1]). Base sell 0.4 × friendly 5.0 = 2.0 → clamped → full value, not double. ──
+    const float PumpRate = V::ComputeReputationAdjustedMultiplier(0.4f, ET::Friendly, 1.0f, 1.0f, 5.0f);
+    TestEqual(TEXT("a runaway friendly sell bonus caps at full value (no money pump)"), ComputeSalePrice(100, 1, PumpRate), 100);
+
+    // ── Economic integrity (the OTHER side): an aggressive friendly BUY discount can't drop the buy price to/below the
+    //    same-tier sell payout (else buy-low + resell-to-same-vendor pumps money). EnforceBuyAboveSellRate floors the
+    //    effective buy multiplier at the clamped effective sell rate. Without it: BuyMult 1.25×0.3=0.375 < SellRate 0.4 →
+    //    buy 38 < sell 40 (a +2/unit pump). With the floor, the buy multiplier rises to 0.4 → buy 40 == sell 40 (no profit).
+    const float AggressiveBuyMult = V::ComputeReputationAdjustedMultiplier(1.25f, ET::Friendly, 1.0f, 1.0f, 0.3f); // 0.375
+    const float SameTierSellRate = V::ComputeReputationAdjustedMultiplier(0.4f, ET::Friendly, 1.0f, 1.0f, 1.0f);    // 0.4
+    const float GuardedBuyMult = V::EnforceBuyAboveSellRate(AggressiveBuyMult, SameTierSellRate);
+    const int32 GuardedBuy = ComputeBuyPrice(100, 1, GuardedBuyMult);
+    const int32 SameTierSell = ComputeSalePrice(100, 1, SameTierSellRate);
+    TestTrue(TEXT("guarded friendly buy price >= same-tier sell payout (no buy-low/resell pump)"), GuardedBuy >= SameTierSell);
+    TestEqual(TEXT("the guard lifts the buy mult to exactly the sell rate (0.4), not the raw 0.375"), GuardedBuyMult, 0.4f);
+    // The guard never RAISES a buy multiplier that is already safely above the sell rate (a normal modest discount).
+    TestEqual(TEXT("a modest discount above the sell rate is left untouched"), V::EnforceBuyAboveSellRate(1.0f, 0.4f), 1.0f);
 
     return true;
 }
