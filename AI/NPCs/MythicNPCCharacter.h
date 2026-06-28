@@ -281,9 +281,18 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic NPC | Dialogue")
     TObjectPtr<UObjectiveDefinition> QuestOffer;
 
+    // Designer-assigned identity tag for "talk to X" objectives (e.g. Objective.NPC.VillageElder). EMPTY (default) =
+    // this NPC is not a talk-objective target. When set, talking to this NPC fires GAS.Event.TalkedToNPC with this tag,
+    // advancing an objective whose RequiredPayloadTag matches. Distinct from GetNPCType() (a TYPE, not a unique id).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic NPC | Dialogue")
+    FGameplayTag QuestNpcTag;
+
 public:
     // The objective this NPC offers on interact (or null). Read server-side by the interacting player's PC.
     UObjectiveDefinition *GetQuestOffer() const { return QuestOffer; }
+
+    // The "talk to X" objective identity tag (or invalid). Read server-side by the interacting player's PC.
+    const FGameplayTag &GetQuestNpcTag() const { return QuestNpcTag; }
 
 protected:
     // Designer-authored barter offers. Non-empty = this NPC is a merchant (offers trade on secondary-interact).

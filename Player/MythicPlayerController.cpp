@@ -26,6 +26,7 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Proficiencies.h"
 #include "Proficiency/ProficiencyDefinition.h"
 #include "Objectives/ObjectiveTracker.h"
+#include "Objectives/MythicObjectiveEvents.h" // ShouldEmitObjectiveEvent gate for the talk-to-NPC emit
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "AI/Cognition/CognitiveBrainComponent.h" // NPC->CognitiveBrain->GetSourceEntity() for recruit
 #include "AI/Party/PartySubsystem.h" // server-authoritative party recruit
@@ -706,6 +707,13 @@ void AMythicPlayerController::ServerRequestNpcDialogue_Implementation(AMythicNPC
     }
 
     OfferNpcQuestIfAny(NPC);
+    // "Talk to X" objective trigger: SERVER-range-gated (the interaction scanner only enforces range client-side, so a
+    // modded client could otherwise complete a remote talk objective — mirrors the quest-offer / social / recruit /
+    // barter paths). No-op unless this NPC carries a QuestNpcTag. Repeatable — a talk objective is count-1, so re-talking
+    // a completed one is a harmless tracker no-op. The cosmetic dialogue line below stays ungated (a client-local bark).
+    if (NPC->IsActorInTradeRange(GetPawn())) {
+        NotifyTalkedToNPC(NPC->GetQuestNpcTag());
+    }
 
     // Pick the line on the server, where the NPC's brain dialogue context (Faction/Role/pressure) is real, then
     // deliver it back to this requesting client for display.
@@ -1067,6 +1075,23 @@ void AMythicPlayerController::NotifyItemAcquired(const UItemDefinition *ItemDef,
     }
     Payload.EventMagnitude = static_cast<float>(Quantity);
     ASC->HandleGameplayEvent(GAS_EVENT_ITEM_ACQUIRED, &Payload);
+}
+
+void AMythicPlayerController::NotifyTalkedToNPC(const FGameplayTag &NpcTag) {
+    UAbilitySystemComponent *ASC = GetAbilitySystemComponent();
+    const bool bServerAuth = ASC && ASC->IsOwnerActorAuthoritative();
+    if (!MythicObjectiveEvents::ShouldEmitObjectiveEvent(bServerAuth, NpcTag.IsValid())) {
+        return; // not server-authoritative, or this NPC isn't a talk-objective target
+    }
+    // Same GAS event bus the ObjectiveTracker listens on (mirrors NotifyItemAcquired); TargetTags carries the NPC's
+    // identity tag for the objective's RequiredPayloadTag filter.
+    FGameplayEventData Payload;
+    Payload.EventTag = GAS_EVENT_TALKED_TO_NPC;
+    Payload.Instigator = GetPawn();
+    Payload.Target = ASC->GetAvatarActor();
+    Payload.TargetTags.AddTag(NpcTag);
+    Payload.EventMagnitude = 1.0f;
+    ASC->HandleGameplayEvent(GAS_EVENT_TALKED_TO_NPC, &Payload);
 }
 
 void AMythicPlayerController::ClientShowShieldAbsorbed_Implementation(int32 Absorbed, bool bBroke) {

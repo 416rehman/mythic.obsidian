@@ -78,6 +78,10 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ITEM_ACQUIRED);
 // TargetTags carries the volume's LocationTag so the ObjectiveTracker can drive non-combat "reach/visit X" objectives.
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_REACHED_LOCATION);
 
+// A player talked to a quest-relevant NPC (one with a QuestNpcTag). Fired server-side on the player's ASC from the
+// dialogue path; TargetTags carries the NPC's QuestNpcTag so the ObjectiveTracker can drive "talk to X" objectives.
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_TALKED_TO_NPC);
+
 // The owner has started an attack
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ATTACK_BEGIN);
 // The owner has ended an attack

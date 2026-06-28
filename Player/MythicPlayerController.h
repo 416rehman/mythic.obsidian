@@ -346,6 +346,10 @@ public:
     // server: emit GAS.Event.Item.Acquired on player's ASC for objectives
     void NotifyItemAcquired(const UItemDefinition *ItemDef, int32 Quantity);
 
+    // server: emit GAS.Event.TalkedToNPC on the player's ASC (TargetTags = NpcTag) for "talk to X" objectives. No-op on
+    // an invalid NpcTag or off authority. Called from the dialogue path.
+    void NotifyTalkedToNPC(const FGameplayTag &NpcTag);
+
     // ---- Companion loss feedback ----
     // Float "<Name> has left your party" (grey) / "<Name> turns on you!" (red) over the departing companion — closing
     // the asymmetry where the recruit is celebrated but the loss is silent. Server (the party subsystem) → owning client.
