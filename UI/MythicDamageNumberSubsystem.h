@@ -392,10 +392,12 @@ public:
     void AddDamageNumber(FVector WorldLocation, float Magnitude, const FGameplayEffectContextHandle &EffectContext, bool bIsHeal = false);
 
     /**
-     * Add a damage number with explicit text and color.
+     * COMBAT-ONLY: float arbitrary combat status text off a world point (e.g. "Shield Broken!", "Winded!", "DODGE").
+     * Non-combat feedback must use AddScreenToast / AddScreenBanner / AddWorldCallout instead — this is deliberately not
+     * a generic floating-text hatch.
      */
     UFUNCTION(BlueprintCallable, Category = "Mythic|DamageNumbers")
-    void AddDamageNumberCustom(FVector WorldLocation, const FString &Text, FLinearColor Color, float Lifetime = 1.0f);
+    void AddCombatText(FVector WorldLocation, const FString &Text, FLinearColor Color, float Lifetime = 1.0f);
 
     // Float a "DODGE" callout using the configured DodgeColor (single source — no duplicated literal). Used by the
     // dodge feedback path, which must fire from the authority damage execution because a dodge negates the hit BEFORE

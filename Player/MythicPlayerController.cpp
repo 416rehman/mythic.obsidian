@@ -1178,10 +1178,24 @@ void AMythicPlayerController::ClientNotifyObjectiveResult_Implementation(const F
     FLinearColor Color(0.9f, 0.9f, 0.95f);
     float Duration = 2.0f;
     bool bMajor = false;
-    if (Category == EObjectiveNotifyCategory::Completed || Category == EObjectiveNotifyCategory::Assignment) {
+    if (Category == EObjectiveNotifyCategory::Completed) {
         Color = FLinearColor(1.0f, 0.85f, 0.1f);
         Duration = 3.0f;
-        bMajor = true; // completion / new assignment is a hero-banner beat
+        bMajor = true; // a genuine completion is a hero-banner beat
+    }
+    else if (Category == EObjectiveNotifyCategory::Assignment) {
+        // The Assignment bucket carries BOTH a real new assignment AND the rejection outcomes (out-of-range / locked /
+        // unavailable). Only a genuine assignment merits the celebratory hero banner; the rejections are minor
+        // informational beats and must NOT read as a celebration of a non-event.
+        if (OfferResult == EObjectiveOfferResult::Assigned) {
+            Color = FLinearColor(1.0f, 0.85f, 0.1f); // gold
+            Duration = 3.0f;
+            bMajor = true;
+        }
+        else {
+            Color = FLinearColor(0.8f, 0.8f, 0.85f); // calm grey — "can't here / locked"
+            Duration = 2.0f;
+        }
     }
     else if (Category == EObjectiveNotifyCategory::RewardResult) {
         Color = bRewardSucceeded ? FLinearColor(0.4f, 0.9f, 0.45f) : FLinearColor(0.9f, 0.2f, 0.15f);
@@ -1377,10 +1391,10 @@ void AMythicPlayerController::ClientShowShieldAbsorbed_Implementation(int32 Abso
     }
     if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
         const FVector Location = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 70.0f);
-        DamageNumbers->AddDamageNumberCustom(Location, FString::Printf(TEXT("%d"), Absorbed),
+        DamageNumbers->AddCombatText(Location, FString::Printf(TEXT("%d"), Absorbed),
                                              FLinearColor(0.4f, 0.7f, 1.0f), 1.0f); // light blue = absorbed by shield
         if (bBroke) {
-            DamageNumbers->AddDamageNumberCustom(Location + FVector(0.0f, 0.0f, 40.0f), TEXT("Shield Broken!"),
+            DamageNumbers->AddCombatText(Location + FVector(0.0f, 0.0f, 40.0f), TEXT("Shield Broken!"),
                                                  FLinearColor(0.6f, 0.9f, 1.0f), 1.5f); // bright cyan, the dramatic beat
         }
     }
@@ -1412,10 +1426,10 @@ void AMythicPlayerController::ClientNotifyExhausted_Implementation(bool bExhaust
     if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
         const FVector Loc = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 90.0f);
         if (bExhausted) {
-            DamageNumbers->AddDamageNumberCustom(Loc, TEXT("Winded!"), FLinearColor(1.0f, 0.55f, 0.1f), 1.2f); // orange warning
+            DamageNumbers->AddCombatText(Loc, TEXT("Winded!"), FLinearColor(1.0f, 0.55f, 0.1f), 1.2f); // orange warning
         }
         else {
-            DamageNumbers->AddDamageNumberCustom(Loc, TEXT("Recovered"), FLinearColor(0.45f, 0.9f, 0.45f), 1.0f); // green relief
+            DamageNumbers->AddCombatText(Loc, TEXT("Recovered"), FLinearColor(0.45f, 0.9f, 0.45f), 1.0f); // green relief
         }
     }
 }

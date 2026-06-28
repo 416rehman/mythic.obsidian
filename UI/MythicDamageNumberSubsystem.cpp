@@ -125,10 +125,10 @@ void UMythicDamageNumberSubsystem::AddDodgeNumber(FVector WorldLocation) {
     // Reuse the configured DodgeColor (designer-tunable data asset) — single source, no duplicated literal; the named
     // FLinearColor::Gray is only a degenerate fallback when no config asset is set. "DODGE" is the conventional miss label.
     const FLinearColor DodgeColor = Config ? Config->DodgeColor : FLinearColor::Gray;
-    AddDamageNumberCustom(WorldLocation, TEXT("DODGE"), DodgeColor, 1.0f);
+    AddCombatText(WorldLocation, TEXT("DODGE"), DodgeColor, 1.0f);
 }
 
-void UMythicDamageNumberSubsystem::AddDamageNumberCustom(FVector WorldLocation, const FString &Text, FLinearColor Color, float Lifetime) {
+void UMythicDamageNumberSubsystem::AddCombatText(FVector WorldLocation, const FString &Text, FLinearColor Color, float Lifetime) {
     CleanupExpired(); // bound the pool even when the HUD isn't rendering (AddDodgeNumber routes through here too)
     FMythicDamageNumberData NewData;
     NewData.WorldLocation = WorldLocation;
