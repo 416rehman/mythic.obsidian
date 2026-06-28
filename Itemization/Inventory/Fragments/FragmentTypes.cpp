@@ -28,6 +28,10 @@ bool FRolledAttributeSpec::Serialize(FArchive &Ar) {
 
     // On load: reconstruct attribute from strings
     if (Ar.IsLoading()) {
+        // bIsApplied is intentionally NOT persisted — it is force-reset here so OnItemActivated re-applies the damage onto a
+        // fresh (non-persisted) attribute, yielding the correct single contribution. NOTE: this "reset on load" is the OPPOSITE
+        // of UAttackFragment::bEquipEventEmitted, which MUST persist (it gates a once-per-equip objective emit). Do not move
+        // a persist-required flag into this custom serializer.
         bIsApplied = false;
 
         if (!AttributeSetClassName.IsEmpty() && !AttributePropertyName.IsEmpty()) {

@@ -1293,6 +1293,25 @@ void AMythicPlayerController::NotifyItemUsed(const UItemDefinition *ItemDef, int
     ASC->HandleGameplayEvent(GAS_EVENT_ITEM_USED, &Payload);
 }
 
+void AMythicPlayerController::NotifyItemEquipped(const UItemDefinition *ItemDef) {
+    UAbilitySystemComponent *ASC = GetAbilitySystemComponent();
+    const bool bServerAuth = ASC && ASC->IsOwnerActorAuthoritative();
+    const bool bValidPayload = ItemDef && ItemDef->ItemType.IsValid();
+    if (!MythicObjectiveEvents::ShouldEmitObjectiveEvent(bServerAuth, bValidPayload)) {
+        return; // not server-authoritative, or the item has no type tag to match an "equip N <type>" objective
+    }
+    // Same GAS event bus the ObjectiveTracker listens on (mirrors NotifyItemUsed). The caller (attack fragment) gates this
+    // on a per-item SaveGame marker so it fires once per genuine equip (not on save-restore re-activation).
+    FGameplayEventData Payload;
+    Payload.EventTag = GAS_EVENT_ITEM_EQUIPPED;
+    Payload.Instigator = GetPawn();
+    Payload.Target = ASC->GetAvatarActor();
+    Payload.OptionalObject = ItemDef;
+    Payload.TargetTags.AddTag(ItemDef->ItemType);
+    Payload.EventMagnitude = 1.0f;
+    ASC->HandleGameplayEvent(GAS_EVENT_ITEM_EQUIPPED, &Payload);
+}
+
 void AMythicPlayerController::NotifyTalkedToNPC(const FGameplayTag &NpcTag) {
     UAbilitySystemComponent *ASC = GetAbilitySystemComponent();
     const bool bServerAuth = ASC && ASC->IsOwnerActorAuthoritative();

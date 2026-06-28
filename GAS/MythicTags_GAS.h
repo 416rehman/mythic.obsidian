@@ -87,6 +87,11 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_TALKED_TO_NPC);
 // "collect N" — using is a different verb than obtaining).
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ITEM_USED);
 
+// A player EQUIPPED a weapon (first genuine equip, gated by a per-item SaveGame marker so save-restore re-activation does
+// NOT re-fire it). Fired server-side on the player's ASC; TargetTags carries the item's ItemType so the ObjectiveTracker
+// can drive "equip N <type>" objectives. (Weapon-equip only for now; other equipment fragments would emit the same way.)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ITEM_EQUIPPED);
+
 // The owner has started an attack
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ATTACK_BEGIN);
 // The owner has ended an attack

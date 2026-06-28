@@ -4,6 +4,9 @@
 #include "AttackFragment.h"
 
 #include "GameModes/GameState/MythicGameState.h"
+#include "GameFramework/Pawn.h"                        // resolve the equipping player's controller
+#include "Player/MythicPlayerController.h"             // NotifyItemEquipped -> "equip N <type>" objectives
+#include "Itemization/Inventory/MythicItemInstance.h"  // GetItemDefinition for the equip event payload
 
 class AMythicGameState;
 
@@ -97,6 +100,25 @@ void UAttackFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
     else {
         UE_LOG(Myth, Log, TEXT("  -> Attack ability already live, skipping grant"));
     }
+
+    // Weapon EQUIPPED → drive "equip N <type>" objectives, ONCE per genuine equip. Gated on the per-item SaveGame marker
+    // (NOT bGrantAbility): idempotent across re-activation AND save-restore (a restored equipped weapon has marker==true →
+    // no re-emit, no over-count). Reset on unequip so a real re-equip emits again. Equipping never destroys the instance,
+    // so reading its definition here is safe. Resolve the owning player via the avatar's controller (AI casts to null).
+    // The marker is per-FRAGMENT but OnActiveItem runs OnItemActivated on EVERY fragment, so a (malformed) weapon with two
+    // UAttackFragments would emit twice for one equip. Guard on identity: only the CANONICAL first attack fragment (the one
+    // GetFragment<T> returns — what every other consumer reads) emits, so the equip counts once regardless of fragment count.
+    const bool bIsCanonicalAttackFragment = ItemInstance && ItemInstance->GetFragment<UAttackFragment>() == this;
+    if (bIsCanonicalAttackFragment && !this->AttackRuntimeReplicatedData.bEquipEventEmitted) {
+        this->AttackRuntimeReplicatedData.bEquipEventEmitted = true;
+        if (AActor *Avatar = ASC->GetAvatarActor()) {
+            if (const APawn *Pawn = Cast<APawn>(Avatar)) {
+                if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(Pawn->GetController())) {
+                    PC->NotifyItemEquipped(ItemInstance->GetItemDefinition());
+                }
+            }
+        }
+    }
 }
 
 void UAttackFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
@@ -105,6 +127,10 @@ void UAttackFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
     UE_LOG(Myth, Log, TEXT("UAttackFragment::OnItemDeactivated: Fragment=%s, Item=%s"),
            *GetName(),
            *GetNameSafe(ItemInstance));
+
+    // Unequipped → re-arm the equip event so the NEXT genuine equip emits again. MUST be before the !bIsApplied early-return
+    // below, so the marker always resets on unequip regardless of the damage-state branch.
+    this->AttackRuntimeReplicatedData.bEquipEventEmitted = false;
 
     auto ASC = this->AttackRuntimeReplicatedData.ASC;
     if (!ASC) {
