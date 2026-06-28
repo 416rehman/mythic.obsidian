@@ -7,8 +7,9 @@
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Inventory/MythicCurrency.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
+#include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h" // repair target
 #include "Itemization/Inventory/MythicItemInstance.h"
-#include "Itemization/Inventory/MythicTrade.h" // PlanBuy / PlanSell pure decisions
+#include "Itemization/Inventory/MythicTrade.h" // PlanBuy / PlanSell / PlanRepair pure decisions
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
 #include "Itemization/MythicTags_Inventory.h" // ITEMIZATION_TYPE_CURRENCY
 #include "Player/MythicPlayerController.h"
@@ -26,6 +27,23 @@ namespace {
             }
         }
         return Total;
+    }
+
+    // Spend Amount of the player's currency across all their inventories. The caller must have verified affordability
+    // this frame (server is single-threaded, so no concurrent spend can race this). Shared by buy + repair.
+    void ChargePlayerCurrency(AMythicPlayerController *Player, int32 Amount) {
+        if (!Player || Amount <= 0) {
+            return;
+        }
+        int32 Remaining = Amount;
+        for (UMythicInventoryComponent *Inv : Player->GetAllInventoryComponents()) {
+            if (Remaining <= 0) {
+                break;
+            }
+            if (Inv) {
+                Remaining -= Inv->SpendCurrency(Remaining);
+            }
+        }
     }
 
     // Grant Amount currency to a player's inventory, minting it from CurrencyDef. Splits across multiple item instances
@@ -147,17 +165,8 @@ FMythicTradePlan AMythicVendor::Server_ExecuteBuy(AMythicPlayerController *Buyer
         ToMake -= Chunk;
     }
 
-    // Goods are ready — now the irreversible mutations. Charge the buyer across their inventories (affordability already
-    // decided this frame; server is single-threaded so no concurrent spend can race this).
-    int32 Remaining = Plan.TotalPrice;
-    for (UMythicInventoryComponent *Inv : Buyer->GetAllInventoryComponents()) {
-        if (Remaining <= 0) {
-            break;
-        }
-        if (Inv) {
-            Remaining -= Inv->SpendCurrency(Remaining);
-        }
-    }
+    // Goods are ready — now the irreversible mutations. Charge the buyer (affordability already decided this frame).
+    ChargePlayerCurrency(Buyer, Plan.TotalPrice);
 
     // Remove from stock and deliver the pre-created goods (fresh def-based; per-instance affix preservation on resale is
     // a logged follow-up). AddItem fires the "+N <Item>" pickup callout + drives "collect N" objectives.
@@ -217,5 +226,50 @@ FMythicTradePlan AMythicVendor::Server_ExecuteSell(AMythicPlayerController *Sell
 
     // Pay the proceeds (minted — infinite vendor funds). AddItem inside GrantCurrency fires the "+N <Currency>" callout.
     GrantCurrency(PlayerInventory, Seller, Plan.TotalPrice, CurrencyItemDefinition, Loot);
+    return Plan;
+}
+
+int32 AMythicVendor::GetRepairCostForItem(UMythicItemInstance *Item) const {
+    if (!bCanRepair || !Item) {
+        return 0;
+    }
+    const UItemDefinition *Def = Item->GetItemDefinition();
+    if (!Def) {
+        return 0;
+    }
+    if (const UDurabilityFragment *Dura = Item->GetFragment<UDurabilityFragment>()) {
+        return MythicCurrency::ComputeRepairCost(Dura->GetCurrentDurability(), Dura->GetMaxDurability(), Def->Value, RepairCostFraction);
+    }
+    return 0;
+}
+
+FMythicTradePlan AMythicVendor::Server_ExecuteRepair(AMythicPlayerController *Payer, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex) {
+    FMythicTradePlan Reject;
+    if (!HasAuthority() || !Payer || !PlayerInventory || !bCanRepair) {
+        return Reject; // InvalidRequest (incl. a vendor that doesn't offer repair — the UI shouldn't surface it)
+    }
+
+    UMythicItemInstance *Item = PlayerInventory->GetItem(PlayerSlotIndex);
+    if (!Item) {
+        Reject.Result = EMythicTradeResult::NothingToRepair;
+        return Reject;
+    }
+    const UItemDefinition *Def = Item->GetItemDefinition();
+    const UDurabilityFragment *Dura = Item->GetFragment<UDurabilityFragment>();
+    if (!Def || !Dura) {
+        Reject.Result = EMythicTradeResult::NothingToRepair; // the item has no durability to repair
+        return Reject;
+    }
+
+    const FMythicTradePlan Plan = MythicTrade::PlanRepair(Dura->GetCurrentDurability(), Dura->GetMaxDurability(),
+                                                          Def->Value, RepairCostFraction, SumPlayerCurrency(Payer));
+    if (Plan.Result != EMythicTradeResult::Success) {
+        return Plan; // NothingToRepair / InsufficientFunds — nothing charged or mutated
+    }
+
+    // Charge then restore (affordability decided this frame; one synchronous server call, no async gap). const_cast
+    // mirrors the wear chokepoint — the durability fragment's only writers are the authoritative wear/repair edges.
+    ChargePlayerCurrency(Payer, Plan.TotalPrice);
+    const_cast<UDurabilityFragment *>(Dura)->ServerRepair(Plan.Quantity); // restores Missing points, clears broken, replicates
     return Plan;
 }

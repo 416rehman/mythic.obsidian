@@ -493,6 +493,36 @@ void AMythicPlayerController::ServerVendorSell_Implementation(AMythicVendor *Ven
     }
 }
 
+bool AMythicPlayerController::ServerVendorRepair_Validate(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex) {
+    return Vendor != nullptr && PlayerInventory != nullptr && PlayerSlotIndex >= 0;
+}
+
+void AMythicPlayerController::ServerVendorRepair_Implementation(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory,
+                                                               int32 PlayerSlotIndex) {
+    if (!HasAuthority() || !Vendor || !PlayerInventory) {
+        return;
+    }
+    if (!CanPlayerAccessInventory(Vendor->GetContainerInventory())) {
+        return;
+    }
+    if (!GetAllInventoryComponents().Contains(PlayerInventory)) {
+        return;
+    }
+    const FMythicTradePlan Plan = Vendor->Server_ExecuteRepair(this, PlayerInventory, PlayerSlotIndex);
+    if (Plan.Result == EMythicTradeResult::Success) {
+        // Success feedback: float "<Item> repaired" over the player. The durability fragment defers its Repaired beat to
+        // the repair initiator (ServerRepair can't resolve the owner for a detached instance), so the initiator fires it.
+        if (UMythicItemInstance *Item = PlayerInventory->GetItem(PlayerSlotIndex)) {
+            if (const UItemDefinition *Def = Item->GetItemDefinition()) {
+                ClientNotifyItemDurability(Def->Name, EMythicItemDurabilityBeat::Repaired);
+            }
+        }
+    }
+    else if (MythicTrade::IsFailureWorthShowing(Plan.Result)) {
+        ClientNotifyTradeResult(Plan.Result);
+    }
+}
+
 bool AMythicPlayerController::ServerDeployPlaceable_Validate(UMythicInventoryComponent *Inventory, int32 SlotIndex,
                                                             FVector AimOrigin, FVector AimDirection) {
     return Inventory != nullptr && SlotIndex >= 0 && !AimDirection.IsNearlyZero();

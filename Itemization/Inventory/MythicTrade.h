@@ -19,6 +19,7 @@ enum class EMythicTradeResult : uint8 {
     NotForSale,        // traded nothing; the item is unpriced (Value 0 / multiplier 0)
     NotSellable,       // traded nothing; worthless, equipped/bound, or a currency item
     VendorCannotPay,   // traded nothing; the vendor has no currency definition assigned
+    NothingToRepair,   // repair: the item is already at full durability, or has no durability to repair
     InvalidRequest     // traded nothing; null / non-positive arguments
 };
 
@@ -40,6 +41,12 @@ namespace MythicTrade {
     // the source slot's player-take rule; bIsCurrencyItem blocks selling currency for currency.
     MYTHIC_API FMythicTradePlan PlanSell(int32 RequestedQty, int32 AvailableStacks, int32 UnitValue, float SellRate,
                                          bool bHasCurrencyDef, bool bCanTake, bool bIsCurrencyItem);
+
+    // Pure REPAIR decision. Cost is priced via MythicCurrency::ComputeRepairCost. On Success, Quantity = the durability
+    // points to restore (Max − Current) and TotalPrice = the cost. NothingToRepair when already full / no durability;
+    // InsufficientFunds when the payer can't afford it. A 0 cost (valueless item / free) still succeeds and restores.
+    MYTHIC_API FMythicTradePlan PlanRepair(int32 CurrentDurability, int32 MaxDurability, int32 ItemValue,
+                                           float RepairCostFraction, int32 PayerCurrency);
 
     // True when a result is a hard reject (Quantity always 0) worth a player-facing failure callout. Successes and partial
     // fills are NOT failures (the "+N" pickup callout already covers them). InvalidRequest stays silent (a bad-input edge).

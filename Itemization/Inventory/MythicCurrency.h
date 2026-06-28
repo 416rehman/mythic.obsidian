@@ -27,4 +27,10 @@ namespace MythicCurrency {
     // and then × Quantity, so a bulk buy costs exactly the same as that many single buys (no buy-1-at-a-time rounding
     // exploit). Non-positive UnitValue (unpriced / not-for-sale) or Quantity → 0; PriceMultiplier clamped non-negative.
     MYTHIC_API int32 ComputeBuyPrice(int32 UnitValue, int32 Quantity, float PriceMultiplier);
+
+    // The currency cost to fully repair an item: ceil(ItemValue × (Missing/Max) × RepairCostFraction), where Missing =
+    // Max − Current durability. Scales with how worn the item is and its value — a barely-scratched legendary costs
+    // little, a fully-broken one costs RepairCostFraction of its value. 0 when already full, valueless, no durability,
+    // or a non-positive fraction (free repair). RepairCostFraction clamped non-negative.
+    MYTHIC_API int32 ComputeRepairCost(int32 CurrentDurability, int32 MaxDurability, int32 ItemValue, float RepairCostFraction);
 }

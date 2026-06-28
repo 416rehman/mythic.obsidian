@@ -240,6 +240,11 @@ public:
     UFUNCTION(Server, Reliable, WithValidation, Category = "Vendor")
     void ServerVendorSell(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex, int32 Quantity);
 
+    // Repair the durable item in PlayerSlotIndex (one of the player's OWN inventories) at the vendor (blacksmith) for
+    // currency. Authorized like sell (vendor open + in range, source is the player's own).
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Vendor")
+    void ServerVendorRepair(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex);
+
     // deploy the placeable item in SlotIndex of Inventory into the world
     UFUNCTION(Server, Reliable, WithValidation, Category = "Placeable")
     void ServerDeployPlaceable(UMythicInventoryComponent *Inventory, int32 SlotIndex, FVector AimOrigin, FVector AimDirection);

@@ -33,4 +33,16 @@ namespace MythicCurrency {
         const int32 UnitPrice = FMath::Max(0, FMath::CeilToInt(static_cast<float>(UnitValue) * Mult));
         return UnitPrice * Quantity;
     }
+
+    int32 ComputeRepairCost(int32 CurrentDurability, int32 MaxDurability, int32 ItemValue, float RepairCostFraction) {
+        if (MaxDurability <= 0 || ItemValue <= 0 || RepairCostFraction <= 0.0f) {
+            return 0;
+        }
+        const int32 Missing = FMath::Clamp(MaxDurability - CurrentDurability, 0, MaxDurability);
+        if (Missing <= 0) {
+            return 0; // already at full durability — nothing to charge for
+        }
+        const float Frac = static_cast<float>(Missing) / static_cast<float>(MaxDurability);
+        return FMath::Max(0, FMath::CeilToInt(static_cast<float>(ItemValue) * Frac * FMath::Max(0.0f, RepairCostFraction)));
+    }
 }

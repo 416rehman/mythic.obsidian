@@ -79,6 +79,30 @@ namespace MythicTrade {
         return Plan;
     }
 
+    FMythicTradePlan PlanRepair(int32 CurrentDurability, int32 MaxDurability, int32 ItemValue, float RepairCostFraction,
+                                int32 PayerCurrency) {
+        FMythicTradePlan Plan;
+        if (MaxDurability <= 0) {
+            Plan.Result = EMythicTradeResult::NothingToRepair; // item has no durability concept
+            return Plan;
+        }
+        const int32 Missing = FMath::Clamp(MaxDurability - CurrentDurability, 0, MaxDurability);
+        if (Missing <= 0) {
+            Plan.Result = EMythicTradeResult::NothingToRepair; // already at full durability
+            return Plan;
+        }
+        const int32 Cost = MythicCurrency::ComputeRepairCost(CurrentDurability, MaxDurability, ItemValue, RepairCostFraction);
+        if (Cost > 0 && !MythicCurrency::CanAfford(PayerCurrency, Cost)) {
+            Plan.Result = EMythicTradeResult::InsufficientFunds;
+            return Plan;
+        }
+        // Success — restore the full missing amount (a 0 cost is a free repair of a valueless item, still allowed).
+        Plan.Result = EMythicTradeResult::Success;
+        Plan.Quantity = Missing;
+        Plan.TotalPrice = Cost;
+        return Plan;
+    }
+
     bool IsFailureWorthShowing(EMythicTradeResult Result) {
         switch (Result) {
             case EMythicTradeResult::InsufficientFunds:
@@ -87,6 +111,7 @@ namespace MythicTrade {
             case EMythicTradeResult::NotForSale:
             case EMythicTradeResult::NotSellable:
             case EMythicTradeResult::VendorCannotPay:
+            case EMythicTradeResult::NothingToRepair:
                 return true;
             default:
                 return false; // Success / PartialStock / PartialFunds / InvalidRequest -> no failure callout
@@ -107,6 +132,8 @@ namespace MythicTrade {
                 return LOCTEXT("NotSellable", "Can't sell that");
             case EMythicTradeResult::VendorCannotPay:
                 return LOCTEXT("VendorCannotPay", "Merchant can't pay");
+            case EMythicTradeResult::NothingToRepair:
+                return LOCTEXT("NothingToRepair", "Nothing to repair");
             default:
                 return FText::GetEmpty();
         }

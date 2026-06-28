@@ -41,6 +41,15 @@ public:
     UFUNCTION(BlueprintPure, Category = "Vendor")
     bool CanVendorBuyFromPlayers() const { return CurrencyItemDefinition != nullptr; }
 
+    // True iff this vendor offers repair (a blacksmith). UI hides the Repair option when false.
+    UFUNCTION(BlueprintPure, Category = "Vendor")
+    bool CanVendorRepair() const { return bCanRepair; }
+
+    // The currency cost to fully repair Item at this vendor (0 if it has no durability, is already full, or this vendor
+    // doesn't repair). For the shop UI to show the price / gray out an unaffordable repair.
+    UFUNCTION(BlueprintPure, Category = "Vendor")
+    int32 GetRepairCostForItem(UMythicItemInstance *Item) const;
+
     // SERVER: buy Quantity units of StockSlotIndex for Buyer. The pure MythicTrade::PlanBuy decides the outcome + quantity
     // (clamped to stock, affordability, and the buyer's free space); this charges the currency and delivers the goods.
     // Returns the full trade plan (result reason + units traded + coins) so the caller can fire the player callout.
@@ -51,6 +60,11 @@ public:
     // decides the outcome; this removes the goods (absorbed into stock when bAbsorbSoldItems + space, else consumed) and
     // pays proceeds in CurrencyItemDefinition. Returns the trade plan.
     FMythicTradePlan Server_ExecuteSell(AMythicPlayerController *Seller, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex, int32 Quantity);
+
+    // SERVER: repair the item in Payer's PlayerSlotIndex for currency. MythicTrade::PlanRepair decides the outcome
+    // (NothingToRepair when already full / no durability, InsufficientFunds when too poor); this charges the cost and
+    // restores durability via the item's UDurabilityFragment::ServerRepair. Returns the trade plan. Requires bCanRepair.
+    FMythicTradePlan Server_ExecuteRepair(AMythicPlayerController *Payer, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex);
 
 protected:
     // Price multiplier applied to an item's Value when a player BUYS from this vendor (1.0 = at value, >1.0 = margin).
@@ -71,4 +85,14 @@ protected:
     // can't accept them they are consumed and the player is still paid. Pure policy knob.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vendor")
     bool bAbsorbSoldItems = true;
+
+    // When true this vendor is a blacksmith that repairs durable items for currency (default false — a general goods
+    // vendor only trades). Repair uses CurrencyItemDefinition's wallet model (spends the player's currency).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vendor")
+    bool bCanRepair = false;
+
+    // Fraction of an item's Value charged to repair it from fully-broken to full (scaled down by how much durability is
+    // actually missing). 0.5 = a fully-broken item costs half its value to mend. Clamped non-negative by the cost decision.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vendor", meta = (ClampMin = "0.0"))
+    float RepairCostFraction = 0.5f;
 };

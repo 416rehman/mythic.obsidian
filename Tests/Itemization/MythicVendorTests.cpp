@@ -148,3 +148,62 @@ bool FMythicVendorTradePlanTest::RunTest(const FString &Parameters) {
 
     return true;
 }
+
+// ─── Repair pricing + decision (ComputeRepairCost / PlanRepair): the blacksmith currency-repair brain ───
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicVendorRepairTest,
+    "Mythic.Itemization.Vendor.Repair",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicVendorRepairTest::RunTest(const FString &Parameters) {
+    using namespace MythicCurrency;
+    using namespace MythicTrade;
+
+    // ── ComputeRepairCost(Current, Max, Value, Fraction) = ceil(Value * (Missing/Max) * Fraction) ──
+    TestEqual(TEXT("fully broken costs Fraction*Value"), ComputeRepairCost(0, 100, 100, 0.5f), 50);
+    TestEqual(TEXT("half worn costs half of that"), ComputeRepairCost(50, 100, 100, 0.5f), 25);
+    TestEqual(TEXT("repair cost rounds up the fractional coin"), ComputeRepairCost(90, 100, 33, 0.5f), 2); // 33*0.1*0.5=1.65 -> 2
+    TestEqual(TEXT("already full -> 0"), ComputeRepairCost(100, 100, 100, 0.5f), 0);
+    TestEqual(TEXT("valueless item -> 0 (free)"), ComputeRepairCost(0, 100, 0, 0.5f), 0);
+    TestEqual(TEXT("no durability (max 0) -> 0"), ComputeRepairCost(0, 0, 100, 0.5f), 0);
+    TestEqual(TEXT("zero fraction -> 0"), ComputeRepairCost(0, 100, 100, 0.0f), 0);
+
+    // ── PlanRepair(Current, Max, Value, Fraction, PayerCurrency) ──
+    {
+        const FMythicTradePlan P = PlanRepair(0, 100, 100, 0.5f, 200);
+        TestEqual(TEXT("repair success result"), P.Result, EMythicTradeResult::Success);
+        TestEqual(TEXT("repair restores all missing points"), P.Quantity, 100);
+        TestEqual(TEXT("repair charges the cost"), P.TotalPrice, 50);
+    }
+    {
+        const FMythicTradePlan P = PlanRepair(75, 100, 100, 0.5f, 200);
+        TestEqual(TEXT("partial-wear success"), P.Result, EMythicTradeResult::Success);
+        TestEqual(TEXT("restores 25 missing points"), P.Quantity, 25);
+        TestEqual(TEXT("costs ceil(100*0.25*0.5)=13"), P.TotalPrice, 13);
+    }
+    {
+        const FMythicTradePlan P = PlanRepair(100, 100, 100, 0.5f, 200);
+        TestEqual(TEXT("already full -> NothingToRepair"), P.Result, EMythicTradeResult::NothingToRepair);
+        TestEqual(TEXT("nothing restored"), P.Quantity, 0);
+    }
+    {
+        const FMythicTradePlan P = PlanRepair(0, 0, 100, 0.5f, 200);
+        TestEqual(TEXT("no durability -> NothingToRepair"), P.Result, EMythicTradeResult::NothingToRepair);
+    }
+    {
+        const FMythicTradePlan P = PlanRepair(0, 100, 100, 0.5f, 40); // cost 50, only 40 coins
+        TestEqual(TEXT("can't afford repair -> InsufficientFunds"), P.Result, EMythicTradeResult::InsufficientFunds);
+        TestEqual(TEXT("no repair on reject"), P.Quantity, 0);
+    }
+    {
+        const FMythicTradePlan P = PlanRepair(50, 100, 0, 0.5f, 0); // valueless -> free repair even with 0 coins
+        TestEqual(TEXT("free repair of a valueless item succeeds"), P.Result, EMythicTradeResult::Success);
+        TestEqual(TEXT("free repair restores missing points"), P.Quantity, 50);
+        TestEqual(TEXT("free repair costs 0"), P.TotalPrice, 0);
+    }
+
+    TestTrue(TEXT("NothingToRepair is shown to the player"), IsFailureWorthShowing(EMythicTradeResult::NothingToRepair));
+    TestFalse(TEXT("NothingToRepair has a message"), DescribeResult(EMythicTradeResult::NothingToRepair).IsEmpty());
+
+    return true;
+}
