@@ -821,6 +821,15 @@ void UMythicLifeComponent::ApplyRegen() {
             }
         }
     }
+
+    // Status-buildup decay (Souls-like falloff) — folds into this same server tick so unrefreshed Burn/Bleed/Poison/etc.
+    // buildup sheds over time instead of accumulating forever. No-op at the default 0 rate; the Defense helper also
+    // skips any buildup already at 0, so an unafflicted entity pays only a handful of reads.
+    if (const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>()) {
+        if (Settings->StatusBuildupDecayPerSecond > 0.0f) {
+            UMythicAttributeSet_Defense::DecayAllBuildups(AbilitySystemComponent, Settings->StatusBuildupDecayPerSecond, RegenInterval);
+        }
+    }
 }
 
 float UMythicLifeComponent::ComputeRegenTarget(float Cur, float Max, float Rate, float DeltaSeconds) {

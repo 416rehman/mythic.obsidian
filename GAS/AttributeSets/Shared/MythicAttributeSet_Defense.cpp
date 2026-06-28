@@ -251,3 +251,37 @@ void UMythicAttributeSet_Defense::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, LifePerKill, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, IncomingDamageMultiplier, COND_None, REPNOTIFY_Always);
 }
+
+float UMythicAttributeSet_Defense::ComputeBuildupAfterDecay(float Cur, float DecayPerSecond, float DeltaSeconds) {
+    const float Decay = FMath::Max(0.0f, DecayPerSecond) * FMath::Max(0.0f, DeltaSeconds);
+    return FMath::Max(0.0f, Cur - Decay); // never below 0 (a buildup floor)
+}
+
+void UMythicAttributeSet_Defense::DecayAllBuildups(UAbilitySystemComponent *ASC, float DecayPerSecond, float DeltaSeconds) {
+    if (!ASC || DecayPerSecond <= 0.0f || DeltaSeconds <= 0.0f) {
+        return;
+    }
+    const UMythicAttributeSet_Defense *Def = ASC->GetSet<UMythicAttributeSet_Defense>();
+    if (!Def) {
+        return;
+    }
+
+    // All six status buildups decay toward 0. Only write an attribute that actually has buildup, so an unafflicted
+    // entity (the common case) costs six reads and zero writes/replication.
+    const TPair<FGameplayAttribute, float> Buildups[] = {
+        {GetBurnBuildupAttribute(), Def->GetBurnBuildup()},
+        {GetBleedBuildupAttribute(), Def->GetBleedBuildup()},
+        {GetPoisonBuildupAttribute(), Def->GetPoisonBuildup()},
+        {GetSlowBuildupAttribute(), Def->GetSlowBuildup()},
+        {GetFreezeBuildupAttribute(), Def->GetFreezeBuildup()},
+        {GetStunBuildupAttribute(), Def->GetStunBuildup()},
+    };
+    for (const TPair<FGameplayAttribute, float> &B : Buildups) {
+        if (B.Value > 0.0f) {
+            const float NewV = ComputeBuildupAfterDecay(B.Value, DecayPerSecond, DeltaSeconds);
+            if (NewV != B.Value) {
+                ASC->SetNumericAttributeBase(B.Key, NewV);
+            }
+        }
+    }
+}

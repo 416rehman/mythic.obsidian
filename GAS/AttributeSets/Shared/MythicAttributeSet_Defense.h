@@ -124,6 +124,17 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, LifePerKill);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, IncomingDamageMultiplier);
 
+    // ── Status buildup decay ──
+    // Buildup remaining after one decay step: Cur − DecayPerSecond×DeltaSeconds, clamped to >= 0 (inputs clamped
+    // non-negative). Pure + static for unit testing. Closes the "sub-threshold buildup persists forever" gap — without
+    // decay, scattered status hits accumulate buildup across unrelated encounters and never fall off.
+    static float ComputeBuildupAfterDecay(float Cur, float DecayPerSecond, float DeltaSeconds);
+
+    // SERVER (authority-gated by the caller): decay all six status buildups (Burn/Bleed/Poison/Slow/Freeze/Stun) on ASC's
+    // Defense set toward 0 by DecayPerSecond over DeltaSeconds. No-op when DecayPerSecond <= 0 (the default) or a buildup
+    // is already 0 (so an unafflicted entity costs only six reads). Driven from the existing LifeComponent regen tick.
+    static void DecayAllBuildups(UAbilitySystemComponent *ASC, float DecayPerSecond, float DeltaSeconds);
+
     // replication
     UFUNCTION()
     virtual void OnRep_Armor(const FGameplayAttributeData &OldArmor);

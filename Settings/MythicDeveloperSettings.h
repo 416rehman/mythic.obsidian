@@ -167,4 +167,13 @@ public:
     /** Threat accrued per point of damage dealt to an NPC (the damage→threat multiplier). */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.0"))
     float ThreatPerDamage = 1.0f;
+
+    /**
+     * Status-buildup decay rate (Burn/Bleed/Poison/Slow/Freeze/Stun buildup points shed per second). 0 (default) = no
+     * decay — sub-threshold buildup persists indefinitely (today's behaviour). A positive value gives the Souls-like
+     * falloff: scattered hits no longer accumulate status across unrelated encounters; you must SUSTAIN hits to cross
+     * the threshold. Applied server-side in the existing regen tick to every afflicted entity. Recommend ~5-15 to enable.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.0"))
+    float StatusBuildupDecayPerSecond = 0.0f;
 };
