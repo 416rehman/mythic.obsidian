@@ -31,6 +31,7 @@
 #include "AI/Cognition/CognitiveBrainComponent.h" // NPC->CognitiveBrain->GetSourceEntity() for recruit
 #include "AI/Party/PartySubsystem.h" // server-authoritative party recruit
 #include "UI/MythicDamageNumberSubsystem.h" // recruit-result callout
+#include "UI/MythicWorldFeedbackSubsystem.h" // NON-combat callouts (loot/party/quest/...) — migrating off the damage-number system
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Player/MythicGift.h"                      // co-op gift pure decision gates
@@ -1206,12 +1207,14 @@ void AMythicPlayerController::ClientNotifyLootPickup_Implementation(const FText 
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    // Loot is NOT combat — route through the world-feedback subsystem (its own optimized non-WBP Canvas path), not the
+    // damage-number system. Floats "+N ItemName" in the item's rarity color above the player.
+    if (UMythicWorldFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicWorldFeedbackSubsystem>()) {
         const FVector Location = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 100.0f); // float over the player's head
-        const FString Text = (Quantity > 1)
-            ? FString::Printf(TEXT("+%d %s"), Quantity, *ItemName.ToString())
-            : ItemName.ToString();
-        DamageNumbers->AddDamageNumberCustom(Location, Text, RarityColor, 1.5f);
+        const FText Text = (Quantity > 1)
+            ? FText::FromString(FString::Printf(TEXT("+%d %s"), Quantity, *ItemName.ToString()))
+            : ItemName;
+        Feedback->AddWorldCallout(Location, Text, RarityColor, /*Icon*/ nullptr, EMythicFeedbackCategory::Loot, 1.5f);
     }
 }
 

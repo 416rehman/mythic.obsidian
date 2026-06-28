@@ -7,6 +7,7 @@
 
 class UMythicAbilityTagRelationshipMapping;
 class UMythicDamageNumberConfig;
+class UMythicWorldFeedbackConfig;
 class UMythicLivingWorldSettings;
 class UMythicLootTable;
 
@@ -58,6 +59,13 @@ public:
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "UI|Damage Numbers")
     TSoftObjectPtr<UMythicDamageNumberConfig> DamageNumberConfig;
+
+    /**
+     * Configuration for NON-combat world feedback (loot/quest/party/resource/proficiency/faction/hazard callouts).
+     * Optional — the subsystem uses sane code defaults if unset.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "UI|World Feedback")
+    TSoftObjectPtr<UMythicWorldFeedbackConfig> WorldFeedbackConfig;
 
     /**
      * Living World System settings data asset.
