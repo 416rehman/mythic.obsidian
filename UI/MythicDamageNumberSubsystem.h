@@ -419,6 +419,11 @@ struct FMythicLocalHud {
     int32 LastAmbientHour = -1;
     FGameplayTag LastAmbientWeather;
     float AmbientShownTime = -1000.0f;
+
+    // Contextual layer: smoothed "reveal everything" factor (hold-to-show) + whether the local player is in combat
+    // (an enemy is engaged with them) — both override the auto-hide so health/resources stay visible.
+    float RevealAlpha = 0.0f;
+    bool bInCombat = false;
 };
 
 /**

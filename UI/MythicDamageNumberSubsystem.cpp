@@ -25,6 +25,7 @@
 #include "Player/MythicPlayerController.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Objectives/ObjectiveTracker.h"
+#include "InputCoreTypes.h" // EKeys for the hold-to-reveal contextual layer
 
 DEFINE_LOG_CATEGORY_STATIC(LogMythicDamageNumbers, Log, All);
 
@@ -76,6 +77,14 @@ void UMythicDamageNumberSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
     APlayerController *PC = HUD->GetOwningPlayerController();
     if (!PC) {
         return;
+    }
+
+    // Contextual "reveal all": hold a key to fade the whole HUD to full; release and it fades back to contextual.
+    {
+        FMythicLocalHud &Hud = GetLocalHud(PC);
+        const float RevealDt = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f;
+        const bool bReveal = PC->IsInputKeyDown(EKeys::Tab);
+        Hud.RevealAlpha = StepNameplateAlpha(Hud.RevealAlpha, bReveal ? 1.0f : 0.0f, RevealDt, 5.0f);
     }
 
     DrawDamageNumbers(Canvas, PC);
@@ -970,6 +979,7 @@ void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas, APlayerControlle
     else if (Elapsed < Hold + Fade) {
         Alpha = 1.0f - (Elapsed - Hold) / Fade;
     }
+    Alpha = FMath::Max(Alpha, Hud.RevealAlpha); // hold-to-reveal also shows the ambient cluster
     if (Alpha <= 0.01f) {
         return; // auto-hidden between changes
     }
@@ -1320,10 +1330,14 @@ void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerControl
     UpdateChip(Hud.StaminaChip, StaminaFrac);
 
     // Contextual visibility: health when hurt / a chip is draining; stamina when sprinting / exhausted / not-full.
-    const bool bHealthRelevant = (HealthFrac < 0.995f) || (Hud.HealthChip.Ghost > HealthFrac + 0.001f) || (ShieldFrac > 0.0f);
+    // Combat forces health/resources visible (don't hide or dim in a fight); chip/hurt/shield also keep it up.
+    const bool bHealthRelevant = (HealthFrac < 0.995f) || (Hud.HealthChip.Ghost > HealthFrac + 0.001f) || (ShieldFrac > 0.0f) || Hud.bInCombat;
     const bool bStaminaRelevant = bSprinting || bExhausted || (StaminaFrac < 0.995f);
     Hud.HealthVis = StepNameplateAlpha(Hud.HealthVis, bHealthRelevant ? 1.0f : 0.0f, Dt, 4.0f);
     Hud.StaminaVis = StepNameplateAlpha(Hud.StaminaVis, bStaminaRelevant ? 1.0f : 0.0f, Dt, 4.0f);
+    // Hold-to-reveal overrides the contextual fades — everything shows at full while the reveal key is held.
+    const float HealthShow = FMath::Max(Hud.HealthVis, Hud.RevealAlpha);
+    const float StaminaShow = FMath::Max(Hud.StaminaVis, Hud.RevealAlpha);
 
     const float CX = Canvas->ClipX * 0.5f;
     const float BaseY = Canvas->ClipY - 70.0f;
@@ -1354,17 +1368,17 @@ void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerControl
 
     // Health (green at full -> red when low), with a thin shield sliver above it.
     const FLinearColor HealthCol = FMath::Lerp(FLinearColor(0.85f, 0.2f, 0.15f), FLinearColor(0.3f, 0.8f, 0.35f), HealthFrac);
-    DrawBar(BaseY, HealthFrac, Hud.HealthChip.Ghost, HealthCol, Hud.HealthVis);
-    if (ShieldFrac > 0.0f && Hud.HealthVis > 0.01f) {
+    DrawBar(BaseY, HealthFrac, Hud.HealthChip.Ghost, HealthCol, HealthShow);
+    if (ShieldFrac > 0.0f && HealthShow > 0.01f) {
         const float X = CX - BarW * 0.5f;
-        FCanvasTileItem Shield(FVector2D(X, BaseY - 5.0f), GWhiteTexture, FVector2D(BarW * ShieldFrac, 3.0f), FLinearColor(0.4f, 0.7f, 1.0f, Hud.HealthVis));
+        FCanvasTileItem Shield(FVector2D(X, BaseY - 5.0f), GWhiteTexture, FVector2D(BarW * ShieldFrac, 3.0f), FLinearColor(0.4f, 0.7f, 1.0f, HealthShow));
         Shield.BlendMode = SE_BLEND_Translucent;
         Canvas->DrawItem(Shield);
     }
 
     // Stamina below (amber; burnt-orange while exhausted).
     const FLinearColor StamCol = bExhausted ? FLinearColor(0.85f, 0.4f, 0.1f) : FLinearColor(0.85f, 0.75f, 0.3f);
-    DrawBar(BaseY + BarH + Gap, StaminaFrac, Hud.StaminaChip.Ghost, StamCol, Hud.StaminaVis);
+    DrawBar(BaseY + BarH + Gap, StaminaFrac, Hud.StaminaChip.Ghost, StamCol, StaminaShow);
 
     // Player status badges above the bars — always shown while a status is building (you must know you're poisoned).
     DrawStatusBadges(Canvas, CX, BaseY - 16.0f, ASC, 1.0f);
@@ -1388,7 +1402,8 @@ void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerControl
             Hud.CurrencyDisplayed = FMath::FInterpConstantTo(Hud.CurrencyDisplayed, static_cast<float>(Balance), Dt, RollSpeed);
 
             const float CElapsed = Now - Hud.CurrencyShownTime;
-            const float CAlpha = (CElapsed < 2.5f) ? 1.0f : (CElapsed < 4.0f ? 1.0f - (CElapsed - 2.5f) / 1.5f : 0.0f);
+            const float CSurfacing = (CElapsed < 2.5f) ? 1.0f : (CElapsed < 4.0f ? 1.0f - (CElapsed - 2.5f) / 1.5f : 0.0f);
+            const float CAlpha = FMath::Max(CSurfacing, Hud.RevealAlpha); // hold-to-reveal also shows the wallet
             if (CAlpha > 0.01f) {
                 UFont *Font = (Config && Config->Font) ? Config->Font.Get() : nullptr;
                 if (!Font) {
@@ -1483,6 +1498,15 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
         }
         const bool bRelevant = IsNameplateRelevant(Npc, LocalPawn);
         Targets.Add(Npc, ComputeNameplateTargetAlpha(bRelevant, Dist, FullDistance, CullDistance));
+    }
+
+    // In-combat = any engaged (relevant) NPC is in range — drives the contextual "always show health in combat" rule.
+    Hud.bInCombat = false;
+    for (const TPair<AActor *, float> &P : Targets) {
+        if (P.Value > 0.0f) {
+            Hud.bInCombat = true;
+            break;
+        }
     }
 
     // FOCUS: among the relevant on-screen plates, the one nearest screen-centre is what the player is looking at.
