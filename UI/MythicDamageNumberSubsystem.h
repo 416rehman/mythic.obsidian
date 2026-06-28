@@ -373,6 +373,7 @@ struct FMythicWorldCallout {
 struct FMythicNameplateState {
     TWeakObjectPtr<AActor> Actor;
     float CurrentAlpha = 0.0f;
+    FText CachedName; // read once when the state is created (a name doesn't change) — avoids a per-frame NPCData copy
 };
 
 /**

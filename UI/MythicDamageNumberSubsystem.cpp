@@ -16,6 +16,7 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "AI/NPCs/MythicAIController.h"
 
@@ -971,15 +972,31 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
         Targets.Add(Npc, ComputeNameplateTargetAlpha(bRelevant, Dist, FullDistance, CullDistance));
     }
 
-    // Draw one health-bar nameplate above an entity's head at the given alpha.
-    auto DrawPlate = [&](AActor *Npc, float Alpha) {
+    UFont *Font = (Config && Config->Font) ? Config->Font.Get() : nullptr;
+    if (!Font) {
+        Font = GEngine->GetMediumFont();
+    }
+    const float NameScale = (Config ? Config->FontScaleMultiplier : 1.0f) * 0.75f; // small label above the bar
+
+    // Read an NPC's display name (once, at state creation — it doesn't change). Empty for nameless/MASS creatures.
+    auto ReadNpcName = [](AActor *Npc) -> FText {
+        if (const AMythicNPCCharacter *NPC = Cast<AMythicNPCCharacter>(Npc)) {
+            return FText::FromString(NPC->GetNPCData().NPCName); // NPCName is an FString
+        }
+        return FText::GetEmpty();
+    };
+
+    // Draw a full nameplate (name + health bar + active status-buildup bars) above an entity's head at the given alpha.
+    auto DrawPlate = [&](AActor *Npc, float Alpha, const FText &Name) {
+        UAbilitySystemComponent *ASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Npc);
         float HealthFrac = 1.0f;
-        if (UAbilitySystemComponent *ASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Npc)) {
+        if (ASC) {
             if (const UMythicAttributeSet_Life *Life = ASC->GetSet<UMythicAttributeSet_Life>()) {
                 const float MaxH = Life->GetMaxHealth();
                 HealthFrac = MaxH > 0.0f ? FMath::Clamp(Life->GetHealth() / MaxH, 0.0f, 1.0f) : 0.0f;
             }
         }
+
         FVector2D ScreenPos;
         const FVector HeadWorld = Npc->GetActorLocation() + FVector(0.0f, 0.0f, HeadZ);
         if (!UGameplayStatics::ProjectWorldToScreen(PC, HeadWorld, ScreenPos, true)) {
@@ -988,13 +1005,24 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
         const float X = ScreenPos.X - BarW * 0.5f;
         const float Y = ScreenPos.Y;
 
-        // Background (1px inset frame).
+        // Name (centered above the bar).
+        if (Font && !Name.IsEmpty()) {
+            float NW = 0.0f, NH = 0.0f;
+            Canvas->TextSize(Font, Name.ToString(), NW, NH, NameScale, NameScale);
+            FCanvasTextItem NameItem(FVector2D(ScreenPos.X - NW * 0.5f, Y - NH - 3.0f), Name, Font, FLinearColor(0.92f, 0.93f, 0.96f, Alpha));
+            NameItem.Scale = FVector2D(NameScale, NameScale);
+            NameItem.bOutlined = true;
+            NameItem.OutlineColor = FLinearColor(0.0f, 0.0f, 0.0f, Alpha);
+            Canvas->DrawItem(NameItem);
+        }
+
+        // Health bar background (1px inset frame).
         FCanvasTileItem Bg(FVector2D(X - 1.0f, Y - 1.0f), GWhiteTexture, FVector2D(BarW + 2.0f, BarH + 2.0f),
                            FLinearColor(0.0f, 0.0f, 0.0f, 0.6f * Alpha));
         Bg.BlendMode = SE_BLEND_Translucent;
         Canvas->DrawItem(Bg);
 
-        // Fill — green at full health, red when low.
+        // Health fill — green at full, red when low.
         const FLinearColor LowCol(0.85f, 0.2f, 0.15f);
         const FLinearColor FullCol(0.25f, 0.85f, 0.35f);
         FLinearColor FillCol = FMath::Lerp(LowCol, FullCol, HealthFrac);
@@ -1002,6 +1030,53 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
         FCanvasTileItem Fill(FVector2D(X, Y), GWhiteTexture, FVector2D(BarW * HealthFrac, BarH), FillCol);
         Fill.BlendMode = SE_BLEND_Translucent;
         Canvas->DrawItem(Fill);
+
+        // Active status-buildup bars (below the health bar). Fraction = buildup / (100 + resistance*2) — the exact
+        // trigger threshold from MythicAttributeSet_Defense. One colored mini-bar per type that has any buildup.
+        if (ASC) {
+            if (const UMythicAttributeSet_Defense *Def = ASC->GetSet<UMythicAttributeSet_Defense>()) {
+                struct FBuildupVis {
+                    float Buildup;
+                    float Threshold;
+                    FLinearColor Color;
+                };
+                const FBuildupVis Vis[] = {
+                    {Def->GetBurnBuildup(), 100.0f + Def->GetBurnResistance() * 2.0f, FLinearColor(1.0f, 0.45f, 0.0f)},  // burn
+                    {Def->GetBleedBuildup(), 100.0f + Def->GetBleedResistance() * 2.0f, FLinearColor(0.7f, 0.0f, 0.0f)}, // bleed
+                    {Def->GetPoisonBuildup(), 100.0f + Def->GetPoisonResistance() * 2.0f, FLinearColor(0.4f, 0.85f, 0.1f)}, // poison
+                    {Def->GetSlowBuildup(), 100.0f + Def->GetSlowResistance() * 2.0f, FLinearColor(0.4f, 0.6f, 0.9f)},   // slow
+                    {Def->GetFreezeBuildup(), 100.0f + Def->GetFreezeResistance() * 2.0f, FLinearColor(0.5f, 0.9f, 1.0f)}, // freeze
+                    {Def->GetStunBuildup(), 100.0f + Def->GetStunResistance() * 2.0f, FLinearColor(1.0f, 0.9f, 0.4f)},   // stun
+                };
+                const float PipW = 12.0f, PipH = 3.0f, PipGap = 2.0f;
+                int32 ActiveCount = 0;
+                for (const FBuildupVis &V : Vis) {
+                    if (V.Buildup > 0.5f) {
+                        ++ActiveCount;
+                    }
+                }
+                if (ActiveCount > 0) {
+                    const float RowW = ActiveCount * PipW + (ActiveCount - 1) * PipGap;
+                    float PipX = ScreenPos.X - RowW * 0.5f;
+                    const float PipY = Y + BarH + 2.0f;
+                    for (const FBuildupVis &V : Vis) {
+                        if (V.Buildup <= 0.5f) {
+                            continue;
+                        }
+                        const float Frac = V.Threshold > 0.0f ? FMath::Clamp(V.Buildup / V.Threshold, 0.0f, 1.0f) : 0.0f;
+                        FCanvasTileItem PipBg(FVector2D(PipX, PipY), GWhiteTexture, FVector2D(PipW, PipH), FLinearColor(0.0f, 0.0f, 0.0f, 0.55f * Alpha));
+                        PipBg.BlendMode = SE_BLEND_Translucent;
+                        Canvas->DrawItem(PipBg);
+                        FLinearColor PipCol = V.Color;
+                        PipCol.A = Alpha;
+                        FCanvasTileItem PipFill(FVector2D(PipX, PipY), GWhiteTexture, FVector2D(PipW * Frac, PipH), PipCol);
+                        PipFill.BlendMode = SE_BLEND_Translucent;
+                        Canvas->DrawItem(PipFill);
+                        PipX += PipW + PipGap;
+                    }
+                }
+            }
+        }
     };
 
     // Update existing states: fade toward their candidate target (0 if no longer a candidate), draw, prune.
@@ -1021,7 +1096,7 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
             continue;
         }
         if (S.CurrentAlpha > 0.01f) {
-            DrawPlate(Npc, S.CurrentAlpha);
+            DrawPlate(Npc, S.CurrentAlpha, S.CachedName);
         }
     }
 
@@ -1032,9 +1107,10 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
         }
         FMythicNameplateState NewState;
         NewState.Actor = Pair.Key;
+        NewState.CachedName = ReadNpcName(Pair.Key);
         NewState.CurrentAlpha = StepNameplateAlpha(0.0f, Pair.Value, Dt, FadeRate);
         if (NewState.CurrentAlpha > 0.01f) {
-            DrawPlate(Pair.Key, NewState.CurrentAlpha);
+            DrawPlate(Pair.Key, NewState.CurrentAlpha, NewState.CachedName);
         }
         NameplateStates.Add(NewState);
     }
