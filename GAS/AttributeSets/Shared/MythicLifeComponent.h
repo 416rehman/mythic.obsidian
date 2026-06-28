@@ -148,6 +148,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mythic|Health")
     float XPReward = 0.0f;
 
+    // CO-OP shared kill credit: when a PLAYER kills this owner, every OTHER player whose pawn is within this radius (cm)
+    // of the victim also receives the full XPReward — so a partner who fought the kill isn't denied credit by not landing
+    // the last hit. The killer is ALWAYS credited regardless of distance. 0 (default) = killer-only (byte-identical to the
+    // prior behaviour); set > 0 (e.g. 3000 = 30 m) to enable co-op sharing. Each eligible player gets the FULL reward (no
+    // split) — the co-op-friendly default; a proportional/by-contribution split is a logged follow-up.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mythic|Health")
+    float SharedKillCreditRange = 0.0f;
+
     // SERVER: loot table(s) rolled when this owner dies, dropped as world items at its location. Designer-
     // assigned per-owner (empty = no drop). Only drops when the killer resolves to a player, since the loot
     // rarity curves are keyed to the killing player's level.
@@ -158,6 +166,11 @@ public:
     // owner can move again. Mirror of StartDeath's disable (kept colocated as the single source of truth).
     UFUNCTION(BlueprintCallable, Category = "Mythic|Health")
     void RestoreAfterDeath();
+
+    // Pure: is a player eligible for shared kill credit? The killer ALWAYS qualifies (bIsKiller); any other player
+    // qualifies iff within range (DistSqToVictim <= RangeSq). A RangeSq <= 0 reduces this to killer-only. Static so the
+    // co-op credit rule is unit-testable without a live world.
+    static bool IsEligibleForSharedKillCredit(bool bIsKiller, float DistSqToVictim, float RangeSq);
 
     // True while the owner is in the co-op downed state (incapacitated, bleeding out, revivable).
     UFUNCTION(BlueprintPure, Category = "Mythic|Health")

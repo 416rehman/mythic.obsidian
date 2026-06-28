@@ -12,6 +12,8 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/GameStateBase.h" // PlayerArray — all players, for co-op shared kill credit (no TActorIterator)
+#include "GameFramework/PlayerState.h"   // GetPawn / GetOwningController per player
 #include "GameModes/MythicGameMode.h"
 #include "Engine/World.h"
 #include "MythicAttributeSet_Defense.h"
@@ -510,6 +512,12 @@ void UMythicLifeComponent::ClearStagger() {
     LastStaggerTime = 0.0;
 }
 
+bool UMythicLifeComponent::IsEligibleForSharedKillCredit(bool bIsKiller, float DistSqToVictim, float RangeSq) {
+    // The killer is always credited. Any other player is credited only when sharing is enabled (RangeSq > 0) AND they are
+    // within range — so RangeSq <= 0 is strictly killer-only (a non-killer exactly on the victim does NOT leech at range 0).
+    return bIsKiller || (RangeSq > 0.0f && DistSqToVictim <= RangeSq);
+}
+
 void UMythicLifeComponent::StartDeath(AActor *Killer) {
     if (!AbilitySystemComponent) {
         return;
@@ -549,19 +557,47 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
     BP_OnDeath();
     OnDeath.Broadcast(Owner);
 
-    // award combat proficiency XP to the killer via their ProficiencyComponent
+    // Award combat proficiency XP. Only a PLAYER kill grants XP (an NPC-on-NPC kill grants none — unchanged). The killer
+    // is always credited; with SharedKillCreditRange > 0, every OTHER player within that radius of the victim also gets the
+    // FULL reward (co-op shared credit — no kill-stealing). Iterates GameState->PlayerArray (server-authoritative; the
+    // server PlayerArray holds every connected player) — no TActorIterator.
     if (XPReward > 0.0f && Killer && Killer != Owner) {
-        APlayerController *KillerPC = nullptr;
+        // Resolve the killer's controller (a player pawn's controller, or the killer cast directly as a controller).
+        const AController *KillerController = nullptr;
         if (const APawn *KillerPawn = Cast<APawn>(Killer)) {
-            KillerPC = Cast<APlayerController>(KillerPawn->GetController());
+            KillerController = KillerPawn->GetController();
         }
         else {
-            KillerPC = Cast<APlayerController>(Killer);
+            KillerController = Cast<AController>(Killer);
         }
-        if (KillerPC) {
-            if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(KillerPC)) {
-                if (UProficiencyComponent *ProfComp = const_cast<UProficiencyComponent*>(MythicPC->GetProficiencyComponent())) {
-                    ProfComp->GrantCombatXP(XPReward);
+
+        // Only share when a PLAYER got the kill — an NPC kill near players must not hand them free XP.
+        if (Cast<AMythicPlayerController>(KillerController)) {
+            const FVector VictimLocation = Owner ? Owner->GetActorLocation() : FVector::ZeroVector;
+            const float RangeSq = FMath::Square(FMath::Max(0.0f, SharedKillCreditRange));
+            if (const UWorld *World = GetWorld()) {
+                if (const AGameStateBase *GameState = World->GetGameState()) {
+                    for (APlayerState *PS : GameState->PlayerArray) {
+                        if (!PS) {
+                            continue;
+                        }
+                        AController *ThisController = PS->GetOwningController();
+                        AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(ThisController);
+                        if (!MythicPC) {
+                            continue;
+                        }
+                        const bool bIsKiller = (ThisController == KillerController);
+                        const APawn *PlayerPawn = PS->GetPawn();
+                        const float DistSq = PlayerPawn
+                            ? FVector::DistSquared(PlayerPawn->GetActorLocation(), VictimLocation)
+                            : TNumericLimits<float>::Max();
+                        if (!IsEligibleForSharedKillCredit(bIsKiller, DistSq, RangeSq)) {
+                            continue;
+                        }
+                        if (UProficiencyComponent *ProfComp = const_cast<UProficiencyComponent *>(MythicPC->GetProficiencyComponent())) {
+                            ProfComp->GrantCombatXP(XPReward);
+                        }
+                    }
                 }
             }
         }
