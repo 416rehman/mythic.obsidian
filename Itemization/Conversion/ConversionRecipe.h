@@ -9,6 +9,7 @@
 class UItemDefinition;
 class UMythicItemInstance;
 class UTexture2D;
+class UProficiencyDefinition;
 
 /**
  * One ingredient slot of a recipe. Matches a concrete item either by exact definition or by a tag query
@@ -73,9 +74,26 @@ struct MYTHIC_API FConversionProduct {
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, meta=(EditCondition="Mode == EConversionProductMode::Create", EditConditionHides))
     EProductLevelMode LevelMode = EProductLevelMode::FixedLevel;
 
+    // FixedLevel: the product level (FixedLevel mode) OR the BASE level that proficiency scaling adds to (ProficiencyScaled mode).
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite,
-        meta=(ClampMin="0", EditCondition="Mode == EConversionProductMode::Create && LevelMode == EProductLevelMode::FixedLevel", EditConditionHides))
+        meta=(ClampMin="0", EditCondition="Mode == EConversionProductMode::Create && (LevelMode == EProductLevelMode::FixedLevel || LevelMode == EProductLevelMode::ProficiencyScaled)", EditConditionHides))
     int32 FixedLevel = 1;
+
+    // ProficiencyScaled mode: the crafter's level in this proficiency drives the product level. Null = no scaling (base only).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite,
+        meta=(EditCondition="Mode == EConversionProductMode::Create && LevelMode == EProductLevelMode::ProficiencyScaled", EditConditionHides))
+    TObjectPtr<UProficiencyDefinition> CraftingProficiency = nullptr;
+
+    // Item-levels added per crafter proficiency level (ProficiencyScaled mode). ClampMax keeps the scaled product well
+    // within int32 (the math is overflow-hardened regardless, but a sane editor range avoids absurd configs).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite,
+        meta=(ClampMin="0", ClampMax="10000", EditCondition="Mode == EConversionProductMode::Create && LevelMode == EProductLevelMode::ProficiencyScaled", EditConditionHides))
+    int32 ProficiencyLevelBonus = 1;
+
+    // Upper cap on the proficiency-scaled product level (0 = uncapped).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite,
+        meta=(ClampMin="0", EditCondition="Mode == EConversionProductMode::Create && LevelMode == EProductLevelMode::ProficiencyScaled", EditConditionHides))
+    int32 MaxProductLevel = 0;
 
     // ---- Transform (mutates the consumed input instance in place) ----
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite,

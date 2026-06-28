@@ -25,7 +25,10 @@ UENUM(BlueprintType)
 enum class EProductLevelMode : uint8 {
     FixedLevel UMETA(DisplayName="Fixed Level"),
     InheritInputLevel UMETA(DisplayName="Inherit Input Level"),
-    InheritStationLevel UMETA(DisplayName="Inherit Station Level")
+    InheritStationLevel UMETA(DisplayName="Inherit Station Level"),
+    // Product level scales with the CRAFTER's proficiency: FixedLevel (base) + crafter's level in the recipe's
+    // CraftingProficiency × ProficiencyLevelBonus, capped by MaxProductLevel. A master smith makes better goods.
+    ProficiencyScaled UMETA(DisplayName="Scaled By Crafter Proficiency")
 };
 
 /** What initiates a recipe: a player selecting it, or the station auto-firing when inputs are present. */

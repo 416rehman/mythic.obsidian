@@ -20,6 +20,9 @@
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
 #include "Itemization/MythicTags_Conversion.h"
 #include "Player/MythicPlayerController.h" // repaired-durability callout over the job's instigator
+#include "Player/Proficiency/ProficiencyComponent.h"  // crafter proficiency resolution (ProficiencyScaled product level)
+#include "Player/Proficiency/ProficiencyDefinition.h"  // CalcLevelAtXP + ProgressAttribute
+#include "AbilitySystemGlobals.h"                      // GetAbilitySystemComponentFromActor
 #include "ViewModels/ConversionViewModels.h"
 
 namespace {
@@ -28,12 +31,13 @@ namespace {
 
 // ============================ FastArray ============================
 
-int32 FConversionJobArray::AddJob(const FGameplayTag &RecipeId, int32 Quantity, int32 JobId, int32 SnapshotInputLevel) {
+int32 FConversionJobArray::AddJob(const FGameplayTag &RecipeId, int32 Quantity, int32 JobId, int32 SnapshotInputLevel, int32 SnapshotCrafterProficiencyLevel) {
     FConversionJobEntry Entry;
     Entry.RecipeId = RecipeId;
     Entry.Quantity = Quantity;
     Entry.JobId = JobId;
     Entry.SnapshotInputLevel = SnapshotInputLevel;
+    Entry.SnapshotCrafterProficiencyLevel = SnapshotCrafterProficiencyLevel;
     Entry.State = EConversionJobState::Pending;
     const int32 Index = Items.Add(Entry);
     MarkItemDirty(Items[Index]);
@@ -572,7 +576,46 @@ int32 UConversionStationComponent::ResolveProductLevel(EProductLevelMode LevelMo
     }
 }
 
+int32 UConversionStationComponent::ComputeProficiencyScaledLevel(int32 CrafterProfLevel, int32 BaseLevel, int32 PerLevelBonus, int32 MaxLevel) {
+    // 64-bit intermediate so a large designer-set PerLevelBonus can't overflow int32 BEFORE the cap is applied — that
+    // would wrap negative and floor the result to 0 (silently losing the base/cap). Clamp to int32 range, floor at 0,
+    // then cap. This keeps the result monotonic in the inputs regardless of how absurd a config value is.
+    const int64 Scaled = (int64)BaseLevel + (int64)FMath::Max(0, CrafterProfLevel) * (int64)FMath::Max(0, PerLevelBonus);
+    int32 Level = (int32)FMath::Clamp<int64>(Scaled, 0, (int64)MAX_int32);
+    if (MaxLevel > 0) {
+        Level = FMath::Min(Level, MaxLevel);
+    }
+    return Level;
+}
+
+int32 UConversionStationComponent::ResolveCrafterProficiencyLevel(AController *Crafter, UProficiencyDefinition *ProfDef) {
+    if (!Crafter || !ProfDef) {
+        return 0;
+    }
+    const AMythicPlayerController *PC = Cast<AMythicPlayerController>(Crafter);
+    UProficiencyComponent *ProfComp = PC ? const_cast<UProficiencyComponent *>(PC->GetProficiencyComponent()) : nullptr;
+    if (!ProfComp) {
+        return 0;
+    }
+    // Match the crafter's proficiency entry, then resolve its current level from the ASC XP (mirrors the gathering path).
+    for (const FProficiency &Prof : ProfComp->Proficiencies) {
+        if (Prof.Definition == ProfDef) {
+            UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Crafter);
+            if (!ASC) {
+                return 0;
+            }
+            const float CurrentXP = ASC->GetNumericAttribute(ProfDef->ProgressAttribute);
+            return UProficiencyDefinition::CalcLevelAtXP(CurrentXP, ProfDef);
+        }
+    }
+    return 0;
+}
+
 int32 UConversionStationComponent::ComputeProductLevel(const FConversionProduct &P, const FConversionJobEntry &Job) const {
+    // ProficiencyScaled: the crafter's level (snapshotted at enqueue) drives the product level off the FixedLevel base.
+    if (P.LevelMode == EProductLevelMode::ProficiencyScaled) {
+        return ComputeProficiencyScaledLevel(Job.SnapshotCrafterProficiencyLevel, P.FixedLevel, P.ProficiencyLevelBonus, P.MaxProductLevel);
+    }
     return ResolveProductLevel(P.LevelMode, Job.SnapshotInputLevel, StationLevel, P.FixedLevel);
 }
 
@@ -1059,7 +1102,7 @@ void UConversionStationComponent::TryAutoEnqueue() {
 
     const int32 Id = NextJobId++;
     const int32 Q = (R->Process.Timing == EConversionTiming::Continuous && R->Process.bRepeatWhileInputsAvailable) ? 0 : 1;
-    Jobs.AddJob(R->RecipeId, Q, Id, SnapLevel);
+    Jobs.AddJob(R->RecipeId, Q, Id, SnapLevel, /*SnapshotCrafterProficiencyLevel*/ 0); // station auto-fire has no crafter
     JobRefundTargets.Add(Id, FJobRefundInfo{nullptr, R->RecipeId});
     bMutatingStationInv = false;
 
@@ -1201,7 +1244,18 @@ void UConversionStationComponent::Server_RequestStart(AController *Controller, F
     }
     NextJobId++;
 
-    Jobs.AddJob(RecipeId, Quantity, Id, SnapLevel);
+    // ProficiencyScaled recipes: snapshot the crafter's level in the recipe's crafting proficiency NOW, so the product
+    // level is reproducible even if the crafter disconnects before the job finishes (mirrors SnapLevel). Uses the first
+    // ProficiencyScaled product's CraftingProficiency — single-skill recipes, the common case (logged otherwise).
+    int32 CrafterProfLevel = 0;
+    for (const FConversionProduct &Prod : R->Products) {
+        if (Prod.LevelMode == EProductLevelMode::ProficiencyScaled && Prod.CraftingProficiency) {
+            CrafterProfLevel = ResolveCrafterProficiencyLevel(Controller, Prod.CraftingProficiency);
+            break;
+        }
+    }
+
+    Jobs.AddJob(RecipeId, Quantity, Id, SnapLevel, CrafterProfLevel);
     JobRefundTargets.Add(Id, FJobRefundInfo{Controller, RecipeId});
     S->OwnedJobs++;
 

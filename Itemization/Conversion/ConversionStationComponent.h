@@ -15,6 +15,7 @@ class UConversionSubsystem;
 class AController;
 class UAbilitySystemComponent;
 class IInventoryProviderInterface;
+class UProficiencyDefinition;
 
 /** One queued conversion job. Only RecipeId (a tag) crosses the wire to identify the recipe. */
 USTRUCT(BlueprintType)
@@ -48,6 +49,11 @@ struct FConversionJobEntry : public FFastArraySerializerItem {
     // Captured at enqueue from the consumed input(s); reproducible InheritInputLevel after the source is gone.
     UPROPERTY()
     int32 SnapshotInputLevel = 0;
+
+    // Captured at enqueue from the crafter's proficiency (ProficiencyScaled mode); reproducible after the crafter
+    // disconnects mid-job. 0 = no crafter (station auto-fire) or no proficiency. Old saves deserialize 0 (non-breaking).
+    UPROPERTY()
+    int32 SnapshotCrafterProficiencyLevel = 0;
 };
 
 /** Replicated FastArray of jobs (mirrors FCraftingQueue's style). */
@@ -71,7 +77,7 @@ public:
     const TArray<FConversionJobEntry> &GetItems() const { return Items; }
     int32 Num() const { return Items.Num(); }
 
-    int32 AddJob(const FGameplayTag &RecipeId, int32 Quantity, int32 JobId, int32 SnapshotInputLevel);
+    int32 AddJob(const FGameplayTag &RecipeId, int32 Quantity, int32 JobId, int32 SnapshotInputLevel, int32 SnapshotCrafterProficiencyLevel);
     void RemoveAt(int32 Index);
     FConversionJobEntry *EditHead();
     FConversionJobEntry *FindById(int32 JobId);
@@ -280,6 +286,14 @@ public:
     /** Pure product-level rule (extracted from the member ComputeProductLevel for unit-testing): FixedLevel→FixedLevel,
      *  InheritInputLevel→InputLevel, InheritStationLevel→StationLevel. Static + pure (no actor/world). */
     static int32 ResolveProductLevel(EProductLevelMode LevelMode, int32 InputLevel, int32 InStationLevel, int32 FixedLevel);
+
+    /** Pure proficiency-scaled product level: BaseLevel + clamp(CrafterProfLevel,0) × clamp(PerLevelBonus,0), floored at
+     *  0, then capped by MaxLevel when MaxLevel > 0 (0 = uncapped). Static + unit-testable. */
+    static int32 ComputeProficiencyScaledLevel(int32 CrafterProfLevel, int32 BaseLevel, int32 PerLevelBonus, int32 MaxLevel);
+
+    /** SERVER: resolve a player-controller's current level in ProfDef (mirrors the gathering-proficiency resolution).
+     *  0 when null / not a player / no matching proficiency. Snapshotted at enqueue for ProficiencyScaled recipes. */
+    static int32 ResolveCrafterProficiencyLevel(AController *Crafter, UProficiencyDefinition *ProfDef);
 
     UPROPERTY(BlueprintAssignable, Category="Conversion")
     FOnConversionJobsChanged OnJobsChanged;
