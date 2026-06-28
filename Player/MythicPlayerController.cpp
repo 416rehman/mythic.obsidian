@@ -769,7 +769,12 @@ void AMythicPlayerController::ServerDeployPlaceable_Implementation(UMythicInvent
 
     const EPlaceableDeployResult Decision = UPlaceableFragment::PlanDeploy(bAuthorized, bHasPlaceableItem, bHasDeployedClass, Placement);
     if (Decision != EPlaceableDeployResult::Deployed) {
-        // The verdict already carries the rejection reason; a client-facing "can't place here" callout is a follow-up.
+        // Tell the player WHY the build failed (was previously silent). DescribeDeployFailure returns empty for outcomes
+        // that shouldn't surface a toast (a UI-impossible empty slot / the NoDeployedClass content error) — skip those.
+        const FText Reason = UPlaceableFragment::DescribeDeployFailure(Decision, Placement);
+        if (!Reason.IsEmpty()) {
+            ClientNotifyDeployRejected(Reason);
+        }
         return;
     }
 
@@ -822,6 +827,7 @@ void AMythicPlayerController::FinishDeployPlaceable(UClass *DeployedClass, const
     if (bCapped) {
         DeployedPlaceables.RemoveAll([](const TWeakObjectPtr<AActor> &P) { return !P.IsValid(); });
         if (!CanDeployMore(DeployedPlaceables.Num(), MaxDeployedPlaceables)) {
+            ClientNotifyDeployRejected(NSLOCTEXT("Placeable", "DeployAtCap", "Build limit reached"));
             return;
         }
     }
@@ -846,6 +852,11 @@ void AMythicPlayerController::FinishDeployPlaceable(UClass *DeployedClass, const
 bool AMythicPlayerController::CanDeployMore(int32 CurrentValidCount, int32 MaxAllowed) {
     // A non-positive cap means unlimited; otherwise the player must currently hold fewer than the cap.
     return MaxAllowed <= 0 || CurrentValidCount < MaxAllowed;
+}
+
+void AMythicPlayerController::ClientNotifyDeployRejected_Implementation(const FText &Reason) {
+    // Client-local: hand the reason to BP for display (toast / deny SFX). No-op if BP didn't bind it.
+    OnDeployRejected(Reason);
 }
 
 bool AMythicPlayerController::ServerInteractPrimary_Validate(AActor *Interactable) {

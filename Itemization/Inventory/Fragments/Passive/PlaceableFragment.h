@@ -162,4 +162,10 @@ public:
     // drives its ghost-preview off this each frame; the server stays authoritative via PlanDeploy. Pure + static so
     // the verdict→feedback mapping is single-sourced and unit-testable.
     static FPlaceablePreview DescribePlacement(EPlaceablePlacementResult Result);
+
+    // Map a DEPLOY-attempt verdict to a short player-facing rejection line (for the server→client "can't build" callout).
+    // PlacementInvalid defers to DescribePlacement's reason (the specific spot problem). Returns EMPTY for outcomes that
+    // shouldn't surface a callout: success (Deployed), a UI-impossible empty slot, and the NoDeployedClass content error
+    // (which is logged, not shown). Pure + static → unit-testable; single-sources the rejection copy.
+    static FText DescribeDeployFailure(EPlaceableDeployResult DeployResult, EPlaceablePlacementResult PlacementResult);
 };

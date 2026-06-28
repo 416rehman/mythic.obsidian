@@ -128,3 +128,20 @@ FPlaceablePreview UPlaceableFragment::DescribePlacement(const EPlaceablePlacemen
     }
     return Preview;
 }
+
+FText UPlaceableFragment::DescribeDeployFailure(const EPlaceableDeployResult DeployResult,
+                                                const EPlaceablePlacementResult PlacementResult) {
+    switch (DeployResult) {
+    case EPlaceableDeployResult::NotAuthorized:
+        return NSLOCTEXT("Placeable", "DeployNotAuthorized", "You can't build here");
+    case EPlaceableDeployResult::PlacementInvalid:
+        // The candidate spot failed — surface the SPECIFIC reason (out of reach / too steep / blocked / no surface),
+        // single-sourced from the same map the ghost preview uses.
+        return DescribePlacement(PlacementResult).Reason;
+    case EPlaceableDeployResult::Deployed:        // success — no callout
+    case EPlaceableDeployResult::SlotEmpty:       // the UI shouldn't offer an empty slot — nothing to tell the player
+    case EPlaceableDeployResult::NoDeployedClass: // content error — logged, not surfaced to the player
+    default:
+        return FText::GetEmpty();
+    }
+}

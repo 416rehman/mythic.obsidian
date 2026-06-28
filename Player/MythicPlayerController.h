@@ -279,6 +279,16 @@ public:
     UFUNCTION(Server, Reliable, WithValidation, Category = "Placeable")
     void ServerDeployPlaceable(UMythicInventoryComponent *Inventory, int32 SlotIndex, FVector AimOrigin, FVector AimDirection);
 
+    // server→owning-client: a deploy attempt was rejected — show the player WHY (a HUD "can't build" toast). The reason
+    // is computed server-side via UPlaceableFragment::DescribeDeployFailure (or the build-limit line); empty reasons are
+    // never sent (no toast for a UI-impossible slot / a content error). Closes the previously-silent deploy-rejection loop.
+    UFUNCTION(Client, Reliable, Category = "Placeable")
+    void ClientNotifyDeployRejected(const FText &Reason);
+
+    // client-side display hook for ClientNotifyDeployRejected (BP shows the toast / plays the deny sound).
+    UFUNCTION(BlueprintImplementableEvent, Category = "Placeable")
+    void OnDeployRejected(const FText &Reason);
+
     // routes primary interaction to the server
     UFUNCTION(Server, Reliable, WithValidation, Category = "Interaction")
     void ServerInteractPrimary(AActor *Interactable);

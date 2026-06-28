@@ -375,3 +375,35 @@ bool FPlaceableDeployCapTest::RunTest(const FString &Parameters) {
 
     return true;
 }
+
+// ─── Deploy-rejection player feedback (DescribeDeployFailure) ──────
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FPlaceableDeployFeedbackTest,
+    "Mythic.Itemization.Placement.DeployFeedback",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FPlaceableDeployFeedbackTest::RunTest(const FString &Parameters) {
+    using D = EPlaceableDeployResult;
+    using P = EPlaceablePlacementResult;
+    auto Msg = &UPlaceableFragment::DescribeDeployFailure;
+
+    // Success surfaces no callout.
+    TestTrue(TEXT("Deployed → no message"), Msg(D::Deployed, P::Valid).IsEmpty());
+
+    // Outcomes that should NOT toast: a UI-impossible empty slot, and the content-error no-class.
+    TestTrue(TEXT("SlotEmpty → no message (UI shouldn't offer it)"), Msg(D::SlotEmpty, P::Valid).IsEmpty());
+    TestTrue(TEXT("NoDeployedClass → no message (content error, logged)"), Msg(D::NoDeployedClass, P::Valid).IsEmpty());
+
+    // NotAuthorized surfaces a non-empty deploy-level line.
+    TestFalse(TEXT("NotAuthorized → a player-facing line"), Msg(D::NotAuthorized, P::Valid).IsEmpty());
+
+    // PlacementInvalid surfaces the SPECIFIC placement reason — single-sourced from DescribePlacement (no duplicate copy).
+    TestTrue(TEXT("PlacementInvalid(OutOfReach) reuses the placement reason"),
+             Msg(D::PlacementInvalid, P::OutOfReach).EqualTo(UPlaceableFragment::DescribePlacement(P::OutOfReach).Reason));
+    TestTrue(TEXT("PlacementInvalid(Obstructed) reuses the placement reason"),
+             Msg(D::PlacementInvalid, P::Obstructed).EqualTo(UPlaceableFragment::DescribePlacement(P::Obstructed).Reason));
+    TestFalse(TEXT("PlacementInvalid(SurfaceTooSteep) is a non-empty reason"),
+              Msg(D::PlacementInvalid, P::SurfaceTooSteep).IsEmpty());
+
+    return true;
+}
