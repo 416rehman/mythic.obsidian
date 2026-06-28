@@ -3,8 +3,20 @@
 #include "World/LivingWorld/CausalFabric/CausalFabric.h"
 
 void UMythicCausalFabric::Initialize(int32 InCapacity) {
+    // Capacity is the divisor of every ring-buffer `% Capacity` wrap below. InCapacity comes from
+    // LivingWorldSettings.FabricCapacity (a UDataAsset, default 4096) whose editor ClampMin (256) guards the property
+    // panel but is NOT enforced for a value set programmatically or persisted in an asset authored before that clamp.
+    // The check() catches a <= 0 in Development but is compiled out in Shipping, where a 0 would turn those wraps into a
+    // modulo-by-zero server crash. Clamp to >= 1 at this chokepoint (cheap defense-in-depth — reachability is low given
+    // the editor clamp + 4096 default) so such a value degrades to a minimal valid buffer instead of crashing the
+    // server; a valid (>= 1) capacity passes through unchanged.
     check(InCapacity > 0);
-    Capacity = InCapacity;
+    if (InCapacity <= 0) {
+        UE_LOG(LogMythCausalFabric, Warning,
+               TEXT("CausalFabric::Initialize: InCapacity %d <= 0 (FabricCapacity bypassed its editor ClampMin); clamping to 1."),
+               InCapacity);
+    }
+    Capacity = FMath::Max(1, InCapacity);
 
     WriteBuffer.SetNum(Capacity);
     ReadBuffer.SetNum(Capacity);
