@@ -195,6 +195,10 @@ public:
     static bool IsReviveComplete(float ProgressSeconds, float ChannelSeconds);
     static bool ShouldContinueReviveChannel(bool bTargetDowned, bool bReviverValid, bool bReviverDowned, bool bReviverInRange);
 
+    // Pure: the reviver took damage since the last channel tick (current health dropped below the prior baseline, past a
+    // tiny epsilon so float/replication noise never spuriously interrupts). Used to break a channel under fire.
+    static bool ShouldInterruptReviveOnDamage(float ReviverHealthNow, float ReviverHealthAtLastTick);
+
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
     // SERVER: seconds between regen ticks. Each tick regenerates Health / Shield / Stamina toward their max at
@@ -412,6 +416,7 @@ protected:
     UPROPERTY(Replicated)
     float ReviveProgressSeconds = 0.0f; // replicated so the reviver + downed player can show the progress bar
     TWeakObjectPtr<APawn> ActiveReviver; // server-only: who is currently channeling the revive
+    float ReviverHealthAtLastTick = 0.0f; // server-only: the reviver's health snapshot, to detect damage-during-channel
     FTimerHandle ReviveChannelTimerHandle;
     void ReviveChannelTick();    // per-tick: re-validate + accrue; complete or interrupt
     void CancelReviveChannel();  // stop the timer, clear the reviver, reset replicated progress

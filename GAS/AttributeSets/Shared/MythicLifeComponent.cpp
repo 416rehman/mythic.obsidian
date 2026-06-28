@@ -396,6 +396,12 @@ bool UMythicLifeComponent::ShouldContinueReviveChannel(bool bTargetDowned, bool 
     return bTargetDowned && bReviverValid && !bReviverDowned && bReviverInRange;
 }
 
+bool UMythicLifeComponent::ShouldInterruptReviveOnDamage(float ReviverHealthNow, float ReviverHealthAtLastTick) {
+    // A real damage event drops health by >=1; the epsilon ignores float/replication jitter so healing or noise can't
+    // spuriously break the channel.
+    return ReviverHealthNow + KINDA_SMALL_NUMBER < ReviverHealthAtLastTick;
+}
+
 bool UMythicLifeComponent::IsDead() const {
     return AbilitySystemComponent && AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_DEAD);
 }
@@ -430,6 +436,11 @@ void UMythicLifeComponent::ServerBeginReviveChannel(APawn *Reviver) {
     }
     ActiveReviver = Reviver;
     ReviveProgressSeconds = 0.0f;
+    // Baseline the reviver's health so the first tick can detect damage taken since the channel began.
+    ReviverHealthAtLastTick = 0.0f;
+    if (const UMythicLifeComponent *ReviverLife = FindHealthComponent(Reviver)) {
+        ReviverHealthAtLastTick = ReviverLife->GetHealth();
+    }
     W->GetTimerManager().SetTimer(ReviveChannelTimerHandle, this, &UMythicLifeComponent::ReviveChannelTick,
                                   ReviveChannelTickIntervalSeconds, /*bLoop=*/true);
 }
@@ -444,20 +455,27 @@ void UMythicLifeComponent::ReviveChannelTick() {
     const bool bReviverValid = Reviver != nullptr;
     bool bReviverIncapacitated = false; // downed OR dead — a corpse/incapacitated teammate can't finish a revive
     bool bReviverInRange = false;
+    float ReviverHealthNow = ReviverHealthAtLastTick; // default to the baseline: an unreadable reviver never spuriously interrupts
     if (bReviverValid) {
         if (const UMythicLifeComponent *ReviverLife = FindHealthComponent(Reviver)) {
             bReviverIncapacitated = ReviverLife->IsDowned() || ReviverLife->IsDead();
+            ReviverHealthNow = ReviverLife->GetHealth();
         }
         if (const AActor *Owner = GetOwner()) {
             bReviverInRange = FVector::DistSquared(Owner->GetActorLocation(), Reviver->GetActorLocation()) <= RangeSq;
         }
     }
 
-    if (!ShouldContinueReviveChannel(bIsDowned, bReviverValid, bReviverIncapacitated, bReviverInRange)) {
-        CancelReviveChannel(); // interrupted: target no longer downed, or reviver gone / downed / out of range
+    // Combat tension: the reviver taking damage during the channel breaks it ("cover me!"). Opt-out via the setting.
+    const bool bDamageInterrupt = Settings && Settings->bReviveInterruptOnReviverDamage
+        && ShouldInterruptReviveOnDamage(ReviverHealthNow, ReviverHealthAtLastTick);
+
+    if (bDamageInterrupt || !ShouldContinueReviveChannel(bIsDowned, bReviverValid, bReviverIncapacitated, bReviverInRange)) {
+        CancelReviveChannel(); // interrupted: reviver took damage, or target no longer downed / reviver gone / downed / out of range
         return;
     }
 
+    ReviverHealthAtLastTick = ReviverHealthNow; // re-baseline for the next tick (also tracks the reviver healing upward)
     ReviveProgressSeconds = ComputeReviveProgressAfterTick(ReviveProgressSeconds, ReviveChannelTickIntervalSeconds, ChannelSeconds);
     if (IsReviveComplete(ReviveProgressSeconds, ChannelSeconds)) {
         ServerReviveFromDowned(); // completion: clears bleed-out, restores movement, heals (and calls CancelReviveChannel)
@@ -470,6 +488,7 @@ void UMythicLifeComponent::CancelReviveChannel() {
     }
     ActiveReviver = nullptr;
     ReviveProgressSeconds = 0.0f;
+    ReviverHealthAtLastTick = 0.0f;
 }
 
 void UMythicLifeComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {

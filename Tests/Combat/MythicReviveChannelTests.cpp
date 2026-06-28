@@ -33,6 +33,13 @@ bool FMythicReviveChannelTest::RunTest(const FString &Parameters) {
     TestFalse(TEXT("stop if the reviver themselves went down"), R::ShouldContinueReviveChannel(true, true, true, true));
     TestFalse(TEXT("stop if the reviver moved out of range"), R::ShouldContinueReviveChannel(true, true, false, false));
 
+    // ── ShouldInterruptReviveOnDamage(healthNow, healthAtLastTick): the reviver took damage → break the channel ──
+    TestTrue(TEXT("a health drop (reviver hit) interrupts"), R::ShouldInterruptReviveOnDamage(80.0f, 100.0f));
+    TestFalse(TEXT("steady health does not interrupt"), R::ShouldInterruptReviveOnDamage(100.0f, 100.0f));
+    TestFalse(TEXT("healing upward does not interrupt"), R::ShouldInterruptReviveOnDamage(120.0f, 100.0f));
+    TestFalse(TEXT("sub-epsilon jitter does not spuriously interrupt"), R::ShouldInterruptReviveOnDamage(100.0f - 1e-5f, 100.0f));
+    TestTrue(TEXT("even a 1-point hit interrupts"), R::ShouldInterruptReviveOnDamage(99.0f, 100.0f));
+
     // ── CanReviveTarget (revive-eligibility gate, reused by the interaction) ──
     TestTrue(TEXT("a downed target + an upright reviver is revivable"), R::CanReviveTarget(true, false));
     TestFalse(TEXT("a healthy target is not revivable"), R::CanReviveTarget(false, false));

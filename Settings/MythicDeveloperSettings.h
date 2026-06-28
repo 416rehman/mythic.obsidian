@@ -112,6 +112,12 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Co-op", meta = (ClampMin = "1.0"))
     float ReviveChannelRange = 250.0f;
 
+    /** When true (default), the reviver TAKING DAMAGE during a revive channel interrupts it (the combat tension that
+     *  makes a channeled revive meaningful — "cover me!"). Only matters while ReviveChannelSeconds > 0, so the default-off
+     *  channel path stays byte-identical regardless. Set false for a forgiving revive that ignores incoming damage. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Co-op")
+    bool bReviveInterruptOnReviverDamage = true;
+
     /**
      * Friendly-fire policy. When FALSE (default), a combat hit from one player onto ANOTHER player is negated in the
      * damage-application execution (no damage/shield/status) — the standard co-op default. When TRUE, players can
