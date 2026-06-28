@@ -12,6 +12,7 @@
 #include "Player/Proficiency/ProficiencyDefinition.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
+#include "GAS/Executions/MythicCombatRoll.h" // boundary-correct probability gate for the bonus-yield roll
 #if ENABLE_DRAW_DEBUG
 #include "DrawDebugHelpers.h"
 #include "HAL/IConsoleManager.h"
@@ -336,7 +337,9 @@ void UMythicResourceManagerComponent::AddToDestroyedResources(FTrackedDestructib
         int32 ProfLevel = GetGathererProficiencyLevel(PlayerController, ResourceType);
         if (ProfLevel > 0) {
             float BonusChance = static_cast<float>(ProfLevel) * GatheringConfig.BonusYieldChancePerLevel;
-            if (FMath::FRand() < BonusChance) {
+            // Boundary-correct gate: a BonusChance that reaches >= 1.0 (high gatherer proficiency) ALWAYS procs — the old
+            // raw `FRand() < BonusChance` dropped the guaranteed bonus when FRand() returned exactly 1.0.
+            if (MythicCombat::RollSucceeds(BonusChance, FMath::FRand())) {
                 DestroyedResource.ResourceISM->OnKillRewards.Give(PlayerController, false, 0, DestroyedResource.Transform.GetLocation());
                 UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent: bonus yield triggered (level %d, chance %.2f)"), ProfLevel, BonusChance);
             }

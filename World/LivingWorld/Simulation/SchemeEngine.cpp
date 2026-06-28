@@ -7,6 +7,7 @@
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/MythicTags_LivingWorld.h"
+#include "GAS/Executions/MythicCombatRoll.h" // boundary-correct probability gate (pure/header-only → thread-safe here)
 
 DEFINE_LOG_CATEGORY(LogMythScheme);
 
@@ -127,7 +128,10 @@ void UMythicSchemeEngine::GenerateSchemes(float SimDeltaTime, uint32 SimTickInde
         // Base probability scales with faction population and military strength
         const float MilitaryBoost = FactionData.MilitaryStrength * SchemeBaseProbability;
 
-        if (FMath::FRand() > SchemeBaseProbability + MilitaryBoost) {
+        // Boundary-correct gate: generate iff the roll succeeds. The old raw `FRand() > prob → continue` lacked the
+        // probability > 0 guard, so a DISABLED generator (SchemeBaseProbability == 0 → prob == 0) still leaked a scheme
+        // whenever FRand() returned exactly 0.0. RollSucceeds(0, x) is always false → a 0-probability faction never generates.
+        if (!MythicCombat::RollSucceeds(SchemeBaseProbability + MilitaryBoost, FMath::FRand())) {
             continue;
         }
 
@@ -340,8 +344,9 @@ void UMythicSchemeEngine::ProgressScheme(FMythicScheme &Scheme, float SimDeltaTi
     // Progress toward completion
     Scheme.Progress += Scheme.ProgressRate * SimDeltaTime;
 
-    // Detection roll
-    if (FMath::FRand() < Scheme.DetectionRisk * SimDeltaTime) {
+    // Detection roll — routed through the centralized gate for consistency (with DetectionRisk a small fraction the 1.0
+    // boundary is unreachable today, but this keeps every scheme/resource probability roll on the one boundary-correct rule).
+    if (MythicCombat::RollSucceeds(Scheme.DetectionRisk * SimDeltaTime, FMath::FRand())) {
         OnSchemeDiscovered(Scheme);
         return;
     }
