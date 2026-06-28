@@ -55,6 +55,15 @@ struct FAffixesRuntimeReplicatedData {
     UPROPERTY(BlueprintReadWrite, SaveGame)
     TArray<FRolledAffix> RolledAffixes = TArray<FRolledAffix>();
 
+    // Per-item "equip OBJECTIVE event already fired" marker for NON-weapon gear (armor/accessories). Persists via the
+    // DEFAULT tagged-property SaveGame path — it is a top-level SaveGame bool on this struct (which has NO custom
+    // serializer; only its FRolledAffix elements do), so it genuinely restores TRUE and a re-equip-on-load skips the
+    // emit (no over-count). Mirrors UAttackFragment::bEquipEventEmitted (iter-23). WARNING: do NOT move it inside
+    // FRolledAffix / FRolledAttributeSpec — those custom serializers force bIsApplied=false on load, which would make
+    // this reset every load and re-fire the equip event. Set on the first genuine non-weapon equip; cleared on unequip.
+    UPROPERTY(SaveGame)
+    bool bEquipEventEmitted = false;
+
     // Server-only runtime wiring. NotReplicated so the default per-property struct replication doesn't push a
     // server ASC object reference to the owning client on every equip/unequip (it's read only on the server, where
     // affixes are activated/rerolled). The replicated struct then carries only the rolled affix arrays.
@@ -161,6 +170,12 @@ public:
 
     // Checks if an affix is already rolled
     static bool IsAffixRolled(const FGameplayAttribute &Affix, TArray<FRolledAffix> &InRolledAffixes);
+
+    // Pure: should THIS affixes fragment drive the "equip N <type>" objective event on activation? True only when it is
+    // the CANONICAL affixes fragment on the item (GetFragment<UAffixesFragment>()==this — dedups multi-affixes items),
+    // the item is NOT a weapon (weapons already emit via UAttackFragment — avoids a double count on a weapon-with-affixes),
+    // and it hasn't already fired this equip (the per-item SaveGame marker). Static → unit-testable without a live item.
+    static bool ShouldEmitArmorEquipEvent(bool bIsCanonicalAffixesFragment, bool bItemHasWeaponFragment, bool bAlreadyEmitted);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {
         Super::GetLifetimeReplicatedProps(OutLifetimeProps);

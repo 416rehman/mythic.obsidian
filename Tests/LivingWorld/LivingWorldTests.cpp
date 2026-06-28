@@ -1860,6 +1860,35 @@ bool FMythicAttackActivationPlanTest::RunTest(const FString &Parameters) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Armor / accessory equip-objective gate — UAffixesFragment::ShouldEmitArmorEquipEvent
+// (the canonical NON-weapon affixes fragment fires the equip event once; weapons emit via UAttackFragment instead)
+// ═══════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicArmorEquipEventGateTest,
+    "Mythic.Itemization.Affixes.ArmorEquipGate",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicArmorEquipEventGateTest::RunTest(const FString &Parameters) {
+    auto Gate = [&](bool bCanonical, bool bHasWeapon, bool bAlready) {
+        return UAffixesFragment::ShouldEmitArmorEquipEvent(bCanonical, bHasWeapon, bAlready);
+    };
+
+    // Armor: canonical affixes fragment, no weapon fragment, not yet emitted → FIRE once.
+    TestTrue(TEXT("armor first equip: canonical, no weapon, not emitted → fire"), Gate(true, false, false));
+    // Weapon-with-affixes: the AttackFragment already emits → affixes must NOT double-count.
+    TestFalse(TEXT("weapon-with-affixes: suppressed (weapon emits via AttackFragment)"), Gate(true, true, false));
+    // Non-canonical affixes fragment on a multi-affixes item → only the canonical one fires.
+    TestFalse(TEXT("non-canonical affixes fragment: suppressed (dedup)"), Gate(false, false, false));
+    // Already emitted this equip (re-activation / save-restore restored marker==true) → no re-emit.
+    TestFalse(TEXT("already emitted this equip → no re-fire"), Gate(true, false, true));
+    // Belt-and-suspenders: non-canonical AND weapon AND already → still false.
+    TestFalse(TEXT("all suppressors set → false"), Gate(false, true, true));
+
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Time-of-day mapping — HourAsDayTime (drives GetDayTime + GetDayTimeTag, consumed by hazards + encounter gating)
 // Locks the ACTUAL boundaries (Morning 7-11, Afternoon 12-16, Evening 17-19, Night 20-6) so the EnvironmentTags
 // annotations stay accurate and any future shift (e.g. aligning Morning to the 06:00 schedule day-start) is deliberate.

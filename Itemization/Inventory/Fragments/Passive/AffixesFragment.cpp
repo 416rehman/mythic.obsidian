@@ -5,6 +5,9 @@
 #include "GameModes/GameState/MythicGameState.h"
 #include "Itemization/MythicLootSettings.h" // data-driven per-rarity affix count
 #include "Mythic/Mythic.h"
+#include "GameFramework/Pawn.h"                                          // resolve the equipping player's controller
+#include "Player/MythicPlayerController.h"                              // NotifyItemEquipped -> "equip N <type>" objectives
+#include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h" // weapon check (weapons emit equip via AttackFragment)
 
 void UAffixesFragment::RollAffixes(int ItemLevel, int Qty) {
     int AffixesAdded = 0;
@@ -54,6 +57,13 @@ void UAffixesFragment::RollAffixes(int ItemLevel, int Qty) {
             AffixesAdded++;
         }
     }
+}
+
+bool UAffixesFragment::ShouldEmitArmorEquipEvent(bool bIsCanonicalAffixesFragment, bool bItemHasWeaponFragment,
+                                                 bool bAlreadyEmitted) {
+    // Canonical fragment (dedup multi-affixes) AND not a weapon (weapons emit via UAttackFragment — no double count)
+    // AND not already fired this equip (per-item SaveGame marker, idempotent across re-activation + save-restore).
+    return bIsCanonicalAffixesFragment && !bItemHasWeaponFragment && !bAlreadyEmitted;
 }
 
 bool UAffixesFragment::IsAffixRolled(const FGameplayAttribute &Affix, TArray<FRolledAffix> &RolledAffixes) {
@@ -160,10 +170,33 @@ void UAffixesFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
 
     ApplyAffixes(ASC, this->AffixesRuntimeReplicatedData.RolledAffixes);
     ApplyAffixes(ASC, this->AffixesRuntimeReplicatedData.RolledCoreAffixes);
+
+    // ARMOR/accessory EQUIPPED → drive "equip N <type>" objectives, ONCE per genuine equip. Weapons are excluded here
+    // because UAttackFragment already emits the equip event for them (this would double-count a weapon-with-affixes); a
+    // multi-affixes item is deduped to the canonical fragment; the per-item SaveGame marker makes it idempotent across
+    // re-activation AND save-restore (a restored equipped item has marker==true → no re-emit). Reset on unequip.
+    const bool bIsCanonical = ItemInstance->GetFragment<UAffixesFragment>() == this;
+    const bool bHasWeapon = ItemInstance->GetFragment<UAttackFragment>() != nullptr;
+    if (ShouldEmitArmorEquipEvent(bIsCanonical, bHasWeapon, this->AffixesRuntimeReplicatedData.bEquipEventEmitted)) {
+        this->AffixesRuntimeReplicatedData.bEquipEventEmitted = true;
+        // Resolve the owning player via the avatar's controller (AI / non-player wearers Cast to null = no event).
+        if (AActor *Avatar = ASC->GetAvatarActor()) {
+            if (const APawn *Pawn = Cast<APawn>(Avatar)) {
+                if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(Pawn->GetController())) {
+                    PC->NotifyItemEquipped(ItemInstance->GetItemDefinition());
+                }
+            }
+        }
+    }
 }
 
 void UAffixesFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
     Super::OnItemDeactivated(ItemInstance);
+
+    // Re-arm the equip event so the NEXT genuine equip emits again. MUST be before the !ASC early-return below so the
+    // marker always resets on unequip regardless of the ASC-null branch.
+    this->AffixesRuntimeReplicatedData.bEquipEventEmitted = false;
+
     auto ASC = this->AffixesRuntimeReplicatedData.ASC;
     if (!ASC) {
         UE_LOG(Myth, Error, TEXT("AffixesInstFragment::DeactivateAffixes: Invalid ASC."));
