@@ -82,6 +82,8 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_REACHED_LOCATION, "GAS.Event.ReachedLoc
                                "Fired server-side on a player's ASC when they first enter an AMythicLocationObjectiveVolume. TargetTags carries the volume's LocationTag. Drives non-combat 'reach/visit X' objectives.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_TALKED_TO_NPC, "GAS.Event.TalkedToNPC",
                                "Fired server-side on a player's ASC when they talk to a quest-relevant NPC. TargetTags carries the NPC's QuestNpcTag. Drives non-combat 'talk to X' objectives.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ITEM_USED, "GAS.Event.Item.Used",
+                               "Fired server-side on a player's ASC when they USE/consume an item (the generic consumable ability). EventMagnitude = quantity; TargetTags carries the item's ItemType. Drives 'use N <type>' objectives (distinct from 'collect N').");
 
 /** GameplayCues */
 UE_DEFINE_GAMEPLAY_TAG(GAMEPLAYCUE_ABILITY_HEAL_ACTIVATED, "GameplayCue.Ability.Heal.Activated");

@@ -82,6 +82,11 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_REACHED_LOCATION);
 // dialogue path; TargetTags carries the NPC's QuestNpcTag so the ObjectiveTracker can drive "talk to X" objectives.
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_TALKED_TO_NPC);
 
+// A player USED (actioned/consumed) an item. Fired server-side on the player's ASC from the generic consumable ability;
+// TargetTags carries the item's ItemType so the ObjectiveTracker can drive "use N <type>" objectives (distinct from
+// "collect N" — using is a different verb than obtaining).
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ITEM_USED);
+
 // The owner has started an attack
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ATTACK_BEGIN);
 // The owner has ended an attack

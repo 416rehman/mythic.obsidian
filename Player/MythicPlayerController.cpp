@@ -1274,6 +1274,25 @@ void AMythicPlayerController::NotifyItemAcquired(const UItemDefinition *ItemDef,
     ASC->HandleGameplayEvent(GAS_EVENT_ITEM_ACQUIRED, &Payload);
 }
 
+void AMythicPlayerController::NotifyItemUsed(const UItemDefinition *ItemDef, int32 Quantity) {
+    UAbilitySystemComponent *ASC = GetAbilitySystemComponent();
+    const bool bServerAuth = ASC && ASC->IsOwnerActorAuthoritative();
+    const bool bValidPayload = ItemDef && ItemDef->ItemType.IsValid();
+    if (!MythicObjectiveEvents::ShouldEmitObjectiveEvent(bServerAuth, bValidPayload) || Quantity <= 0) {
+        return; // not server-authoritative, or the item has no type tag to match a "use N <type>" objective
+    }
+    // Same GAS event bus the ObjectiveTracker listens on (mirrors NotifyItemAcquired). TargetTags carries the item's
+    // ItemType for the payload-tag filter; magnitude carries the quantity used.
+    FGameplayEventData Payload;
+    Payload.EventTag = GAS_EVENT_ITEM_USED;
+    Payload.Instigator = GetPawn();
+    Payload.Target = ASC->GetAvatarActor();
+    Payload.OptionalObject = ItemDef;
+    Payload.TargetTags.AddTag(ItemDef->ItemType);
+    Payload.EventMagnitude = static_cast<float>(Quantity);
+    ASC->HandleGameplayEvent(GAS_EVENT_ITEM_USED, &Payload);
+}
+
 void AMythicPlayerController::NotifyTalkedToNPC(const FGameplayTag &NpcTag) {
     UAbilitySystemComponent *ASC = GetAbilitySystemComponent();
     const bool bServerAuth = ASC && ASC->IsOwnerActorAuthoritative();

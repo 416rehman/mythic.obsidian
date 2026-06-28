@@ -382,6 +382,10 @@ public:
     // server: emit GAS.Event.Item.Acquired on player's ASC for objectives
     void NotifyItemAcquired(const UItemDefinition *ItemDef, int32 Quantity);
 
+    // server: emit GAS.Event.Item.Used on the player's ASC (TargetTags = ItemType) for "use N <type>" objectives. No-op
+    // off authority / on an item with no type / non-positive quantity. Called from the generic consumable ability on use.
+    void NotifyItemUsed(const UItemDefinition *ItemDef, int32 Quantity);
+
     // server: emit GAS.Event.TalkedToNPC on the player's ASC (TargetTags = NpcTag) for "talk to X" objectives. No-op on
     // an invalid NpcTag or off authority. Called from the dialogue path.
     void NotifyTalkedToNPC(const FGameplayTag &NpcTag);
