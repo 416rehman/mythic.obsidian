@@ -14,9 +14,9 @@
  * receive {Rewards}". Tracked per-player by UObjectiveTracker. The trigger is a GAS gameplay-event tag from the
  * GAS.Event.* family emitted server-side: combat (Kill / Death / Dmg.* / Heal.*) AND item acquisition
  * (GAS.Event.Item.Acquired — fires on every genuine pickup/grant). With RequiredPayloadTag + bCountByEventMagnitude
- * this expresses non-combat "collect N <type>" objectives (e.g. gather 20 wood) on the same atomic unit. Prerequisites
- * (PrerequisiteObjectives) now gate assignment into multi-step quest chains; auto-advance (assign the next step on
- * completion) and branching are still follow-ups.
+ * this expresses non-combat "collect N <type>" objectives (e.g. gather 20 wood) on the same atomic unit. Multi-step
+ * quest chains are modeled by PrerequisiteObjectives (gate assignment) + NextObjectives (auto-assign the next step on
+ * completion); branching (choose one of N next steps) is still a follow-up.
  */
 UCLASS(BlueprintType)
 class MYTHIC_API UObjectiveDefinition : public UDataAsset {
@@ -56,6 +56,13 @@ public:
     // authors the chain; a dependency cycle simply leaves all looped steps unassignable (harmless data error).
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")
     TArray<TObjectPtr<UObjectiveDefinition>> PrerequisiteObjectives;
+
+    // Objectives auto-assigned to the player when THIS one completes — the next step(s) of the quest chain, so it
+    // advances without re-talking the giver. Each is still gated by its OWN PrerequisiteObjectives at assign time (a
+    // converging step waits until all its prerequisites are complete), and an already-tracked/completed step is never
+    // re-assigned (so a chain cycle can't loop). Empty (default) = a terminal step.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")
+    TArray<TObjectPtr<UObjectiveDefinition>> NextObjectives;
 
     // Player-facing objective line (e.g. "Slay 5 wolves").
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")

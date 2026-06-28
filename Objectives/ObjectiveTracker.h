@@ -109,6 +109,13 @@ public:
     static bool AreObjectivePrerequisitesMet(const TArray<TObjectPtr<UObjectiveDefinition>> &Prerequisites,
                                              const TArray<FObjectiveProgress> &TrackedObjectives);
 
+    // Pure: of CandidateNext, which objectives are newly assignable given TrackedObjectives — i.e. those for which
+    // ResolveObjectiveOfferResult would return Assigned (not already active/completed, prerequisites met). Null entries
+    // skipped; deduped. This is the chain-advance set: when an objective completes, its NextObjectives run through here.
+    static void CollectAssignableNextObjectives(const TArray<TObjectPtr<UObjectiveDefinition>> &CandidateNext,
+                                                const TArray<FObjectiveProgress> &TrackedObjectives,
+                                                TArray<UObjectiveDefinition *> &OutAssignable);
+
     static FText BuildObjectiveNotificationText(const FText &DisplayText, EObjectiveNotifyCategory Category,
                                                 EObjectiveOfferResult OfferResult, int32 Current, int32 Required,
                                                 bool bRewardSucceeded, bool bRewardDroppedNearby);

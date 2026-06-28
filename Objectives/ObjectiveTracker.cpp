@@ -124,6 +124,22 @@ bool UObjectiveTracker::AreObjectivePrerequisitesMet(const TArray<TObjectPtr<UOb
     return true;
 }
 
+void UObjectiveTracker::CollectAssignableNextObjectives(const TArray<TObjectPtr<UObjectiveDefinition>> &CandidateNext,
+                                                        const TArray<FObjectiveProgress> &TrackedObjectives,
+                                                        TArray<UObjectiveDefinition *> &OutAssignable) {
+    for (const TObjectPtr<UObjectiveDefinition> &Next : CandidateNext) {
+        if (!Next) {
+            continue;
+        }
+        FObjectiveProgress Scratch;
+        // Reuse the single offer-decision: a next step is assignable iff it is not already tracked and its own
+        // prerequisites are met. An already-active/completed step → not Assigned → skipped (so a chain cycle can't loop).
+        if (ResolveObjectiveOfferResult(TrackedObjectives, Next, Scratch) == EObjectiveOfferResult::Assigned) {
+            OutAssignable.AddUnique(Next); // a step reachable from two completing parents (or listed twice) assigns once
+        }
+    }
+}
+
 FText UObjectiveTracker::BuildObjectiveNotificationText(const FText &DisplayText, EObjectiveNotifyCategory Category,
                                                         EObjectiveOfferResult OfferResult, int32 Current, int32 Required,
                                                         bool bRewardSucceeded, bool bRewardDroppedNearby) {
@@ -172,6 +188,9 @@ void UObjectiveTracker::HandleGameplayEvent(const FGameplayEventData *Payload) {
     // Advance every active, non-completed objective whose trigger tag matches this event. In-place mutation of a
     // plain replicated TArray<FStruct> replicates on the next net update (same pattern as FactionStanding).
     int32 NotifyIndex = 0; // stack offset so 2+ same-tag objectives advancing on one event don't overlap their floaters
+    // Chain auto-advance: a completing objective's NextObjectives are collected here and assigned AFTER the loop —
+    // never mid-iteration, since ServerTryAddObjective mutates ActiveObjectives (which would invalidate this range-for).
+    TArray<TObjectPtr<UObjectiveDefinition>> PendingNextSteps;
     for (FObjectiveProgress &Prog : ActiveObjectives) {
         if (Prog.bCompleted || !Prog.Definition) {
             continue;
@@ -195,6 +214,8 @@ void UObjectiveTracker::HandleGameplayEvent(const FGameplayEventData *Payload) {
         Prog.CurrentCount = NewCount;
         if (bJustCompleted) {
             Prog.bCompleted = true;
+            // Queue this step's chain successors for assignment after the loop (deferred — see above).
+            PendingNextSteps.Append(Prog.Definition->NextObjectives);
             // Grant rewards on the server via the canonical reward holder (builds correct XP/item-level contexts).
             const bool bRewardSucceeded = Prog.Definition->Rewards.Give(PC);
             UE_LOG(Myth, Log, TEXT("ObjectiveTracker: objective '%s' completed (%d/%d); rewards granted to %s."),
@@ -215,6 +236,21 @@ void UObjectiveTracker::HandleGameplayEvent(const FGameplayEventData *Payload) {
             // line. Previously DisplayText was sent even on completion, so CompletedText was dead.
             MythicPC->ClientNotifyObjective(Prog.Definition->GetCalloutText(bJustCompleted), Prog.CurrentCount,
                                             Prog.Definition->RequiredCount, bJustCompleted, NotifyIndex++);
+        }
+    }
+
+    // Deferred chain advance: assign each newly-unlocked next step (its prerequisites are now met and it isn't already
+    // tracked) and announce it to the owning client — so a quest chain flows forward without re-talking the giver.
+    if (PendingNextSteps.Num() > 0) {
+        TArray<UObjectiveDefinition *> ToAssign;
+        CollectAssignableNextObjectives(PendingNextSteps, ActiveObjectives, ToAssign);
+        AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PC);
+        for (UObjectiveDefinition *Next : ToAssign) {
+            FObjectiveProgress OutProg;
+            if (ServerTryAddObjective(Next, OutProg) == EObjectiveOfferResult::Assigned && MythicPC) {
+                MythicPC->ClientNotifyObjective(Next->GetCalloutText(false), OutProg.CurrentCount, Next->RequiredCount,
+                                                /*bCompleted*/ false, NotifyIndex++);
+            }
         }
     }
 }

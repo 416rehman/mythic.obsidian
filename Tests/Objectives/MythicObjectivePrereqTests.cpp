@@ -74,3 +74,78 @@ bool FMythicObjectivePrereqTest::RunTest(const FString &Parameters) {
 
     return true;
 }
+
+// ─── Chain auto-advance: CollectAssignableNextObjectives picks the next step(s) on completion ───
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicObjectiveChainAdvanceTest,
+    "Mythic.Objectives.ChainAdvance",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicObjectiveChainAdvanceTest::RunTest(const FString &Parameters) {
+    // Chain: A → {B, C}; C is a CONVERGING step that requires B. (Fresh defs default to a valid trigger + count.)
+    UObjectiveDefinition *A = NewObject<UObjectiveDefinition>();
+    UObjectiveDefinition *B = NewObject<UObjectiveDefinition>();
+    UObjectiveDefinition *C = NewObject<UObjectiveDefinition>();
+    A->NextObjectives = {B, C};
+    C->PrerequisiteObjectives = {B};
+
+    // A just completed: B (no prereqs) is assignable; C (needs B, not done) is not.
+    {
+        TArray<FObjectiveProgress> Tracked;
+        FObjectiveProgress PA;
+        PA.Definition = A;
+        PA.bCompleted = true;
+        Tracked.Add(PA);
+
+        TArray<UObjectiveDefinition *> Out;
+        UObjectiveTracker::CollectAssignableNextObjectives(A->NextObjectives, Tracked, Out);
+        TestTrue(TEXT("B is assignable after A completes"), Out.Contains(B));
+        TestFalse(TEXT("C waits for its prerequisite B"), Out.Contains(C));
+        TestEqual(TEXT("only B unlocks first"), Out.Num(), 1);
+
+        // Now B is also complete: re-evaluating A's next steps yields C (B already tracked → skipped; C's prereq met).
+        FObjectiveProgress PB;
+        PB.Definition = B;
+        PB.bCompleted = true;
+        Tracked.Add(PB);
+        Out.Reset();
+        UObjectiveTracker::CollectAssignableNextObjectives(A->NextObjectives, Tracked, Out);
+        TestFalse(TEXT("B is not re-assigned (already tracked)"), Out.Contains(B));
+        TestTrue(TEXT("C unlocks once B is complete"), Out.Contains(C));
+        TestEqual(TEXT("only C now"), Out.Num(), 1);
+    }
+
+    // Cycle safety: an objective whose NextObjectives points back at itself never re-assigns once tracked.
+    {
+        UObjectiveDefinition *Loop = NewObject<UObjectiveDefinition>();
+        Loop->NextObjectives = {Loop};
+        TArray<FObjectiveProgress> Tracked;
+        FObjectiveProgress PL;
+        PL.Definition = Loop;
+        PL.bCompleted = true;
+        Tracked.Add(PL);
+
+        TArray<UObjectiveDefinition *> Out;
+        UObjectiveTracker::CollectAssignableNextObjectives(Loop->NextObjectives, Tracked, Out);
+        TestEqual(TEXT("a self-cycle does not re-assign"), Out.Num(), 0);
+    }
+
+    // Dedup + null-skip: A → {B, B, null} unlocks B exactly once.
+    {
+        UObjectiveDefinition *Parent = NewObject<UObjectiveDefinition>();
+        UObjectiveDefinition *Step = NewObject<UObjectiveDefinition>();
+        Parent->NextObjectives = {Step, Step, nullptr};
+        TArray<FObjectiveProgress> Tracked;
+        FObjectiveProgress PP;
+        PP.Definition = Parent;
+        PP.bCompleted = true;
+        Tracked.Add(PP);
+
+        TArray<UObjectiveDefinition *> Out;
+        UObjectiveTracker::CollectAssignableNextObjectives(Parent->NextObjectives, Tracked, Out);
+        TestEqual(TEXT("duplicate + null entries collapse to one assignment"), Out.Num(), 1);
+        TestTrue(TEXT("the step is present"), Out.Contains(Step));
+    }
+
+    return true;
+}
