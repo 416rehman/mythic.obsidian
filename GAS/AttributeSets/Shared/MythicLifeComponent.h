@@ -13,6 +13,7 @@
 #include "MythicLifeComponent.generated.h"
 
 class UMythicAbilitySystemComponent;
+class APawn; // revive-channel reviver (ServerBeginReviveChannel / ActiveReviver)
 
 UCLASS(Blueprintable, BlueprintType)
 class UDamageResult : public UObject {
@@ -162,6 +163,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Health")
     bool IsDowned() const { return bIsDowned; }
 
+    // True once the owner has latched the dead state (GAS.State.Dead). Distinct from downed: a dead pawn is NOT revivable.
+    UFUNCTION(BlueprintPure, Category = "Mythic|Health")
+    bool IsDead() const;
+
     // SERVER: revive a downed owner — clears the bleed-out timer + downed tag, restores movement, and heals to the
     // configured ReviveHealthFraction (which clears the out-of-health latch). No-op if not downed / off authority.
     UFUNCTION(BlueprintCallable, Category = "Mythic|Health")
@@ -170,6 +175,27 @@ public:
     // Pure revive-eligibility gate: a downed target can be revived only by a reviver who is NOT themselves downed.
     // (Range is enforced separately by the interaction RPC.) Static + no engine state for unit testing.
     static bool CanReviveTarget(bool bTargetDowned, bool bReviverDowned);
+
+    // SERVER: begin (or refresh) a proximity-maintained revive channel on this downed owner by Reviver. While the channel
+    // runs, progress accrues each tick as long as Reviver stays in range + isn't downed (re-validated server-side); on
+    // completion this calls ServerReviveFromDowned. No-op if not downed / already being revived by someone else / off
+    // authority / ReviveChannelSeconds<=0 (the instant path is taken by the caller instead).
+    void ServerBeginReviveChannel(APawn *Reviver);
+
+    // Normalized revive-channel progress [0,1] for the UI bar (0 when no channel / ReviveChannelSeconds<=0). Reads the
+    // replicated progress so both the downed player and the reviver can show it.
+    UFUNCTION(BlueprintPure, Category = "Mythic|Health")
+    float GetReviveProgress01() const;
+
+    // Pure revive-channel rules (static + unit-testable):
+    //  - ComputeReviveProgressAfterTick: accrue DeltaSeconds onto CurrentSeconds, clamped to [0, ChannelSeconds].
+    //  - IsReviveComplete: channel enabled (ChannelSeconds>0) and progress reached it.
+    //  - ShouldContinueReviveChannel: the per-tick keep-going gate (target still downed, reviver valid + not downed + in range).
+    static float ComputeReviveProgressAfterTick(float CurrentSeconds, float DeltaSeconds, float ChannelSeconds);
+    static bool IsReviveComplete(float ProgressSeconds, float ChannelSeconds);
+    static bool ShouldContinueReviveChannel(bool bTargetDowned, bool bReviverValid, bool bReviverDowned, bool bReviverInRange);
+
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
     // SERVER: seconds between regen ticks. Each tick regenerates Health / Shield / Stamina toward their max at
     // the corresponding *RegenRate attribute. 0 disables regen.
@@ -381,4 +407,12 @@ protected:
     bool bIsDowned = false;
     FTimerHandle BleedOutTimerHandle;
     TWeakObjectPtr<AActor> DownedKiller; // remembered so a bleed-out attributes the eventual death correctly
+
+    // Revive channel (server-authoritative; only active while a teammate is reviving this downed owner).
+    UPROPERTY(Replicated)
+    float ReviveProgressSeconds = 0.0f; // replicated so the reviver + downed player can show the progress bar
+    TWeakObjectPtr<APawn> ActiveReviver; // server-only: who is currently channeling the revive
+    FTimerHandle ReviveChannelTimerHandle;
+    void ReviveChannelTick();    // per-tick: re-validate + accrue; complete or interrupt
+    void CancelReviveChannel();  // stop the timer, clear the reviver, reset replicated progress
 };

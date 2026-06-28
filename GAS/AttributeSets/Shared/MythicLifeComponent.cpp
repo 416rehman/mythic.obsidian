@@ -31,6 +31,7 @@
 #include "Player/MythicFactionStandingComponent.h"
 #include "World/LivingWorld/Events/ActionEventSubsystem.h"
 #include "World/LivingWorld/MythicTags_LivingWorld.h"
+#include "Net/UnrealNetwork.h" // DOREPLIFETIME for the replicated revive-channel progress
 
 
 UMythicLifeComponent::UMythicLifeComponent(const FObjectInitializer &ObjectInitializer)
@@ -170,7 +171,12 @@ void UMythicLifeComponent::UninitializeFromAbilitySystem() {
 
     if (GetWorld()) {
         GetWorld()->GetTimerManager().ClearTimer(RegenTimerHandle);
+        GetWorld()->GetTimerManager().ClearTimer(BleedOutTimerHandle);
     }
+
+    // Tear down any in-flight revive channel (timer + reviver ref) so a reused (persistent / pooled) component never
+    // carries an orphaned channel timer onto its next life.
+    CancelReviveChannel();
 
     // Tear down any in-flight stagger (timer + transient loose STUNNED tag) via the single-source helper, so the
     // tag doesn't dangle on a reused (persistent) ASC.
@@ -302,6 +308,7 @@ void UMythicLifeComponent::EnterDownedState(AActor *Killer) {
     AActor *Owner = GetOwner();
     bIsDowned = true;
     DownedKiller = Killer;
+    CancelReviveChannel(); // defensive: a fresh down starts with no in-flight revive channel (clears any pooled/stale state)
 
     // Incapacitate, but DON'T latch Dead — this is recoverable. Cancel abilities + clear any stagger so the downed
     // owner can't act or carry a leftover stun.
@@ -364,8 +371,110 @@ void UMythicLifeComponent::ServerReviveFromDowned() {
         AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Life::GetHealthAttribute(), NewHealth);
     }
 
+    CancelReviveChannel(); // a revive happened (channel or instant) — never leave a channel timer running afterward
     UE_LOG(Myth, Log, TEXT("LifeComponent: %s REVIVED from downed."), *GetNameSafe(GetOwner()));
     OnRevived.Broadcast(GetOwner());
+}
+
+namespace {
+    // The revive channel ticks at 10 Hz while active (a teammate is holding the revive). Only running during an actual
+    // channel — not a persistent per-pawn tick. Progress accrues in real seconds, so it completes after the configured
+    // ReviveChannelSeconds of maintained proximity.
+    constexpr float ReviveChannelTickIntervalSeconds = 0.1f;
+}
+
+float UMythicLifeComponent::ComputeReviveProgressAfterTick(float CurrentSeconds, float DeltaSeconds, float ChannelSeconds) {
+    const float MaxProgress = FMath::Max(0.0f, ChannelSeconds);
+    return FMath::Clamp(CurrentSeconds + FMath::Max(0.0f, DeltaSeconds), 0.0f, MaxProgress);
+}
+
+bool UMythicLifeComponent::IsReviveComplete(float ProgressSeconds, float ChannelSeconds) {
+    return ChannelSeconds > 0.0f && ProgressSeconds >= ChannelSeconds;
+}
+
+bool UMythicLifeComponent::ShouldContinueReviveChannel(bool bTargetDowned, bool bReviverValid, bool bReviverDowned, bool bReviverInRange) {
+    return bTargetDowned && bReviverValid && !bReviverDowned && bReviverInRange;
+}
+
+bool UMythicLifeComponent::IsDead() const {
+    return AbilitySystemComponent && AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_DEAD);
+}
+
+float UMythicLifeComponent::GetReviveProgress01() const {
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    const float ChannelSeconds = Settings ? Settings->ReviveChannelSeconds : 0.0f;
+    if (ChannelSeconds <= 0.0f) {
+        return 0.0f;
+    }
+    return FMath::Clamp(ReviveProgressSeconds / ChannelSeconds, 0.0f, 1.0f);
+}
+
+void UMythicLifeComponent::ServerBeginReviveChannel(APawn *Reviver) {
+    if (!AbilitySystemComponent || !bIsDowned || !Reviver || !GetOwner() || !GetOwner()->HasAuthority()) {
+        return;
+    }
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    const float ChannelSeconds = Settings ? Settings->ReviveChannelSeconds : 0.0f;
+    if (ChannelSeconds <= 0.0f) {
+        ServerReviveFromDowned(); // channel disabled → instant (the caller normally gates this; stay correct regardless)
+        return;
+    }
+    UWorld *W = GetWorld();
+    if (!W) {
+        return;
+    }
+    // One channel at a time: while a reviver is actively channeling, ignore another player's start. A different reviver
+    // can take over only after an interruption clears the timer (proximity is re-validated each tick).
+    if (W->GetTimerManager().IsTimerActive(ReviveChannelTimerHandle)) {
+        return;
+    }
+    ActiveReviver = Reviver;
+    ReviveProgressSeconds = 0.0f;
+    W->GetTimerManager().SetTimer(ReviveChannelTimerHandle, this, &UMythicLifeComponent::ReviveChannelTick,
+                                  ReviveChannelTickIntervalSeconds, /*bLoop=*/true);
+}
+
+void UMythicLifeComponent::ReviveChannelTick() {
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    const float ChannelSeconds = Settings ? Settings->ReviveChannelSeconds : 0.0f;
+    const float RangeSq = FMath::Square(Settings ? FMath::Max(1.0f, Settings->ReviveChannelRange) : 250.0f);
+
+    // Re-validate the reviver SERVER-SIDE every tick (the channel was started off a client-named reviver; gotcha (d)).
+    const APawn *Reviver = ActiveReviver.Get();
+    const bool bReviverValid = Reviver != nullptr;
+    bool bReviverIncapacitated = false; // downed OR dead — a corpse/incapacitated teammate can't finish a revive
+    bool bReviverInRange = false;
+    if (bReviverValid) {
+        if (const UMythicLifeComponent *ReviverLife = FindHealthComponent(Reviver)) {
+            bReviverIncapacitated = ReviverLife->IsDowned() || ReviverLife->IsDead();
+        }
+        if (const AActor *Owner = GetOwner()) {
+            bReviverInRange = FVector::DistSquared(Owner->GetActorLocation(), Reviver->GetActorLocation()) <= RangeSq;
+        }
+    }
+
+    if (!ShouldContinueReviveChannel(bIsDowned, bReviverValid, bReviverIncapacitated, bReviverInRange)) {
+        CancelReviveChannel(); // interrupted: target no longer downed, or reviver gone / downed / out of range
+        return;
+    }
+
+    ReviveProgressSeconds = ComputeReviveProgressAfterTick(ReviveProgressSeconds, ReviveChannelTickIntervalSeconds, ChannelSeconds);
+    if (IsReviveComplete(ReviveProgressSeconds, ChannelSeconds)) {
+        ServerReviveFromDowned(); // completion: clears bleed-out, restores movement, heals (and calls CancelReviveChannel)
+    }
+}
+
+void UMythicLifeComponent::CancelReviveChannel() {
+    if (UWorld *W = GetWorld()) {
+        W->GetTimerManager().ClearTimer(ReviveChannelTimerHandle);
+    }
+    ActiveReviver = nullptr;
+    ReviveProgressSeconds = 0.0f;
+}
+
+void UMythicLifeComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(UMythicLifeComponent, ReviveProgressSeconds);
 }
 
 void UMythicLifeComponent::ClearStagger() {
@@ -398,6 +507,12 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
     // Tear down any in-flight stagger (single-source helper) so its transient STUNNED loose tag + pending recovery
     // timer don't survive onto a reused pooled actor (which would spawn movement-locked via ReevaluateCrowdControl).
     ClearStagger();
+
+    // Death is terminal: clear the downed flag + tear down any in-flight revive channel deterministically (don't rely on
+    // the next channel tick self-interrupting). This closes the "revive a corpse" window — a channel completing after
+    // death would otherwise pass ServerReviveFromDowned's `bIsDowned` guard and heal a GAS.State.Dead pawn.
+    bIsDowned = false;
+    CancelReviveChannel();
 
     if (ACharacter *Char = Cast<ACharacter>(Owner)) {
         if (UCharacterMovementComponent *Move = Char->GetCharacterMovement()) {

@@ -101,6 +101,17 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Co-op", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float ReviveHealthFraction = 0.5f;
 
+    /** Seconds a teammate must stay near a downed ally to revive them (a hold/channel, not instant). 0 = INSTANT revive
+     *  on interact (the default → byte-identical to before; co-op tension is opt-in). >0 enables the proximity channel:
+     *  the reviver presses Revive then stays within ReviveChannelRange until progress completes; leaving range / going
+     *  down themselves interrupts and resets it. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Co-op", meta = (ClampMin = "0.0"))
+    float ReviveChannelSeconds = 0.0f;
+
+    /** Max distance (cm) the reviver may be from the downed ally to keep a revive channel progressing. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Co-op", meta = (ClampMin = "1.0"))
+    float ReviveChannelRange = 250.0f;
+
     /**
      * Friendly-fire policy. When FALSE (default), a combat hit from one player onto ANOTHER player is negated in the
      * damage-application execution (no damage/shield/status) — the standard co-op default. When TRUE, players can

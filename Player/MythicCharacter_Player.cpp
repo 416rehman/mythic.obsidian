@@ -11,6 +11,7 @@
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
+#include "Settings/MythicDeveloperSettings.h" // ReviveChannelSeconds (channel vs instant revive)
 #include "MythicPlayerController.h" // revive interaction routes via ServerInteractPrimary
 
 AMythicCharacter_Player::AMythicCharacter_Player() {
@@ -107,7 +108,15 @@ void AMythicCharacter_Player::OnPrimaryInteract_Implementation(AActor *Interacto
             }
         }
         if (UMythicLifeComponent::CanReviveTarget(LifeComponent->IsDowned(), bReviverDowned)) {
-            LifeComponent->ServerReviveFromDowned();
+            // Channel revive (stay near the downed ally until progress completes) when ReviveChannelSeconds > 0; else the
+            // legacy instant revive. The channel re-validates the reviver's proximity + downed state server-side each tick.
+            const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+            if (Settings && Settings->ReviveChannelSeconds > 0.0f) {
+                LifeComponent->ServerBeginReviveChannel(ReviverPC->GetPawn());
+            }
+            else {
+                LifeComponent->ServerReviveFromDowned();
+            }
         }
         return;
     }
