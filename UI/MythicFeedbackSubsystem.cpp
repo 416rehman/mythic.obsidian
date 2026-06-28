@@ -79,21 +79,11 @@ void UMythicFeedbackSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
         return;
     }
 
-    // Contextual "reveal all": hold a key to fade the whole HUD to full; release and it fades back to contextual.
-    {
-        FMythicLocalHud &Hud = GetLocalHud(PC);
-        const float RevealDt = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f;
-        const bool bReveal = PC->IsInputKeyDown(EKeys::Tab);
-        Hud.RevealAlpha = StepNameplateAlpha(Hud.RevealAlpha, bReveal ? 1.0f : 0.0f, RevealDt, 5.0f);
-    }
-
+    // COMBAT damage numbers stay on Canvas (transient world VFX — the right tool, and never the ugly part). EVERYTHING
+    // else (player HUD, nameplates, toasts/banners, world callouts, quest tracker, ambient) is migrating to UMG/MVVM
+    // widgets driven by ViewModels + gameplay events, so it is no longer drawn here. The other Draw* methods + their
+    // pools/state are retired as each element's UMG widget lands.
     DrawDamageNumbers(Canvas, PC);
-    DrawWorldCallouts(Canvas, PC);
-    DrawNameplates(Canvas, PC);
-    DrawQuestTracker(Canvas, PC);        // top-left active-objective tracker
-    DrawPlayerHud(Canvas, PC);           // bottom-centre player resource bars (chip + contextual)
-    DrawScreenNotifications(Canvas, PC); // screen UI (toasts/banners) layers on top of world-anchored elements
-    DrawAmbient(Canvas, PC);             // auto-hiding time/weather corner cluster
 }
 
 // Swap-remove every expired entry. Declared in the header but previously never defined — the ONLY pruning was inside
