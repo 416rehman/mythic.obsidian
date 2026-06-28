@@ -1192,25 +1192,20 @@ void FMythicWorldSimThread::TickCrystallization() {
         Fabric->QueryEventsByFaction(FId, RecentEvents, 64); // Last 64 events
 
         if (RecentEvents.Num() >= 8) {
-            // Count events by category
+            // Count events by category. (The cultural drift below is COUNT-based: a category exceeding the threshold
+            // share drifts a fixed ideology axis. A richer "drift toward the average moral VECTOR of recent events" was
+            // never wired up — its per-axis CombatMoralSum/EconomyMoralSum accumulators were write-only — so they're
+            // removed; re-introduce them if/when that vector-based drift is built.)
             int32 CombatCount = 0;
             int32 EconomyCount = 0;
             int32 DiplomacyCount = 0;
-            float CombatMoralSum[MoralAxisCount] = {};
-            float EconomyMoralSum[MoralAxisCount] = {};
 
             for (const FMythicWorldEvent &Event : RecentEvents) {
                 if ((Event.CategoryFlags & EMythicEventCategory::Combat) != 0) {
                     ++CombatCount;
-                    for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
-                        CombatMoralSum[Axis] += Event.MoralVector.AxisValues[Axis];
-                    }
                 }
                 if ((Event.CategoryFlags & EMythicEventCategory::Trade) != 0) {
                     ++EconomyCount;
-                    for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
-                        EconomyMoralSum[Axis] += Event.MoralVector.AxisValues[Axis];
-                    }
                 }
                 if ((Event.CategoryFlags & EMythicEventCategory::Diplomacy) != 0) {
                     ++DiplomacyCount;
