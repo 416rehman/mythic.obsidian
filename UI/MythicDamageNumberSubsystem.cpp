@@ -988,22 +988,78 @@ void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas, APlayerControlle
         WeatherName = Full.FindLastChar(TEXT('.'), DotIdx) ? Full.RightChop(DotIdx + 1) : Full;
     }
 
-    const FString Text = FString::Printf(TEXT("%02d:00    %s    Day %d"), Hour, *WeatherName, Now.GetDay());
-    const float FontScale = (Config ? Config->FontScaleMultiplier : 1.0f) * 0.85f;
+    const float FontScale = (Config ? Config->FontScaleMultiplier : 1.0f) * 0.8f;
+    const float Margin = 22.0f;
+    const float PanelW = 134.0f;
+    const float PanelH = 50.0f;
+    const float PX = Canvas->ClipX - PanelW - Margin;
+    const float PY = Margin;
 
-    float TW = 0.0f, TH = 0.0f;
-    Canvas->TextSize(Font, Text, TW, TH, FontScale, FontScale);
-    const float Margin = 24.0f;
-    const float Pad = 7.0f;
-    const float X = Canvas->ClipX - TW - Margin;
-    const float Y = Margin;
+    FCanvasTileItem Panel(FVector2D(PX, PY), GWhiteTexture, FVector2D(PanelW, PanelH), FLinearColor(0.0f, 0.0f, 0.0f, 0.4f * Alpha));
+    Panel.BlendMode = SE_BLEND_Translucent;
+    Canvas->DrawItem(Panel);
 
-    FCanvasTileItem Bg(FVector2D(X - Pad, Y - Pad), GWhiteTexture, FVector2D(TW + Pad * 2.0f, TH + Pad * 2.0f),
-                       FLinearColor(0.0f, 0.0f, 0.0f, 0.45f * Alpha));
-    Bg.BlendMode = SE_BLEND_Translucent;
-    Canvas->DrawItem(Bg);
+    auto Disc = [&](float cx, float cy, float r, FLinearColor col) {
+        FCanvasNGonItem D(FVector2D(cx, cy), FVector2D(r, r), 18, col);
+        D.BlendMode = SE_BLEND_Translucent;
+        Canvas->DrawItem(D);
+    };
+    auto Seg = [&](float ax, float ay, float bx, float by, FLinearColor col, float th) {
+        FCanvasLineItem L(FVector2D(ax, ay), FVector2D(bx, by));
+        L.SetColor(col);
+        L.LineThickness = th;
+        L.BlendMode = SE_BLEND_Translucent;
+        Canvas->DrawItem(L);
+    };
 
-    FCanvasTextItem TextItem(FVector2D(X, Y), FText::FromString(Text), Font, FLinearColor(0.9f, 0.92f, 0.96f, Alpha));
+    // Time icon: a rayed sun by day, a crescent moon by night.
+    const bool bDay = (Hour >= 6 && Hour < 19);
+    const float IconCX = PX + 22.0f;
+    const float IconCY = PY + 18.0f;
+    if (bDay) {
+        const FLinearColor Sun(1.0f, 0.82f, 0.3f, Alpha);
+        Disc(IconCX, IconCY, 7.0f, Sun);
+        for (int32 i = 0; i < 8; ++i) {
+            const float A = i * (PI / 4.0f);
+            Seg(IconCX + FMath::Cos(A) * 9.0f, IconCY + FMath::Sin(A) * 9.0f, IconCX + FMath::Cos(A) * 12.0f, IconCY + FMath::Sin(A) * 12.0f, Sun, 1.4f);
+        }
+    }
+    else {
+        // Crescent — a light disc with a panel-toned disc offset over it.
+        Disc(IconCX, IconCY, 8.0f, FLinearColor(0.85f, 0.88f, 0.95f, Alpha));
+        Disc(IconCX + 3.5f, IconCY - 1.5f, 7.0f, FLinearColor(0.0f, 0.0f, 0.0f, 0.55f * Alpha));
+    }
+
+    // Weather glyph: rain/snow fall from a small cloud; overcast = cloud; clear = nothing extra.
+    const float Wx = PX + 66.0f;
+    const float Wy = PY + 15.0f;
+    auto Cloud = [&]() {
+        const FLinearColor Cl(0.8f, 0.83f, 0.88f, Alpha);
+        Disc(Wx - 6.0f, Wy, 5.0f, Cl);
+        Disc(Wx + 1.0f, Wy - 3.0f, 6.0f, Cl);
+        Disc(Wx + 7.0f, Wy, 5.0f, Cl);
+    };
+    if (WeatherName == TEXT("Rain")) {
+        Cloud();
+        const FLinearColor Drop(0.5f, 0.7f, 1.0f, Alpha);
+        for (int32 i = -1; i <= 1; ++i) {
+            Seg(Wx + i * 5.0f, Wy + 7.0f, Wx + i * 5.0f - 2.0f, Wy + 12.0f, Drop, 1.4f);
+        }
+    }
+    else if (WeatherName == TEXT("Snow")) {
+        Cloud();
+        const FLinearColor Flake(0.9f, 0.95f, 1.0f, Alpha);
+        for (int32 i = -1; i <= 1; ++i) {
+            Disc(Wx + i * 5.0f, Wy + 9.0f, 1.4f, Flake);
+        }
+    }
+    else if (WeatherName == TEXT("Overcast")) {
+        Cloud();
+    }
+
+    // Time + day text along the bottom of the panel.
+    const FString TimeStr = FString::Printf(TEXT("%02d:00   Day %d"), Hour, Now.GetDay());
+    FCanvasTextItem TextItem(FVector2D(PX + 10.0f, PY + 32.0f), FText::FromString(TimeStr), Font, FLinearColor(0.9f, 0.92f, 0.96f, Alpha));
     TextItem.Scale = FVector2D(FontScale, FontScale);
     TextItem.bOutlined = Config ? Config->bEnableOutline : true;
     TextItem.OutlineColor = Config ? Config->OutlineColor : FLinearColor::Black;
