@@ -225,6 +225,15 @@ void UMythicLifeComponent::UninitializeFromAbilitySystem() {
         LifeSet->OnMaxHealthChanged.RemoveAll(this);
     }
 
+    if (AbilitySystemComponent) {
+        // Mirror the GetGameplayAttributeValueChangeDelegate binds in InitializeWithAbilitySystem (Health + MaxHealth).
+        // These are raw multicast delegates on the PERSISTENT PlayerState ASC; without removal they leak a stale
+        // TriggerHealthChange/TriggerMaxHealthChange binding into a freed LifeComponent across pawn reuse — a dangling
+        // call (use-after-free) on the next attribute change (the same persistent-ASC hazard the tag block above guards).
+        AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UMythicAttributeSet_Life::GetHealthAttribute()).RemoveAll(this);
+        AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(UMythicAttributeSet_Life::GetMaxHealthAttribute()).RemoveAll(this);
+    }
+
     LifeSet = nullptr;
     AbilitySystemComponent = nullptr;
 }
