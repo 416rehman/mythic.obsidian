@@ -1007,6 +1007,106 @@ void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas) {
     Canvas->DrawItem(TextItem);
 }
 
+void UMythicDamageNumberSubsystem::DrawStatusBadges(UCanvas *Canvas, float CenterX, float RowCenterY, UAbilitySystemComponent *ASC, float Alpha) {
+    const UMythicAttributeSet_Defense *Def = ASC ? ASC->GetSet<UMythicAttributeSet_Defense>() : nullptr;
+    if (!Def) {
+        return;
+    }
+    struct FBadge {
+        float Buildup;
+        float Threshold;
+        FLinearColor Color;
+        int32 Glyph; // 0=X(poison) 1=dot(bleed) 2=snowflake(freeze) 3=flame(burn) 4=slow 5=star(stun)
+    };
+    const FBadge Badges[] = {
+        {Def->GetPoisonBuildup(), 100.0f + Def->GetPoisonResistance() * 2.0f, FLinearColor(0.3f, 0.8f, 0.2f), 0},
+        {Def->GetBleedBuildup(), 100.0f + Def->GetBleedResistance() * 2.0f, FLinearColor(0.85f, 0.12f, 0.12f), 1},
+        {Def->GetFreezeBuildup(), 100.0f + Def->GetFreezeResistance() * 2.0f, FLinearColor(0.5f, 0.85f, 1.0f), 2},
+        {Def->GetBurnBuildup(), 100.0f + Def->GetBurnResistance() * 2.0f, FLinearColor(1.0f, 0.5f, 0.1f), 3},
+        {Def->GetSlowBuildup(), 100.0f + Def->GetSlowResistance() * 2.0f, FLinearColor(0.72f, 0.62f, 0.42f), 4},
+        {Def->GetStunBuildup(), 100.0f + Def->GetStunResistance() * 2.0f, FLinearColor(0.55f, 0.72f, 1.0f), 5},
+    };
+
+    int32 ActiveCount = 0;
+    for (const FBadge &B : Badges) {
+        if (B.Buildup > 0.5f) {
+            ++ActiveCount;
+        }
+    }
+    if (ActiveCount == 0) {
+        return;
+    }
+
+    const float R = 8.0f;
+    const float Step = R * 2.0f + 5.0f;
+    float X = CenterX - (ActiveCount * Step - 5.0f) * 0.5f + R; // center of the first badge
+
+    for (const FBadge &B : Badges) {
+        if (B.Buildup <= 0.5f) {
+            continue;
+        }
+        const float Frac = B.Threshold > 0.0f ? FMath::Clamp(B.Buildup / B.Threshold, 0.0f, 1.0f) : 0.0f;
+        const float BadgeA = Alpha * FMath::Lerp(0.45f, 1.0f, Frac); // faint while building, solid near the proc
+        const FVector2D C(X, RowCenterY);
+
+        FCanvasNGonItem Back(C, FVector2D(R + 1.0f, R + 1.0f), 20, FLinearColor(0.03f, 0.04f, 0.05f, 0.85f * Alpha));
+        Back.BlendMode = SE_BLEND_Translucent;
+        Canvas->DrawItem(Back);
+        FLinearColor Col = B.Color;
+        Col.A = BadgeA;
+        FCanvasNGonItem Disc(C, FVector2D(R, R), 20, Col);
+        Disc.BlendMode = SE_BLEND_Translucent;
+        Canvas->DrawItem(Disc);
+
+        // Minimal white glyph so each badge reads as its status even before designer icon textures are assigned.
+        const FLinearColor G(0.97f, 0.97f, 0.97f, BadgeA);
+        const float g = R * 0.55f;
+        auto Line = [&](float ax, float ay, float bx, float by) {
+            FCanvasLineItem L(FVector2D(X + ax, RowCenterY + ay), FVector2D(X + bx, RowCenterY + by));
+            L.SetColor(G);
+            L.LineThickness = 1.3f;
+            L.BlendMode = SE_BLEND_Translucent;
+            Canvas->DrawItem(L);
+        };
+        switch (B.Glyph) {
+        case 0: // poison — X
+            Line(-g, -g, g, g);
+            Line(-g, g, g, -g);
+            break;
+        case 1: { // bleed — drop dot
+            FCanvasNGonItem Dot(C, FVector2D(g * 0.6f, g * 0.6f), 12, G);
+            Dot.BlendMode = SE_BLEND_Translucent;
+            Canvas->DrawItem(Dot);
+            break;
+        }
+        case 2: // freeze — snowflake
+            Line(0.0f, -g, 0.0f, g);
+            Line(-g, 0.0f, g, 0.0f);
+            Line(-g * 0.7f, -g * 0.7f, g * 0.7f, g * 0.7f);
+            Line(-g * 0.7f, g * 0.7f, g * 0.7f, -g * 0.7f);
+            break;
+        case 3: { // burn — flame triangle
+            FCanvasNGonItem Tri(FVector2D(X, RowCenterY + g * 0.2f), FVector2D(g, g), 3, G);
+            Tri.BlendMode = SE_BLEND_Translucent;
+            Canvas->DrawItem(Tri);
+            break;
+        }
+        case 4: // slow — offset marks
+            Line(-g, -g * 0.4f, 0.0f, -g * 0.4f);
+            Line(0.0f, g * 0.4f, g, g * 0.4f);
+            break;
+        default: // stun — star
+            Line(0.0f, -g, 0.0f, g);
+            Line(-g, 0.0f, g, 0.0f);
+            Line(-g * 0.6f, -g * 0.6f, g * 0.6f, g * 0.6f);
+            Line(-g * 0.6f, g * 0.6f, g * 0.6f, -g * 0.6f);
+            break;
+        }
+
+        X += Step;
+    }
+}
+
 void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerController *PC) {
     APawn *Pawn = PC ? PC->GetPawn() : nullptr;
     if (!Pawn) {
@@ -1099,6 +1199,9 @@ void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerControl
     // Stamina below (amber; burnt-orange while exhausted).
     const FLinearColor StamCol = bExhausted ? FLinearColor(0.85f, 0.4f, 0.1f) : FLinearColor(0.85f, 0.75f, 0.3f);
     DrawBar(BaseY + BarH + Gap, StaminaFrac, PlayerStaminaChip.Ghost, StamCol, PlayerStaminaVis);
+
+    // Player status badges above the bars — always shown while a status is building (you must know you're poisoned).
+    DrawStatusBadges(Canvas, CX, BaseY - 16.0f, ASC, 1.0f);
 }
 
 bool UMythicDamageNumberSubsystem::IsNameplateRelevant(AActor *Npc, AActor *LocalPawn) const {
@@ -1264,52 +1367,8 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
         Fill.BlendMode = SE_BLEND_Translucent;
         Canvas->DrawItem(Fill);
 
-        // Active status-buildup bars (below the health bar). Fraction = buildup / (100 + resistance*2) — the exact
-        // trigger threshold from MythicAttributeSet_Defense. One colored mini-bar per type that has any buildup.
-        if (ASC) {
-            if (const UMythicAttributeSet_Defense *Def = ASC->GetSet<UMythicAttributeSet_Defense>()) {
-                struct FBuildupVis {
-                    float Buildup;
-                    float Threshold;
-                    FLinearColor Color;
-                };
-                const FBuildupVis Vis[] = {
-                    {Def->GetBurnBuildup(), 100.0f + Def->GetBurnResistance() * 2.0f, FLinearColor(1.0f, 0.45f, 0.0f)},  // burn
-                    {Def->GetBleedBuildup(), 100.0f + Def->GetBleedResistance() * 2.0f, FLinearColor(0.7f, 0.0f, 0.0f)}, // bleed
-                    {Def->GetPoisonBuildup(), 100.0f + Def->GetPoisonResistance() * 2.0f, FLinearColor(0.4f, 0.85f, 0.1f)}, // poison
-                    {Def->GetSlowBuildup(), 100.0f + Def->GetSlowResistance() * 2.0f, FLinearColor(0.4f, 0.6f, 0.9f)},   // slow
-                    {Def->GetFreezeBuildup(), 100.0f + Def->GetFreezeResistance() * 2.0f, FLinearColor(0.5f, 0.9f, 1.0f)}, // freeze
-                    {Def->GetStunBuildup(), 100.0f + Def->GetStunResistance() * 2.0f, FLinearColor(1.0f, 0.9f, 0.4f)},   // stun
-                };
-                const float PipW = 12.0f, PipH = 3.0f, PipGap = 2.0f;
-                int32 ActiveCount = 0;
-                for (const FBuildupVis &V : Vis) {
-                    if (V.Buildup > 0.5f) {
-                        ++ActiveCount;
-                    }
-                }
-                if (ActiveCount > 0) {
-                    const float RowW = ActiveCount * PipW + (ActiveCount - 1) * PipGap;
-                    float PipX = ScreenPos.X - RowW * 0.5f;
-                    const float PipY = Y + BarH + 2.0f;
-                    for (const FBuildupVis &V : Vis) {
-                        if (V.Buildup <= 0.5f) {
-                            continue;
-                        }
-                        const float Frac = V.Threshold > 0.0f ? FMath::Clamp(V.Buildup / V.Threshold, 0.0f, 1.0f) : 0.0f;
-                        FCanvasTileItem PipBg(FVector2D(PipX, PipY), GWhiteTexture, FVector2D(PipW, PipH), FLinearColor(0.0f, 0.0f, 0.0f, 0.55f * Alpha));
-                        PipBg.BlendMode = SE_BLEND_Translucent;
-                        Canvas->DrawItem(PipBg);
-                        FLinearColor PipCol = V.Color;
-                        PipCol.A = Alpha;
-                        FCanvasTileItem PipFill(FVector2D(PipX, PipY), GWhiteTexture, FVector2D(PipW * Frac, PipH), PipCol);
-                        PipFill.BlendMode = SE_BLEND_Translucent;
-                        Canvas->DrawItem(PipFill);
-                        PipX += PipW + PipGap;
-                    }
-                }
-            }
-        }
+        // Status-effect badges (circular, color-coded, opacity ramps with buildup-toward-proc) above the plate.
+        DrawStatusBadges(Canvas, ScreenPos.X, Y - 28.0f, ASC, Alpha);
     };
 
     // Update existing states: fade toward their candidate target (0 if no longer a candidate), draw, prune.

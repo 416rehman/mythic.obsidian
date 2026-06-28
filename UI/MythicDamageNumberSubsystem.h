@@ -13,6 +13,7 @@
 class AHUD;
 class UFont;
 class UTexture2D;
+class UAbilitySystemComponent;
 
 /**
  * Animation styles for damage numbers.
@@ -560,6 +561,10 @@ protected:
 
     // Draws the bottom-centre player resource HUD (health / stamina / shield) — chip bars + contextual visibility.
     void DrawPlayerHud(UCanvas *Canvas, APlayerController *PC);
+
+    // Draws a centered row of circular status-effect badges (the 6 buildup types) for an entity's ASC, at the given
+    // alpha. Shared by enemy nameplates and the player HUD. Each badge's opacity ramps with its buildup-toward-proc.
+    void DrawStatusBadges(UCanvas *Canvas, float CenterX, float RowCenterY, UAbilitySystemComponent *ASC, float Alpha);
 
 protected:
     // Active damage numbers
