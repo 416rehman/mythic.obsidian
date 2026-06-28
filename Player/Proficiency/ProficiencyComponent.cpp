@@ -245,9 +245,14 @@ void UProficiencyComponent::ApplyLoadedProficiencies() {
         return;
     }
 
-    // Get ASC from owner using their ASC interface
-    ASC = Cast<IAbilitySystemInterface>(GetOwner())->GetAbilitySystemComponent();
-    checkf(ASC, TEXT("The parent actor of the ProficiencyComponent must implement IAbilitySystemInterface"));
+    // Get ASC from owner using their ASC interface. Check the interface cast BEFORE dereferencing it: Cast<> returns
+    // null when the owner doesn't implement IAbilitySystemInterface, so calling ->GetAbilitySystemComponent() on that
+    // null would be a raw null deref that crashes BEFORE the (previously mis-placed) checkf could report the
+    // documented misconfiguration. Assert the interface first, then deref, then assert the returned ASC separately.
+    IAbilitySystemInterface *OwnerASI = Cast<IAbilitySystemInterface>(Owner);
+    checkf(OwnerASI, TEXT("The parent actor of the ProficiencyComponent must implement IAbilitySystemInterface"));
+    ASC = OwnerASI->GetAbilitySystemComponent();
+    checkf(ASC, TEXT("The parent actor of the ProficiencyComponent returned a null AbilitySystemComponent"));
 
     // Two-phase load so multi-proficiency restore is additive-consistent with the live earn path (#7).
     //
