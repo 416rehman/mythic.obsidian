@@ -921,6 +921,17 @@ float UMythicDamageNumberSubsystem::StepNameplateAlpha(float CurrentAlpha, float
     return CurrentAlpha;
 }
 
+float UMythicDamageNumberSubsystem::StepGhostFill(float GhostFrac, float TargetFrac, float DeltaSeconds, float DrainSpeed, float HoldRemaining) {
+    if (TargetFrac >= GhostFrac) {
+        return TargetFrac; // gained (or settled): the chip catches up to the fill immediately
+    }
+    if (HoldRemaining > 0.0f) {
+        return GhostFrac; // the just-lost chip lingers during the hold
+    }
+    const float MaxDrain = FMath::Max(0.0f, DrainSpeed) * FMath::Max(0.0f, DeltaSeconds);
+    return FMath::Max(TargetFrac, GhostFrac - MaxDrain); // drain toward the fill, no undershoot
+}
+
 void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas) {
     UWorld *World = GetWorld();
     UGameInstance *GI = World ? World->GetGameInstance() : nullptr;
@@ -1028,6 +1039,8 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
     const float BarH = 7.0f;
     const float FocusRadiusPx = 220.0f; // a plate within this many px of screen-centre is "focused"
     const float DimFactor = 0.5f;       // non-focused plates dim to this when something is focused
+    const float ChipHoldTime = 0.35f;   // delayed-damage chip lingers this long after a hit before draining
+    const float ChipDrainSpeed = 0.6f;  // then drains the lost slice at this fraction/sec
 
     const FVector LocalLoc = LocalPawn->GetActorLocation();
 
@@ -1082,7 +1095,7 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
     };
 
     // Draw a full nameplate (name + health bar + active status-buildup bars) above an entity's head at the given alpha.
-    auto DrawPlate = [&](AActor *Npc, float Alpha, const FText &Name, bool bFocused) {
+    auto DrawPlate = [&](AActor *Npc, FMythicNameplateState &S, float Alpha, bool bFocused) {
         UAbilitySystemComponent *ASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Npc);
         float HealthFrac = 1.0f;
         if (ASC) {
@@ -1091,6 +1104,17 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
                 HealthFrac = MaxH > 0.0f ? FMath::Clamp(Life->GetHealth() / MaxH, 0.0f, 1.0f) : 0.0f;
             }
         }
+
+        // Delayed-damage "chip": the ghost frac trails HealthFrac — lingers on a hit (hold), then drains the lost slice.
+        if (S.LastHealthFrac < 0.0f) {
+            S.GhostHealthFrac = HealthFrac; // first sight: no chip
+        }
+        else if (HealthFrac < S.LastHealthFrac) {
+            S.HealthChipHold = ChipHoldTime; // took damage -> (re)start the hold
+        }
+        S.HealthChipHold = FMath::Max(0.0f, S.HealthChipHold - Dt);
+        S.GhostHealthFrac = StepGhostFill(S.GhostHealthFrac, HealthFrac, Dt, ChipDrainSpeed, S.HealthChipHold);
+        S.LastHealthFrac = HealthFrac;
 
         FVector2D ScreenPos;
         const FVector HeadWorld = Npc->GetActorLocation() + FVector(0.0f, 0.0f, HeadZ);
@@ -1101,10 +1125,10 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
         const float Y = ScreenPos.Y;
 
         // Name (centered above the bar).
-        if (Font && !Name.IsEmpty()) {
+        if (Font && !S.CachedName.IsEmpty()) {
             float NW = 0.0f, NH = 0.0f;
-            Canvas->TextSize(Font, Name.ToString(), NW, NH, NameScale, NameScale);
-            FCanvasTextItem NameItem(FVector2D(ScreenPos.X - NW * 0.5f, Y - NH - 3.0f), Name, Font, FLinearColor(0.92f, 0.93f, 0.96f, Alpha));
+            Canvas->TextSize(Font, S.CachedName.ToString(), NW, NH, NameScale, NameScale);
+            FCanvasTextItem NameItem(FVector2D(ScreenPos.X - NW * 0.5f, Y - NH - 3.0f), S.CachedName, Font, FLinearColor(0.92f, 0.93f, 0.96f, Alpha));
             NameItem.Scale = FVector2D(NameScale, NameScale);
             NameItem.bOutlined = true;
             NameItem.OutlineColor = FLinearColor(0.0f, 0.0f, 0.0f, Alpha);
@@ -1124,6 +1148,15 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
                            FLinearColor(0.0f, 0.0f, 0.0f, 0.6f * Alpha));
         Bg.BlendMode = SE_BLEND_Translucent;
         Canvas->DrawItem(Bg);
+
+        // Chip (recently-lost slice): from the current fill edge out to the trailing ghost edge, dim warm-white.
+        if (S.GhostHealthFrac > HealthFrac + 0.001f) {
+            const float ChipX = X + BarW * HealthFrac;
+            const float ChipW = BarW * (S.GhostHealthFrac - HealthFrac);
+            FCanvasTileItem Chip(FVector2D(ChipX, Y), GWhiteTexture, FVector2D(ChipW, BarH), FLinearColor(0.95f, 0.85f, 0.7f, 0.7f * Alpha));
+            Chip.BlendMode = SE_BLEND_Translucent;
+            Canvas->DrawItem(Chip);
+        }
 
         // Health fill — green at full, red when low.
         const FLinearColor LowCol(0.85f, 0.2f, 0.15f);
@@ -1201,7 +1234,7 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
         if (S.CurrentAlpha > 0.01f) {
             const bool bFocused = (Npc == FocusedActor);
             const float Dim = (FocusedActor && !bFocused) ? DimFactor : 1.0f;
-            DrawPlate(Npc, S.CurrentAlpha * Dim, S.CachedName, bFocused);
+            DrawPlate(Npc, S, S.CurrentAlpha * Dim, bFocused);
         }
     }
 
@@ -1217,7 +1250,7 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
         if (NewState.CurrentAlpha > 0.01f) {
             const bool bFocused = (Pair.Key == FocusedActor);
             const float Dim = (FocusedActor && !bFocused) ? DimFactor : 1.0f;
-            DrawPlate(Pair.Key, NewState.CurrentAlpha * Dim, NewState.CachedName, bFocused);
+            DrawPlate(Pair.Key, NewState, NewState.CurrentAlpha * Dim, bFocused);
         }
         NameplateStates.Add(NewState);
     }

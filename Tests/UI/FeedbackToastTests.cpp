@@ -226,3 +226,36 @@ bool FMythicFeedbackNameplateFadeTest::RunTest(const FString &Parameters) {
 
     return true;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Chip / delayed-damage bar — StepGhostFill
+// (gain snaps up; loss lingers during the hold, then drains the recently-lost slice without undershoot)
+// ═══════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicFeedbackGhostFillTest,
+    "Mythic.UI.Feedback.GhostFill",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicFeedbackGhostFillTest::RunTest(const FString &Parameters) {
+    auto G = &UMythicDamageNumberSubsystem::StepGhostFill;
+    const float Tol = 1.e-4f;
+    const float Drain = 0.5f; // frac/sec
+
+    // Gain (or settled): the chip catches up to the fill immediately, regardless of hold.
+    TestEqual(TEXT("gain snaps up to target"), G(0.5f, 0.8f, 0.1f, Drain, 0.0f), 0.8f, Tol);
+    TestEqual(TEXT("gain snaps up even during hold"), G(0.5f, 0.8f, 0.1f, Drain, 1.0f), 0.8f, Tol);
+    TestEqual(TEXT("already at target -> unchanged"), G(0.7f, 0.7f, 0.1f, Drain, 0.0f), 0.7f, Tol);
+
+    // Loss during the hold: the just-lost chip lingers (frozen above target).
+    TestEqual(TEXT("loss during hold lingers"), G(0.9f, 0.5f, 0.1f, Drain, 0.3f), 0.9f, Tol);
+
+    // Loss after the hold: drains toward target by Drain*Dt.
+    TestEqual(TEXT("drains after hold"), G(0.9f, 0.5f, 0.2f, Drain, 0.0f), 0.8f, Tol); // 0.9 - 0.5*0.2
+    // Drain never undershoots the fill.
+    TestEqual(TEXT("drain clamps to target"), G(0.55f, 0.5f, 1.0f, Drain, 0.0f), 0.5f, Tol);
+    // Zero dt -> no drain.
+    TestEqual(TEXT("zero dt -> no drain"), G(0.9f, 0.5f, 0.0f, Drain, 0.0f), 0.9f, Tol);
+
+    return true;
+}

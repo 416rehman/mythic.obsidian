@@ -374,6 +374,12 @@ struct FMythicNameplateState {
     TWeakObjectPtr<AActor> Actor;
     float CurrentAlpha = 0.0f;
     FText CachedName; // read once when the state is created (a name doesn't change) — avoids a per-frame NPCData copy
+
+    // "Chip" / delayed-damage health bar: GhostHealthFrac trails the real fraction — on a hit it lingers (hold) then
+    // drains the recently-lost slice away. (LastHealthFrac < 0 = not yet initialised: snap the ghost to the real frac.)
+    float GhostHealthFrac = 0.0f;
+    float LastHealthFrac = -1.0f;
+    float HealthChipHold = 0.0f;
 };
 
 /**
@@ -479,6 +485,13 @@ public:
 
     /** Step CurrentAlpha toward TargetAlpha by FadeRate*DeltaSeconds without overshoot (the smooth fade in/out). */
     static float StepNameplateAlpha(float CurrentAlpha, float TargetAlpha, float DeltaSeconds, float FadeRate);
+
+    /**
+     * Step a "chip" (delayed-damage) bar fill toward TargetFrac — REUSABLE for any bar (health/XP/stamina): a GAIN
+     * (Target >= Ghost) snaps the chip up to the fill; on a LOSS the chip lingers above Target while HoldRemaining > 0,
+     * then drains toward Target at DrainSpeed (frac/sec) without undershoot. Returns the new ghost fraction.
+     */
+    static float StepGhostFill(float GhostFrac, float TargetFrac, float DeltaSeconds, float DrainSpeed, float HoldRemaining);
 
     /**
      * Called by HUD to draw all damage numbers. Do not call directly.
