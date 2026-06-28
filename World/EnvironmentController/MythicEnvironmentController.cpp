@@ -696,8 +696,10 @@ void AMythicEnvironmentController::CycleWeather() {
         }
     }
     else {
-        // Otherwise get a random weather type
-        SelectedWeather = WeatherTypes[FMath::RandRange(0, WeatherTypes.Num() - 1)];
+        // Otherwise get a random weather type. Guard the empty-config case: an unconfigured WeatherTypes would make
+        // FMath::RandRange(0, -1) return 0 and WeatherTypes[0] index an EMPTY array — a hard server crash. Fall through
+        // to the null-SelectedWeather handler below (logs + returns, keeping the current weather) instead of crashing.
+        SelectedWeather = WeatherTypes.Num() > 0 ? WeatherTypes[FMath::RandRange(0, WeatherTypes.Num() - 1)] : nullptr;
     }
 
     if (!SelectedWeather) {
