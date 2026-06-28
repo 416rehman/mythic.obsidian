@@ -92,6 +92,14 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")
     FText CompletedText;
 
+    // The quest this objective belongs to — the tracker groups objectives under one quest header. Empty = standalone.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")
+    FText QuestName;
+
+    // Optional (secondary) objective — the tracker shows it dimmed/italic; not required to finish the quest.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")
+    bool bOptional = false;
+
     /** The player-facing callout line for the objective's current state: the completion line once complete (if one was
      *  authored), otherwise the progress line. CompletedText is optional — falls back to DisplayText when empty, so an
      *  objective with no completion line keeps the prior behaviour. Pure (reads only this asset) → unit-testable. */

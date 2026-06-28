@@ -590,6 +590,9 @@ protected:
     // Draws the bottom-centre player resource HUD (health / stamina / shield) — chip bars + contextual visibility.
     void DrawPlayerHud(UCanvas *Canvas, APlayerController *PC);
 
+    // Draws the quest tracker (top-left): active objectives grouped by quest, completed struck-through, optional dimmed.
+    void DrawQuestTracker(UCanvas *Canvas, APlayerController *PC);
+
     // Finds-or-adds the transient HUD bucket for a local player's controller (and prunes stale ones).
     FMythicLocalHud &GetLocalHud(APlayerController *PC);
 

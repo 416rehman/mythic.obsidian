@@ -30,6 +30,14 @@ struct FObjectiveSummary {
 
     UPROPERTY(BlueprintReadOnly)
     bool bCompleted = false;
+
+    // The quest this objective belongs to (empty = standalone) — the tracker groups objectives under one quest header.
+    UPROPERTY(BlueprintReadOnly)
+    FText QuestName;
+
+    // Optional (secondary) objective — the tracker shows it dimmed.
+    UPROPERTY(BlueprintReadOnly)
+    bool bOptional = false;
 };
 
 UENUM(BlueprintType)

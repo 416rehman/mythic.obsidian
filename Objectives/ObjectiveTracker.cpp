@@ -482,6 +482,8 @@ TArray<FObjectiveSummary> UObjectiveTracker::GetActiveObjectiveSummaries() const
             ? static_cast<float>(Summary.CurrentCount) / static_cast<float>(Summary.RequiredCount)
             : 0.0f;
         Summary.bCompleted = Prog.bCompleted;
+        Summary.QuestName = Prog.Definition ? Prog.Definition->QuestName : FText::GetEmpty();
+        Summary.bOptional = Prog.Definition ? Prog.Definition->bOptional : false;
         Summaries.Add(Summary);
     }
 

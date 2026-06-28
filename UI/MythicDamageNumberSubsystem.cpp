@@ -24,6 +24,7 @@
 #include "World/EnvironmentController/MythicEnvironmentSubsystem.h"
 #include "Player/MythicPlayerController.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
+#include "Objectives/ObjectiveTracker.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMythicDamageNumbers, Log, All);
 
@@ -80,6 +81,7 @@ void UMythicDamageNumberSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
     DrawDamageNumbers(Canvas, PC);
     DrawWorldCallouts(Canvas, PC);
     DrawNameplates(Canvas, PC);
+    DrawQuestTracker(Canvas, PC);        // top-left active-objective tracker
     DrawPlayerHud(Canvas, PC);           // bottom-centre player resource bars (chip + contextual)
     DrawScreenNotifications(Canvas, PC); // screen UI (toasts/banners) layers on top of world-anchored elements
     DrawAmbient(Canvas, PC);             // auto-hiding time/weather corner cluster
@@ -1173,6 +1175,100 @@ void UMythicDamageNumberSubsystem::DrawStatusBadges(UCanvas *Canvas, float Cente
         }
 
         X += Step;
+    }
+}
+
+void UMythicDamageNumberSubsystem::DrawQuestTracker(UCanvas *Canvas, APlayerController *PC) {
+    const AMythicPlayerController *MPC = Cast<AMythicPlayerController>(PC);
+    const UObjectiveTracker *Tracker = MPC ? MPC->GetObjectiveTracker() : nullptr;
+    if (!Tracker) {
+        return;
+    }
+    const TArray<FObjectiveSummary> Summaries = Tracker->GetActiveObjectiveSummaries();
+    if (Summaries.Num() == 0) {
+        return;
+    }
+    UFont *Font = (Config && Config->Font) ? Config->Font.Get() : nullptr;
+    if (!Font) {
+        Font = GEngine->GetMediumFont();
+    }
+    if (!Font) {
+        return;
+    }
+
+    const float Scale = (Config ? Config->FontScaleMultiplier : 1.0f) * 0.8f;
+    const float HeaderScale = Scale * 1.08f;
+    const float X = 32.0f;
+    float Y = 96.0f;
+    const float LineH = 18.0f;
+    const float Indent = 16.0f;
+    const FLinearColor Black(0.0f, 0.0f, 0.0f, 1.0f);
+
+    auto Text = [&](float tx, float ty, const FString &Str, FLinearColor Col, float Sc) -> float {
+        FCanvasTextItem T(FVector2D(tx, ty), FText::FromString(Str), Font, Col);
+        T.Scale = FVector2D(Sc, Sc);
+        T.bOutlined = true;
+        T.OutlineColor = Black;
+        Canvas->DrawItem(T);
+        float w = 0.0f, h = 0.0f;
+        Canvas->TextSize(Font, Str, w, h, Sc, Sc);
+        return w;
+    };
+
+    FText CurQuest;
+    bool bFirst = true;
+    for (const FObjectiveSummary &S : Summaries) {
+        // Quest header when the group changes (skipped for standalone/empty quest names).
+        if (bFirst || !S.QuestName.EqualTo(CurQuest)) {
+            CurQuest = S.QuestName;
+            bFirst = false;
+            if (!S.QuestName.IsEmpty()) {
+                Text(X, Y, S.QuestName.ToString(), FLinearColor(1.0f, 0.85f, 0.3f, 1.0f), HeaderScale);
+                Y += LineH + 2.0f;
+            }
+        }
+
+        const FLinearColor Col = S.bCompleted
+                                     ? FLinearColor(0.55f, 0.6f, 0.55f, 1.0f)
+                                     : (S.bOptional ? FLinearColor(0.62f, 0.64f, 0.7f, 1.0f) : FLinearColor(0.9f, 0.92f, 0.95f, 1.0f));
+        FString Line = S.DisplayText.ToString();
+        if (!S.bCompleted && S.RequiredCount > 1) {
+            Line += FString::Printf(TEXT("  %d/%d"), S.CurrentCount, S.RequiredCount);
+        }
+        if (S.bOptional && !S.bCompleted) {
+            Line += TEXT("  (optional)");
+        }
+
+        const float MX = X + Indent;
+        const float MY = Y + LineH * 0.5f;
+        // Marker: a green check for completed, a filled dot otherwise.
+        if (S.bCompleted) {
+            const FLinearColor Check(0.5f, 0.85f, 0.5f, 1.0f);
+            FCanvasLineItem C1(FVector2D(MX - 4.0f, MY), FVector2D(MX - 1.0f, MY + 3.0f));
+            C1.SetColor(Check);
+            C1.LineThickness = 1.5f;
+            Canvas->DrawItem(C1);
+            FCanvasLineItem C2(FVector2D(MX - 1.0f, MY + 3.0f), FVector2D(MX + 4.0f, MY - 3.0f));
+            C2.SetColor(Check);
+            C2.LineThickness = 1.5f;
+            Canvas->DrawItem(C2);
+        }
+        else {
+            FCanvasNGonItem Dot(FVector2D(MX, MY), FVector2D(2.2f, 2.2f), 10, Col);
+            Dot.BlendMode = SE_BLEND_Translucent;
+            Canvas->DrawItem(Dot);
+        }
+
+        const float LineW = Text(MX + 10.0f, Y, Line, Col, Scale);
+        // Strikethrough on completed objectives.
+        if (S.bCompleted) {
+            FCanvasLineItem Strike(FVector2D(MX + 10.0f, Y + LineH * 0.42f), FVector2D(MX + 10.0f + LineW, Y + LineH * 0.42f));
+            Strike.SetColor(Col);
+            Strike.LineThickness = 1.2f;
+            Strike.BlendMode = SE_BLEND_Translucent;
+            Canvas->DrawItem(Strike);
+        }
+        Y += LineH;
     }
 }
 
