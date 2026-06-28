@@ -17,6 +17,8 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
+#include "GAS/MythicTags_GAS.h"
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "Engine/GameInstance.h"
 #include "World/EnvironmentController/MythicEnvironmentSubsystem.h"
@@ -76,6 +78,7 @@ void UMythicDamageNumberSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
     DrawDamageNumbers(Canvas, PC);
     DrawWorldCallouts(Canvas, PC);
     DrawNameplates(Canvas, PC);
+    DrawPlayerHud(Canvas, PC);           // bottom-centre player resource bars (chip + contextual)
     DrawScreenNotifications(Canvas, PC); // screen UI (toasts/banners) layers on top of world-anchored elements
     DrawAmbient(Canvas);                 // auto-hiding time/weather corner cluster
 }
@@ -1002,6 +1005,100 @@ void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas) {
     TextItem.bOutlined = Config ? Config->bEnableOutline : true;
     TextItem.OutlineColor = Config ? Config->OutlineColor : FLinearColor::Black;
     Canvas->DrawItem(TextItem);
+}
+
+void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerController *PC) {
+    APawn *Pawn = PC ? PC->GetPawn() : nullptr;
+    if (!Pawn) {
+        return;
+    }
+    UAbilitySystemComponent *ASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Pawn);
+    if (!ASC) {
+        return;
+    }
+    UWorld *World = GetWorld();
+    const float Dt = World ? World->GetDeltaSeconds() : 0.0f;
+
+    // Read the local player's resources.
+    float HealthFrac = 1.0f, StaminaFrac = 1.0f, ShieldFrac = 0.0f;
+    if (const UMythicAttributeSet_Life *Life = ASC->GetSet<UMythicAttributeSet_Life>()) {
+        const float M = Life->GetMaxHealth();
+        HealthFrac = M > 0.0f ? FMath::Clamp(Life->GetHealth() / M, 0.0f, 1.0f) : 0.0f;
+    }
+    if (const UMythicAttributeSet_Utility *Util = ASC->GetSet<UMythicAttributeSet_Utility>()) {
+        const float M = Util->GetMaxStamina();
+        StaminaFrac = M > 0.0f ? FMath::Clamp(Util->GetCurrentStamina() / M, 0.0f, 1.0f) : 0.0f;
+    }
+    if (const UMythicAttributeSet_Defense *Def = ASC->GetSet<UMythicAttributeSet_Defense>()) {
+        const float M = Def->GetMaxShield();
+        ShieldFrac = M > 0.0f ? FMath::Clamp(Def->GetShield() / M, 0.0f, 1.0f) : 0.0f;
+    }
+    const bool bSprinting = ASC->HasMatchingGameplayTag(GAS_STATE_SPRINTING);
+    const bool bExhausted = ASC->HasMatchingGameplayTag(GAS_STATE_EXHAUSTED);
+
+    // Advance the chip bars (reusing the tested StepGhostFill).
+    const float ChipHoldTime = 0.35f;
+    const float ChipDrainSpeed = 0.6f;
+    auto UpdateChip = [&](FMythicChipBar &C, float Target) {
+        if (C.Last < 0.0f) {
+            C.Ghost = Target;
+        }
+        else if (Target < C.Last) {
+            C.Hold = ChipHoldTime;
+        }
+        C.Hold = FMath::Max(0.0f, C.Hold - Dt);
+        C.Ghost = StepGhostFill(C.Ghost, Target, Dt, ChipDrainSpeed, C.Hold);
+        C.Last = Target;
+    };
+    UpdateChip(PlayerHealthChip, HealthFrac);
+    UpdateChip(PlayerStaminaChip, StaminaFrac);
+
+    // Contextual visibility: health when hurt / a chip is draining; stamina when sprinting / exhausted / not-full.
+    const bool bHealthRelevant = (HealthFrac < 0.995f) || (PlayerHealthChip.Ghost > HealthFrac + 0.001f) || (ShieldFrac > 0.0f);
+    const bool bStaminaRelevant = bSprinting || bExhausted || (StaminaFrac < 0.995f);
+    PlayerHealthVis = StepNameplateAlpha(PlayerHealthVis, bHealthRelevant ? 1.0f : 0.0f, Dt, 4.0f);
+    PlayerStaminaVis = StepNameplateAlpha(PlayerStaminaVis, bStaminaRelevant ? 1.0f : 0.0f, Dt, 4.0f);
+
+    const float CX = Canvas->ClipX * 0.5f;
+    const float BaseY = Canvas->ClipY - 70.0f;
+    const float BarW = 300.0f;
+    const float BarH = 13.0f;
+    const float Gap = 6.0f;
+
+    // Shared bar drawer (bg + chip + fill) at a given vis alpha.
+    auto DrawBar = [&](float Y, float Frac, float GhostFrac, FLinearColor FillCol, float Vis) {
+        if (Vis <= 0.01f) {
+            return;
+        }
+        const float X = CX - BarW * 0.5f;
+        FCanvasTileItem Bg(FVector2D(X - 1.0f, Y - 1.0f), GWhiteTexture, FVector2D(BarW + 2.0f, BarH + 2.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.55f * Vis));
+        Bg.BlendMode = SE_BLEND_Translucent;
+        Canvas->DrawItem(Bg);
+        if (GhostFrac > Frac + 0.001f) {
+            FCanvasTileItem Chip(FVector2D(X + BarW * Frac, Y), GWhiteTexture, FVector2D(BarW * (GhostFrac - Frac), BarH), FLinearColor(0.95f, 0.85f, 0.7f, 0.7f * Vis));
+            Chip.BlendMode = SE_BLEND_Translucent;
+            Canvas->DrawItem(Chip);
+        }
+        FLinearColor C = FillCol;
+        C.A = Vis;
+        FCanvasTileItem Fill(FVector2D(X, Y), GWhiteTexture, FVector2D(BarW * Frac, BarH), C);
+        Fill.BlendMode = SE_BLEND_Translucent;
+        Canvas->DrawItem(Fill);
+    };
+
+    // Health (green at full -> red when low), with a thin shield sliver above it.
+    const FLinearColor HealthCol = FMath::Lerp(FLinearColor(0.85f, 0.2f, 0.15f), FLinearColor(0.3f, 0.8f, 0.35f), HealthFrac);
+    DrawBar(BaseY, HealthFrac, PlayerHealthChip.Ghost, HealthCol, PlayerHealthVis);
+    if (ShieldFrac > 0.0f && PlayerHealthVis > 0.01f) {
+        const float X = CX - BarW * 0.5f;
+        FCanvasTileItem Shield(FVector2D(X, BaseY - 5.0f), GWhiteTexture, FVector2D(BarW * ShieldFrac, 3.0f), FLinearColor(0.4f, 0.7f, 1.0f, PlayerHealthVis));
+        Shield.BlendMode = SE_BLEND_Translucent;
+        Canvas->DrawItem(Shield);
+    }
+
+    // Stamina below (amber; burnt-orange while exhausted).
+    const FLinearColor StamCol = bExhausted ? FLinearColor(0.85f, 0.4f, 0.1f) : FLinearColor(0.85f, 0.75f, 0.3f);
+    DrawBar(BaseY + BarH + Gap, StaminaFrac, PlayerStaminaChip.Ghost, StamCol, PlayerStaminaVis);
 }
 
 bool UMythicDamageNumberSubsystem::IsNameplateRelevant(AActor *Npc, AActor *LocalPawn) const {

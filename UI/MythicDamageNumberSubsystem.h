@@ -366,6 +366,16 @@ struct FMythicWorldCallout {
 };
 
 /**
+ * Reusable "chip" / delayed-damage bar state — the drained-toward ghost fraction, the last target (for hit detection),
+ * and the lingering hold timer. Drives any progress bar (health / stamina / XP) via StepGhostFill.
+ */
+struct FMythicChipBar {
+    float Ghost = 0.0f;
+    float Last = -1.0f; // -1 = uninitialised: snap the ghost to the first target
+    float Hold = 0.0f;
+};
+
+/**
  * Per-entity nameplate render state — holds the SMOOTHED alpha so a nameplate fades in/out instead of popping when an
  * entity becomes (ir)relevant. Plain struct (NOT a UPROPERTY): the TWeakObjectPtr auto-nulls and must NOT keep the actor
  * alive; this is purely transient render bookkeeping rebuilt each frame.
@@ -548,6 +558,9 @@ protected:
     // Draws the auto-hiding ambient cluster (time of day / weather / day) — surfaces on change, then fades out.
     void DrawAmbient(UCanvas *Canvas);
 
+    // Draws the bottom-centre player resource HUD (health / stamina / shield) — chip bars + contextual visibility.
+    void DrawPlayerHud(UCanvas *Canvas, APlayerController *PC);
+
 protected:
     // Active damage numbers
     UPROPERTY()
@@ -571,6 +584,12 @@ protected:
     int32 LastAmbientHour = -1;
     FGameplayTag LastAmbientWeather;
     float AmbientShownTime = -1000.0f;
+
+    // Player resource HUD: chip-bar state + contextual-visibility fade (health/stamina shown only when relevant).
+    FMythicChipBar PlayerHealthChip;
+    FMythicChipBar PlayerStaminaChip;
+    float PlayerHealthVis = 0.0f;
+    float PlayerStaminaVis = 0.0f;
 
     // Configuration
     UPROPERTY()
