@@ -1,10 +1,10 @@
 // Mythic UI — Unified-feedback screen-toast presentation-math unit tests
-// Covers: UMythicDamageNumberSubsystem::ComputeToastAlpha / ComputeToastSlideOffset / ComputeToastStackOffset
+// Covers: UMythicFeedbackSubsystem::ComputeToastAlpha / ComputeToastSlideOffset / ComputeToastStackOffset
 // (the pure fade, slide-in, and vertical-stack curves for screen-space toasts).
 // Run via: Session Frontend -> Automation -> Mythic.UI.Feedback
 
 #include "Misc/AutomationTest.h"
-#include "UI/MythicDamageNumberSubsystem.h"
+#include "UI/MythicFeedbackSubsystem.h"
 
 // ═══════════════════════════════════════════════════════════════
 // Toast fade — ComputeToastAlpha
@@ -17,7 +17,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicFeedbackToastAlphaTest::RunTest(const FString &Parameters) {
-    auto Alpha = &UMythicDamageNumberSubsystem::ComputeToastAlpha;
+    auto Alpha = &UMythicFeedbackSubsystem::ComputeToastAlpha;
     const float Tol = 1.e-4f;
     const float Life = 3.0f, In = 0.2f, Out = 0.4f;
 
@@ -56,7 +56,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicFeedbackToastSlideTest::RunTest(const FString &Parameters) {
-    auto Slide = &UMythicDamageNumberSubsystem::ComputeToastSlideOffset;
+    auto Slide = &UMythicFeedbackSubsystem::ComputeToastSlideOffset;
     const float Tol = 1.e-4f;
     const float In = 0.2f, Dist = 60.0f;
 
@@ -90,7 +90,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicFeedbackToastStackTest::RunTest(const FString &Parameters) {
-    auto Stack = &UMythicDamageNumberSubsystem::ComputeToastStackOffset;
+    auto Stack = &UMythicFeedbackSubsystem::ComputeToastStackOffset;
     const float Tol = 1.e-4f;
     const float Step = 40.0f;
 
@@ -115,7 +115,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicFeedbackEaseOutBackTest::RunTest(const FString &Parameters) {
-    auto E = &UMythicDamageNumberSubsystem::EaseOutBack;
+    auto E = &UMythicFeedbackSubsystem::EaseOutBack;
     const float Tol = 1.e-3f;
 
     // Anchored endpoints.
@@ -135,7 +135,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicFeedbackBannerScaleTest::RunTest(const FString &Parameters) {
-    auto S = &UMythicDamageNumberSubsystem::ComputeBannerScale;
+    auto S = &UMythicFeedbackSubsystem::ComputeBannerScale;
     const float Tol = 1.e-3f;
     const float Ent = 0.35f, Start = 0.85f;
 
@@ -156,7 +156,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicFeedbackBannerSweepTest::RunTest(const FString &Parameters) {
-    auto W = &UMythicDamageNumberSubsystem::ComputeBannerSweepX;
+    auto W = &UMythicFeedbackSubsystem::ComputeBannerSweepX;
     const float Tol = 1.e-3f;
     const float Ent = 0.35f, Width = 300.0f;
 
@@ -180,7 +180,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicFeedbackNameplateAlphaTest::RunTest(const FString &Parameters) {
-    auto A = &UMythicDamageNumberSubsystem::ComputeNameplateTargetAlpha;
+    auto A = &UMythicFeedbackSubsystem::ComputeNameplateTargetAlpha;
     const float Tol = 1.e-4f;
     const float Full = 1000.0f, Cull = 3000.0f;
 
@@ -208,7 +208,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicFeedbackNameplateFadeTest::RunTest(const FString &Parameters) {
-    auto Step = &UMythicDamageNumberSubsystem::StepNameplateAlpha;
+    auto Step = &UMythicFeedbackSubsystem::StepNameplateAlpha;
     const float Tol = 1.e-4f;
     const float Rate = 4.0f; // alpha/sec
 
@@ -238,7 +238,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicFeedbackGhostFillTest::RunTest(const FString &Parameters) {
-    auto G = &UMythicDamageNumberSubsystem::StepGhostFill;
+    auto G = &UMythicFeedbackSubsystem::StepGhostFill;
     const float Tol = 1.e-4f;
     const float Drain = 0.5f; // frac/sec
 

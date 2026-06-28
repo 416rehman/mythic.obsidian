@@ -8,7 +8,7 @@
 #include "Fonts/SlateFontInfo.h"
 #include "GameplayEffectTypes.h"
 #include "Engine/DataAsset.h"
-#include "MythicDamageNumberSubsystem.generated.h"
+#include "MythicFeedbackSubsystem.generated.h"
 
 class AHUD;
 class UFont;
@@ -427,15 +427,16 @@ struct FMythicLocalHud {
 };
 
 /**
- * UMythicDamageNumberSubsystem
+ * UMythicFeedbackSubsystem
  *
  * The unified, high-performance, NON-WBP feedback subsystem. Combat damage numbers (world-projected, floating off the
  * target) AND non-combat screen notifications (toasts / animated hero banners) are rendered in ONE immediate-mode Canvas
- * pass via AHUD::OnHUDPostRender, over pooled flat arrays. (Pending a mechanical rename to UMythicFeedbackSubsystem now
- * that the former UMythicWorldFeedbackSubsystem is fully merged in.)
+ * pass via AHUD::OnHUDPostRender, over pooled flat arrays. (Named UMythicFeedbackSubsystem; the combat damage-number
+ * path is one mode of it. The EMythicDamageNumberType / FMythicDamageNumberData / UMythicDamageNumberConfig names below
+ * stay — they are genuinely the combat damage-number feature.)
  */
 UCLASS()
-class MYTHIC_API UMythicDamageNumberSubsystem : public UWorldSubsystem {
+class MYTHIC_API UMythicFeedbackSubsystem : public UWorldSubsystem {
     GENERATED_BODY()
 
 public:

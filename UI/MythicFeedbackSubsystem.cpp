@@ -1,6 +1,6 @@
 // Copyright Stellar Games. All Rights Reserved.
 
-#include "MythicDamageNumberSubsystem.h"
+#include "MythicFeedbackSubsystem.h"
 #include "GAS/MythicGameplayEffectContext.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "Engine/Canvas.h"
@@ -29,7 +29,7 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogMythicDamageNumbers, Log, All);
 
-void UMythicDamageNumberSubsystem::Initialize(FSubsystemCollectionBase &Collection) {
+void UMythicFeedbackSubsystem::Initialize(FSubsystemCollectionBase &Collection) {
     Super::Initialize(Collection);
 
     // Reserve space for typical damage number count
@@ -44,19 +44,19 @@ void UMythicDamageNumberSubsystem::Initialize(FSubsystemCollectionBase &Collecti
     }
 
     // Bind to HUD drawing - this delegate is called every frame for each local player
-    HUDDrawDelegateHandle = AHUD::OnHUDPostRender.AddUObject(this, &UMythicDamageNumberSubsystem::OnHUDPostRender);
+    HUDDrawDelegateHandle = AHUD::OnHUDPostRender.AddUObject(this, &UMythicFeedbackSubsystem::OnHUDPostRender);
 
     UE_LOG(LogMythicDamageNumbers, Log, TEXT("DamageNumberSubsystem initialized"));
 }
 
-void UMythicDamageNumberSubsystem::Deinitialize() {
+void UMythicFeedbackSubsystem::Deinitialize() {
     AHUD::OnHUDPostRender.Remove(HUDDrawDelegateHandle);
     ActiveDamageNumbers.Empty();
 
     Super::Deinitialize();
 }
 
-bool UMythicDamageNumberSubsystem::ShouldCreateSubsystem(UObject *Outer) const {
+bool UMythicFeedbackSubsystem::ShouldCreateSubsystem(UObject *Outer) const {
     // Only create for game worlds, not editor preview worlds
     if (const UWorld *World = Cast<UWorld>(Outer)) {
         return World->IsGameWorld();
@@ -64,7 +64,7 @@ bool UMythicDamageNumberSubsystem::ShouldCreateSubsystem(UObject *Outer) const {
     return false;
 }
 
-void UMythicDamageNumberSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
+void UMythicFeedbackSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
     if (!HUD || !Canvas) {
         return;
     }
@@ -100,7 +100,7 @@ void UMythicDamageNumberSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
 // DrawDamageNumbers, which the engine stops calling when the HUD is hidden (AHUD::PostRender gates on bShowHUD), so the
 // pool grew unbounded while hidden. Called on every Add (the sole growth source) so the array stays bounded regardless
 // of whether the HUD is currently rendering.
-void UMythicDamageNumberSubsystem::CleanupExpired() {
+void UMythicFeedbackSubsystem::CleanupExpired() {
     const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     for (int32 i = ActiveDamageNumbers.Num() - 1; i >= 0; --i) {
         if (ActiveDamageNumbers[i].IsExpired(CurrentTime)) {
@@ -121,7 +121,7 @@ void UMythicDamageNumberSubsystem::CleanupExpired() {
     }
 }
 
-void UMythicDamageNumberSubsystem::AddDamageNumber(FVector WorldLocation, float Magnitude, const FGameplayEffectContextHandle &EffectContext, bool bIsHeal) {
+void UMythicFeedbackSubsystem::AddDamageNumber(FVector WorldLocation, float Magnitude, const FGameplayEffectContextHandle &EffectContext, bool bIsHeal) {
     CleanupExpired(); // bound the pool even when the HUD isn't rendering
     FMythicDamageNumberData NewData;
     NewData.WorldLocation = WorldLocation;
@@ -147,14 +147,14 @@ void UMythicDamageNumberSubsystem::AddDamageNumber(FVector WorldLocation, float 
     UE_LOG(LogMythicDamageNumbers, Verbose, TEXT("Added damage number at %s (Type: %d)"), *WorldLocation.ToString(), (int32)NewData.DamageType);
 }
 
-void UMythicDamageNumberSubsystem::AddDodgeNumber(FVector WorldLocation) {
+void UMythicFeedbackSubsystem::AddDodgeNumber(FVector WorldLocation) {
     // Reuse the configured DodgeColor (designer-tunable data asset) — single source, no duplicated literal; the named
     // FLinearColor::Gray is only a degenerate fallback when no config asset is set. "DODGE" is the conventional miss label.
     const FLinearColor DodgeColor = Config ? Config->DodgeColor : FLinearColor::Gray;
     AddCombatText(WorldLocation, TEXT("DODGE"), DodgeColor, 1.0f);
 }
 
-void UMythicDamageNumberSubsystem::AddCombatText(FVector WorldLocation, const FString &Text, FLinearColor Color, float Lifetime) {
+void UMythicFeedbackSubsystem::AddCombatText(FVector WorldLocation, const FString &Text, FLinearColor Color, float Lifetime) {
     CleanupExpired(); // bound the pool even when the HUD isn't rendering (AddDodgeNumber routes through here too)
     FMythicDamageNumberData NewData;
     NewData.WorldLocation = WorldLocation;
@@ -173,17 +173,17 @@ void UMythicDamageNumberSubsystem::AddCombatText(FVector WorldLocation, const FS
     ActiveDamageNumbers.Add(MoveTemp(NewData));
 }
 
-void UMythicDamageNumberSubsystem::SetConfig(UMythicDamageNumberConfig *NewConfig) {
+void UMythicFeedbackSubsystem::SetConfig(UMythicDamageNumberConfig *NewConfig) {
     Config = NewConfig;
 }
 
-void UMythicDamageNumberSubsystem::ClearAll() {
+void UMythicFeedbackSubsystem::ClearAll() {
     ActiveDamageNumbers.Empty();
     ActiveNotifications.Empty();
     ActiveWorldCallouts.Empty();
 }
 
-void UMythicDamageNumberSubsystem::AddWorldCallout(FVector WorldLocation, const FText &Text, FLinearColor Color, UTexture2D *Icon, float DurationOverride) {
+void UMythicFeedbackSubsystem::AddWorldCallout(FVector WorldLocation, const FText &Text, FLinearColor Color, UTexture2D *Icon, float DurationOverride) {
     CleanupExpired();
 
     FMythicWorldCallout C;
@@ -198,7 +198,7 @@ void UMythicDamageNumberSubsystem::AddWorldCallout(FVector WorldLocation, const 
     ActiveWorldCallouts.Add(MoveTemp(C));
 }
 
-void UMythicDamageNumberSubsystem::DrawWorldCallouts(UCanvas *Canvas, APlayerController *PC) {
+void UMythicFeedbackSubsystem::DrawWorldCallouts(UCanvas *Canvas, APlayerController *PC) {
     if (ActiveWorldCallouts.Num() == 0) {
         return;
     }
@@ -274,7 +274,7 @@ void UMythicDamageNumberSubsystem::DrawWorldCallouts(UCanvas *Canvas, APlayerCon
     }
 }
 
-void UMythicDamageNumberSubsystem::AddScreenToast(const FText &Text, FLinearColor Color, UTexture2D *Icon, float DurationOverride) {
+void UMythicFeedbackSubsystem::AddScreenToast(const FText &Text, FLinearColor Color, UTexture2D *Icon, float DurationOverride) {
     CleanupExpired(); // bound both pools even when the HUD isn't rendering
 
     FMythicScreenNotification N;
@@ -291,7 +291,7 @@ void UMythicDamageNumberSubsystem::AddScreenToast(const FText &Text, FLinearColo
 
 // ─── Pure presentation math for screen notifications (mirrors the world-callout fade; unit-tested Mythic.UI.Feedback) ───
 
-float UMythicDamageNumberSubsystem::ComputeToastAlpha(float Elapsed, float Lifetime, float FadeInTime, float FadeOutTime) {
+float UMythicFeedbackSubsystem::ComputeToastAlpha(float Elapsed, float Lifetime, float FadeInTime, float FadeOutTime) {
     if (Lifetime <= 0.0f) {
         return 0.0f;
     }
@@ -308,7 +308,7 @@ float UMythicDamageNumberSubsystem::ComputeToastAlpha(float Elapsed, float Lifet
     return FMath::Clamp(A, 0.0f, 1.0f);
 }
 
-float UMythicDamageNumberSubsystem::ComputeToastSlideOffset(float Elapsed, float FadeInTime, float SlideDistance) {
+float UMythicFeedbackSubsystem::ComputeToastSlideOffset(float Elapsed, float FadeInTime, float SlideDistance) {
     if (FadeInTime <= 0.0f || Elapsed >= FadeInTime) {
         return 0.0f; // settled
     }
@@ -320,11 +320,11 @@ float UMythicDamageNumberSubsystem::ComputeToastSlideOffset(float Elapsed, float
     return SlideDistance * (1.0f - EaseOut);                 // SlideDistance -> 0
 }
 
-float UMythicDamageNumberSubsystem::ComputeToastStackOffset(int32 SlotFromAnchor, float EntryStep) {
+float UMythicFeedbackSubsystem::ComputeToastStackOffset(int32 SlotFromAnchor, float EntryStep) {
     return FMath::Max(0, SlotFromAnchor) * EntryStep;
 }
 
-void UMythicDamageNumberSubsystem::AddScreenBanner(const FText &Title, const FText &Subtitle, FLinearColor AccentColor, UTexture2D *Icon, float DurationOverride) {
+void UMythicFeedbackSubsystem::AddScreenBanner(const FText &Title, const FText &Subtitle, FLinearColor AccentColor, UTexture2D *Icon, float DurationOverride) {
     CleanupExpired();
 
     FMythicScreenNotification N;
@@ -340,7 +340,7 @@ void UMythicDamageNumberSubsystem::AddScreenBanner(const FText &Title, const FTe
     ActiveNotifications.Add(MoveTemp(N));
 }
 
-float UMythicDamageNumberSubsystem::EaseOutBack(float T) {
+float UMythicFeedbackSubsystem::EaseOutBack(float T) {
     // Standard ease-out-back: settles to 1.0 with a small overshoot past it near the end (the "pop").
     const float C1 = 1.70158f;
     const float C3 = C1 + 1.0f;
@@ -348,7 +348,7 @@ float UMythicDamageNumberSubsystem::EaseOutBack(float T) {
     return 1.0f + C3 * T1 * T1 * T1 + C1 * T1 * T1;
 }
 
-float UMythicDamageNumberSubsystem::ComputeBannerScale(float Elapsed, float EntranceTime, float StartScale) {
+float UMythicFeedbackSubsystem::ComputeBannerScale(float Elapsed, float EntranceTime, float StartScale) {
     if (EntranceTime <= 0.0f || Elapsed >= EntranceTime) {
         return 1.0f;
     }
@@ -359,7 +359,7 @@ float UMythicDamageNumberSubsystem::ComputeBannerScale(float Elapsed, float Entr
     return FMath::Lerp(StartScale, 1.0f, E);
 }
 
-float UMythicDamageNumberSubsystem::ComputeBannerSweepX(float Elapsed, float EntranceTime, float Width) {
+float UMythicFeedbackSubsystem::ComputeBannerSweepX(float Elapsed, float EntranceTime, float Width) {
     if (EntranceTime <= 0.0f) {
         return Width;
     }
@@ -367,7 +367,7 @@ float UMythicDamageNumberSubsystem::ComputeBannerSweepX(float Elapsed, float Ent
     return T * Width;
 }
 
-void UMythicDamageNumberSubsystem::DrawScreenNotifications(UCanvas *Canvas, APlayerController *PC) {
+void UMythicFeedbackSubsystem::DrawScreenNotifications(UCanvas *Canvas, APlayerController *PC) {
     if (ActiveNotifications.Num() == 0) {
         return;
     }
@@ -560,7 +560,7 @@ void UMythicDamageNumberSubsystem::DrawScreenNotifications(UCanvas *Canvas, APla
     }
 }
 
-void UMythicDamageNumberSubsystem::DrawDamageNumbers(UCanvas *Canvas, APlayerController *PC) {
+void UMythicFeedbackSubsystem::DrawDamageNumbers(UCanvas *Canvas, APlayerController *PC) {
     if (ActiveDamageNumbers.Num() == 0) {
         return;
     }
@@ -648,7 +648,7 @@ void UMythicDamageNumberSubsystem::DrawDamageNumbers(UCanvas *Canvas, APlayerCon
     }
 }
 
-FString UMythicDamageNumberSubsystem::FormatMagnitude(float Magnitude) const {
+FString UMythicFeedbackSubsystem::FormatMagnitude(float Magnitude) const {
     const float AbsMagnitude = FMath::Abs(Magnitude);
 
     if (Config && Config->bAbbreviateLargeNumbers) {
@@ -663,7 +663,7 @@ FString UMythicDamageNumberSubsystem::FormatMagnitude(float Magnitude) const {
     return FString::Printf(TEXT("%d"), FMath::RoundToInt(AbsMagnitude));
 }
 
-FLinearColor UMythicDamageNumberSubsystem::DetermineColor(const FGameplayEffectContextHandle &EffectContext, bool bIsHeal) const {
+FLinearColor UMythicFeedbackSubsystem::DetermineColor(const FGameplayEffectContextHandle &EffectContext, bool bIsHeal) const {
     // Default colors if no config
     const FLinearColor DefaultColor = Config ? Config->DefaultColor : FLinearColor::White;
     const FLinearColor HealColor = Config ? Config->HealColor : FLinearColor(0.0f, 1.0f, 0.3f);
@@ -690,7 +690,7 @@ FLinearColor UMythicDamageNumberSubsystem::DetermineColor(const FGameplayEffectC
     return DefaultColor;
 }
 
-bool UMythicDamageNumberSubsystem::IsCriticalHit(const FGameplayEffectContextHandle &EffectContext) const {
+bool UMythicFeedbackSubsystem::IsCriticalHit(const FGameplayEffectContextHandle &EffectContext) const {
     if (EffectContext.IsValid()) {
         const FMythicGameplayEffectContext *MythicContext = static_cast<const FMythicGameplayEffectContext *>(EffectContext.Get());
         if (MythicContext) {
@@ -700,7 +700,7 @@ bool UMythicDamageNumberSubsystem::IsCriticalHit(const FGameplayEffectContextHan
     return false;
 }
 
-EMythicDamageNumberType UMythicDamageNumberSubsystem::DetermineDamageType(const FGameplayEffectContextHandle &EffectContext, bool bIsHeal) const {
+EMythicDamageNumberType UMythicFeedbackSubsystem::DetermineDamageType(const FGameplayEffectContextHandle &EffectContext, bool bIsHeal) const {
     if (bIsHeal) {
         return EMythicDamageNumberType::Heal;
     }
@@ -731,7 +731,7 @@ EMythicDamageNumberType UMythicDamageNumberSubsystem::DetermineDamageType(const 
     return EMythicDamageNumberType::Default;
 }
 
-FLinearColor UMythicDamageNumberSubsystem::GetColorForType(EMythicDamageNumberType Type) const {
+FLinearColor UMythicFeedbackSubsystem::GetColorForType(EMythicDamageNumberType Type) const {
     if (!Config) {
         // Fallback colors when no config (mirror the config defaults so behavior is identical sans data asset).
         switch (Type) {
@@ -790,7 +790,7 @@ FLinearColor UMythicDamageNumberSubsystem::GetColorForType(EMythicDamageNumberTy
     }
 }
 
-EMythicDamageNumberAnimStyle UMythicDamageNumberSubsystem::GetAnimStyleForType(EMythicDamageNumberType Type) const {
+EMythicDamageNumberAnimStyle UMythicFeedbackSubsystem::GetAnimStyleForType(EMythicDamageNumberType Type) const {
     if (!Config) {
         // Sensible defaults when no config
         switch (Type) {
@@ -835,7 +835,7 @@ EMythicDamageNumberAnimStyle UMythicDamageNumberSubsystem::GetAnimStyleForType(E
     }
 }
 
-FVector2D UMythicDamageNumberSubsystem::CalculateAnimationOffset(const FMythicDamageNumberData &Data, float CurrentTime) const {
+FVector2D UMythicFeedbackSubsystem::CalculateAnimationOffset(const FMythicDamageNumberData &Data, float CurrentTime) const {
     const float Age = CurrentTime - Data.SpawnTime;
     const float NormalizedAge = FMath::Clamp(Age / Data.Lifetime, 0.0f, 1.0f);
     const float BaseVerticalSpeed = Config ? Config->VerticalFloatSpeed : 50.0f;
@@ -893,7 +893,7 @@ FVector2D UMythicDamageNumberSubsystem::CalculateAnimationOffset(const FMythicDa
     return Offset;
 }
 
-float UMythicDamageNumberSubsystem::CalculateAnimationScale(const FMythicDamageNumberData &Data, float CurrentTime) const {
+float UMythicFeedbackSubsystem::CalculateAnimationScale(const FMythicDamageNumberData &Data, float CurrentTime) const {
     if (Data.AnimStyle != EMythicDamageNumberAnimStyle::Pulse) {
         return 1.0f;
     }
@@ -910,7 +910,7 @@ float UMythicDamageNumberSubsystem::CalculateAnimationScale(const FMythicDamageN
 // Contextual nameplates — health bars shown ONLY for entities ENGAGED with the local player, faded by relevance/distance.
 // ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-float UMythicDamageNumberSubsystem::ComputeNameplateTargetAlpha(bool bRelevant, float Distance, float FullDistance, float CullDistance) {
+float UMythicFeedbackSubsystem::ComputeNameplateTargetAlpha(bool bRelevant, float Distance, float FullDistance, float CullDistance) {
     if (!bRelevant) {
         return 0.0f;
     }
@@ -926,7 +926,7 @@ float UMythicDamageNumberSubsystem::ComputeNameplateTargetAlpha(bool bRelevant, 
     return 1.0f - (Distance - FullDistance) / (CullDistance - FullDistance); // linear fade in the band
 }
 
-float UMythicDamageNumberSubsystem::StepNameplateAlpha(float CurrentAlpha, float TargetAlpha, float DeltaSeconds, float FadeRate) {
+float UMythicFeedbackSubsystem::StepNameplateAlpha(float CurrentAlpha, float TargetAlpha, float DeltaSeconds, float FadeRate) {
     const float MaxStep = FMath::Max(0.0f, FadeRate) * FMath::Max(0.0f, DeltaSeconds);
     if (CurrentAlpha < TargetAlpha) {
         return FMath::Min(TargetAlpha, CurrentAlpha + MaxStep);
@@ -937,7 +937,7 @@ float UMythicDamageNumberSubsystem::StepNameplateAlpha(float CurrentAlpha, float
     return CurrentAlpha;
 }
 
-float UMythicDamageNumberSubsystem::StepGhostFill(float GhostFrac, float TargetFrac, float DeltaSeconds, float DrainSpeed, float HoldRemaining) {
+float UMythicFeedbackSubsystem::StepGhostFill(float GhostFrac, float TargetFrac, float DeltaSeconds, float DrainSpeed, float HoldRemaining) {
     if (TargetFrac >= GhostFrac) {
         return TargetFrac; // gained (or settled): the chip catches up to the fill immediately
     }
@@ -948,7 +948,7 @@ float UMythicDamageNumberSubsystem::StepGhostFill(float GhostFrac, float TargetF
     return FMath::Max(TargetFrac, GhostFrac - MaxDrain); // drain toward the fill, no undershoot
 }
 
-void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas, APlayerController *PC) {
+void UMythicFeedbackSubsystem::DrawAmbient(UCanvas *Canvas, APlayerController *PC) {
     UWorld *World = GetWorld();
     UGameInstance *GI = World ? World->GetGameInstance() : nullptr;
     UMythicEnvironmentSubsystem *Env = GI ? GI->GetSubsystem<UMythicEnvironmentSubsystem>() : nullptr;
@@ -1078,7 +1078,7 @@ void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas, APlayerControlle
     Canvas->DrawItem(TextItem);
 }
 
-FMythicLocalHud &UMythicDamageNumberSubsystem::GetLocalHud(APlayerController *PC) {
+FMythicLocalHud &UMythicFeedbackSubsystem::GetLocalHud(APlayerController *PC) {
     // Prune buckets whose local player went away (controller destroyed), then find-or-add this PC's bucket.
     for (auto It = LocalHuds.CreateIterator(); It; ++It) {
         if (!It.Key().IsValid()) {
@@ -1088,7 +1088,7 @@ FMythicLocalHud &UMythicDamageNumberSubsystem::GetLocalHud(APlayerController *PC
     return LocalHuds.FindOrAdd(TWeakObjectPtr<APlayerController>(PC));
 }
 
-void UMythicDamageNumberSubsystem::DrawStatusBadges(UCanvas *Canvas, float CenterX, float RowCenterY, UAbilitySystemComponent *ASC, float Alpha) {
+void UMythicFeedbackSubsystem::DrawStatusBadges(UCanvas *Canvas, float CenterX, float RowCenterY, UAbilitySystemComponent *ASC, float Alpha) {
     const UMythicAttributeSet_Defense *Def = ASC ? ASC->GetSet<UMythicAttributeSet_Defense>() : nullptr;
     if (!Def) {
         return;
@@ -1188,7 +1188,7 @@ void UMythicDamageNumberSubsystem::DrawStatusBadges(UCanvas *Canvas, float Cente
     }
 }
 
-void UMythicDamageNumberSubsystem::DrawQuestTracker(UCanvas *Canvas, APlayerController *PC) {
+void UMythicFeedbackSubsystem::DrawQuestTracker(UCanvas *Canvas, APlayerController *PC) {
     const AMythicPlayerController *MPC = Cast<AMythicPlayerController>(PC);
     const UObjectiveTracker *Tracker = MPC ? MPC->GetObjectiveTracker() : nullptr;
     if (!Tracker) {
@@ -1290,7 +1290,7 @@ void UMythicDamageNumberSubsystem::DrawQuestTracker(UCanvas *Canvas, APlayerCont
     }
 }
 
-void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerController *PC) {
+void UMythicFeedbackSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerController *PC) {
     APawn *Pawn = PC ? PC->GetPawn() : nullptr;
     if (!Pawn) {
         return;
@@ -1452,7 +1452,7 @@ void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerControl
     }
 }
 
-bool UMythicDamageNumberSubsystem::IsNameplateRelevant(AActor *Npc, AActor *LocalPawn) const {
+bool UMythicFeedbackSubsystem::IsNameplateRelevant(AActor *Npc, AActor *LocalPawn) const {
     // ENGAGED = this NPC is fighting the local player. Read the NPC's REPLICATED EngagedTarget (mirrored from the server
     // AI's hostile target) so the plate appears on EVERY client — the AIController's target is server-only and is null on
     // remote clients. Broader signals (threat table, faction-hostile-and-near) are a follow-up.
@@ -1462,7 +1462,7 @@ bool UMythicDamageNumberSubsystem::IsNameplateRelevant(AActor *Npc, AActor *Loca
     return false;
 }
 
-void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerController *PC) {
+void UMythicFeedbackSubsystem::DrawNameplates(UCanvas *Canvas, APlayerController *PC) {
     UWorld *World = GetWorld();
     if (!World) {
         return;

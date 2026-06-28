@@ -30,7 +30,7 @@
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "AI/Cognition/CognitiveBrainComponent.h" // NPC->CognitiveBrain->GetSourceEntity() for recruit
 #include "AI/Party/PartySubsystem.h" // server-authoritative party recruit
-#include "UI/MythicDamageNumberSubsystem.h" // unified feedback subsystem — combat numbers, screen toasts/banners, world callouts
+#include "UI/MythicFeedbackSubsystem.h" // unified feedback subsystem — combat numbers, screen toasts/banners, world callouts
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Player/MythicGift.h"                      // co-op gift pure decision gates
@@ -620,7 +620,7 @@ void AMythicPlayerController::ClientReceiveGiftOffer_Implementation(AMythicPlaye
     // RECIPIENT client: surface the offer (a float beat so it's never silent) + hand it to the BP prompt widget.
     if (const APawn *AvatarPawn = GetPawn()) {
         if (UWorld *World = AvatarPawn->GetWorld()) {
-            if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+            if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
                 Feedback->AddScreenToast(FText::FromString(TEXT("Gift offered")), FLinearColor(0.6f, 0.85f, 1.0f), nullptr, 2.0f);
             }
         }
@@ -712,7 +712,7 @@ void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
 void AMythicPlayerController::ClientNotifyGiftResult_Implementation(const FText &Message, FLinearColor Color) {
     if (const APawn *AvatarPawn = GetPawn()) {
         if (UWorld *World = AvatarPawn->GetWorld()) {
-            if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+            if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
                 Feedback->AddScreenToast(Message, Color, nullptr, 2.0f);
             }
         }
@@ -1057,7 +1057,7 @@ void AMythicPlayerController::ClientReceiveRecruitResult_Implementation(AMythicN
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         if (bSucceeded) {
             Feedback->AddScreenToast(FText::FromString(TEXT("Joined your party!")), FLinearColor(0.1f, 0.9f, 0.3f), nullptr, 3.0f);
         }
@@ -1072,7 +1072,7 @@ void AMythicPlayerController::ClientShowGatherProgress_Implementation(FVector Lo
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         const FVector Loc = Location + FVector(0.0f, 0.0f, 50.0f); // float just above the node
         Feedback->AddWorldCallout(Loc, FText::FromString(FString::Printf(TEXT("%d left"), HitsRemaining)),
                                   FLinearColor(0.85f, 0.7f, 0.4f), nullptr, 1.0f); // tan, brief — world-anchored, spatial
@@ -1084,7 +1084,7 @@ void AMythicPlayerController::ClientShowGatherDepleted_Implementation(FVector Lo
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         const FVector Loc = Location + FVector(0.0f, 0.0f, 50.0f);
         Feedback->AddWorldCallout(Loc, FText::FromString(TEXT("Depleted!")), FLinearColor(0.6f, 0.85f, 0.4f), nullptr, 1.5f);
     }
@@ -1099,7 +1099,7 @@ void AMythicPlayerController::ClientNotifyProficiencyLevel_Implementation(const 
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         // A level-up is a major beat -> hero banner. Milestone unlock (if any) rides as the subtitle.
         const FText Title = FText::FromString(FString::Printf(TEXT("%s  Lv %d"), *ProfName.ToString(), NewLevel));
         const FText Subtitle = MilestoneName.IsEmpty()
@@ -1114,7 +1114,7 @@ void AMythicPlayerController::ClientNotifyCompanionDeparted_Implementation(const
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         const FString Who = Name.IsEmpty() ? TEXT("A companion") : Name.ToString();
         Feedback->AddScreenToast(FText::FromString(FString::Printf(TEXT("%s has left your party"), *Who)),
                                  FLinearColor(0.7f, 0.7f, 0.75f), nullptr, 3.0f); // grey, lingers
@@ -1126,7 +1126,7 @@ void AMythicPlayerController::ClientNotifyCompanionBetrayed_Implementation(const
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         const FString Who = Name.IsEmpty() ? TEXT("A companion") : Name.ToString();
         Feedback->AddScreenToast(FText::FromString(FString::Printf(TEXT("%s turns on you!"), *Who)),
                                  FLinearColor(0.9f, 0.1f, 0.1f), nullptr, 3.5f); // red, lingers
@@ -1142,7 +1142,7 @@ void AMythicPlayerController::ClientNotifyObjective_Implementation(const FText &
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         if (bCompleted) {
             // Objective complete is a major beat -> hero banner (title + the objective name as subtitle).
             Feedback->AddScreenBanner(FText::FromString(TEXT("Objective Complete")), DisplayText,
@@ -1167,7 +1167,7 @@ void AMythicPlayerController::ClientNotifyObjectiveResult_Implementation(const F
     if (!World) {
         return;
     }
-    UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>();
+    UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>();
     if (!Feedback) {
         return;
     }
@@ -1221,7 +1221,7 @@ void AMythicPlayerController::ClientNotifyLootPickup_Implementation(const FText 
     }
     // Loot is NOT combat — a minor non-combat beat -> screen toast (the unified subsystem's non-WBP Canvas path).
     // Shows "+N ItemName" in the item's rarity color.
-    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         const FText Text = (Quantity > 1)
             ? FText::FromString(FString::Printf(TEXT("+%d %s"), Quantity, *ItemName.ToString()))
             : ItemName;
@@ -1242,7 +1242,7 @@ void AMythicPlayerController::ClientNotifyTradeResult_Implementation(EMythicTrad
     if (Message.IsEmpty()) {
         return; // nothing player-facing (a success/partial/invalid result reaches here only defensively)
     }
-    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         // Denial red — distinct from the gold/rarity pickup tints so a failed trade reads as a failure at a glance.
         Feedback->AddScreenToast(Message, FLinearColor(0.9f, 0.2f, 0.2f), nullptr, 2.0f);
     }
@@ -1257,7 +1257,7 @@ void AMythicPlayerController::ClientNotifyEnvironmentHazard_Implementation(const
     if (!World) {
         return;
     }
-    UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>();
+    UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>();
     if (!Feedback) {
         return;
     }
@@ -1280,7 +1280,7 @@ void AMythicPlayerController::ClientNotifyItemDurability_Implementation(const FT
     if (!World) {
         return;
     }
-    UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>();
+    UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>();
     if (!Feedback) {
         return;
     }
@@ -1389,7 +1389,7 @@ void AMythicPlayerController::ClientShowShieldAbsorbed_Implementation(int32 Abso
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *DamageNumbers = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         const FVector Location = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 70.0f);
         DamageNumbers->AddCombatText(Location, FString::Printf(TEXT("%d"), Absorbed),
                                              FLinearColor(0.4f, 0.7f, 1.0f), 1.0f); // light blue = absorbed by shield
@@ -1409,7 +1409,7 @@ void AMythicPlayerController::ClientShowDodge_Implementation() {
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *DamageNumbers = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         DamageNumbers->AddDodgeNumber(AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 90.0f));
     }
 }
@@ -1423,7 +1423,7 @@ void AMythicPlayerController::ClientNotifyExhausted_Implementation(bool bExhaust
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *DamageNumbers = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         const FVector Loc = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 90.0f);
         if (bExhausted) {
             DamageNumbers->AddCombatText(Loc, TEXT("Winded!"), FLinearColor(1.0f, 0.55f, 0.1f), 1.2f); // orange warning
@@ -1473,7 +1473,7 @@ void AMythicPlayerController::ClientNotifyZoneEntry_Implementation(const FText &
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         // Entering a settlement is a major beat -> hero banner (place name big, "Now entering" beneath).
         Feedback->AddScreenBanner(SettlementName, FText::FromString(TEXT("Now entering")), FLinearColor(1.0f, 0.85f, 0.1f), nullptr, 3.5f); // gold
     }

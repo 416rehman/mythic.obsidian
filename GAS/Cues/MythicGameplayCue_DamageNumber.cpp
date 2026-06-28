@@ -3,7 +3,7 @@
 #include "MythicGameplayCue_DamageNumber.h"
 
 #include "Engine/World.h"
-#include "UI/MythicDamageNumberSubsystem.h"
+#include "UI/MythicFeedbackSubsystem.h"
 
 UMythicGameplayCue_DamageNumber::UMythicGameplayCue_DamageNumber() {}
 
@@ -17,7 +17,7 @@ bool UMythicGameplayCue_DamageNumber::OnExecute_Implementation(AActor *Target, c
         return false;
     }
 
-    UMythicDamageNumberSubsystem *DamageNumberSubsystem = World->GetSubsystem<UMythicDamageNumberSubsystem>();
+    UMythicFeedbackSubsystem *DamageNumberSubsystem = World->GetSubsystem<UMythicFeedbackSubsystem>();
     if (!DamageNumberSubsystem) {
         return false;
     }

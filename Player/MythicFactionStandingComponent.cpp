@@ -8,7 +8,7 @@
 #include "Net/UnrealNetwork.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h" // FactionDatabase (server-side faction name resolution)
 #include "World/LivingWorld/Factions/FactionDatabase.h"
-#include "UI/MythicDamageNumberSubsystem.h" // unified feedback subsystem — faction shift = hero banner
+#include "UI/MythicFeedbackSubsystem.h" // unified feedback subsystem — faction shift = hero banner
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/Pawn.h"
 
@@ -183,7 +183,7 @@ void UMythicFactionStandingComponent::ClientNotifyStandingTier_Implementation(co
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         FString TierText;
         FLinearColor Color;
         switch (NewTier) {

@@ -69,7 +69,7 @@
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "GameModes/Attributes/WorldAttributes.h"
 #include "Resources/MythicResourceManagerComponent.h"
-#include "UI/MythicDamageNumberSubsystem.h"
+#include "UI/MythicFeedbackSubsystem.h"
 #include "Engine/LocalPlayer.h"
 
 // Pane 8 (Cognition) / Pane 9 (Crime/History) / Pane 10 (World State) — all verified-present systems.
@@ -876,7 +876,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
     }
     // #15 DAMAGE NUMBERS (world subsystem; active pool size).
-    if (const UMythicDamageNumberSubsystem *DN = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (const UMythicFeedbackSubsystem *DN = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
         Header += FString::Printf(TEXT("{white}DmgNumbers active: {yellow}%d{white}\n"), DN->GetActiveDamageNumberCount());
     }
 
