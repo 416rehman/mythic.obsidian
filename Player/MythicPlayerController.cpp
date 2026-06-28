@@ -685,8 +685,13 @@ void AMythicPlayerController::OfferNpcQuestIfAny(AMythicNPCCharacter *NPC) {
         if (Result == EObjectiveOfferResult::Assigned ||
             Result == EObjectiveOfferResult::AlreadyActive ||
             Result == EObjectiveOfferResult::AlreadyCompleted ||
-            Result == EObjectiveOfferResult::OutOfRange) {
-            const EObjectiveNotifyCategory Category = (Result == EObjectiveOfferResult::Assigned || Result == EObjectiveOfferResult::OutOfRange)
+            Result == EObjectiveOfferResult::OutOfRange ||
+            Result == EObjectiveOfferResult::PrerequisitesNotMet) {
+            // Assigned / OutOfRange / PrerequisitesNotMet are "assignment" beats (assigned / can't here / locked behind a
+            // prior step); AlreadyActive / AlreadyCompleted are "duplicate" beats.
+            const EObjectiveNotifyCategory Category = (Result == EObjectiveOfferResult::Assigned
+                                                       || Result == EObjectiveOfferResult::OutOfRange
+                                                       || Result == EObjectiveOfferResult::PrerequisitesNotMet)
                 ? EObjectiveNotifyCategory::Assignment
                 : EObjectiveNotifyCategory::Duplicate;
             ClientNotifyObjectiveResult(Offer->GetCalloutText(Progress.bCompleted), Category, Result,

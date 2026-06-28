@@ -14,8 +14,9 @@
  * receive {Rewards}". Tracked per-player by UObjectiveTracker. The trigger is a GAS gameplay-event tag from the
  * GAS.Event.* family emitted server-side: combat (Kill / Death / Dmg.* / Heal.*) AND item acquisition
  * (GAS.Event.Item.Acquired — fires on every genuine pickup/grant). With RequiredPayloadTag + bCountByEventMagnitude
- * this expresses non-combat "collect N <type>" objectives (e.g. gather 20 wood) on the same atomic unit. Multi-step
- * chains, prerequisites, and branching are still intentionally NOT modeled here (separate follow-ups).
+ * this expresses non-combat "collect N <type>" objectives (e.g. gather 20 wood) on the same atomic unit. Prerequisites
+ * (PrerequisiteObjectives) now gate assignment into multi-step quest chains; auto-advance (assign the next step on
+ * completion) and branching are still follow-ups.
  */
 UCLASS(BlueprintType)
 class MYTHIC_API UObjectiveDefinition : public UDataAsset {
@@ -48,6 +49,13 @@ public:
     // contexts (XP level / item level) are built correctly — a bare TArray<URewardBase*> would zero those.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")
     FRewardsToGive Rewards;
+
+    // Objectives that must ALL be COMPLETED before this one can be assigned — the multi-step quest chain. Empty
+    // (default) = no prerequisite (assignable immediately, the original behaviour). A quest-giver offering a later step
+    // won't enroll the player until the earlier steps are done. Direct prerequisites only (no recursion) — the designer
+    // authors the chain; a dependency cycle simply leaves all looped steps unassignable (harmless data error).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")
+    TArray<TObjectPtr<UObjectiveDefinition>> PrerequisiteObjectives;
 
     // Player-facing objective line (e.g. "Slay 5 wolves").
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")

@@ -95,8 +95,33 @@ EObjectiveOfferResult UObjectiveTracker::ResolveObjectiveOfferResult(const TArra
         }
     }
 
+    // Chain gate: a later step won't assign until every prerequisite step is COMPLETED in this player's tracked set.
+    if (!AreObjectivePrerequisitesMet(Definition->PrerequisiteObjectives, TrackedObjectives)) {
+        return EObjectiveOfferResult::PrerequisitesNotMet;
+    }
+
     OutProgress.Definition = const_cast<UObjectiveDefinition *>(Definition);
     return EObjectiveOfferResult::Assigned;
+}
+
+bool UObjectiveTracker::AreObjectivePrerequisitesMet(const TArray<TObjectPtr<UObjectiveDefinition>> &Prerequisites,
+                                                     const TArray<FObjectiveProgress> &TrackedObjectives) {
+    for (const TObjectPtr<UObjectiveDefinition> &Prereq : Prerequisites) {
+        if (!Prereq) {
+            continue; // ignore a null prerequisite entry (designer slop) — not a blocker
+        }
+        bool bPrereqCompleted = false;
+        for (const FObjectiveProgress &Prog : TrackedObjectives) {
+            if (Prog.Definition == Prereq && Prog.bCompleted) {
+                bPrereqCompleted = true;
+                break;
+            }
+        }
+        if (!bPrereqCompleted) {
+            return false; // a prerequisite is untracked or not yet complete → the chain step stays gated
+        }
+    }
+    return true;
 }
 
 FText UObjectiveTracker::BuildObjectiveNotificationText(const FText &DisplayText, EObjectiveNotifyCategory Category,
@@ -107,6 +132,9 @@ FText UObjectiveTracker::BuildObjectiveNotificationText(const FText &DisplayText
     case EObjectiveNotifyCategory::Assignment:
         if (OfferResult == EObjectiveOfferResult::OutOfRange) {
             return FText::FromString(FString::Printf(TEXT("Objective Out of Range: %s"), *Text));
+        }
+        if (OfferResult == EObjectiveOfferResult::PrerequisitesNotMet) {
+            return FText::FromString(FString::Printf(TEXT("Objective Locked: %s"), *Text));
         }
         if (OfferResult == EObjectiveOfferResult::Invalid) {
             return FText::FromString(FString::Printf(TEXT("Objective Unavailable: %s"), *Text));

@@ -39,6 +39,7 @@ enum class EObjectiveOfferResult : uint8 {
     AlreadyCompleted,
     NoOffer,
     OutOfRange,
+    PrerequisitesNotMet, // a prior step in this objective's chain isn't complete yet — assignment is gated
     Invalid
 };
 
@@ -101,6 +102,12 @@ public:
     static EObjectiveOfferResult ResolveObjectiveOfferResult(const TArray<FObjectiveProgress> &TrackedObjectives,
                                                              const UObjectiveDefinition *Definition,
                                                              FObjectiveProgress &OutProgress);
+
+    // Pure: every prerequisite definition must appear COMPLETED in the player's tracked set. Empty prerequisites →
+    // always met (no chain). A null prerequisite entry is ignored (designer slop, not a blocker); a prerequisite that
+    // is untracked or tracked-but-incomplete fails the gate. Static so the chain rule is unit-testable without a tracker.
+    static bool AreObjectivePrerequisitesMet(const TArray<TObjectPtr<UObjectiveDefinition>> &Prerequisites,
+                                             const TArray<FObjectiveProgress> &TrackedObjectives);
 
     static FText BuildObjectiveNotificationText(const FText &DisplayText, EObjectiveNotifyCategory Category,
                                                 EObjectiveOfferResult OfferResult, int32 Current, int32 Required,
