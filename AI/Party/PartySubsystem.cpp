@@ -648,7 +648,21 @@ float UMythicPartySubsystem::EvaluateLoyaltyImpact(
         CompanionFactionData.CondemnThreshold,
         CompanionFactionData.HostileThreshold);
 
-    // Translate severity into loyalty impact
+    // Translate severity into loyalty impact via the pure, unit-tested policy (Mythic.Party.LoyaltyDelta). The companion's
+    // Tend (empathy) vent weight scales the positive Mercy bonus, and the Mercy-axis value off the full moral vector says
+    // whether the player showed mercy/healed/spared. Both are read here — the live objects above are already null-checked
+    // — and passed by value so the loyalty-balance curve itself is testable in isolation.
+    const FMythicPersonalityFragment &PersonalityRef = Brain->GetPersonality();
+    const float TendWeight = PersonalityRef.VentWeights[static_cast<int32>(EMythicVentChannel::Tend)];
+    const float MercyVal = MoralAction.AxisValues[static_cast<int32>(EMythicMoralAxis::Mercy)];
+    return ComputeLoyaltyDelta(Severity, MercyVal, TendWeight);
+}
+
+float UMythicPartySubsystem::ComputeLoyaltyDelta(EMythicMoralSeverity Severity, float MercyAxisValue, float TendWeight) {
+    // Severity (already judged against the companion's faction ideology by the caller) maps to a loyalty delta: a
+    // violation scales by how serious that faction considers the act; a benign act earns mild approval, and a merciful
+    // one earns more for an empathetic (high-Tend) companion. Pure — no live objects — so the balance curve is unit-
+    // tested + regression-locked against accidental retuning.
     switch (Severity) {
     case EMythicMoralSeverity::Hostile:
         return -0.10f; // Major violation
@@ -658,19 +672,10 @@ float UMythicPartySubsystem::EvaluateLoyaltyImpact(
         return -0.02f; // Minor disapproval
     case EMythicMoralSeverity::Ignore:
     default:
-        // If the companion's personality leans toward this axis, reward alignment
-    {
-        // Read the companion's actual personality VentWeights for nuanced evaluation
-        const FMythicPersonalityFragment &PersonalityRef = Brain->GetPersonality();
-        const float TendWeight = PersonalityRef.VentWeights[static_cast<int32>(EMythicVentChannel::Tend)];
-
-        // Mercy actions are universally loyalty-positive for empathetic companions (read the Mercy axis off the
-        // full vector — a positive Mercy contribution means the player showed mercy/healed/spared).
-        if (MoralAction.AxisValues[static_cast<int32>(EMythicMoralAxis::Mercy)] > 0.0f) {
-            return 0.03f * (0.5f + TendWeight);
+        if (MercyAxisValue > 0.0f) {
+            return 0.03f * (0.5f + TendWeight); // empathetic companions reward mercy more
         }
         return 0.01f; // Mild approval
-    }
     }
 }
 

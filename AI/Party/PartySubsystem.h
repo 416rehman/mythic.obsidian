@@ -124,6 +124,15 @@ public:
     static bool ShouldShareBelief(const FMythicBelief &Belief, int32 MaxHops);
 
     /**
+     * PURE loyalty-balance policy: map a moral-action Severity (already judged against the companion's faction ideology)
+     * + the action's Mercy-axis value + the companion's Tend (empathy) vent weight to a loyalty delta. Extracted from
+     * EvaluateLoyaltyImpact so the curve is unit-testable + regression-locked (Mythic.Party.LoyaltyDelta). Negative =
+     * disturbed (severity-scaled); positive = aligned, with a merciful act scaling by the companion's empathy. Public +
+     * static, like the sibling testable statics, so the test addresses it without relying on a relaxed access check.
+     */
+    static float ComputeLoyaltyDelta(EMythicMoralSeverity Severity, float MercyAxisValue, float TendWeight);
+
+    /**
      * Single source of truth for one belief's save/load byte layout (used by both branches of Serialize so the field
      * order can never desync between save and load). Reads/writes the original 3 fields (EventTag/Confidence/
      * FormationTime) for all versions and the full semantic state (Cell/InvolvedFaction/LastDecayTime/PropagationHops/
