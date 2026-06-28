@@ -189,6 +189,20 @@ public:
     // (Range is enforced separately by the interaction RPC.) Static + no engine state for unit testing.
     static bool CanReviveTarget(bool bTargetDowned, bool bReviverDowned);
 
+    // Combat proficiency XP paid to the teammate who revives this owner (co-op incentive). 0 (default) = no reward,
+    // byte-identical to the prior behaviour. The reward domain (combat vs a support proficiency) is a logged design choice.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mythic|Health")
+    float ReviveXPReward = 0.0f;
+
+    // One-shot: set true ONLY by the genuine reviver-initiated revive paths (channel completion + the instant fallback),
+    // consumed in ServerReviveFromDowned to gate the reward — so a DIRECT/debug ServerReviveFromDowned (e.g. a self-revive
+    // cheat) never credits an in-flight channeling teammate for a revive they did not complete.
+    bool bPayReviverOnNextRevive = false;
+
+    // Pure: the reward actually paid to a reviver — the configured amount (floored at 0) iff the reviver is an eligible
+    // player, else 0. Static so the co-op incentive rule is unit-testable without a live world.
+    static float ComputeReviveReward(bool bReviverIsEligiblePlayer, float ConfiguredReward);
+
     // SERVER: begin (or refresh) a proximity-maintained revive channel on this downed owner by Reviver. While the channel
     // runs, progress accrues each tick as long as Reviver stays in range + isn't downed (re-validated server-side); on
     // completion this calls ServerReviveFromDowned. No-op if not downed / already being revived by someone else / off

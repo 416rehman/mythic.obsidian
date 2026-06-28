@@ -350,6 +350,13 @@ void UMythicLifeComponent::ServerReviveFromDowned() {
     if (!AbilitySystemComponent || !bIsDowned) {
         return;
     }
+    // Capture the teammate who revived BEFORE CancelReviveChannel (below) clears ActiveReviver — used for the co-op
+    // revive reward. The one-shot bPayReviverOnNextRevive flag is set ONLY by the genuine reviver-initiated paths
+    // (channel completion + instant), so a DIRECT/debug ServerReviveFromDowned (e.g. MythReviveSelf) never credits an
+    // in-flight channeler. Consume it now so it can't leak to a later revive.
+    APawn *Reviver = ActiveReviver.Get();
+    const bool bPayReviver = bPayReviverOnNextRevive;
+    bPayReviverOnNextRevive = false;
     if (UWorld *W = GetWorld()) {
         W->GetTimerManager().ClearTimer(BleedOutTimerHandle);
     }
@@ -375,7 +382,26 @@ void UMythicLifeComponent::ServerReviveFromDowned() {
 
     CancelReviveChannel(); // a revive happened (channel or instant) — never leave a channel timer running afterward
     UE_LOG(Myth, Log, TEXT("LifeComponent: %s REVIVED from downed."), *GetNameSafe(GetOwner()));
+
+    // Co-op incentive: pay the reviver combat proficiency XP for bringing a teammate back. Conservative default 0 =
+    // no reward (byte-identical). Only a valid player reviver who isn't the revived owner qualifies; NPC / absent
+    // revivers earn nothing. ComputeReviveReward owns the eligibility→amount rule (unit-tested).
+    AMythicPlayerController *ReviverPC = (bPayReviver && Reviver && Reviver != GetOwner())
+        ? Cast<AMythicPlayerController>(Reviver->GetController())
+        : nullptr;
+    const float ReviveReward = ComputeReviveReward(ReviverPC != nullptr, ReviveXPReward);
+    if (ReviveReward > 0.0f && ReviverPC) {
+        if (UProficiencyComponent *ProfComp = const_cast<UProficiencyComponent *>(ReviverPC->GetProficiencyComponent())) {
+            ProfComp->GrantCombatXP(ReviveReward);
+        }
+    }
+
     OnRevived.Broadcast(GetOwner());
+}
+
+float UMythicLifeComponent::ComputeReviveReward(bool bReviverIsEligiblePlayer, float ConfiguredReward) {
+    // Only an eligible player reviver earns the reward; a negative configured value floors at 0 (never punishes a revive).
+    return bReviverIsEligiblePlayer ? FMath::Max(0.0f, ConfiguredReward) : 0.0f;
 }
 
 namespace {
@@ -424,7 +450,9 @@ void UMythicLifeComponent::ServerBeginReviveChannel(APawn *Reviver) {
     const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
     const float ChannelSeconds = Settings ? Settings->ReviveChannelSeconds : 0.0f;
     if (ChannelSeconds <= 0.0f) {
-        ServerReviveFromDowned(); // channel disabled → instant (the caller normally gates this; stay correct regardless)
+        ActiveReviver = Reviver;          // record the reviver so the instant revive can still pay the co-op revive reward
+        bPayReviverOnNextRevive = true;   // this revive IS reviver-initiated → credit them (a direct/debug revive won't set this)
+        ServerReviveFromDowned();         // channel disabled → instant (the caller normally gates this; stay correct regardless)
         return;
     }
     UWorld *W = GetWorld();
@@ -480,6 +508,7 @@ void UMythicLifeComponent::ReviveChannelTick() {
     ReviverHealthAtLastTick = ReviverHealthNow; // re-baseline for the next tick (also tracks the reviver healing upward)
     ReviveProgressSeconds = ComputeReviveProgressAfterTick(ReviveProgressSeconds, ReviveChannelTickIntervalSeconds, ChannelSeconds);
     if (IsReviveComplete(ReviveProgressSeconds, ChannelSeconds)) {
+        bPayReviverOnNextRevive = true;  // the channeling teammate earned the revive → credit them
         ServerReviveFromDowned(); // completion: clears bleed-out, restores movement, heals (and calls CancelReviveChannel)
     }
 }

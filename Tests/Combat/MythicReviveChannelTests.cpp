@@ -59,5 +59,11 @@ bool FMythicReviveChannelTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("progress clamps at exactly the channel length"), Progress, 3.0f);
     TestTrue(TEXT("after enough held proximity (>=3.0s) the revive completes"), R::IsReviveComplete(Progress, 3.0f));
 
+    // ── ComputeReviveReward(reviverIsEligiblePlayer, configuredReward): the co-op revive incentive ──
+    TestEqual(TEXT("eligible player reviver earns the configured reward"), R::ComputeReviveReward(true, 25.0f), 25.0f);
+    TestEqual(TEXT("reward 0 (default) pays nothing"), R::ComputeReviveReward(true, 0.0f), 0.0f);
+    TestEqual(TEXT("a negative configured reward floors at 0 (never punishes a revive)"), R::ComputeReviveReward(true, -10.0f), 0.0f);
+    TestEqual(TEXT("an ineligible reviver (NPC / absent / self) earns nothing even if configured"), R::ComputeReviveReward(false, 25.0f), 0.0f);
+
     return true;
 }

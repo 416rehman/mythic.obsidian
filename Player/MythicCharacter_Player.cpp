@@ -108,15 +108,10 @@ void AMythicCharacter_Player::OnPrimaryInteract_Implementation(AActor *Interacto
             }
         }
         if (UMythicLifeComponent::CanReviveTarget(LifeComponent->IsDowned(), bReviverDowned)) {
-            // Channel revive (stay near the downed ally until progress completes) when ReviveChannelSeconds > 0; else the
-            // legacy instant revive. The channel re-validates the reviver's proximity + downed state server-side each tick.
-            const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
-            if (Settings && Settings->ReviveChannelSeconds > 0.0f) {
-                LifeComponent->ServerBeginReviveChannel(ReviverPC->GetPawn());
-            }
-            else {
-                LifeComponent->ServerReviveFromDowned();
-            }
+            // Always route through the channel entry: it takes the instant path ITSELF when ReviveChannelSeconds<=0, and it
+            // is the SINGLE place that records the reviver (for proximity re-validation each tick AND the co-op revive
+            // reward). Channel revive re-validates the reviver's proximity + downed state server-side each tick.
+            LifeComponent->ServerBeginReviveChannel(ReviverPC->GetPawn());
         }
         return;
     }
