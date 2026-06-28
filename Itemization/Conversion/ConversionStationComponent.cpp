@@ -19,6 +19,7 @@
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
 #include "Itemization/MythicTags_Conversion.h"
+#include "GAS/Executions/MythicCombatRoll.h" // boundary-correct probability gate for chance/byproduct outputs
 #include "Player/MythicPlayerController.h" // repaired-durability callout over the job's instigator
 #include "Player/Proficiency/ProficiencyComponent.h"  // crafter proficiency resolution (ProficiencyScaled product level)
 #include "Player/Proficiency/ProficiencyDefinition.h"  // CalcLevelAtXP + ProgressAttribute
@@ -698,7 +699,11 @@ void UConversionStationComponent::ProduceAndRoute(UConversionRecipe *R, const FC
     int32 TransformCursor = 0;
 
     for (const FConversionProduct &P : R->Products) {
-        if (FMath::FRand() >= P.Probability) {
+        // Chance / byproduct outputs: roll via the centralized boundary-correct gate. A guaranteed product (Probability
+        // >= 1, the default) is NEVER dropped — even when FMath::FRand() returns exactly 1.0; a Probability <= 0 product
+        // never fires. The old raw `FRand() >= Probability` skip WRONGLY dropped a guaranteed product on an exact-1.0 sample
+        // (FRand() is 1.0-inclusive) — the very boundary MythicCombat::RollSucceeds (Roll <= Probability) was built to fix.
+        if (!MythicCombat::RollSucceeds(P.Probability, FMath::FRand())) {
             continue;
         }
 
