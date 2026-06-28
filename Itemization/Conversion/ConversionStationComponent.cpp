@@ -588,6 +588,18 @@ int32 UConversionStationComponent::ComputeProficiencyScaledLevel(int32 CrafterPr
     return Level;
 }
 
+float UConversionStationComponent::ComputeCraftingXpReward(float BaseXpPerCraft, int32 Cycles, int32 CrafterLevel, int32 NoGainAtOrAboveLevel) {
+    if (BaseXpPerCraft <= 0.0f || Cycles <= 0) {
+        return 0.0f;
+    }
+    // Anti-grind: a recipe stops paying out once the crafter has reached/passed NoGainAtOrAboveLevel (you don't master
+    // smithing by forging the same trivial item forever). 0 = no cap.
+    if (NoGainAtOrAboveLevel > 0 && CrafterLevel >= NoGainAtOrAboveLevel) {
+        return 0.0f;
+    }
+    return BaseXpPerCraft * (float)Cycles;
+}
+
 int32 UConversionStationComponent::ResolveCrafterProficiencyLevel(AController *Crafter, UProficiencyDefinition *ProfDef) {
     if (!Crafter || !ProfDef) {
         return 0;
@@ -747,6 +759,25 @@ void UConversionStationComponent::ProduceAndRoute(UConversionRecipe *R, const FC
             if (HeldTransforms[i].JobId == Job.JobId && HeldTransforms[i].Instance == Routed) {
                 HeldTransforms.RemoveAt(i);
                 break;
+            }
+        }
+    }
+
+    // Award crafting proficiency XP for this completed cycle (closes the MAKE progression loop: crafting raises the
+    // CraftingProficiency that ProficiencyScaled recipes read for output quality). Server-only; granted to the LIVE
+    // crafter resolved at produce time (skipped if they disconnected — XP to a gone player is moot). The crafter's
+    // CURRENT level gates the anti-grind cap. Awarded per cycle even on a probability-empty roll: the inputs were
+    // consumed and time spent, so the attempt still teaches.
+    if (R->CraftingProficiency && R->CraftingXpReward > 0.0f) {
+        if (AController *Crafter = ResolveInstigatorController(Job.JobId)) {
+            const int32 CrafterLevel = ResolveCrafterProficiencyLevel(Crafter, R->CraftingProficiency);
+            const float Xp = ComputeCraftingXpReward(R->CraftingXpReward, /*Cycles*/ 1, CrafterLevel, R->XpNoGainAtOrAboveLevel);
+            if (Xp > 0.0f) {
+                if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(Crafter)) {
+                    if (UProficiencyComponent *Prof = const_cast<UProficiencyComponent *>(PC->GetProficiencyComponent())) {
+                        Prof->GrantProficiencyXP(R->CraftingProficiency, Xp);
+                    }
+                }
             }
         }
     }
@@ -1244,14 +1275,20 @@ void UConversionStationComponent::Server_RequestStart(AController *Controller, F
     }
     NextJobId++;
 
-    // ProficiencyScaled recipes: snapshot the crafter's level in the recipe's crafting proficiency NOW, so the product
-    // level is reproducible even if the crafter disconnects before the job finishes (mirrors SnapLevel). Uses the first
-    // ProficiencyScaled product's CraftingProficiency — single-skill recipes, the common case (logged otherwise).
+    // ProficiencyScaled recipes: snapshot the crafter's level in the recipe's CraftingProficiency NOW, so the product
+    // level is reproducible even if the crafter disconnects before the job finishes (mirrors SnapLevel). One skill per
+    // recipe — resolved once from R->CraftingProficiency when any product actually scales.
     int32 CrafterProfLevel = 0;
-    for (const FConversionProduct &Prod : R->Products) {
-        if (Prod.LevelMode == EProductLevelMode::ProficiencyScaled && Prod.CraftingProficiency) {
-            CrafterProfLevel = ResolveCrafterProficiencyLevel(Controller, Prod.CraftingProficiency);
-            break;
+    if (R->CraftingProficiency) {
+        bool bAnyScaled = false;
+        for (const FConversionProduct &Prod : R->Products) {
+            if (Prod.LevelMode == EProductLevelMode::ProficiencyScaled) {
+                bAnyScaled = true;
+                break;
+            }
+        }
+        if (bAnyScaled) {
+            CrafterProfLevel = ResolveCrafterProficiencyLevel(Controller, R->CraftingProficiency);
         }
     }
 

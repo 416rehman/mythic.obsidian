@@ -291,6 +291,10 @@ public:
      *  0, then capped by MaxLevel when MaxLevel > 0 (0 = uncapped). Static + unit-testable. */
     static int32 ComputeProficiencyScaledLevel(int32 CrafterProfLevel, int32 BaseLevel, int32 PerLevelBonus, int32 MaxLevel);
 
+    /** Pure crafting XP reward for a completed cycle: 0 when BaseXpPerCraft<=0 / Cycles<=0, 0 when the crafter has hit
+     *  the anti-grind cap (NoGainAtOrAboveLevel>0 && CrafterLevel>=it), else BaseXpPerCraft × Cycles. Static + testable. */
+    static float ComputeCraftingXpReward(float BaseXpPerCraft, int32 Cycles, int32 CrafterLevel, int32 NoGainAtOrAboveLevel);
+
     /** SERVER: resolve a player-controller's current level in ProfDef (mirrors the gathering-proficiency resolution).
      *  0 when null / not a player / no matching proficiency. Snapshotted at enqueue for ProficiencyScaled recipes. */
     static int32 ResolveCrafterProficiencyLevel(AController *Crafter, UProficiencyDefinition *ProfDef);

@@ -98,6 +98,11 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     void GrantCombatXP(float Amount);
 
+    // server: grant XP to ANY proficiency by its definition (the generic primitive — used by crafting completion,
+    // reusable for gathering/etc). No-op off-authority, Amount<=0, null Def, or a Def this player has no proficiency for.
+    UFUNCTION(BlueprintCallable, Category = "Proficiency")
+    void GrantProficiencyXP(UProficiencyDefinition *Definition, float Amount);
+
     // server: apply death penalty to combat proficiency XP (reduces current XP by PenaltyFraction)
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     void ApplyDeathPenalty(float PenaltyFraction);

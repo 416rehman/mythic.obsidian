@@ -79,13 +79,9 @@ struct MYTHIC_API FConversionProduct {
         meta=(ClampMin="0", EditCondition="Mode == EConversionProductMode::Create && (LevelMode == EProductLevelMode::FixedLevel || LevelMode == EProductLevelMode::ProficiencyScaled)", EditConditionHides))
     int32 FixedLevel = 1;
 
-    // ProficiencyScaled mode: the crafter's level in this proficiency drives the product level. Null = no scaling (base only).
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite,
-        meta=(EditCondition="Mode == EConversionProductMode::Create && LevelMode == EProductLevelMode::ProficiencyScaled", EditConditionHides))
-    TObjectPtr<UProficiencyDefinition> CraftingProficiency = nullptr;
-
-    // Item-levels added per crafter proficiency level (ProficiencyScaled mode). ClampMax keeps the scaled product well
-    // within int32 (the math is overflow-hardened regardless, but a sane editor range avoids absurd configs).
+    // Item-levels added per crafter proficiency level (ProficiencyScaled mode — the skill is the recipe's CraftingProficiency).
+    // ClampMax keeps the scaled product well within int32 (the math is overflow-hardened regardless, but a sane editor
+    // range avoids absurd configs).
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite,
         meta=(ClampMin="0", ClampMax="10000", EditCondition="Mode == EConversionProductMode::Create && LevelMode == EProductLevelMode::ProficiencyScaled", EditConditionHides))
     int32 ProficiencyLevelBonus = 1;
@@ -213,6 +209,22 @@ public:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Recipe|Outputs", meta=(TitleProperty="DisplayLabel"))
     TArray<FConversionProduct> Products;
+
+    // ---- Proficiency / progression (the ONE skill this recipe trains) ----
+    // Which proficiency this recipe trains. Drives BOTH the ProficiencyScaled product level (crafter's level → output
+    // quality) AND the XP awarded on completion. Null = this recipe trains no skill (no scaling, no XP).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Recipe|Proficiency")
+    TObjectPtr<UProficiencyDefinition> CraftingProficiency = nullptr;
+
+    // XP granted to the crafter's CraftingProficiency on each completed produce cycle. 0 = no XP (conservative default —
+    // a recipe opts into training). Requires CraftingProficiency set.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Recipe|Proficiency", meta=(ClampMin="0"))
+    float CraftingXpReward = 0.0f;
+
+    // Anti-grind: once the crafter's level in CraftingProficiency is at or above this, the recipe grants no more XP
+    // (you don't master smithing by forging nails forever). 0 = no cap (always grants while CraftingXpReward > 0).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Recipe|Proficiency", meta=(ClampMin="0"))
+    int32 XpNoGainAtOrAboveLevel = 0;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Recipe|Requirements", meta=(ShowOnlyInnerProperties))
     FConversionRequirements Requirements;

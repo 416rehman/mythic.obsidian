@@ -32,3 +32,26 @@ bool FMythicCraftingProficiencyTest::RunTest(const FString &Parameters) {
 
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicCraftingXpTest,
+    "Mythic.Itemization.Conversion.CraftingXp",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicCraftingXpTest::RunTest(const FString &Parameters) {
+    // ComputeCraftingXpReward(BaseXpPerCraft, Cycles, CrafterLevel, NoGainAtOrAboveLevel)
+    // = 0 if BaseXp<=0 or Cycles<=0; 0 if NoGainAtOrAboveLevel>0 && CrafterLevel>=it (anti-grind); else BaseXp×Cycles.
+    using S = UConversionStationComponent;
+
+    TestEqual(TEXT("no reward when the recipe grants 0 XP (conservative default)"), S::ComputeCraftingXpReward(0.0f, 1, 5, 0), 0.0f);
+    TestEqual(TEXT("base reward, one cycle, no cap"), S::ComputeCraftingXpReward(10.0f, 1, 5, 0), 10.0f);
+    TestEqual(TEXT("scales with cycles"), S::ComputeCraftingXpReward(10.0f, 3, 5, 0), 30.0f);
+    TestEqual(TEXT("anti-grind: at the cap level, no XP"), S::ComputeCraftingXpReward(10.0f, 1, 10, 10), 0.0f);
+    TestEqual(TEXT("anti-grind: above the cap level, no XP"), S::ComputeCraftingXpReward(10.0f, 1, 25, 10), 0.0f);
+    TestEqual(TEXT("just under the cap still pays"), S::ComputeCraftingXpReward(10.0f, 1, 9, 10), 10.0f);
+    TestEqual(TEXT("cap 0 = no cap, pays at any level"), S::ComputeCraftingXpReward(10.0f, 1, 999, 0), 10.0f);
+    TestEqual(TEXT("zero cycles → no reward"), S::ComputeCraftingXpReward(10.0f, 0, 5, 0), 0.0f);
+    TestEqual(TEXT("negative cycles → no reward"), S::ComputeCraftingXpReward(10.0f, -2, 5, 0), 0.0f);
+
+    return true;
+}

@@ -371,6 +371,37 @@ void UProficiencyComponent::GrantCombatXP(float Amount) {
            Amount, Current, Current + Amount);
 }
 
+void UProficiencyComponent::GrantProficiencyXP(UProficiencyDefinition *Definition, float Amount) {
+    if (!Definition || Amount <= 0.0f) {
+        return;
+    }
+    if (!ASC || !GetOwner() || !GetOwner()->HasAuthority()) {
+        return;
+    }
+
+    // Find the matching proficiency entry by definition (mirrors FindCombatProficiency, but for any skill).
+    FProficiency *Prof = nullptr;
+    for (auto &P : Proficiencies) {
+        if (P.Definition == Definition) {
+            Prof = &P;
+            break;
+        }
+    }
+    if (!Prof || !Prof->ProgressAttribute.IsValid()) {
+        UE_LOG(Myth, Warning, TEXT("ProficiencyComponent: no proficiency configured for %s, cannot grant XP"),
+               *GetNameSafe(Definition));
+        return;
+    }
+
+    // grant via attribute base value modification, which triggers PreAttributeBaseChange and OnAttributeChanged (level-up,
+    // milestones, floater) — exactly the path GrantCombatXP uses.
+    const float Current = ASC->GetNumericAttributeBase(Prof->ProgressAttribute);
+    ASC->SetNumericAttributeBase(Prof->ProgressAttribute, Current + Amount);
+
+    UE_LOG(Myth, Log, TEXT("ProficiencyComponent: granted %.1f %s XP (%.1f -> %.1f)"),
+           Amount, *GetNameSafe(Definition), Current, Current + Amount);
+}
+
 void UProficiencyComponent::ApplyDeathPenalty(float PenaltyFraction) {
     if (PenaltyFraction <= 0.0f) {
         return;
