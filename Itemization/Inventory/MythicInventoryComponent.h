@@ -188,6 +188,13 @@ public:
     // balance, since currency is modelled as stackable currency-type items). 0 if it holds none. Server + owning client.
     int32 GetTotalCurrency() const;
 
+    // SERVER-ONLY: spend up to Amount of this inventory's currency, decrementing/destroying Itemization.Type.Currency
+    // stacks across slots (the authoritative inverse of GetTotalCurrency; denomination-agnostic). Returns the amount
+    // actually spent — == Amount when GetTotalCurrency() >= Amount. No-op without authority or for Amount <= 0. The
+    // caller is responsible for the affordability check (CanAfford) before spending. Reusable by vendors, repair,
+    // toll/quest costs — any currency sink.
+    int32 SpendCurrency(int32 Amount);
+
     UMythicInventoryComponent(const FObjectInitializer &OI);
 
     virtual void BeginPlay() override;

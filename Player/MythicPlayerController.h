@@ -16,6 +16,7 @@ class UMythicItemInstance;
 class UItemDefinition;
 class AMythicConversionStation;
 class AMythicStorageContainer;
+class AMythicVendor;
 class AMythicNPCCharacter;
 
 class UMythicCheatManager;
@@ -227,6 +228,16 @@ public:
     // in-range container). Both directions. Server-authoritative, identity- + range- + take-rule-gated.
     UFUNCTION(Server, Reliable, WithValidation, Category = "Storage")
     void ServerMoveItemBetweenInventories(UMythicInventoryComponent *Source, int32 SourceSlot, UMythicInventoryComponent *Target, int32 TargetSlot);
+
+    // ---- Vendor RPCs (client-owned PC -> server-authoritative currency-gated trade) ----
+    // Buy Quantity units of the vendor's StockSlotIndex into the player's inventory; charges the player's currency.
+    // Authorized exactly like a container access (the player must have THIS vendor open + be in range).
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Vendor")
+    void ServerVendorBuy(AMythicVendor *Vendor, int32 StockSlotIndex, int32 Quantity);
+
+    // Sell Quantity units of PlayerSlotIndex (in one of the player's OWN inventories) to the vendor; pays proceeds.
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Vendor")
+    void ServerVendorSell(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex, int32 Quantity);
 
     // deploy the placeable item in SlotIndex of Inventory into the world
     UFUNCTION(Server, Reliable, WithValidation, Category = "Placeable")

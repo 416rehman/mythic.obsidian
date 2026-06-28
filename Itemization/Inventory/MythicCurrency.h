@@ -21,4 +21,10 @@ namespace MythicCurrency {
     // half value). Floored to whole coins, clamped non-negative. SellRate clamped to [0,1] so a vendor never pays above
     // value. Zero-value (unsellable) or non-positive quantity → 0.
     MYTHIC_API int32 ComputeSalePrice(int32 UnitValue, int32 Quantity, float SellRate);
+
+    // The currency a buyer pays for Quantity units priced at UnitValue each, marked up by PriceMultiplier (1.0 = at
+    // value, >1.0 = the vendor's margin). The PER-UNIT price is rounded UP (the buyer never underpays a fractional coin)
+    // and then × Quantity, so a bulk buy costs exactly the same as that many single buys (no buy-1-at-a-time rounding
+    // exploit). Non-positive UnitValue (unpriced / not-for-sale) or Quantity → 0; PriceMultiplier clamped non-negative.
+    MYTHIC_API int32 ComputeBuyPrice(int32 UnitValue, int32 Quantity, float PriceMultiplier);
 }

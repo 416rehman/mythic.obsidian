@@ -1008,6 +1008,35 @@ int32 UMythicInventoryComponent::GetTotalCurrency() const {
     return Total;
 }
 
+int32 UMythicInventoryComponent::SpendCurrency(int32 Amount) {
+    const AActor *lOwner = GetOwner();
+    if (!lOwner || !lOwner->HasAuthority() || Amount <= 0) {
+        return 0;
+    }
+
+    int32 SpentSoFar = 0;
+    // Iterate by index and re-read each slot: ServerRemoveItem may clear a fully-drained slot, but we only ever read
+    // the current slot's instance, so a cleared earlier slot can't corrupt later reads.
+    for (int32 i = 0; i < Slots.Items.Num() && SpentSoFar < Amount; ++i) {
+        UMythicItemInstance *Item = Slots.Items[i].SlottedItemInstance;
+        if (!Item) {
+            continue;
+        }
+        const UItemDefinition *Def = Item->GetItemDefinition();
+        if (!Def || !Def->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY)) {
+            continue;
+        }
+        const int32 Stacks = Item->GetStacks();
+        if (Stacks <= 0) {
+            continue;
+        }
+        const int32 Take = FMath::Min(Stacks, Amount - SpentSoFar);
+        ServerRemoveItem(Item, Take); // authoritative decrement/destroy + replication notify (same path as ConsumeItem)
+        SpentSoFar += Take;
+    }
+    return SpentSoFar;
+}
+
 void UMythicInventoryComponent::NotifyItemInstanceUpdated(int32 SlotIndex) {
     if (IsValid(ViewModel)) {
         ViewModel->RefreshSlotFromInventory(this, SlotIndex);

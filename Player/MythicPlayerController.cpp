@@ -16,6 +16,7 @@
 #include "Itemization/Conversion/MythicConversionStation.h"
 #include "Itemization/Conversion/ConversionStationComponent.h"
 #include "Itemization/Storage/MythicStorageContainer.h"
+#include "Itemization/Vendor/MythicVendor.h"
 #include "Proficiency/ProficiencyComponent.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
@@ -442,6 +443,45 @@ void AMythicPlayerController::ServerMoveItemBetweenInventories_Implementation(UM
     }
 
     Source->SendItem(SourceSlot, Target, TargetSlot);
+}
+
+// ---- Vendor RPCs ----
+
+bool AMythicPlayerController::ServerVendorBuy_Validate(AMythicVendor *Vendor, int32 StockSlotIndex, int32 Quantity) {
+    return Vendor != nullptr && StockSlotIndex >= 0 && Quantity > 0;
+}
+
+void AMythicPlayerController::ServerVendorBuy_Implementation(AMythicVendor *Vendor, int32 StockSlotIndex, int32 Quantity) {
+    if (!HasAuthority() || !Vendor) {
+        return;
+    }
+    // Same access gate as a container item-move: the player must have THIS vendor open AND be in range. A vendor IS a
+    // storage container, so CanPlayerAccessInventory's container branch authorizes its stock inventory unchanged.
+    if (!CanPlayerAccessInventory(Vendor->GetContainerInventory())) {
+        return;
+    }
+    Vendor->Server_ExecuteBuy(this, StockSlotIndex, Quantity);
+}
+
+bool AMythicPlayerController::ServerVendorSell_Validate(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex,
+                                                        int32 Quantity) {
+    return Vendor != nullptr && PlayerInventory != nullptr && PlayerSlotIndex >= 0 && Quantity > 0;
+}
+
+void AMythicPlayerController::ServerVendorSell_Implementation(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory,
+                                                              int32 PlayerSlotIndex, int32 Quantity) {
+    if (!HasAuthority() || !Vendor || !PlayerInventory) {
+        return;
+    }
+    // The vendor must be open + in range (can't sell across the map), AND the source must be one of the player's own
+    // inventories (you can only sell YOUR items, never reach into a third party's bags).
+    if (!CanPlayerAccessInventory(Vendor->GetContainerInventory())) {
+        return;
+    }
+    if (!GetAllInventoryComponents().Contains(PlayerInventory)) {
+        return;
+    }
+    Vendor->Server_ExecuteSell(this, PlayerInventory, PlayerSlotIndex, Quantity);
 }
 
 bool AMythicPlayerController::ServerDeployPlaceable_Validate(UMythicInventoryComponent *Inventory, int32 SlotIndex,
