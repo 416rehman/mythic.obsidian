@@ -1225,60 +1225,68 @@ void UMythicDamageNumberSubsystem::DrawQuestTracker(UCanvas *Canvas, APlayerCont
         return w;
     };
 
-    FText CurQuest;
-    bool bFirst = true;
-    for (const FObjectiveSummary &S : Summaries) {
-        // Quest header when the group changes (skipped for standalone/empty quest names).
-        if (bFirst || !S.QuestName.EqualTo(CurQuest)) {
-            CurQuest = S.QuestName;
-            bFirst = false;
-            if (!S.QuestName.IsEmpty()) {
-                Text(X, Y, S.QuestName.ToString(), FLinearColor(1.0f, 0.85f, 0.3f, 1.0f), HeaderScale);
-                Y += LineH + 2.0f;
+    // Group by quest in first-seen order so each quest header is drawn ONCE and its objectives stay contiguous, even
+    // when the active-objective list interleaves objectives from different quests (it isn't grouped upstream).
+    TArray<FText> QuestOrder;
+    TMap<FString, TArray<int32>> Groups;
+    for (int32 i = 0; i < Summaries.Num(); ++i) {
+        const FString Key = Summaries[i].QuestName.ToString();
+        if (!Groups.Contains(Key)) {
+            QuestOrder.Add(Summaries[i].QuestName);
+        }
+        Groups.FindOrAdd(Key).Add(i);
+    }
+
+    for (const FText &QName : QuestOrder) {
+        if (!QName.IsEmpty()) {
+            Text(X, Y, QName.ToString(), FLinearColor(1.0f, 0.85f, 0.3f, 1.0f), HeaderScale);
+            Y += LineH + 2.0f;
+        }
+        for (const int32 Idx : Groups[QName.ToString()]) {
+            const FObjectiveSummary &S = Summaries[Idx];
+
+            const FLinearColor Col = S.bCompleted
+                                         ? FLinearColor(0.55f, 0.6f, 0.55f, 1.0f)
+                                         : (S.bOptional ? FLinearColor(0.62f, 0.64f, 0.7f, 1.0f) : FLinearColor(0.9f, 0.92f, 0.95f, 1.0f));
+            FString Line = S.DisplayText.ToString();
+            if (!S.bCompleted && S.RequiredCount > 1) {
+                Line += FString::Printf(TEXT("  %d/%d"), S.CurrentCount, S.RequiredCount);
             }
-        }
+            if (S.bOptional && !S.bCompleted) {
+                Line += TEXT("  (optional)");
+            }
 
-        const FLinearColor Col = S.bCompleted
-                                     ? FLinearColor(0.55f, 0.6f, 0.55f, 1.0f)
-                                     : (S.bOptional ? FLinearColor(0.62f, 0.64f, 0.7f, 1.0f) : FLinearColor(0.9f, 0.92f, 0.95f, 1.0f));
-        FString Line = S.DisplayText.ToString();
-        if (!S.bCompleted && S.RequiredCount > 1) {
-            Line += FString::Printf(TEXT("  %d/%d"), S.CurrentCount, S.RequiredCount);
-        }
-        if (S.bOptional && !S.bCompleted) {
-            Line += TEXT("  (optional)");
-        }
+            const float MX = X + Indent;
+            const float MY = Y + LineH * 0.5f;
+            // Marker: a green check for completed, a filled dot otherwise.
+            if (S.bCompleted) {
+                const FLinearColor Check(0.5f, 0.85f, 0.5f, 1.0f);
+                FCanvasLineItem C1(FVector2D(MX - 4.0f, MY), FVector2D(MX - 1.0f, MY + 3.0f));
+                C1.SetColor(Check);
+                C1.LineThickness = 1.5f;
+                Canvas->DrawItem(C1);
+                FCanvasLineItem C2(FVector2D(MX - 1.0f, MY + 3.0f), FVector2D(MX + 4.0f, MY - 3.0f));
+                C2.SetColor(Check);
+                C2.LineThickness = 1.5f;
+                Canvas->DrawItem(C2);
+            }
+            else {
+                FCanvasNGonItem Dot(FVector2D(MX, MY), FVector2D(2.2f, 2.2f), 10, Col);
+                Dot.BlendMode = SE_BLEND_Translucent;
+                Canvas->DrawItem(Dot);
+            }
 
-        const float MX = X + Indent;
-        const float MY = Y + LineH * 0.5f;
-        // Marker: a green check for completed, a filled dot otherwise.
-        if (S.bCompleted) {
-            const FLinearColor Check(0.5f, 0.85f, 0.5f, 1.0f);
-            FCanvasLineItem C1(FVector2D(MX - 4.0f, MY), FVector2D(MX - 1.0f, MY + 3.0f));
-            C1.SetColor(Check);
-            C1.LineThickness = 1.5f;
-            Canvas->DrawItem(C1);
-            FCanvasLineItem C2(FVector2D(MX - 1.0f, MY + 3.0f), FVector2D(MX + 4.0f, MY - 3.0f));
-            C2.SetColor(Check);
-            C2.LineThickness = 1.5f;
-            Canvas->DrawItem(C2);
+            const float LineW = Text(MX + 10.0f, Y, Line, Col, Scale);
+            // Strikethrough on completed objectives.
+            if (S.bCompleted) {
+                FCanvasLineItem Strike(FVector2D(MX + 10.0f, Y + LineH * 0.42f), FVector2D(MX + 10.0f + LineW, Y + LineH * 0.42f));
+                Strike.SetColor(Col);
+                Strike.LineThickness = 1.2f;
+                Strike.BlendMode = SE_BLEND_Translucent;
+                Canvas->DrawItem(Strike);
+            }
+            Y += LineH;
         }
-        else {
-            FCanvasNGonItem Dot(FVector2D(MX, MY), FVector2D(2.2f, 2.2f), 10, Col);
-            Dot.BlendMode = SE_BLEND_Translucent;
-            Canvas->DrawItem(Dot);
-        }
-
-        const float LineW = Text(MX + 10.0f, Y, Line, Col, Scale);
-        // Strikethrough on completed objectives.
-        if (S.bCompleted) {
-            FCanvasLineItem Strike(FVector2D(MX + 10.0f, Y + LineH * 0.42f), FVector2D(MX + 10.0f + LineW, Y + LineH * 0.42f));
-            Strike.SetColor(Col);
-            Strike.LineThickness = 1.2f;
-            Strike.BlendMode = SE_BLEND_Translucent;
-            Canvas->DrawItem(Strike);
-        }
-        Y += LineH;
     }
 }
 
