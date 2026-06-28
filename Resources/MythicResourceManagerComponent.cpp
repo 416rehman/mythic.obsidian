@@ -332,7 +332,8 @@ void UMythicResourceManagerComponent::AddToDestroyedResources(FTrackedDestructib
 
     // proficiency bonus yield: roll a chance to double the reward
     if (DestroyedResource.ResourceISM->ResourceType.IsValid()) {
-        int32 ProfLevel = GetGathererProficiencyLevel(PlayerController, DestroyedResource.ResourceISM->ResourceType);
+        const FGameplayTag &ResourceType = DestroyedResource.ResourceISM->ResourceType;
+        int32 ProfLevel = GetGathererProficiencyLevel(PlayerController, ResourceType);
         if (ProfLevel > 0) {
             float BonusChance = static_cast<float>(ProfLevel) * GatheringConfig.BonusYieldChancePerLevel;
             if (FMath::FRand() < BonusChance) {
@@ -340,7 +341,35 @@ void UMythicResourceManagerComponent::AddToDestroyedResources(FTrackedDestructib
                 UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent: bonus yield triggered (level %d, chance %.2f)"), ProfLevel, BonusChance);
             }
         }
+
+        // Award gathering proficiency XP for this harvest (closes the gather→improve→gather-better loop: gathering raises
+        // the proficiency that drives BonusDamagePerLevel + BonusYieldChancePerLevel). Granted even at level 0 (so a
+        // novice can climb from nothing); the anti-grind cap uses the gatherer's CURRENT level. Server-side; reuses the
+        // shared GrantProficiencyXP primitive + the resource→proficiency map.
+        const float GatherXp = ComputeGatherXpReward(GatheringConfig.XpPerHarvest, ProfLevel, GatheringConfig.XpNoGainAtOrAboveLevel);
+        if (GatherXp > 0.0f) {
+            if (const TObjectPtr<UProficiencyDefinition> *FoundDef = GatheringConfig.ResourceToProficiency.Find(ResourceType)) {
+                if (UProficiencyDefinition *ProfDef = *FoundDef) {
+                    if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PlayerController)) {
+                        if (UProficiencyComponent *Prof = const_cast<UProficiencyComponent *>(MythicPC->GetProficiencyComponent())) {
+                            Prof->GrantProficiencyXP(ProfDef, GatherXp);
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+float UMythicResourceManagerComponent::ComputeGatherXpReward(float BaseXpPerHarvest, int32 GathererLevel, int32 NoGainAtOrAboveLevel) {
+    if (BaseXpPerHarvest <= 0.0f) {
+        return 0.0f;
+    }
+    // Anti-grind: a node stops paying out once the gatherer reaches/passes NoGainAtOrAboveLevel (mirrors crafting). 0 = no cap.
+    if (NoGainAtOrAboveLevel > 0 && GathererLevel >= NoGainAtOrAboveLevel) {
+        return 0.0f;
+    }
+    return BaseXpPerHarvest;
 }
 
 // Called when the game starts

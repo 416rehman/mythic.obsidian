@@ -187,6 +187,11 @@ public:
      *  Pure + static so the respawn loop's core decision is unit-testable without a live world/timer. */
     static bool ShouldRespawnDestructible(int32 HitsTillDestruction, float RespawnTime, float CurrentTime);
 
+    /** Pure gathering XP reward for one harvested node: 0 when BaseXpPerHarvest<=0, 0 when the gatherer has hit the
+     *  anti-grind cap (NoGainAtOrAboveLevel>0 && GathererLevel>=it), else BaseXpPerHarvest. Static + unit-testable;
+     *  mirrors the crafting XP rule. */
+    static float ComputeGatherXpReward(float BaseXpPerHarvest, int32 GathererLevel, int32 NoGainAtOrAboveLevel);
+
     const TArray<FTrackedDestructibleData> &GetDestroyedItems() const { return *DestroyedResources.GetItems(); }
 
     // Used for handling destruction of resources after they are added to the destroyed resources array
