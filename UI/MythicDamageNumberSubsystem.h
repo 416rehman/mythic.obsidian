@@ -596,6 +596,12 @@ protected:
     float PlayerHealthVis = 0.0f;
     float PlayerStaminaVis = 0.0f;
 
+    // Currency display: a rolling counter that surfaces + animates on a balance change, then auto-hides.
+    float CurrencyDisplayed = -1.0f; // <0 = uninitialised
+    int32 CurrencyLast = -1;
+    int32 CurrencyDelta = 0;
+    float CurrencyShownTime = -1000.0f;
+
     // Configuration
     UPROPERTY()
     TObjectPtr<UMythicDamageNumberConfig> Config;

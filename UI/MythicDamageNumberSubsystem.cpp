@@ -22,6 +22,8 @@
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "Engine/GameInstance.h"
 #include "World/EnvironmentController/MythicEnvironmentSubsystem.h"
+#include "Player/MythicPlayerController.h"
+#include "Itemization/Inventory/MythicInventoryComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMythicDamageNumbers, Log, All);
 
@@ -1202,6 +1204,65 @@ void UMythicDamageNumberSubsystem::DrawPlayerHud(UCanvas *Canvas, APlayerControl
 
     // Player status badges above the bars — always shown while a status is building (you must know you're poisoned).
     DrawStatusBadges(Canvas, CX, BaseY - 16.0f, ASC, 1.0f);
+
+    // Currency: surfaces + rolls the count on a balance change, then auto-hides (with a +N / -N flyout).
+    if (const AMythicPlayerController *MPC = Cast<AMythicPlayerController>(PC)) {
+        if (const UMythicInventoryComponent *Inv = MPC->GetInventoryComponent()) {
+            const int32 Balance = Inv->GetTotalCurrency();
+            const float Now = World ? World->GetTimeSeconds() : 0.0f;
+            if (CurrencyLast < 0) {
+                CurrencyDisplayed = static_cast<float>(Balance);
+                CurrencyLast = Balance;
+            }
+            else if (Balance != CurrencyLast) {
+                CurrencyDelta = Balance - CurrencyLast;
+                CurrencyLast = Balance;
+                CurrencyShownTime = Now;
+            }
+            // Roll the displayed value toward the real balance (faster the bigger the gap) — the count-up/down animation.
+            const float RollSpeed = FMath::Max(8.0f, FMath::Abs(static_cast<float>(Balance) - CurrencyDisplayed) * 6.0f);
+            CurrencyDisplayed = FMath::FInterpConstantTo(CurrencyDisplayed, static_cast<float>(Balance), Dt, RollSpeed);
+
+            const float CElapsed = Now - CurrencyShownTime;
+            const float CAlpha = (CElapsed < 2.5f) ? 1.0f : (CElapsed < 4.0f ? 1.0f - (CElapsed - 2.5f) / 1.5f : 0.0f);
+            if (CAlpha > 0.01f) {
+                UFont *Font = (Config && Config->Font) ? Config->Font.Get() : nullptr;
+                if (!Font) {
+                    Font = GEngine->GetMediumFont();
+                }
+                if (Font) {
+                    const FString Amount = FString::Printf(TEXT("%d"), FMath::RoundToInt(CurrencyDisplayed));
+                    const float FontScale = Config ? Config->FontScaleMultiplier : 1.0f;
+                    float TW = 0.0f, TH = 0.0f;
+                    Canvas->TextSize(Font, Amount, TW, TH, FontScale, FontScale);
+                    const float CoinR = 6.0f;
+                    const float TotalW = CoinR * 2.0f + 6.0f + TW;
+                    const float OX = CX - TotalW * 0.5f;
+                    const float OY = BaseY - 40.0f;
+
+                    FCanvasNGonItem Coin(FVector2D(OX + CoinR, OY + TH * 0.5f), FVector2D(CoinR, CoinR), 18, FLinearColor(0.85f, 0.7f, 0.28f, CAlpha));
+                    Coin.BlendMode = SE_BLEND_Translucent;
+                    Canvas->DrawItem(Coin);
+
+                    FCanvasTextItem Amt(FVector2D(OX + CoinR * 2.0f + 6.0f, OY), FText::FromString(Amount), Font, FLinearColor(0.95f, 0.9f, 0.75f, CAlpha));
+                    Amt.Scale = FVector2D(FontScale, FontScale);
+                    Amt.bOutlined = true;
+                    Amt.OutlineColor = FLinearColor(0.0f, 0.0f, 0.0f, CAlpha);
+                    Canvas->DrawItem(Amt);
+
+                    // +N / -N flyout: floats up and fades over the first ~1.2s after a change.
+                    if (CElapsed < 1.2f && CurrencyDelta != 0) {
+                        const float FlyA = CAlpha * FMath::Clamp(1.0f - CElapsed / 1.2f, 0.0f, 1.0f);
+                        const FString DeltaStr = FString::Printf(TEXT("%s%d"), CurrencyDelta > 0 ? TEXT("+") : TEXT(""), CurrencyDelta);
+                        const FLinearColor DeltaCol = CurrencyDelta > 0 ? FLinearColor(0.4f, 0.9f, 0.45f, FlyA) : FLinearColor(0.95f, 0.4f, 0.3f, FlyA);
+                        FCanvasTextItem Fly(FVector2D(OX + TotalW + 8.0f, OY - CElapsed * 18.0f), FText::FromString(DeltaStr), Font, DeltaCol);
+                        Fly.Scale = FVector2D(FontScale * 0.85f, FontScale * 0.85f);
+                        Canvas->DrawItem(Fly);
+                    }
+                }
+            }
+        }
+    }
 }
 
 bool UMythicDamageNumberSubsystem::IsNameplateRelevant(AActor *Npc, AActor *LocalPawn) const {
