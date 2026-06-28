@@ -910,6 +910,12 @@ void AMythicPlayerController::ServerRequestNpcDialogue_Implementation(AMythicNPC
     // a completed one is a harmless tracker no-op. The cosmetic dialogue line below stays ungated (a client-local bark).
     if (NPC->IsActorInTradeRange(GetPawn())) {
         NotifyTalkedToNPC(NPC->GetQuestNpcTag());
+        // Turn-in / deliver: hand over items for any active delivery objective whose receiver is THIS NPC. Same
+        // server-range gate as the talk trigger (a modded client must not turn in from across the map). The tracker
+        // consumes from the player inventory + advances server-authoritatively.
+        if (ObjectiveTracker && InventoryComponent) {
+            ObjectiveTracker->ServerTurnInDeliveriesTo(NPC->GetQuestNpcTag(), InventoryComponent);
+        }
     }
 
     // Pick the line on the server, where the NPC's brain dialogue context (Faction/Role/pressure) is real, then

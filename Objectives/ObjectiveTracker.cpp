@@ -7,6 +7,8 @@
 #include "AbilitySystemInterface.h"
 #include "GameFramework/PlayerController.h"
 #include "Player/MythicPlayerController.h" // objective progress/completion callout
+#include "Itemization/Inventory/MythicInventoryComponent.h" // turn-in: GetItemCount + ServerRemoveItemByDefinition
+#include "Itemization/Inventory/ItemDefinition.h"           // DeliverItem definition for the turn-in
 #include "Net/UnrealNetwork.h"
 
 UObjectiveTracker::UObjectiveTracker() {
@@ -198,6 +200,11 @@ void UObjectiveTracker::HandleGameplayEvent(const FGameplayEventData *Payload) {
         if (Prog.Definition->TriggerEventTag != Payload->EventTag) {
             continue;
         }
+        // Delivery objectives are advanced ONLY by handing the item to their NPC (ServerTurnInDeliveriesTo), never by a
+        // GAS event — skip them here so a default TriggerEventTag (Kill) can't silently advance a turn-in objective.
+        if (Prog.Definition->IsDeliveryObjective()) {
+            continue;
+        }
         // Optional payload-tag filter: one trigger family (e.g. GAS.Event.Item.Acquired) can serve type-specific
         // objectives ("collect N wood") by matching the item's ItemType carried in the event's TargetTags.
         const FGameplayTag &RequiredTag = Prog.Definition->RequiredPayloadTag;
@@ -205,54 +212,113 @@ void UObjectiveTracker::HandleGameplayEvent(const FGameplayEventData *Payload) {
             continue;
         }
 
-        // Advance this objective. The count math (magnitude floor, completion threshold, overshoot clamp) is the
-        // single source of truth in ComputeObjectiveProgress (unit-tested) — the clamp now happens inside it.
-        int32 NewCount = Prog.CurrentCount;
-        bool bJustCompleted = false;
-        ComputeObjectiveProgress(Prog.CurrentCount, Prog.Definition->bCountByEventMagnitude, Payload->EventMagnitude,
-                                 Prog.Definition->RequiredCount, NewCount, bJustCompleted);
-        Prog.CurrentCount = NewCount;
-        if (bJustCompleted) {
-            Prog.bCompleted = true;
-            // Queue this step's chain successors for assignment after the loop (deferred — see above).
-            PendingNextSteps.Append(Prog.Definition->NextObjectives);
-            // Grant rewards on the server via the canonical reward holder (builds correct XP/item-level contexts).
-            const bool bRewardSucceeded = Prog.Definition->Rewards.Give(PC);
-            UE_LOG(Myth, Log, TEXT("ObjectiveTracker: objective '%s' completed (%d/%d); rewards granted to %s."),
-                   *Prog.Definition->DisplayText.ToString(), Prog.CurrentCount, Prog.Definition->RequiredCount,
-                   *GetNameSafe(PC));
-            if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PC)) {
-                MythicPC->ClientNotifyObjectiveResult(Prog.Definition->GetCalloutText(true),
-                                                      EObjectiveNotifyCategory::RewardResult,
-                                                      EObjectiveOfferResult::Assigned,
-                                                      Prog.CurrentCount, Prog.Definition->RequiredCount,
-                                                      bRewardSucceeded, false, NotifyIndex);
-            }
-        }
-        // Player-facing callout (server → owning client): "<Objective> N/M" each step, "Objective Complete: <Objective>"
-        // on the finishing step — makes the otherwise-silent quest loop legible. (A persistent tracker HUD is logged.)
-        if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PC)) {
-            // On the finishing step show the authored completion line (CompletedText) if any; otherwise the progress
-            // line. Previously DisplayText was sent even on completion, so CompletedText was dead.
-            MythicPC->ClientNotifyObjective(Prog.Definition->GetCalloutText(bJustCompleted), Prog.CurrentCount,
-                                            Prog.Definition->RequiredCount, bJustCompleted, NotifyIndex++);
-        }
+        AdvanceObjectiveProgress(Prog, Prog.Definition->bCountByEventMagnitude, Payload->EventMagnitude, PC,
+                                 PendingNextSteps, NotifyIndex);
     }
 
-    // Deferred chain advance: assign each newly-unlocked next step (its prerequisites are now met and it isn't already
-    // tracked) and announce it to the owning client — so a quest chain flows forward without re-talking the giver.
-    if (PendingNextSteps.Num() > 0) {
-        TArray<UObjectiveDefinition *> ToAssign;
-        CollectAssignableNextObjectives(PendingNextSteps, ActiveObjectives, ToAssign);
-        AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PC);
-        for (UObjectiveDefinition *Next : ToAssign) {
-            FObjectiveProgress OutProg;
-            if (ServerTryAddObjective(Next, OutProg) == EObjectiveOfferResult::Assigned && MythicPC) {
-                MythicPC->ClientNotifyObjective(Next->GetCalloutText(false), OutProg.CurrentCount, Next->RequiredCount,
-                                                /*bCompleted*/ false, NotifyIndex++);
-            }
+    ProcessChainAdvance(PC, PendingNextSteps, NotifyIndex);
+}
+
+void UObjectiveTracker::AdvanceObjectiveProgress(FObjectiveProgress &Prog, bool bCountByMagnitude, float Magnitude,
+                                                 APlayerController *PC,
+                                                 TArray<TObjectPtr<UObjectiveDefinition>> &PendingNextSteps,
+                                                 int32 &NotifyIndex) {
+    if (!Prog.Definition) {
+        return;
+    }
+    // Advance this objective. The count math (magnitude floor, completion threshold, overshoot clamp) is the single
+    // source of truth in ComputeObjectiveProgress (unit-tested) — the clamp now happens inside it.
+    int32 NewCount = Prog.CurrentCount;
+    bool bJustCompleted = false;
+    ComputeObjectiveProgress(Prog.CurrentCount, bCountByMagnitude, Magnitude, Prog.Definition->RequiredCount, NewCount,
+                             bJustCompleted);
+    Prog.CurrentCount = NewCount;
+    if (bJustCompleted) {
+        Prog.bCompleted = true;
+        // Queue this step's chain successors for assignment after the loop (deferred — ServerTryAddObjective mutates
+        // ActiveObjectives, which would invalidate the caller's range-for).
+        PendingNextSteps.Append(Prog.Definition->NextObjectives);
+        // Grant rewards on the server via the canonical reward holder (builds correct XP/item-level contexts).
+        const bool bRewardSucceeded = Prog.Definition->Rewards.Give(PC);
+        UE_LOG(Myth, Log, TEXT("ObjectiveTracker: objective '%s' completed (%d/%d); rewards granted to %s."),
+               *Prog.Definition->DisplayText.ToString(), Prog.CurrentCount, Prog.Definition->RequiredCount,
+               *GetNameSafe(PC));
+        if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PC)) {
+            MythicPC->ClientNotifyObjectiveResult(Prog.Definition->GetCalloutText(true),
+                                                  EObjectiveNotifyCategory::RewardResult,
+                                                  EObjectiveOfferResult::Assigned,
+                                                  Prog.CurrentCount, Prog.Definition->RequiredCount,
+                                                  bRewardSucceeded, false, NotifyIndex);
         }
     }
+    // Player-facing callout (server → owning client): "<Objective> N/M" each step, "Objective Complete: <Objective>"
+    // on the finishing step — makes the otherwise-silent quest loop legible. (A persistent tracker HUD is logged.)
+    if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PC)) {
+        // On the finishing step show the authored completion line (CompletedText) if any; otherwise the progress line.
+        MythicPC->ClientNotifyObjective(Prog.Definition->GetCalloutText(bJustCompleted), Prog.CurrentCount,
+                                        Prog.Definition->RequiredCount, bJustCompleted, NotifyIndex++);
+    }
+}
+
+void UObjectiveTracker::ProcessChainAdvance(APlayerController *PC,
+                                            TArray<TObjectPtr<UObjectiveDefinition>> &PendingNextSteps,
+                                            int32 &NotifyIndex) {
+    // Deferred chain advance: assign each newly-unlocked next step (its prerequisites are now met and it isn't already
+    // tracked) and announce it to the owning client — so a quest chain flows forward without re-talking the giver.
+    if (PendingNextSteps.Num() == 0) {
+        return;
+    }
+    TArray<UObjectiveDefinition *> ToAssign;
+    CollectAssignableNextObjectives(PendingNextSteps, ActiveObjectives, ToAssign);
+    AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PC);
+    for (UObjectiveDefinition *Next : ToAssign) {
+        FObjectiveProgress OutProg;
+        if (ServerTryAddObjective(Next, OutProg) == EObjectiveOfferResult::Assigned && MythicPC) {
+            MythicPC->ClientNotifyObjective(Next->GetCalloutText(false), OutProg.CurrentCount, Next->RequiredCount,
+                                            /*bCompleted*/ false, NotifyIndex++);
+        }
+    }
+}
+
+int32 UObjectiveTracker::ComputeDeliverConsumeCount(int32 CurrentCount, int32 RequiredCount, int32 Available) {
+    // Remaining needed, clamped to what the player has. Negatives (over-complete / negative stock) floor at 0.
+    return FMath::Clamp(RequiredCount - CurrentCount, 0, FMath::Max(0, Available));
+}
+
+void UObjectiveTracker::ServerTurnInDeliveriesTo(const FGameplayTag &NpcTag, UMythicInventoryComponent *PlayerInventory) {
+    if (!GetOwner() || !GetOwner()->HasAuthority() || !PlayerInventory || !NpcTag.IsValid()) {
+        return;
+    }
+    APlayerController *PC = Cast<APlayerController>(GetOwner());
+    if (!PC) {
+        return;
+    }
+
+    int32 NotifyIndex = 0;
+    TArray<TObjectPtr<UObjectiveDefinition>> PendingNextSteps;
+    // Advance loop never mutates ActiveObjectives (consume + AdvanceObjectiveProgress touch the inventory + this Prog +
+    // the local PendingNextSteps only); the chain assignment that DOES mutate it runs after the loop (mirrors the GAS path).
+    for (FObjectiveProgress &Prog : ActiveObjectives) {
+        if (Prog.bCompleted || !Prog.Definition || !Prog.Definition->IsDeliveryObjective()) {
+            continue;
+        }
+        // The talking NPC's identity must satisfy this objective's required receiver (hierarchical, mirrors the talk path).
+        if (!NpcTag.MatchesTag(Prog.Definition->DeliverToNpcTag)) {
+            continue;
+        }
+        UItemDefinition *Wanted = Prog.Definition->DeliverItem;
+        const int32 Available = PlayerInventory->GetItemCount(Wanted);
+        const int32 Consume = ComputeDeliverConsumeCount(Prog.CurrentCount, Prog.Definition->RequiredCount, Available);
+        if (Consume <= 0) {
+            continue; // player carries none (or the objective is already satisfied) — nothing to hand in
+        }
+        // Take exactly what we credit, THEN advance by that amount — never advance more than was actually consumed.
+        PlayerInventory->ServerRemoveItemByDefinition(Wanted, Consume);
+        AdvanceObjectiveProgress(Prog, /*bCountByMagnitude*/ true, static_cast<float>(Consume), PC, PendingNextSteps,
+                                 NotifyIndex);
+    }
+
+    ProcessChainAdvance(PC, PendingNextSteps, NotifyIndex);
 }
 
 bool UObjectiveTracker::HasObjective(const UObjectiveDefinition *Definition) const {

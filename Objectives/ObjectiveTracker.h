@@ -127,6 +127,16 @@ public:
     static void ComputeObjectiveProgress(int32 CurrentCount, bool bCountByMagnitude, float EventMagnitude,
                                          int32 RequiredCount, int32 &OutNewCount, bool &OutJustCompleted);
 
+    // Pure: how many of DeliverItem to consume on a turn-in — the remaining needed (RequiredCount - CurrentCount),
+    // clamped to what the player actually has (Available) and floored at 0. Static → unit-testable without inventory.
+    static int32 ComputeDeliverConsumeCount(int32 CurrentCount, int32 RequiredCount, int32 Available);
+
+    // SERVER: attempt to turn in every active delivery objective whose DeliverToNpcTag matches NpcTag — consume up to the
+    // remaining count of its DeliverItem from PlayerInventory and advance it by the amount consumed (chain + rewards as
+    // usual). Authority-gated; a no-op off authority / with no inventory / for non-delivery objectives. Called from the
+    // player's dialogue path when talking to a quest NPC (range-gated there).
+    void ServerTurnInDeliveriesTo(const FGameplayTag &NpcTag, class UMythicInventoryComponent *PlayerInventory);
+
     // SERVER (save): snapshot every tracked objective (definition soft-path + count + completed) for the character save.
     void SaveObjectives(TArray<FSerializedObjectiveData> &OutData) const;
 
@@ -158,6 +168,20 @@ protected:
 
     // SERVER: GAS gameplay-event callback bound to GAS.Event.Kill on the owning player's ASC.
     void HandleGameplayEvent(const FGameplayEventData *Payload);
+
+    // SERVER: advance ONE active, non-completed objective by (bCountByMagnitude ? round(Magnitude) : 1), latch completion,
+    // grant rewards, queue chain successors into PendingNextSteps, and emit the per-step client callout. Shared by the GAS
+    // event path and the turn-in path so the count/complete/reward/callout logic lives in one place. NotifyIndex is the
+    // per-update floater stack offset (incremented as callouts are sent).
+    void AdvanceObjectiveProgress(FObjectiveProgress &Prog, bool bCountByMagnitude, float Magnitude,
+                                  class APlayerController *PC,
+                                  TArray<TObjectPtr<UObjectiveDefinition>> &PendingNextSteps, int32 &NotifyIndex);
+
+    // SERVER: assign each newly-unlocked chain successor in PendingNextSteps (prerequisites now met, not already tracked)
+    // and announce it. Called AFTER the advance loop — ServerTryAddObjective mutates ActiveObjectives, so it must never
+    // run mid-iteration. Shared by the GAS event + turn-in paths.
+    void ProcessChainAdvance(class APlayerController *PC, TArray<TObjectPtr<UObjectiveDefinition>> &PendingNextSteps,
+                             int32 &NotifyIndex);
 
     // Active + completed objectives for this player. Owner-only so quest progress stays private to its owner.
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Objectives")

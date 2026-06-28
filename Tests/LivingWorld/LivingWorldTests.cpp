@@ -1066,6 +1066,41 @@ bool FMythicObjectiveProgressTest::RunTest(const FString &Parameters) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Turn-in / deliver consume arithmetic — UObjectiveTracker::ComputeDeliverConsumeCount
+// (consume the remaining needed, clamped to what the player carries; never over-consume / over-credit)
+// ═══════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicObjectiveDeliverConsumeTest,
+    "Mythic.Objectives.ObjectiveTracker.DeliverConsume",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicObjectiveDeliverConsumeTest::RunTest(const FString &Parameters) {
+    auto Consume = [&](int32 Cur, int32 Req, int32 Avail) {
+        return UObjectiveTracker::ComputeDeliverConsumeCount(Cur, Req, Avail);
+    };
+
+    // Enough on hand to finish in one turn-in: need 5, carry 8 → consume exactly the 5 remaining (leave 3).
+    TestEqual(TEXT("carry more than needed → consume the remaining only"), Consume(0, 5, 8), 5);
+    // Partial: need 5, carry 3 → consume all 3 (objective advances 0→3, player returns later).
+    TestEqual(TEXT("carry fewer than needed → consume all carried"), Consume(0, 5, 3), 3);
+    // Mid-progress: 2/5 done, carry 10 → consume the 3 still needed.
+    TestEqual(TEXT("mid-progress consumes only the shortfall"), Consume(2, 5, 10), 3);
+    // Already satisfied: 5/5 → consume nothing even if carrying more.
+    TestEqual(TEXT("already complete → consume 0"), Consume(5, 5, 4), 0);
+    // Carry none → consume 0 (no free advance).
+    TestEqual(TEXT("empty inventory → consume 0"), Consume(0, 5, 0), 0);
+    // Defensive: over-complete (current > required) never returns negative.
+    TestEqual(TEXT("over-complete floors at 0"), Consume(7, 5, 9), 0);
+    // Defensive: negative available (degenerate) floors at 0.
+    TestEqual(TEXT("negative available floors at 0"), Consume(0, 5, -3), 0);
+    // Exact: need 1, carry 1 → consume 1.
+    TestEqual(TEXT("single-item turn-in"), Consume(0, 1, 1), 1);
+
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Utility reduction-fraction clamp membership — UMythicAttributeSet_Utility::IsReductionFractionAttribute
 // (StaminaCostReduction + CooldownReduction clamp to [0,1]; CooldownReduction was previously unclamped)
 // ═══════════════════════════════════════════════════════════════

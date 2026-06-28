@@ -9,6 +9,8 @@
 #include "GAS/MythicTags_GAS.h"
 #include "ObjectiveDefinition.generated.h"
 
+class UItemDefinition;
+
 /**
  * A single, designer-authored objective: "do {TriggerEventTag} [x{RequiredCount}, of {RequiredPayloadTag}], then
  * receive {Rewards}". Tracked per-player by UObjectiveTracker. The trigger is a GAS gameplay-event tag from the
@@ -44,6 +46,24 @@ public:
     // (>=1), for quantity-bearing events like item acquisition (EventMagnitude = stacks acquired).
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")
     bool bCountByEventMagnitude = false;
+
+    // --- Turn-in / deliver objectives ("bring N <item> to NPC X") ---
+    // When set together with DeliverToNpcTag, this is a DELIVERY objective: it is NOT advanced by GAS events (the tracker
+    // skips it in HandleGameplayEvent, regardless of TriggerEventTag). Instead, talking to the NPC whose QuestNpcTag
+    // matches DeliverToNpcTag consumes up to the remaining count of this exact item from the player's inventory and
+    // advances by the amount consumed. A concrete item (not a type tag) lets the turn-in reuse the inventory's
+    // GetItemCount + ServerRemoveItemByDefinition (no by-type slot walk), and makes the consumed amount unambiguous.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective|Delivery")
+    TObjectPtr<UItemDefinition> DeliverItem = nullptr;
+
+    // The receiving NPC's identity tag, matched (hierarchical) against AMythicNPCCharacter::QuestNpcTag. Set together
+    // with DeliverItem to make this a delivery objective. Empty = not a delivery objective.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective|Delivery")
+    FGameplayTag DeliverToNpcTag;
+
+    // True iff this is a turn-in/deliver objective (advanced ONLY by handing DeliverItem to DeliverToNpcTag, never by a
+    // GAS event). Pure → keeps the "delivery vs event-driven" rule in one place and unit-testable.
+    bool IsDeliveryObjective() const { return DeliverItem != nullptr && DeliverToNpcTag.IsValid(); }
 
     // Rewards granted (server-side) on completion. Reuses the canonical one-of-each reward holder so the derived
     // contexts (XP level / item level) are built correctly — a bare TArray<URewardBase*> would zero those.
