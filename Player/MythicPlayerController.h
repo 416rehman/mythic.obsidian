@@ -17,6 +17,7 @@ class UItemDefinition;
 class AMythicConversionStation;
 class AMythicStorageContainer;
 class AMythicVendor;
+enum class EMythicTradeResult : uint8;
 class AMythicNPCCharacter;
 
 class UMythicCheatManager;
@@ -326,6 +327,12 @@ public:
     // server-side from UItemDefinition::GetRarityColor (single source). Mirrors ClientNotifyObjective.
     UFUNCTION(Client, Reliable, Category = "Itemization")
     void ClientNotifyLootPickup(const FText &ItemName, int32 Quantity, FLinearColor RarityColor);
+
+    // Float a vendor failure callout (e.g. "Not enough gold" / "Out of stock" / "Inventory full") over the acting
+    // client's pawn. Sent ONLY on a hard reject — a successful or partial buy/sell is already covered by the "+N"
+    // pickup callout. Server-decided reason, client-local cosmetic display. Mirrors ClientNotifyLootPickup.
+    UFUNCTION(Client, Reliable, Category = "Itemization")
+    void ClientNotifyTradeResult(EMythicTradeResult Result);
 
     // Float a durability beat over the player: broken, low warning, or repaired
     UFUNCTION(Client, Reliable, Category = "Itemization")

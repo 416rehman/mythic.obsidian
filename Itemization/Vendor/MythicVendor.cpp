@@ -2,11 +2,13 @@
 
 #include "MythicVendor.h"
 
+#include "Mythic.h" // Myth log category
 #include "Engine/GameInstance.h"
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Inventory/MythicCurrency.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
+#include "Itemization/Inventory/MythicTrade.h" // PlanBuy / PlanSell pure decisions
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
 #include "Itemization/MythicTags_Inventory.h" // ITEMIZATION_TYPE_CURRENCY
 #include "Player/MythicPlayerController.h"
@@ -35,9 +37,12 @@ namespace {
             return;
         }
         const int32 Cap = FMath::Max(1, CurrencyDef->StackSizeMax);
+        // Bound the loop by the chunks the payout actually needs (+ slack), NOT a fixed constant, so a large sale is
+        // never silently truncated below the amount owed. int64 keeps the chunk count safe from overflow.
+        const int64 MaxChunks = (static_cast<int64>(Amount) + Cap - 1) / Cap + 4;
         int32 Remaining = Amount;
-        int32 Guard = 0;
-        while (Remaining > 0 && Guard++ < 4096) {
+        int64 Guard = 0;
+        while (Remaining > 0 && Guard++ < MaxChunks) {
             const int32 Chunk = FMath::Min(Remaining, Cap);
             UMythicItemInstance *Coins = Loot->Create(CurrencyDef, Chunk, Recipient, 0);
             if (!Coins) {
@@ -45,6 +50,11 @@ namespace {
             }
             Inv->AddItem(Coins, Recipient);
             Remaining -= Chunk;
+        }
+        if (Remaining > 0) {
+            // A payout must never be silently lost (the "never a fake payout" contract). With the guard now sized to the
+            // work, this is reachable only on a Create() failure (OOM/GC pathology).
+            UE_LOG(Myth, Warning, TEXT("MythicVendor::GrantCurrency could not mint %d of %d currency for the payout"), Remaining, Amount);
         }
     }
 } // namespace
@@ -75,35 +85,28 @@ int32 AMythicVendor::GetSalePriceForItem(const UMythicItemInstance *Item, int32 
     return 0;
 }
 
-int32 AMythicVendor::Server_ExecuteBuy(AMythicPlayerController *Buyer, int32 StockSlotIndex, int32 Quantity) {
+FMythicTradePlan AMythicVendor::Server_ExecuteBuy(AMythicPlayerController *Buyer, int32 StockSlotIndex, int32 Quantity) {
+    FMythicTradePlan Reject; // defaults to {InvalidRequest, 0, 0}
     UMythicInventoryComponent *Stock = GetContainerInventory();
     if (!HasAuthority() || !Buyer || !Stock || Quantity <= 0) {
-        return 0;
+        return Reject;
     }
 
     UMythicItemInstance *StockItem = Stock->GetItem(StockSlotIndex);
     if (!StockItem) {
-        return 0;
+        Reject.Result = EMythicTradeResult::OutOfStock; // empty slot
+        return Reject;
     }
     UItemDefinition *Def = StockItem->GetItemDefinition();
     if (!Def) {
-        return 0;
-    }
-    const int32 Available = StockItem->GetStacks();
-    if (Available <= 0) {
-        return 0;
-    }
-
-    const int32 UnitPrice = MythicCurrency::ComputeBuyPrice(Def->Value, 1, BuyPriceMultiplier);
-    if (UnitPrice <= 0) {
-        return 0; // unpriced item — not for sale
+        return Reject; // malformed stock entry
     }
 
     // The goods factory must exist before we mutate anything, so a buy can never charge/remove without delivering.
     UGameInstance *GI = GetGameInstance();
     UMythicLootManagerSubsystem *Loot = GI ? GI->GetSubsystem<UMythicLootManagerSubsystem>() : nullptr;
     if (!Loot) {
-        return 0;
+        return Reject;
     }
 
     // Find the first of the buyer's inventories that can accept this item type (the delivery target).
@@ -114,22 +117,39 @@ int32 AMythicVendor::Server_ExecuteBuy(AMythicPlayerController *Buyer, int32 Sto
             break;
         }
     }
-    if (!Target) {
-        return 0; // no room / no inventory accepts this type
+
+    // Decide the outcome + quantity from live inputs (pure, unit-tested). Charges nothing on a hard reject.
+    const FMythicTradePlan Plan = MythicTrade::PlanBuy(Quantity, Def->Value, BuyPriceMultiplier, StockItem->GetStacks(),
+                                                       SumPlayerCurrency(Buyer), Target != nullptr);
+    if (Plan.Quantity <= 0) {
+        return Plan; // hard reject — nothing mutated; the result carries the reason
     }
 
-    // Clamp the requested quantity to what's in stock and what the buyer can afford.
-    const int32 BuyerCurrency = SumPlayerCurrency(Buyer);
-    const int32 AffordableQty = BuyerCurrency / UnitPrice; // integer division — whole units only
-    const int32 SellQty = FMath::Min3(Quantity, Available, AffordableQty);
-    if (SellQty <= 0) {
-        return 0; // can't afford even one unit, or nothing in stock
+    // Pre-create the goods (split across StackSizeMax) BEFORE any irreversible mutation: a creation failure then aborts
+    // without charging or decrementing stock, and the delivered total always equals Plan.Quantity even if it exceeds a
+    // single stack cap (Loot->Create clamps one instance to StackSizeMax). Mirrors the sell path's pre-mutation guard.
+    const int32 GoodsLevel = StockItem->GetItemLevel();
+    const int32 StackCap = FMath::Max(1, Def->StackSizeMax);
+    TArray<UMythicItemInstance *, TInlineAllocator<8>> Goods;
+    for (int32 ToMake = Plan.Quantity; ToMake > 0;) {
+        const int32 Chunk = FMath::Min(ToMake, StackCap);
+        UMythicItemInstance *G = Loot->Create(Def, Chunk, Buyer, GoodsLevel);
+        if (!G) {
+            // Creation failed (OOM/GC pathology) — undo the half-built goods and abort before any charge / removal.
+            for (UMythicItemInstance *Made : Goods) {
+                if (Made) {
+                    Made->Destroy();
+                }
+            }
+            return Reject;
+        }
+        Goods.Add(G);
+        ToMake -= Chunk;
     }
-    const int32 TotalPrice = UnitPrice * SellQty;
 
-    // Charge the buyer across their inventories (affordability already verified this frame; server is single-threaded
-    // so no concurrent spend can race this).
-    int32 Remaining = TotalPrice;
+    // Goods are ready — now the irreversible mutations. Charge the buyer across their inventories (affordability already
+    // decided this frame; server is single-threaded so no concurrent spend can race this).
+    int32 Remaining = Plan.TotalPrice;
     for (UMythicInventoryComponent *Inv : Buyer->GetAllInventoryComponents()) {
         if (Remaining <= 0) {
             break;
@@ -139,67 +159,56 @@ int32 AMythicVendor::Server_ExecuteBuy(AMythicPlayerController *Buyer, int32 Sto
         }
     }
 
-    // Remove from stock and deliver fresh def-based goods (preserving the stock item's level). Fungible goods; per-
-    // instance affix/durability preservation on resale is a logged follow-up.
-    const int32 GoodsLevel = StockItem->GetItemLevel();
-    Stock->ServerRemoveItem(StockItem, SellQty);
-
-    if (UMythicItemInstance *Goods = Loot->Create(Def, SellQty, Buyer, GoodsLevel)) {
-        Target->AddItem(Goods, Buyer); // fires the "+N <Item>" pickup callout + drives "collect N" objectives
+    // Remove from stock and deliver the pre-created goods (fresh def-based; per-instance affix preservation on resale is
+    // a logged follow-up). AddItem fires the "+N <Item>" pickup callout + drives "collect N" objectives.
+    Stock->ServerRemoveItem(StockItem, Plan.Quantity);
+    for (UMythicItemInstance *G : Goods) {
+        Target->AddItem(G, Buyer);
     }
-    return SellQty;
+    return Plan;
 }
 
-int32 AMythicVendor::Server_ExecuteSell(AMythicPlayerController *Seller, UMythicInventoryComponent *PlayerInventory,
-                                        int32 PlayerSlotIndex, int32 Quantity) {
+FMythicTradePlan AMythicVendor::Server_ExecuteSell(AMythicPlayerController *Seller, UMythicInventoryComponent *PlayerInventory,
+                                                   int32 PlayerSlotIndex, int32 Quantity) {
+    FMythicTradePlan Reject;
     if (!HasAuthority() || !Seller || !PlayerInventory || Quantity <= 0) {
-        return 0;
-    }
-    if (!CurrencyItemDefinition) {
-        return 0; // this vendor can't pay (no currency def) — reject rather than fake a payout
+        return Reject;
     }
 
     UMythicItemInstance *Item = PlayerInventory->GetItem(PlayerSlotIndex);
     if (!Item) {
-        return 0;
-    }
-    if (!PlayerInventory->CanPlayerTakeFromSlot(PlayerSlotIndex)) {
-        return 0; // equipped / bound item — not sellable
+        Reject.Result = EMythicTradeResult::OutOfStock; // nothing in that slot
+        return Reject;
     }
     UItemDefinition *Def = Item->GetItemDefinition();
     if (!Def) {
-        return 0;
-    }
-    if (Def->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY)) {
-        return 0; // can't sell currency for currency
+        return Reject; // malformed item
     }
 
-    const int32 Available = Item->GetStacks();
-    const int32 SellQty = FMath::Min(Quantity, Available);
-    if (SellQty <= 0) {
-        return 0;
-    }
-
-    const int32 Proceeds = MythicCurrency::ComputeSalePrice(Def->Value, SellQty, SellRate);
-    if (Proceeds <= 0) {
-        return 0; // worthless / unsellable — reject (no free item sink)
+    // Decide the outcome (pure). Gated inputs: stacks, value, sell rate, vendor-can-pay, take-rule, currency guard.
+    const bool bIsCurrency = Def->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY);
+    const FMythicTradePlan Plan = MythicTrade::PlanSell(Quantity, Item->GetStacks(), Def->Value, SellRate,
+                                                        CurrencyItemDefinition != nullptr,
+                                                        PlayerInventory->CanPlayerTakeFromSlot(PlayerSlotIndex), bIsCurrency);
+    if (Plan.Quantity <= 0) {
+        return Plan; // hard reject — nothing mutated
     }
 
     UGameInstance *GI = GetGameInstance();
     UMythicLootManagerSubsystem *Loot = GI ? GI->GetSubsystem<UMythicLootManagerSubsystem>() : nullptr;
     if (!Loot) {
-        return 0;
+        return Reject; // can't mint proceeds — abort BEFORE removing the goods
     }
 
     // Remove the sold goods from the seller.
-    PlayerInventory->ServerRemoveItem(Item, SellQty);
+    PlayerInventory->ServerRemoveItem(Item, Plan.Quantity);
 
     // Absorb into stock for resale when enabled and the stock accepts the type; otherwise the goods are consumed (the
     // player is still paid — the vendor "melts them down").
     if (bAbsorbSoldItems) {
         if (UMythicInventoryComponent *Stock = GetContainerInventory()) {
             if (Stock->CanAcceptItemType(Def->ItemType)) {
-                if (UMythicItemInstance *StockGoods = Loot->Create(Def, SellQty, nullptr, 0)) {
+                if (UMythicItemInstance *StockGoods = Loot->Create(Def, Plan.Quantity, nullptr, 0)) {
                     Stock->AddToAnySlot(StockGoods);
                 }
             }
@@ -207,6 +216,6 @@ int32 AMythicVendor::Server_ExecuteSell(AMythicPlayerController *Seller, UMythic
     }
 
     // Pay the proceeds (minted — infinite vendor funds). AddItem inside GrantCurrency fires the "+N <Currency>" callout.
-    GrantCurrency(PlayerInventory, Seller, Proceeds, CurrencyItemDefinition, Loot);
-    return SellQty;
+    GrantCurrency(PlayerInventory, Seller, Plan.TotalPrice, CurrencyItemDefinition, Loot);
+    return Plan;
 }

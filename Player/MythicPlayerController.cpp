@@ -17,6 +17,7 @@
 #include "Itemization/Conversion/ConversionStationComponent.h"
 #include "Itemization/Storage/MythicStorageContainer.h"
 #include "Itemization/Vendor/MythicVendor.h"
+#include "Itemization/Inventory/MythicTrade.h" // EMythicTradeResult + IsFailureWorthShowing/DescribeResult for the callout
 #include "Proficiency/ProficiencyComponent.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
@@ -460,7 +461,11 @@ void AMythicPlayerController::ServerVendorBuy_Implementation(AMythicVendor *Vend
     if (!CanPlayerAccessInventory(Vendor->GetContainerInventory())) {
         return;
     }
-    Vendor->Server_ExecuteBuy(this, StockSlotIndex, Quantity);
+    const FMythicTradePlan Plan = Vendor->Server_ExecuteBuy(this, StockSlotIndex, Quantity);
+    // A successful / partial buy already shows the "+N <Item>" pickup callout; only surface a hard reject.
+    if (MythicTrade::IsFailureWorthShowing(Plan.Result)) {
+        ClientNotifyTradeResult(Plan.Result);
+    }
 }
 
 bool AMythicPlayerController::ServerVendorSell_Validate(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex,
@@ -481,7 +486,11 @@ void AMythicPlayerController::ServerVendorSell_Implementation(AMythicVendor *Ven
     if (!GetAllInventoryComponents().Contains(PlayerInventory)) {
         return;
     }
-    Vendor->Server_ExecuteSell(this, PlayerInventory, PlayerSlotIndex, Quantity);
+    const FMythicTradePlan Plan = Vendor->Server_ExecuteSell(this, PlayerInventory, PlayerSlotIndex, Quantity);
+    // A successful sale already shows the "+N <Currency>" callout; only surface a hard reject.
+    if (MythicTrade::IsFailureWorthShowing(Plan.Result)) {
+        ClientNotifyTradeResult(Plan.Result);
+    }
 }
 
 bool AMythicPlayerController::ServerDeployPlaceable_Validate(UMythicInventoryComponent *Inventory, int32 SlotIndex,
@@ -923,6 +932,26 @@ void AMythicPlayerController::ClientNotifyLootPickup_Implementation(const FText 
             ? FString::Printf(TEXT("+%d %s"), Quantity, *ItemName.ToString())
             : ItemName.ToString();
         DamageNumbers->AddDamageNumberCustom(Location, Text, RarityColor, 1.5f);
+    }
+}
+
+void AMythicPlayerController::ClientNotifyTradeResult_Implementation(EMythicTradeResult Result) {
+    const APawn *AvatarPawn = GetPawn();
+    if (!AvatarPawn) {
+        return;
+    }
+    UWorld *World = AvatarPawn->GetWorld();
+    if (!World) {
+        return;
+    }
+    const FText Message = MythicTrade::DescribeResult(Result);
+    if (Message.IsEmpty()) {
+        return; // nothing player-facing (a success/partial/invalid result reaches here only defensively)
+    }
+    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+        const FVector Location = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 100.0f); // float over the player's head
+        // Denial red — distinct from the gold/rarity pickup tints so a failed trade reads as a failure at a glance.
+        DamageNumbers->AddDamageNumberCustom(Location, Message.ToString(), FLinearColor(0.9f, 0.2f, 0.2f), 1.5f);
     }
 }
 

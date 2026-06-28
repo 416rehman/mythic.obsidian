@@ -10,6 +10,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Itemization/Inventory/MythicTrade.h" // EMythicTradeResult + FMythicTradePlan (buy/sell outcome)
 #include "Itemization/Storage/MythicStorageContainer.h"
 #include "MythicVendor.generated.h"
 
@@ -40,15 +41,16 @@ public:
     UFUNCTION(BlueprintPure, Category = "Vendor")
     bool CanVendorBuyFromPlayers() const { return CurrencyItemDefinition != nullptr; }
 
-    // SERVER: buy Quantity units of StockSlotIndex for Buyer. Clamps to stock, affordability, and the buyer's free
-    // space; charges the buyer's currency; delivers the goods. Returns the quantity actually sold (0 on any reject).
+    // SERVER: buy Quantity units of StockSlotIndex for Buyer. The pure MythicTrade::PlanBuy decides the outcome + quantity
+    // (clamped to stock, affordability, and the buyer's free space); this charges the currency and delivers the goods.
+    // Returns the full trade plan (result reason + units traded + coins) so the caller can fire the player callout.
     // Authority + access are pre-checked by the calling PC RPC.
-    int32 Server_ExecuteBuy(AMythicPlayerController *Buyer, int32 StockSlotIndex, int32 Quantity);
+    FMythicTradePlan Server_ExecuteBuy(AMythicPlayerController *Buyer, int32 StockSlotIndex, int32 Quantity);
 
-    // SERVER: sell Quantity units from Seller's PlayerSlotIndex in PlayerInventory to this vendor. Clamps to the stack;
-    // removes the goods (absorbed into stock when bAbsorbSoldItems + space, else consumed); pays proceeds in
-    // CurrencyItemDefinition. Returns the quantity actually sold (0 on any reject).
-    int32 Server_ExecuteSell(AMythicPlayerController *Seller, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex, int32 Quantity);
+    // SERVER: sell Quantity units from Seller's PlayerSlotIndex in PlayerInventory to this vendor. MythicTrade::PlanSell
+    // decides the outcome; this removes the goods (absorbed into stock when bAbsorbSoldItems + space, else consumed) and
+    // pays proceeds in CurrencyItemDefinition. Returns the trade plan.
+    FMythicTradePlan Server_ExecuteSell(AMythicPlayerController *Seller, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex, int32 Quantity);
 
 protected:
     // Price multiplier applied to an item's Value when a player BUYS from this vendor (1.0 = at value, >1.0 = margin).
