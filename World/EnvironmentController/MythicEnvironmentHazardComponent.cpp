@@ -54,6 +54,9 @@ void UMythicEnvironmentHazardComponent::EndPlay(const EEndPlayReason::Type EndPl
     HandlesOwnerASC.Reset();
     NotifiedConditions.Empty(); // no relief callout on teardown/logout — this is not a real world-state relief
 
+    // Drop the suppression-tag listeners off the (still-valid) ASC so this destroyed component isn't called back.
+    UnbindSuppressionTags();
+
     if (AMythicEnvironmentController *Controller = BoundController.Get()) {
         Controller->WeatherChangeDelegate.RemoveDynamic(this, &UMythicEnvironmentHazardComponent::HandleWeatherChanged);
         Controller->DayTimeChangeDelegate.RemoveDynamic(this, &UMythicEnvironmentHazardComponent::HandleDaytimeChanged);
@@ -88,6 +91,26 @@ void UMythicEnvironmentHazardComponent::ReevaluateAll() {
     if (!GetOwner() || !GetOwner()->HasAuthority()) {
         return;
     }
+    // Re-entrancy guard + coalescing. ApplyGameplayEffectSpecToSelf / RemoveActiveGameplayEffect inside the diff fire the
+    // ASC's tag-change delegates SYNCHRONOUSLY, and OnSuppressionTagChanged re-calls ReevaluateAll. A nested call mid-loop
+    // would corrupt the handle bookkeeping (the apply->record pair isn't yet complete → a leaked, untracked GE handle on
+    // the persistent PlayerState ASC; an unbounded recurse for a self-toggling suppressor). So a re-entrant call only FLAGS
+    // a re-run and returns; the outer call re-runs the FULL diff until stable. Each pass thus completes atomically. The
+    // pass cap is a backstop against a content error (a hazard GE that grants its OWN suppressor tag → genuine oscillation).
+    if (bReevaluating) {
+        bReevaluatePending = true;
+        return;
+    }
+    bReevaluating = true;
+    int32 PassGuard = 0;
+    do {
+        bReevaluatePending = false;
+        ReevaluateAllOnce();
+    } while (bReevaluatePending && ++PassGuard < 8);
+    bReevaluating = false;
+}
+
+void UMythicEnvironmentHazardComponent::ReevaluateAllOnce() {
     UAbilitySystemComponent *ASC = ResolvePlayerASC();
     if (!ASC || !BoundController.IsValid()) {
         return;
@@ -101,9 +124,18 @@ void UMythicEnvironmentHazardComponent::ReevaluateAll() {
         HandlesOwnerASC = ASC;
     }
 
+    // Keep the suppression-tag listeners bound to the live ASC (idempotent; rebinds on a swap) so a campfire/clothing
+    // toggle re-evaluates hazards immediately. Must run on the same authority + resolved-ASC path as the GE handles.
+    RebindSuppressionTags(ASC);
+
+    // Snapshot the player's owned tags ONCE for this pass (not per rule) — the suppression gate reads it. A cross-rule
+    // tag change made by a GE applied below fires the bound listener → a coalesced re-run picks up the fresh snapshot.
+    FGameplayTagContainer OwnedTags;
+    ASC->GetOwnedGameplayTags(OwnedTags);
+
     for (int32 i = 0; i < Conditions.Num(); ++i) {
         const FEnvironmentHazardCondition &Condition = Conditions[i];
-        const bool bNowActive = EvaluateCondition(Condition);
+        const bool bNowActive = EvaluateCondition(Condition, OwnedTags);
         const bool bWasActive = ActiveHazardHandles.Contains(i);
 
         if (bNowActive && !bWasActive) {
@@ -148,7 +180,8 @@ void UMythicEnvironmentHazardComponent::NotifyHazard(const FEnvironmentHazardCon
     }
 }
 
-bool UMythicEnvironmentHazardComponent::EvaluateCondition(const FEnvironmentHazardCondition &Condition) const {
+bool UMythicEnvironmentHazardComponent::EvaluateCondition(const FEnvironmentHazardCondition &Condition,
+                                                          const FGameplayTagContainer &PlayerOwnedTags) const {
     const AMythicEnvironmentController *Controller = BoundController.Get();
     if (!Controller) {
         return false;
@@ -184,7 +217,61 @@ bool UMythicEnvironmentHazardComponent::EvaluateCondition(const FEnvironmentHaza
         return false;
     }
 
+    // Counter-play: the world axes match, but a sheltered/warm player suppresses the hazard. Checked LAST (the rarest
+    // gate). PlayerOwnedTags was snapshotted once by the caller; OnSuppressionTagChanged re-evaluates when these tags
+    // come/go, so the hazard lifts/returns immediately. The tag SOURCE (campfire aura / warm clothing / indoors) is content.
+    if (Condition.SuppressionTags.Num() > 0 && IsHazardSuppressed(PlayerOwnedTags, Condition.SuppressionTags)) {
+        return false;
+    }
+
     return true;
+}
+
+bool UMythicEnvironmentHazardComponent::IsHazardSuppressed(const FGameplayTagContainer &PlayerOwnedTags,
+                                                          const TArray<FGameplayTag> &SuppressionTags) {
+    for (const FGameplayTag &Tag : SuppressionTags) {
+        if (Tag.IsValid() && PlayerOwnedTags.HasTag(Tag)) {
+            return true; // owns this suppressor (or a child of it) — hazard suppressed
+        }
+    }
+    return false;
+}
+
+void UMythicEnvironmentHazardComponent::OnSuppressionTagChanged(const FGameplayTag, int32) {
+    // A suppressor came or went on the player — re-diff every rule so the affected hazard lifts/returns now.
+    ReevaluateAll();
+}
+
+void UMythicEnvironmentHazardComponent::RebindSuppressionTags(UAbilitySystemComponent *ASC) {
+    if (SuppressionBoundASC.Get() == ASC) {
+        return; // already bound to this ASC; the Conditions' tag set is fixed at runtime, so nothing to do
+    }
+    UnbindSuppressionTags(); // drop bindings on the previous ASC (seamless-travel swap), if any
+
+    if (!ASC) {
+        return;
+    }
+    // Bind each DISTINCT valid suppression tag across all rules exactly once.
+    for (const FEnvironmentHazardCondition &Condition : Conditions) {
+        for (const FGameplayTag &Tag : Condition.SuppressionTags) {
+            if (Tag.IsValid() && !BoundSuppressionTags.Contains(Tag)) {
+                ASC->RegisterGameplayTagEvent(Tag, EGameplayTagEventType::NewOrRemoved)
+                   .AddUObject(this, &UMythicEnvironmentHazardComponent::OnSuppressionTagChanged);
+                BoundSuppressionTags.Add(Tag);
+            }
+        }
+    }
+    SuppressionBoundASC = ASC;
+}
+
+void UMythicEnvironmentHazardComponent::UnbindSuppressionTags() {
+    if (UAbilitySystemComponent *ASC = SuppressionBoundASC.Get()) {
+        for (const FGameplayTag &Tag : BoundSuppressionTags) {
+            ASC->RegisterGameplayTagEvent(Tag, EGameplayTagEventType::NewOrRemoved).RemoveAll(this);
+        }
+    }
+    BoundSuppressionTags.Reset();
+    SuppressionBoundASC.Reset();
 }
 
 UAbilitySystemComponent *UMythicEnvironmentHazardComponent::ResolvePlayerASC() const {

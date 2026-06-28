@@ -46,6 +46,13 @@ struct FEnvironmentHazardCondition {
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hazard")
     float EffectLevel = 1.0f;
 
+    // Counter-play: if the player's ASC has ANY of these tags (hierarchical), this hazard is SUPPRESSED — it won't apply,
+    // and an already-applied one is removed. Empty (default) = no suppression (the hazard always applies when its axes
+    // match — byte-identical to the prior behaviour). The tag SOURCE is designer content (e.g. a campfire aura GE grants
+    // "Status.Warm", warm clothing grants it via an affix, being indoors grants "Status.Sheltered") — this is the GATE.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hazard", meta = (Categories = "Status"))
+    TArray<FGameplayTag> SuppressionTags;
+
     // Player-facing name announced when this hazard begins ("<Name>") and ends ("<Name> subsides"), e.g. "Freezing",
     // "Scorching Heat", "Toxic Fog". Empty = no callout (the GE, if any, still applies silently). Designer-authored —
     // nothing fabricated in code. Independent of HazardEffect: a feedback-only rule (name, no GE) or a silent rule
@@ -102,11 +109,34 @@ protected:
     UFUNCTION()
     void HandleMonthChanged(int32 PrevMonth, int32 NewMonth, ESeason PrevSeason, ESeason NewSeason);
 
+    // Re-evaluate when a suppression tag is gained/lost on the player's ASC (e.g. stepping into / out of a campfire's
+    // warmth aura) so a hazard lifts/returns IMMEDIATELY, not only on the next weather/season/daytime change.
+    void OnSuppressionTagChanged(const FGameplayTag CallbackTag, int32 NewCount);
+
+public:
+    // Pure: is a hazard suppressed for a player with the given owned tags? True iff the player owns ANY of the (valid)
+    // SuppressionTags (hierarchical HasTag). Static so the gate is unit-testable without a live ASC.
+    static bool IsHazardSuppressed(const FGameplayTagContainer &PlayerOwnedTags, const TArray<FGameplayTag> &SuppressionTags);
+
 private:
     void BindController(AMythicEnvironmentController *Controller);
+    // Public entry: re-entrancy-guarded + coalescing wrapper around ReevaluateAllOnce (see the .cpp).
     void ReevaluateAll();
-    bool EvaluateCondition(const FEnvironmentHazardCondition &Condition) const;
+    // One full apply/remove diff pass over all rules. Only ever called from ReevaluateAll (never re-entrantly).
+    void ReevaluateAllOnce();
+    // PlayerOwnedTags is snapshotted ONCE per diff pass by the caller (not re-read per rule) — used for the suppression gate.
+    bool EvaluateCondition(const FEnvironmentHazardCondition &Condition, const FGameplayTagContainer &PlayerOwnedTags) const;
     UAbilitySystemComponent *ResolvePlayerASC() const;
+
+    // ReevaluateAll re-entrancy guard: a GE apply/remove can synchronously fire a bound suppression-tag delegate that
+    // re-calls ReevaluateAll. bReevaluating blocks a nested diff; bReevaluatePending coalesces it into one more pass.
+    bool bReevaluating = false;
+    bool bReevaluatePending = false;
+
+    // (Re)bind the suppression-tag change listeners to ASC — idempotent on ASC identity; rebinds on a seamless-travel ASC
+    // swap (mirrors the GE-handle swap handling). Unbind removes this object's bindings from the currently-bound ASC.
+    void RebindSuppressionTags(UAbilitySystemComponent *ASC);
+    void UnbindSuppressionTags();
 
     // Float the onset / relief callout for a hazard over the owning player (no-op if the rule has no DisplayName, or
     // the owner isn't a player controller). Server-side; routes through the PC's Client RPC.
@@ -124,6 +154,12 @@ private:
     // but the ASC lives on the PlayerState, which can be REPLACED (seamless travel). If the ASC identity changes,
     // the old handles are stale — we drop the map (without removing on the new ASC) and re-apply fresh.
     TWeakObjectPtr<UAbilitySystemComponent> HandlesOwnerASC;
+
+    // The ASC the suppression-tag listeners are currently bound to (parallels HandlesOwnerASC — rebind on swap).
+    TWeakObjectPtr<UAbilitySystemComponent> SuppressionBoundASC;
+
+    // The distinct suppression tags currently bound on SuppressionBoundASC (so UnbindSuppressionTags removes exactly them).
+    TArray<FGameplayTag> BoundSuppressionTags;
 
     TWeakObjectPtr<AMythicEnvironmentController> BoundController;
 };
