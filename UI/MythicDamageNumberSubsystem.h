@@ -370,8 +370,8 @@ struct FMythicWorldCallout {
  *
  * The unified, high-performance, NON-WBP feedback subsystem. Combat damage numbers (world-projected, floating off the
  * target) AND non-combat screen notifications (toasts / animated hero banners) are rendered in ONE immediate-mode Canvas
- * pass via AHUD::OnHUDPostRender, over pooled flat arrays. (Being renamed to UMythicFeedbackSubsystem once the merge of
- * the former UMythicWorldFeedbackSubsystem completes.)
+ * pass via AHUD::OnHUDPostRender, over pooled flat arrays. (Pending a mechanical rename to UMythicFeedbackSubsystem now
+ * that the former UMythicWorldFeedbackSubsystem is fully merged in.)
  */
 UCLASS()
 class MYTHIC_API UMythicDamageNumberSubsystem : public UWorldSubsystem {

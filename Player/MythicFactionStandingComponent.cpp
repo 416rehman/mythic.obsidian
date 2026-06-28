@@ -8,7 +8,7 @@
 #include "Net/UnrealNetwork.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h" // FactionDatabase (server-side faction name resolution)
 #include "World/LivingWorld/Factions/FactionDatabase.h"
-#include "UI/MythicDamageNumberSubsystem.h" // floating "now Hostile/Friendly" callout
+#include "UI/MythicDamageNumberSubsystem.h" // unified feedback subsystem — faction shift = hero banner
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/Pawn.h"
 
@@ -183,7 +183,7 @@ void UMythicFactionStandingComponent::ClientNotifyStandingTier_Implementation(co
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
         FString TierText;
         FLinearColor Color;
         switch (NewTier) {
@@ -200,8 +200,9 @@ void UMythicFactionStandingComponent::ClientNotifyStandingTier_Implementation(co
             Color = FLinearColor(0.8f, 0.8f, 0.8f); // gray
             break;
         }
-        const FVector Location = Pawn->GetActorLocation() + FVector(0.0f, 0.0f, 110.0f);
-        const FString Text = FString::Printf(TEXT("%s now %s"), *FactionName, *TierText);
-        DamageNumbers->AddDamageNumberCustom(Location, Text, Color, 3.0f);
+        // A faction standing shift is a major beat -> hero banner (faction name + the new standing beneath).
+        Feedback->AddScreenBanner(FText::FromString(FactionName),
+                                  FText::FromString(FString::Printf(TEXT("Now %s"), *TierText)),
+                                  Color, nullptr, 3.0f);
     }
 }
