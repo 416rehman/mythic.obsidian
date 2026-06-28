@@ -814,6 +814,18 @@ void AMythicPlayerController::FinishDeployPlaceable(UClass *DeployedClass, const
         return;
     }
 
+    // Per-player placeable cap (only when one is set — at the unlimited default 0 we skip ALL tracking so the path is
+    // truly zero-cost + byte-identical). Prune entries whose actor is gone (destroyed by combat/decay/another player),
+    // then reject if at the cap. Don't spawn or consume — the item stays in the slot. Re-checked HERE (the authoritative
+    // spawn point) so concurrently-queued deploys can't exceed the cap across the async load gap.
+    const bool bCapped = MaxDeployedPlaceables > 0;
+    if (bCapped) {
+        DeployedPlaceables.RemoveAll([](const TWeakObjectPtr<AActor> &P) { return !P.IsValid(); });
+        if (!CanDeployMore(DeployedPlaceables.Num(), MaxDeployedPlaceables)) {
+            return;
+        }
+    }
+
     // Deferred spawn so the actor is fully initialized before BeginPlay; consume the item ONLY after a real spawn
     // (so a failed deploy never eats the item).
     AActor *Deployed = World->SpawnActorDeferred<AActor>(DeployedClass, Pending.SpawnTransform, this, GetPawn(),
@@ -823,6 +835,17 @@ void AMythicPlayerController::FinishDeployPlaceable(UClass *DeployedClass, const
     }
     Deployed->FinishSpawning(Pending.SpawnTransform);
     Item->ConsumeItem(1);
+
+    // Track the live placeable so it counts against this player's cap until destroyed (then lazily pruned above). Only
+    // when capped — see above.
+    if (bCapped) {
+        DeployedPlaceables.Add(Deployed);
+    }
+}
+
+bool AMythicPlayerController::CanDeployMore(int32 CurrentValidCount, int32 MaxAllowed) {
+    // A non-positive cap means unlimited; otherwise the player must currently hold fewer than the cap.
+    return MaxAllowed <= 0 || CurrentValidCount < MaxAllowed;
 }
 
 bool AMythicPlayerController::ServerInteractPrimary_Validate(AActor *Interactable) {

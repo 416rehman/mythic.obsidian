@@ -6,6 +6,7 @@
 #include "Misc/AutomationTest.h"
 #include "Itemization/Inventory/Fragments/Passive/PlaceableFragment.h"
 #include "Itemization/Placeable/MythicPlacementModeComponent.h"
+#include "Player/MythicPlayerController.h" // AMythicPlayerController::CanDeployMore (per-player placeable cap gate)
 
 namespace PlaceableTestHelpers {
     // Build a placement query inline. Order: hit?, surface normal Z, distance (cm), blocking overlap?
@@ -343,6 +344,34 @@ bool FPlaceablePreviewTest::RunTest(const FString &Parameters) {
         TestTrue(TEXT("rejection tints red"), P.TintColor.Equals(FLinearColor::Red));
         TestFalse(TEXT("rejection has a reason"), P.Reason.IsEmpty());
     }
+
+    return true;
+}
+
+// ─── Per-player deploy cap (CanDeployMore) ────────────────────────
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FPlaceableDeployCapTest,
+    "Mythic.Itemization.Placement.DeployCap",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FPlaceableDeployCapTest::RunTest(const FString &Parameters) {
+    auto Can = &AMythicPlayerController::CanDeployMore; // (currentValidCount, maxAllowed)
+
+    // Cap 0 (default) = unlimited — always allowed regardless of how many are live.
+    TestTrue(TEXT("cap 0 is unlimited (none placed)"), Can(0, 0));
+    TestTrue(TEXT("cap 0 is unlimited (many placed)"), Can(999, 0));
+    // A negative cap is also treated as unlimited (defensive).
+    TestTrue(TEXT("negative cap is unlimited"), Can(50, -1));
+
+    // A positive cap allows up to but NOT including it.
+    TestTrue(TEXT("under the cap → allowed"), Can(0, 3));
+    TestTrue(TEXT("one below the cap → allowed"), Can(2, 3));
+    TestFalse(TEXT("exactly at the cap → blocked"), Can(3, 3));
+    TestFalse(TEXT("over the cap (defensive) → blocked"), Can(4, 3));
+
+    // Cap of 1 (single placeable) boundary.
+    TestTrue(TEXT("cap 1, none placed → allowed"), Can(0, 1));
+    TestFalse(TEXT("cap 1, one placed → blocked"), Can(1, 1));
 
     return true;
 }

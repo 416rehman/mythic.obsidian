@@ -456,6 +456,20 @@ private:
     // spawns the placeable actor and consumes the item
     void FinishDeployPlaceable(UClass *DeployedClass, const FMythicPendingDeploy &Pending);
 
+    // Pure: may this player deploy another placeable? MaxAllowed <= 0 = unlimited; else the count of this player's live
+    // placeables must be below it. Static so the per-player cap rule is unit-testable without a live world.
+    static bool CanDeployMore(int32 CurrentValidCount, int32 MaxAllowed);
+
+    // Per-player cap on simultaneously-deployed placeables. 0 (default) = unlimited (byte-identical to the prior
+    // behaviour); set > 0 to cap base-building spam / structure count. Enforced server-side in FinishDeployPlaceable.
+    UPROPERTY(EditDefaultsOnly, Category = "Placeable")
+    int32 MaxDeployedPlaceables = 0;
+
+    // SERVER: weak refs to the placeables THIS player currently has live in the world. Pruned (lazy GC) + counted at
+    // deploy time — a placeable destroyed by combat/decay/another player frees a slot without any per-actor destroy hook.
+    UPROPERTY()
+    TArray<TWeakObjectPtr<AActor>> DeployedPlaceables;
+
     // Server-side per-player poll: maps the pawn's cell -> governing settlement and fires ClientNotifyZoneEntry on a
     // change (INDEX_NONE = wilderness/none). Game thread; CopySettlementAtCell is SimulationLock-guarded (snapshot copy).
     void CheckZoneEntry();
