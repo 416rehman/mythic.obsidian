@@ -192,6 +192,12 @@ protected:
     UPROPERTY(Replicated, EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
     UAbilitySystemComponent *AbilitySystemComponent;
 
+    // Replicated mirror of this NPC's current hostile target (set by AMythicAIController on the server; AI controllers
+    // themselves do NOT replicate). Lets clients know who the NPC is fighting — drives the contextual nameplate
+    // visibility so plates appear for ALL players, not just the listen-server host.
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Mythic NPC | Combat")
+    TObjectPtr<AActor> EngagedTarget;
+
     // The LifeAttributeSet for the NPC
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mythic NPC | Stats")
     UMythicAttributeSet_Life *LifeAttributes;
@@ -338,6 +344,14 @@ public:
     // Get NPC Data
     UFUNCTION(BlueprintCallable, Category = "Mythic NPC | Data")
     const FMythicNPCData GetNPCData() const;
+
+    // The actor this NPC is currently fighting (replicated mirror of the server AI's hostile target; null = not engaged).
+    // Client-visible, so the contextual nameplate system shows plates for everyone, not just the host.
+    UFUNCTION(BlueprintPure, Category = "Mythic NPC | Combat")
+    AActor *GetEngagedTarget() const { return EngagedTarget; }
+
+    // SERVER: set the engaged target. Called by AMythicAIController when its hostile target is engaged/released.
+    void SetEngagedTarget(AActor *Target) { EngagedTarget = Target; }
 
     // SERVER: seed base attributes from NPCData.Proficiencies onto the ASC. Idempotent across pooled reuse
     // (resets each target attribute to its default before applying the authored modifier).

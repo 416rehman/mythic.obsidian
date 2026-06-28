@@ -18,7 +18,6 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "AI/NPCs/MythicNPCCharacter.h"
-#include "AI/NPCs/MythicAIController.h"
 #include "Engine/GameInstance.h"
 #include "World/EnvironmentController/MythicEnvironmentSubsystem.h"
 
@@ -926,8 +925,8 @@ void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas) {
     UWorld *World = GetWorld();
     UGameInstance *GI = World ? World->GetGameInstance() : nullptr;
     UMythicEnvironmentSubsystem *Env = GI ? GI->GetSubsystem<UMythicEnvironmentSubsystem>() : nullptr;
-    if (!Env) {
-        return; // no environment system (e.g. a menu map) — nothing to show
+    if (!Env || !Env->GetEnvironmentController()) {
+        return; // no env system (menu map) OR controller not registered yet — never show real-world wall-clock time
     }
 
     const FDateTime Now = Env->GetCurrentTime();
@@ -995,14 +994,11 @@ void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas) {
 }
 
 bool UMythicDamageNumberSubsystem::IsNameplateRelevant(AActor *Npc, AActor *LocalPawn) const {
-    // ENGAGED = the NPC's AI is actively fighting the local player (its current hostile target is us). Cheap + reliable;
-    // broader signals (threat table, faction-hostile-and-near, focus) are layered on in follow-up slices.
-    const APawn *NpcPawn = Cast<APawn>(Npc);
-    if (!NpcPawn) {
-        return false;
-    }
-    if (const AMythicAIController *AICtrl = Cast<AMythicAIController>(NpcPawn->GetController())) {
-        return AICtrl->GetCurrentHostileTarget() == LocalPawn;
+    // ENGAGED = this NPC is fighting the local player. Read the NPC's REPLICATED EngagedTarget (mirrored from the server
+    // AI's hostile target) so the plate appears on EVERY client — the AIController's target is server-only and is null on
+    // remote clients. Broader signals (threat table, faction-hostile-and-near) are a follow-up.
+    if (const AMythicNPCCharacter *NPC = Cast<AMythicNPCCharacter>(Npc)) {
+        return NPC->GetEngagedTarget() == LocalPawn;
     }
     return false;
 }
@@ -1015,6 +1011,7 @@ void UMythicDamageNumberSubsystem::DrawNameplates(UCanvas *Canvas, APlayerContro
     APawn *LocalPawn = PC->GetPawn();
     if (!LocalPawn) {
         NameplateStates.Reset();
+        LastNameplateTime = -1.0f; // restart the fade clock so the first frame after respawn doesn't spike Dt (no pop-in)
         return;
     }
 

@@ -28,6 +28,7 @@
 #include "World/LivingWorld/Factions/FactionColor.h"          // MythicFactionColor::GetFactionColor (resolved tint)
 #include "TimerManager.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h" // GetMesh() URO + VisibilityBasedAnimTickOption (embodied-population anim cost)
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -367,6 +368,21 @@ AMythicNPCCharacter::AMythicNPCCharacter() {
     if (UCapsuleComponent *Capsule = GetCapsuleComponent()) {
         Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
     }
+
+    // ── Animation cost control for the embodied population ──────────────────────────────────────────────────────────
+    // Every embodied actor (this class, its mesh-bearing BP subclasses, and AMythicCreatureCharacter) carries a full
+    // skeletal mesh. With dozens embodied around the player the SkeletalMeshComponent pose evaluation (TG_PrePhysics)
+    // dominates the frame. Two engine LODs cut that WITHOUT reducing the visible NPC count:
+    //   • OnlyTickPoseWhenRendered — an NPC not currently rendered skips pose evaluation entirely (movement still ticks,
+    //     so it keeps walking/pathing; only the bone animation pauses while off-screen).
+    //   • Update Rate Optimization — on-screen NPCs that are distant / small on screen evaluate the pose every N frames
+    //     and interpolate, so cost scales down with screen size instead of being flat per actor.
+    // Ambient population NPCs don't need bone-accurate off-screen poses, so this is safe. A BP/native subclass that
+    // genuinely needs always-on bones (e.g. a scripted set-piece) can override these in its own ctor/BeginPlay.
+    if (USkeletalMeshComponent *MeshComp = GetMesh()) {
+        MeshComp->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+        MeshComp->bEnableUpdateRateOptimizations = true;
+    }
 }
 
 // ─── IMythicInteractable: talk to the NPC → contextual dialogue bark ───
@@ -705,6 +721,8 @@ void AMythicNPCCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimePrope
     // Step 4: the resolved wardrobe descriptor. The ONLY new replicated property this cluster adds (single edit, per the
     // GetLifetimeReplicatedProps single-owner contract). Server resolves + assigns it; clients apply via OnRep_Appearance.
     DOREPLIFETIME(AMythicNPCCharacter, Appearance);
+    // Client-visible mirror of the server AI's hostile target — drives contextual nameplate visibility on all clients.
+    DOREPLIFETIME(AMythicNPCCharacter, EngagedTarget);
 }
 
 void AMythicNPCCharacter::PossessedBy(AController *NewController) {

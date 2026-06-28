@@ -219,6 +219,11 @@ void AMythicAIController::ForceEngageTarget(AActor *Target) {
     }
 
     CurrentHostileTarget = Target;
+    // Mirror onto the (replicated) NPC so CLIENTS can see who we're fighting — the contextual nameplate system reads this
+    // (AI controllers don't replicate, so the nameplate can't read CurrentHostileTarget directly).
+    if (AMythicNPCCharacter *NPC = Cast<AMythicNPCCharacter>(GetPawn())) {
+        NPC->SetEngagedTarget(Target);
+    }
     // Anchor the leash at the engage point (where we acquired). The leash check in TryAttackCurrentTarget resets the
     // NPC if it is later pulled beyond LeashRange from here.
     if (const APawn *MyPawn = GetPawn()) {
@@ -239,6 +244,9 @@ void AMythicAIController::ForceEngageTarget(AActor *Target) {
 void AMythicAIController::ReleaseHostileTarget() {
     AActor *Previous = CurrentHostileTarget;
     CurrentHostileTarget = nullptr;
+    if (AMythicNPCCharacter *NPC = Cast<AMythicNPCCharacter>(GetPawn())) {
+        NPC->SetEngagedTarget(nullptr); // clear the client-visible engaged marker
+    }
     StopMovement();
     bFleeingMove = false;
     ClearFocus(EAIFocusPriority::Gameplay);
