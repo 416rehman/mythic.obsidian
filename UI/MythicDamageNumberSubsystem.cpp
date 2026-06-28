@@ -19,6 +19,8 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "AI/NPCs/MythicAIController.h"
+#include "Engine/GameInstance.h"
+#include "World/EnvironmentController/MythicEnvironmentSubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMythicDamageNumbers, Log, All);
 
@@ -76,6 +78,7 @@ void UMythicDamageNumberSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
     DrawWorldCallouts(Canvas, PC);
     DrawNameplates(Canvas, PC);
     DrawScreenNotifications(Canvas, PC); // screen UI (toasts/banners) layers on top of world-anchored elements
+    DrawAmbient(Canvas);                 // auto-hiding time/weather corner cluster
 }
 
 // Swap-remove every expired entry. Declared in the header but previously never defined — the ONLY pruning was inside
@@ -917,6 +920,78 @@ float UMythicDamageNumberSubsystem::StepNameplateAlpha(float CurrentAlpha, float
         return FMath::Max(TargetAlpha, CurrentAlpha - MaxStep);
     }
     return CurrentAlpha;
+}
+
+void UMythicDamageNumberSubsystem::DrawAmbient(UCanvas *Canvas) {
+    UWorld *World = GetWorld();
+    UGameInstance *GI = World ? World->GetGameInstance() : nullptr;
+    UMythicEnvironmentSubsystem *Env = GI ? GI->GetSubsystem<UMythicEnvironmentSubsystem>() : nullptr;
+    if (!Env) {
+        return; // no environment system (e.g. a menu map) — nothing to show
+    }
+
+    const FDateTime Now = Env->GetCurrentTime();
+    const FGameplayTag Weather = Env->GetWeather();
+    const int32 Hour = Now.GetHour();
+    const float CurrentTime = World->GetTimeSeconds();
+
+    // Surface the cluster whenever the hour or the weather changes (and on first sight); then it auto-hides.
+    if (Hour != LastAmbientHour || Weather != LastAmbientWeather) {
+        AmbientShownTime = CurrentTime;
+        LastAmbientHour = Hour;
+        LastAmbientWeather = Weather;
+    }
+
+    const float Hold = 3.0f;
+    const float Fade = 1.5f;
+    const float Elapsed = CurrentTime - AmbientShownTime;
+    float Alpha = 0.0f;
+    if (Elapsed < Hold) {
+        Alpha = 1.0f;
+    }
+    else if (Elapsed < Hold + Fade) {
+        Alpha = 1.0f - (Elapsed - Hold) / Fade;
+    }
+    if (Alpha <= 0.01f) {
+        return; // auto-hidden between changes
+    }
+
+    UFont *Font = (Config && Config->Font) ? Config->Font.Get() : nullptr;
+    if (!Font) {
+        Font = GEngine->GetMediumFont();
+    }
+    if (!Font) {
+        return;
+    }
+
+    // Weather leaf name (Environment.Weather.Rain -> "Rain").
+    FString WeatherName = TEXT("Clear");
+    if (Weather.IsValid()) {
+        const FString Full = Weather.GetTagName().ToString();
+        int32 DotIdx = INDEX_NONE;
+        WeatherName = Full.FindLastChar(TEXT('.'), DotIdx) ? Full.RightChop(DotIdx + 1) : Full;
+    }
+
+    const FString Text = FString::Printf(TEXT("%02d:00    %s    Day %d"), Hour, *WeatherName, Now.GetDay());
+    const float FontScale = (Config ? Config->FontScaleMultiplier : 1.0f) * 0.85f;
+
+    float TW = 0.0f, TH = 0.0f;
+    Canvas->TextSize(Font, Text, TW, TH, FontScale, FontScale);
+    const float Margin = 24.0f;
+    const float Pad = 7.0f;
+    const float X = Canvas->ClipX - TW - Margin;
+    const float Y = Margin;
+
+    FCanvasTileItem Bg(FVector2D(X - Pad, Y - Pad), GWhiteTexture, FVector2D(TW + Pad * 2.0f, TH + Pad * 2.0f),
+                       FLinearColor(0.0f, 0.0f, 0.0f, 0.45f * Alpha));
+    Bg.BlendMode = SE_BLEND_Translucent;
+    Canvas->DrawItem(Bg);
+
+    FCanvasTextItem TextItem(FVector2D(X, Y), FText::FromString(Text), Font, FLinearColor(0.9f, 0.92f, 0.96f, Alpha));
+    TextItem.Scale = FVector2D(FontScale, FontScale);
+    TextItem.bOutlined = Config ? Config->bEnableOutline : true;
+    TextItem.OutlineColor = Config ? Config->OutlineColor : FLinearColor::Black;
+    Canvas->DrawItem(TextItem);
 }
 
 bool UMythicDamageNumberSubsystem::IsNameplateRelevant(AActor *Npc, AActor *LocalPawn) const {

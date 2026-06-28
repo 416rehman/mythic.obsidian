@@ -532,6 +532,9 @@ protected:
     // True if this NPC is currently ENGAGED with the local player (its AI is fighting us) — drives nameplate visibility.
     bool IsNameplateRelevant(AActor *Npc, AActor *LocalPawn) const;
 
+    // Draws the auto-hiding ambient cluster (time of day / weather / day) — surfaces on change, then fades out.
+    void DrawAmbient(UCanvas *Canvas);
+
 protected:
     // Active damage numbers
     UPROPERTY()
@@ -550,6 +553,11 @@ protected:
 
     // World time of the previous nameplate draw, for the per-frame fade delta (-1 = not drawn yet).
     float LastNameplateTime = -1.0f;
+
+    // Ambient cluster (time/weather) auto-hide state: last seen hour/weather + when the cluster was last surfaced.
+    int32 LastAmbientHour = -1;
+    FGameplayTag LastAmbientWeather;
+    float AmbientShownTime = -1000.0f;
 
     // Configuration
     UPROPERTY()
