@@ -621,9 +621,10 @@ void AMythicPlayerController::ClientReceiveGiftOffer_Implementation(AMythicPlaye
     // RECIPIENT client: surface the offer (a float beat so it's never silent) + hand it to the BP prompt widget.
     if (const APawn *AvatarPawn = GetPawn()) {
         if (UWorld *World = AvatarPawn->GetWorld()) {
-            if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
-                DamageNumbers->AddDamageNumberCustom(AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 95.0f),
-                                                     TEXT("Gift offered"), FLinearColor(0.6f, 0.85f, 1.0f), 1.5f);
+            if (UMythicWorldFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicWorldFeedbackSubsystem>()) {
+                Feedback->AddWorldCallout(AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 95.0f),
+                                          FText::FromString(TEXT("Gift offered")), FLinearColor(0.6f, 0.85f, 1.0f), nullptr,
+                                          EMythicFeedbackCategory::Party, 1.5f);
             }
         }
     }
@@ -714,9 +715,9 @@ void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
 void AMythicPlayerController::ClientNotifyGiftResult_Implementation(const FText &Message, FLinearColor Color) {
     if (const APawn *AvatarPawn = GetPawn()) {
         if (UWorld *World = AvatarPawn->GetWorld()) {
-            if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
-                DamageNumbers->AddDamageNumberCustom(AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 95.0f),
-                                                     Message.ToString(), Color, 1.5f);
+            if (UMythicWorldFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicWorldFeedbackSubsystem>()) {
+                Feedback->AddWorldCallout(AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 95.0f),
+                                          Message, Color, nullptr, EMythicFeedbackCategory::Party, 1.5f);
             }
         }
     }
@@ -1060,13 +1061,15 @@ void AMythicPlayerController::ClientReceiveRecruitResult_Implementation(AMythicN
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicWorldFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicWorldFeedbackSubsystem>()) {
         const FVector Location = NPC->GetActorLocation() + FVector(0.0f, 0.0f, 110.0f);
         if (bSucceeded) {
-            DamageNumbers->AddDamageNumberCustom(Location, TEXT("Joined your party!"), FLinearColor(0.1f, 0.9f, 0.3f), 3.0f);
+            Feedback->AddWorldCallout(Location, FText::FromString(TEXT("Joined your party!")), FLinearColor(0.1f, 0.9f, 0.3f),
+                                      nullptr, EMythicFeedbackCategory::Party, 3.0f);
         }
         else {
-            DamageNumbers->AddDamageNumberCustom(Location, TEXT("Party is full"), FLinearColor(0.8f, 0.8f, 0.8f), 3.0f);
+            Feedback->AddWorldCallout(Location, FText::FromString(TEXT("Party is full")), FLinearColor(0.8f, 0.8f, 0.8f),
+                                      nullptr, EMythicFeedbackCategory::Party, 3.0f);
         }
     }
 }
@@ -1076,10 +1079,10 @@ void AMythicPlayerController::ClientShowGatherProgress_Implementation(FVector Lo
     if (!World) {
         return;
     }
-    if (UMythicWorldFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicWorldFeedbackSubsystem>()) {
+    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
         const FVector Loc = Location + FVector(0.0f, 0.0f, 50.0f); // float just above the node
         Feedback->AddWorldCallout(Loc, FText::FromString(FString::Printf(TEXT("%d left"), HitsRemaining)),
-                                  FLinearColor(0.85f, 0.7f, 0.4f), nullptr, EMythicFeedbackCategory::Resource, 1.0f); // tan, brief
+                                  FLinearColor(0.85f, 0.7f, 0.4f), nullptr, 1.0f); // tan, brief — world-anchored, spatial
     }
 }
 
@@ -1088,10 +1091,9 @@ void AMythicPlayerController::ClientShowGatherDepleted_Implementation(FVector Lo
     if (!World) {
         return;
     }
-    if (UMythicWorldFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicWorldFeedbackSubsystem>()) {
+    if (UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
         const FVector Loc = Location + FVector(0.0f, 0.0f, 50.0f);
-        Feedback->AddWorldCallout(Loc, FText::FromString(TEXT("Depleted!")), FLinearColor(0.6f, 0.85f, 0.4f), nullptr,
-                                  EMythicFeedbackCategory::Resource, 1.5f);
+        Feedback->AddWorldCallout(Loc, FText::FromString(TEXT("Depleted!")), FLinearColor(0.6f, 0.85f, 0.4f), nullptr, 1.5f);
     }
 }
 
@@ -1232,10 +1234,10 @@ void AMythicPlayerController::ClientNotifyTradeResult_Implementation(EMythicTrad
     if (Message.IsEmpty()) {
         return; // nothing player-facing (a success/partial/invalid result reaches here only defensively)
     }
-    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicWorldFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicWorldFeedbackSubsystem>()) {
         const FVector Location = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 100.0f); // float over the player's head
         // Denial red — distinct from the gold/rarity pickup tints so a failed trade reads as a failure at a glance.
-        DamageNumbers->AddDamageNumberCustom(Location, Message.ToString(), FLinearColor(0.9f, 0.2f, 0.2f), 1.5f);
+        Feedback->AddWorldCallout(Location, Message, FLinearColor(0.9f, 0.2f, 0.2f), nullptr, EMythicFeedbackCategory::Generic, 1.5f);
     }
 }
 
@@ -1248,18 +1250,17 @@ void AMythicPlayerController::ClientNotifyEnvironmentHazard_Implementation(const
     if (!World) {
         return;
     }
-    UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>();
-    if (!DamageNumbers) {
+    UMythicDamageNumberSubsystem *Feedback = World->GetSubsystem<UMythicDamageNumberSubsystem>();
+    if (!Feedback) {
         return;
     }
     const FVector Location = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 110.0f);
     if (bOnset) {
-        DamageNumbers->AddDamageNumberCustom(Location, HazardName.ToString(),
-                                             FLinearColor(1.0f, 0.55f, 0.15f), 2.5f); // amber — a hazard takes hold
+        Feedback->AddWorldCallout(Location, HazardName, FLinearColor(1.0f, 0.55f, 0.15f), nullptr, 2.5f); // amber — a hazard takes hold
     }
     else {
-        DamageNumbers->AddDamageNumberCustom(Location, FString::Printf(TEXT("%s subsides"), *HazardName.ToString()),
-                                             FLinearColor(0.7f, 0.8f, 0.85f), 2.0f); // cool grey — it passes
+        Feedback->AddWorldCallout(Location, FText::FromString(FString::Printf(TEXT("%s subsides"), *HazardName.ToString())),
+                                  FLinearColor(0.7f, 0.8f, 0.85f), nullptr, 2.0f); // cool grey — it passes
     }
 }
 
@@ -1272,25 +1273,25 @@ void AMythicPlayerController::ClientNotifyItemDurability_Implementation(const FT
     if (!World) {
         return;
     }
-    UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>();
-    if (!DamageNumbers) {
+    UMythicWorldFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicWorldFeedbackSubsystem>();
+    if (!Feedback) {
         return;
     }
     const FString Item = ItemName.IsEmpty() ? TEXT("Item") : ItemName.ToString();
     const FVector Location = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 90.0f);
     switch (Beat) {
         case EMythicItemDurabilityBeat::Broken:
-            DamageNumbers->AddDamageNumberCustom(Location, FString::Printf(TEXT("%s broke!"), *Item),
-                                                 FLinearColor(0.9f, 0.1f, 0.1f), 3.0f); // red, lingers — the dramatic beat
+            Feedback->AddWorldCallout(Location, FText::FromString(FString::Printf(TEXT("%s broke!"), *Item)),
+                                      FLinearColor(0.9f, 0.1f, 0.1f), nullptr, EMythicFeedbackCategory::Generic, 3.0f); // red, lingers — the dramatic beat
             break;
         case EMythicItemDurabilityBeat::Repaired:
-            DamageNumbers->AddDamageNumberCustom(Location, FString::Printf(TEXT("%s repaired"), *Item),
-                                                 FLinearColor(0.1f, 0.9f, 0.3f), 2.0f); // green (matches the recruit beat)
+            Feedback->AddWorldCallout(Location, FText::FromString(FString::Printf(TEXT("%s repaired"), *Item)),
+                                      FLinearColor(0.1f, 0.9f, 0.3f), nullptr, EMythicFeedbackCategory::Generic, 2.0f); // green (matches the recruit beat)
             break;
         case EMythicItemDurabilityBeat::LowWarning:
         default:
-            DamageNumbers->AddDamageNumberCustom(Location, FString::Printf(TEXT("%s durability low"), *Item),
-                                                 FLinearColor(1.0f, 0.6f, 0.1f), 2.0f); // amber warning
+            Feedback->AddWorldCallout(Location, FText::FromString(FString::Printf(TEXT("%s durability low"), *Item)),
+                                      FLinearColor(1.0f, 0.6f, 0.1f), nullptr, EMythicFeedbackCategory::Generic, 2.0f); // amber warning
             break;
     }
 }
@@ -1466,10 +1467,10 @@ void AMythicPlayerController::ClientNotifyZoneEntry_Implementation(const FText &
     if (!World) {
         return;
     }
-    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+    if (UMythicWorldFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicWorldFeedbackSubsystem>()) {
         const FVector Location = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 130.0f);
-        DamageNumbers->AddDamageNumberCustom(Location, FString::Printf(TEXT("Welcome to %s"), *SettlementName.ToString()),
-                                             FLinearColor(1.0f, 0.85f, 0.1f), 3.0f); // gold, lingers (matches objectives)
+        Feedback->AddWorldCallout(Location, FText::FromString(FString::Printf(TEXT("Welcome to %s"), *SettlementName.ToString())),
+                                  FLinearColor(1.0f, 0.85f, 0.1f), nullptr, EMythicFeedbackCategory::Generic, 3.0f); // gold, lingers (matches objectives)
     }
 }
 

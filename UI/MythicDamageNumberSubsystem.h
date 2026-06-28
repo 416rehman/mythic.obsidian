@@ -331,6 +331,41 @@ struct FMythicScreenNotification {
 };
 
 /**
+ * One world-anchored NON-COMBAT callout (gather "3 left" / "Depleted" at the node, a hazard at its source). Projected
+ * above a world point and drifting up — calmer than a combat damage number, no background panel. Plain struct for
+ * cache-friendly iteration.
+ */
+USTRUCT()
+struct FMythicWorldCallout {
+    GENERATED_BODY()
+
+    UPROPERTY()
+    FVector WorldLocation = FVector::ZeroVector;
+
+    UPROPERTY()
+    FText CachedText;
+
+    UPROPERTY()
+    TObjectPtr<UTexture2D> Icon = nullptr;
+
+    UPROPERTY()
+    FLinearColor Color = FLinearColor::White;
+
+    UPROPERTY()
+    float SpawnTime = 0.0f;
+
+    UPROPERTY()
+    float Lifetime = 2.0f;
+
+    UPROPERTY()
+    int32 ID = 0;
+
+    bool IsExpired(float CurrentTime) const {
+        return (CurrentTime - SpawnTime) >= Lifetime;
+    }
+};
+
+/**
  * UMythicDamageNumberSubsystem
  *
  * The unified, high-performance, NON-WBP feedback subsystem. Combat damage numbers (world-projected, floating off the
@@ -397,6 +432,13 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Feedback")
     void AddScreenBanner(const FText &Title, const FText &Subtitle, FLinearColor AccentColor, UTexture2D *Icon = nullptr, float DurationOverride = 0.0f);
 
+    /**
+     * Queue a world-anchored NON-COMBAT callout (gather / hazard) — projected above WorldLocation, drifting up and fading.
+     * Calmer than a combat number (no background panel). Icon optional; DurationOverride <= 0 uses a sensible default.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Feedback")
+    void AddWorldCallout(FVector WorldLocation, const FText &Text, FLinearColor Color, UTexture2D *Icon = nullptr, float DurationOverride = 0.0f);
+
     // ─── Pure presentation math for screen notifications (public + static so it is unit-testable) ──────────────────
 
     /** Toast opacity over its life: ramp 0->1 over FadeInTime, hold 1, ramp 1->0 over FadeOutTime; clamp [0,1]; Lifetime<=0 -> 0. */
@@ -460,6 +502,9 @@ protected:
     // Draws the screen-space notifications (toasts/banners). Called from OnHUDPostRender after the damage numbers.
     void DrawScreenNotifications(UCanvas *Canvas, APlayerController *PC);
 
+    // Draws the world-anchored non-combat callouts (gather/hazard). Called from OnHUDPostRender.
+    void DrawWorldCallouts(UCanvas *Canvas, APlayerController *PC);
+
 protected:
     // Active damage numbers
     UPROPERTY()
@@ -468,6 +513,10 @@ protected:
     // Active screen-space notifications (non-combat toasts / hero banners).
     UPROPERTY()
     TArray<FMythicScreenNotification> ActiveNotifications;
+
+    // Active world-anchored non-combat callouts (gather/hazard).
+    UPROPERTY()
+    TArray<FMythicWorldCallout> ActiveWorldCallouts;
 
     // Configuration
     UPROPERTY()

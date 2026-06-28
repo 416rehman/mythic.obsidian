@@ -66,6 +66,7 @@ void UMythicDamageNumberSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
     }
 
     DrawDamageNumbers(Canvas, PC);
+    DrawWorldCallouts(Canvas, PC);
     DrawScreenNotifications(Canvas, PC);
 }
 
@@ -84,6 +85,12 @@ void UMythicDamageNumberSubsystem::CleanupExpired() {
     for (int32 i = ActiveNotifications.Num() - 1; i >= 0; --i) {
         if (ActiveNotifications[i].IsExpired(CurrentTime)) {
             ActiveNotifications.RemoveAtSwap(i, EAllowShrinking::No);
+        }
+    }
+    // ...and the world-anchored non-combat callouts.
+    for (int32 i = ActiveWorldCallouts.Num() - 1; i >= 0; --i) {
+        if (ActiveWorldCallouts[i].IsExpired(CurrentTime)) {
+            ActiveWorldCallouts.RemoveAtSwap(i, EAllowShrinking::No);
         }
     }
 }
@@ -147,6 +154,98 @@ void UMythicDamageNumberSubsystem::SetConfig(UMythicDamageNumberConfig *NewConfi
 void UMythicDamageNumberSubsystem::ClearAll() {
     ActiveDamageNumbers.Empty();
     ActiveNotifications.Empty();
+    ActiveWorldCallouts.Empty();
+}
+
+void UMythicDamageNumberSubsystem::AddWorldCallout(FVector WorldLocation, const FText &Text, FLinearColor Color, UTexture2D *Icon, float DurationOverride) {
+    CleanupExpired();
+
+    FMythicWorldCallout C;
+    C.WorldLocation = WorldLocation;
+    C.CachedText = Text;
+    C.Icon = Icon;
+    C.Color = Color;
+    C.SpawnTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    C.Lifetime = DurationOverride > 0.0f ? DurationOverride : 2.0f;
+    C.ID = NextID++;
+
+    ActiveWorldCallouts.Add(MoveTemp(C));
+}
+
+void UMythicDamageNumberSubsystem::DrawWorldCallouts(UCanvas *Canvas, APlayerController *PC) {
+    if (ActiveWorldCallouts.Num() == 0) {
+        return;
+    }
+    const float CurrentTime = GetWorld()->GetTimeSeconds();
+
+    UFont *Font = (Config && Config->Font) ? Config->Font.Get() : nullptr;
+    if (!Font) {
+        Font = GEngine->GetMediumFont();
+    }
+    if (!Font) {
+        return;
+    }
+
+    const float FontScale = Config ? Config->FontScaleMultiplier : 1.0f;
+    const float FadeIn = 0.15f;
+    const float FadeOut = 0.5f;
+    const float RiseSpeed = 36.0f; // world units/sec the callout drifts up off its anchor
+    const float IconSize = 22.0f;
+    const float IconGap = 4.0f;
+    const bool bOutline = Config ? Config->bEnableOutline : true;
+    const FLinearColor OutlineColor = Config ? Config->OutlineColor : FLinearColor::Black;
+
+    for (int32 i = ActiveWorldCallouts.Num() - 1; i >= 0; --i) {
+        FMythicWorldCallout &C = ActiveWorldCallouts[i];
+        if (C.IsExpired(CurrentTime)) {
+            ActiveWorldCallouts.RemoveAtSwap(i, EAllowShrinking::No);
+            continue;
+        }
+        const float Elapsed = CurrentTime - C.SpawnTime;
+        const float Rise = FMath::Max(0.0f, Elapsed) * RiseSpeed;
+        const FVector RisenWorld = C.WorldLocation + FVector(0.0f, 0.0f, Rise);
+
+        FVector2D ScreenPos;
+        if (!UGameplayStatics::ProjectWorldToScreen(PC, RisenWorld, ScreenPos, true)) {
+            continue; // off-screen / behind camera
+        }
+        const float Alpha = ComputeToastAlpha(Elapsed, C.Lifetime, FadeIn, FadeOut);
+
+        float TextW = 0.0f, TextH = 0.0f;
+        Canvas->TextSize(Font, C.CachedText.ToString(), TextW, TextH, FontScale, FontScale);
+
+        const bool bHasIcon = (C.Icon != nullptr);
+        const float IconW = bHasIcon ? IconSize : 0.0f;
+        const float Gap = bHasIcon ? IconGap : 0.0f;
+        const float TotalW = IconW + Gap + TextW;
+        const float TotalH = FMath::Max(bHasIcon ? IconSize : 0.0f, TextH);
+        const float OriginX = ScreenPos.X - TotalW * 0.5f;
+        const float OriginY = ScreenPos.Y - TotalH * 0.5f;
+
+        if (bHasIcon && C.Icon->GetResource()) {
+            FLinearColor IconColor = C.Color;
+            IconColor.A *= Alpha;
+            FCanvasTileItem IconItem(
+                FVector2D(OriginX, OriginY + (TotalH - IconSize) * 0.5f),
+                C.Icon->GetResource(),
+                FVector2D(IconSize, IconSize),
+                IconColor);
+            IconItem.BlendMode = SE_BLEND_Translucent;
+            Canvas->DrawItem(IconItem);
+        }
+
+        FLinearColor TextColor = C.Color;
+        TextColor.A *= Alpha;
+        FCanvasTextItem TextItem(
+            FVector2D(OriginX + IconW + Gap, OriginY + (TotalH - TextH) * 0.5f),
+            C.CachedText,
+            Font,
+            TextColor);
+        TextItem.Scale = FVector2D(FontScale, FontScale);
+        TextItem.bOutlined = bOutline;
+        TextItem.OutlineColor = OutlineColor;
+        Canvas->DrawItem(TextItem);
+    }
 }
 
 void UMythicDamageNumberSubsystem::AddScreenToast(const FText &Text, FLinearColor Color, UTexture2D *Icon, float DurationOverride) {
