@@ -644,8 +644,25 @@ void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
     // The EXACT offered instance must still occupy the offered slot — guards the giver moving / using / swapping it.
     const bool bItemStillThere = bGiverValid && (SourceInv->GetItem(SourceSlot) == OfferedItem);
 
+    // Capture the item name BEFORE any move — a fully-transferred instance is destroyed, so it can't be read afterward.
+    FText ItemName;
+    if (OfferedItem) {
+        if (const UItemDefinition *Def = OfferedItem->GetItemDefinition()) {
+            ItemName = Def->Name;
+        }
+    }
+
     if (!MythicGift::CanCompleteGift(HasPendingGift(), bAccept, bGiverValid, bInRange, bItemStillThere)) {
-        ClearPendingGift(); // declined / expired / moved / out of range — drop the offer (item stays with the giver)
+        // Don't leave it silent: a decline tells the GIVER; an accept that lapsed (item moved / out of range) tells the recipient.
+        if (HasPendingGift()) {
+            if (!bAccept && Giver) {
+                Giver->ClientNotifyGiftResult(NSLOCTEXT("Gift", "Declined", "Gift declined"), FLinearColor(0.7f, 0.7f, 0.7f));
+            }
+            else if (bAccept) {
+                ClientNotifyGiftResult(NSLOCTEXT("Gift", "Unavailable", "Gift no longer available"), FLinearColor(0.7f, 0.7f, 0.7f));
+            }
+        }
+        ClearPendingGift(); // item stays with the giver
         return;
     }
 
@@ -654,12 +671,54 @@ void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
     if (const UItemDefinition *Def = OfferedItem->GetItemDefinition()) {
         DestInv = GetInventoryForItemType(Def->ItemType);
     }
+    EMythicGiftResult Result = EMythicGiftResult::NoRoom;
+    int32 Moved = 0;
     if (DestInv) {
-        // Server RPC invoked on the authority → executes the move locally (atomic, loss-safe: it puts the item back on
-        // no/partial room). Moves the whole offered stack; partial-quantity gifts are a logged follow-up.
-        SourceInv->ServerQuickMoveToInventory(SourceSlot, DestInv);
+        const UItemDefinition *OfferedDef = OfferedItem->GetItemDefinition();
+        const int32 StacksBefore = OfferedItem->GetStacks();
+        SourceInv->ServerQuickMoveToInventory(SourceSlot, DestInv); // whole-stack; partial-qty gift is a logged follow-up
+        // Detect the outcome from what (if anything) remains in the giver's source slot — by DEFINITION, since the offered
+        // instance may have been destroyed on a full move (never deref the stale pointer here).
+        int32 RemainingInGiver = 0;
+        if (UMythicItemInstance *StillThere = SourceInv->GetItem(SourceSlot)) {
+            if (StillThere->GetItemDefinition() == OfferedDef) {
+                RemainingInGiver = StillThere->GetStacks();
+            }
+        }
+        Moved = FMath::Max(0, StacksBefore - RemainingInGiver);
+        Result = MythicGift::ClassifyGiftMove(StacksBefore, Moved);
+    }
+
+    // Outcome beats — the recipient (this) sees what they got; the giver sees how it landed.
+    if (Result == EMythicGiftResult::Success || Result == EMythicGiftResult::Partial) {
+        ClientNotifyGiftResult(FText::Format(NSLOCTEXT("Gift", "Received", "Received {0} x{1}"), ItemName, FText::AsNumber(Moved)),
+                               FLinearColor(0.45f, 0.9f, 0.45f));
+    }
+    if (Giver) {
+        switch (Result) {
+        case EMythicGiftResult::Success:
+            Giver->ClientNotifyGiftResult(NSLOCTEXT("Gift", "Given", "Gift given"), FLinearColor(0.45f, 0.9f, 0.45f));
+            break;
+        case EMythicGiftResult::Partial:
+            Giver->ClientNotifyGiftResult(NSLOCTEXT("Gift", "Partial", "Gift partly given (no room for all)"), FLinearColor(0.95f, 0.8f, 0.3f));
+            break;
+        default: // NoRoom
+            Giver->ClientNotifyGiftResult(NSLOCTEXT("Gift", "NoRoom", "Recipient has no room"), FLinearColor(1.0f, 0.5f, 0.3f));
+            break;
+        }
     }
     ClearPendingGift();
+}
+
+void AMythicPlayerController::ClientNotifyGiftResult_Implementation(const FText &Message, FLinearColor Color) {
+    if (const APawn *AvatarPawn = GetPawn()) {
+        if (UWorld *World = AvatarPawn->GetWorld()) {
+            if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+                DamageNumbers->AddDamageNumberCustom(AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 95.0f),
+                                                     Message.ToString(), Color, 1.5f);
+            }
+        }
+    }
 }
 
 bool AMythicPlayerController::ServerDeployPlaceable_Validate(UMythicInventoryComponent *Inventory, int32 SlotIndex,

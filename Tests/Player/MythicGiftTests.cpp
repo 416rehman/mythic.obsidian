@@ -28,5 +28,13 @@ bool FMythicGiftHandshakeTest::RunTest(const FString &Parameters) {
     TestFalse(TEXT("drifted out of range before accepting → no transfer"), MythicGift::CanCompleteGift(true, true, true, false, true));
     TestFalse(TEXT("giver moved/used the offered item → no transfer (no substitution)"), MythicGift::CanCompleteGift(true, true, true, true, false));
 
+    // ── ClassifyGiftMove(stacksBefore, moved): how the transfer landed (drives the outcome beats) ──
+    TestTrue(TEXT("the whole stack moved → Success"), MythicGift::ClassifyGiftMove(5, 5) == EMythicGiftResult::Success);
+    TestTrue(TEXT("some but not all moved → Partial"), MythicGift::ClassifyGiftMove(5, 3) == EMythicGiftResult::Partial);
+    TestTrue(TEXT("nothing moved (recipient full) → NoRoom"), MythicGift::ClassifyGiftMove(5, 0) == EMythicGiftResult::NoRoom);
+    TestTrue(TEXT("a single-item full move → Success"), MythicGift::ClassifyGiftMove(1, 1) == EMythicGiftResult::Success);
+    TestTrue(TEXT("a degenerate empty offer → NoRoom (defensive)"), MythicGift::ClassifyGiftMove(0, 0) == EMythicGiftResult::NoRoom);
+    TestTrue(TEXT("moved-clamped-above-before is still Success, not Partial"), MythicGift::ClassifyGiftMove(3, 4) == EMythicGiftResult::Success);
+
     return true;
 }

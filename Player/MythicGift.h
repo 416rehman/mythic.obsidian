@@ -7,7 +7,28 @@
 
 #include "CoreMinimal.h"
 
+// Outcome of a gift, used SERVER-SIDE to compose the giver/recipient beats (a plain enum — not reflected; the beat is sent
+// as pre-composed text over a Client RPC). Success = the whole offered stack moved; Partial = some moved (recipient ran out
+// of room); NoRoom = nothing moved; Declined = the recipient declined; Unavailable = the offer lapsed (item moved / range).
+enum class EMythicGiftResult : uint8 {
+    Success,
+    Partial,
+    NoRoom,
+    Declined,
+    Unavailable,
+};
+
 namespace MythicGift {
+
+    // Pure: classify how a gift MOVE turned out from the stack count before vs how many actually moved. Drives the outcome
+    // beats. <=0 moved → NoRoom; the whole stack → Success; some-but-not-all → Partial. Static + unit-testable.
+    FORCEINLINE EMythicGiftResult ClassifyGiftMove(int32 StacksBefore, int32 Moved) {
+        if (Moved <= 0 || StacksBefore <= 0) {
+            return EMythicGiftResult::NoRoom;
+        }
+        return (Moved >= StacksBefore) ? EMythicGiftResult::Success : EMythicGiftResult::Partial;
+    }
+
     // Can the giver OFFER a gift? The recipient is a valid, DIFFERENT player, within gifting range, and the source slot
     // holds a player-takeable item. (Authority + own-inventory are enforced at the RPC; these are the gameplay gates.)
     FORCEINLINE bool CanOfferGift(bool bRecipientValid, bool bDifferentPlayers, bool bInRange, bool bSourceHasTakeableItem) {

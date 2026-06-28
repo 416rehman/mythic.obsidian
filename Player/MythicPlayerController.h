@@ -270,6 +270,11 @@ public:
     UFUNCTION(BlueprintImplementableEvent, Category = "Gift")
     void OnGiftOffered(AMythicPlayerController *Giver, const FText &ItemName);
 
+    // SERVER → client: float a gift OUTCOME beat (server-composed text/color). Fired to BOTH the recipient ("Received <item>")
+    // and the giver ("Gift given" / "No room" / "Declined"), so neither side is left guessing how the hand-off resolved.
+    UFUNCTION(Client, Reliable, Category = "Gift")
+    void ClientNotifyGiftResult(const FText &Message, FLinearColor Color);
+
     // deploy the placeable item in SlotIndex of Inventory into the world
     UFUNCTION(Server, Reliable, WithValidation, Category = "Placeable")
     void ServerDeployPlaceable(UMythicInventoryComponent *Inventory, int32 SlotIndex, FVector AimOrigin, FVector AimDirection);
