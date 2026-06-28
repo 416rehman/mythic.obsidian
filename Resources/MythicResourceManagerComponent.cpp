@@ -118,14 +118,14 @@ void UMythicResourceManagerComponent::OnRep_DestroyedResources() {
         HandleResourceDestruction(*Items);
     }
     else {
-        // Keep trying next frame
-        UE_LOG(Myth, Warning, TEXT("UMythicResourceManagerComponent::OnRep_DestroyedResources: World is null, retrying next frame"));
-
-        GetWorld()->GetTimerManager().SetTimerForNextTick([this]() {
-            UE_LOG(Myth, Log,
-                   TEXT("UMythicResourceManagerComponent::OnRep_DestroyedResources: Retrying OnRep_DestroyedResources because World should be valid now"));
-            OnRep_DestroyedResources();
-        });
+        // World is null. The previous code "retried next frame" via GetWorld()->GetTimerManager() — but GetWorld() is
+        // exactly the null pointer this branch tests for, so that was a guaranteed null-deref CRASH in the one case the
+        // branch exists to handle (and the raw [this] timer lambda would have been a use-after-free too). A registered
+        // component receiving an OnRep is normally already in a world, so this branch is effectively unreachable; but if
+        // it ever is reached we must not crash. The replicated DestroyedResources state persists, so a later OnRep (with
+        // a valid world) re-syncs it.
+        UE_LOG(Myth, Warning,
+               TEXT("UMythicResourceManagerComponent::OnRep_DestroyedResources: World is null; deferring resource sync to the next replication update."));
     }
 }
 
