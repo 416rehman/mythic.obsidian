@@ -189,10 +189,16 @@ public:
     // (Range is enforced separately by the interaction RPC.) Static + no engine state for unit testing.
     static bool CanReviveTarget(bool bTargetDowned, bool bReviverDowned);
 
-    // Combat proficiency XP paid to the teammate who revives this owner (co-op incentive). 0 (default) = no reward,
-    // byte-identical to the prior behaviour. The reward domain (combat vs a support proficiency) is a logged design choice.
+    // Proficiency XP paid to the teammate who revives this owner (co-op incentive). 0 (default) = no reward,
+    // byte-identical to the prior behaviour.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mythic|Health")
     float ReviveXPReward = 0.0f;
+
+    // Which proficiency the revive reward feeds. null (default) = COMBAT XP (the prior behaviour). Set a dedicated
+    // support/medic proficiency definition to credit reviving as its OWN skill (a revive is a support act, not combat) —
+    // closes the iter-28 logged domain choice without changing the default.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mythic|Health")
+    TObjectPtr<class UProficiencyDefinition> ReviveRewardProficiency = nullptr;
 
     // One-shot: set true ONLY by the genuine reviver-initiated revive paths (channel completion + the instant fallback),
     // consumed in ServerReviveFromDowned to gate the reward — so a DIRECT/debug ServerReviveFromDowned (e.g. a self-revive

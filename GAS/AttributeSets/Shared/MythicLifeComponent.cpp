@@ -383,16 +383,23 @@ void UMythicLifeComponent::ServerReviveFromDowned() {
     CancelReviveChannel(); // a revive happened (channel or instant) — never leave a channel timer running afterward
     UE_LOG(Myth, Log, TEXT("LifeComponent: %s REVIVED from downed."), *GetNameSafe(GetOwner()));
 
-    // Co-op incentive: pay the reviver combat proficiency XP for bringing a teammate back. Conservative default 0 =
-    // no reward (byte-identical). Only a valid player reviver who isn't the revived owner qualifies; NPC / absent
-    // revivers earn nothing. ComputeReviveReward owns the eligibility→amount rule (unit-tested).
+    // Co-op incentive: pay the reviver proficiency XP for bringing a teammate back. Conservative default 0 = no reward
+    // (byte-identical). Only a valid player reviver who isn't the revived owner qualifies; NPC / absent revivers earn
+    // nothing. ComputeReviveReward owns the eligibility→amount rule (unit-tested).
     AMythicPlayerController *ReviverPC = (bPayReviver && Reviver && Reviver != GetOwner())
         ? Cast<AMythicPlayerController>(Reviver->GetController())
         : nullptr;
     const float ReviveReward = ComputeReviveReward(ReviverPC != nullptr, ReviveXPReward);
     if (ReviveReward > 0.0f && ReviverPC) {
         if (UProficiencyComponent *ProfComp = const_cast<UProficiencyComponent *>(ReviverPC->GetProficiencyComponent())) {
-            ProfComp->GrantCombatXP(ReviveReward);
+            // Credit a dedicated support/medic proficiency when one is configured (a revive is a support act); otherwise
+            // fall back to combat XP — byte-identical to the prior behaviour when ReviveRewardProficiency is unset.
+            if (ReviveRewardProficiency) {
+                ProfComp->GrantProficiencyXP(ReviveRewardProficiency, ReviveReward);
+            }
+            else {
+                ProfComp->GrantCombatXP(ReviveReward);
+            }
         }
     }
 
