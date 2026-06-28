@@ -74,6 +74,10 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DMG_DESTRUCTIBLE);
 // drive non-combat "collect N <type>" objectives (the trigger-event family was combat-only before this).
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ITEM_ACQUIRED);
 
+// A player entered a location-objective volume (AMythicLocationObjectiveVolume). Fired server-side on the player's ASC;
+// TargetTags carries the volume's LocationTag so the ObjectiveTracker can drive non-combat "reach/visit X" objectives.
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_REACHED_LOCATION);
+
 // The owner has started an attack
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ATTACK_BEGIN);
 // The owner has ended an attack

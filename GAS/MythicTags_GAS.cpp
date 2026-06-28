@@ -78,6 +78,8 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_DESTRUCTIBLE, "GAS.Event.Dmg.Destru
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ITEM_ACQUIRED, "GAS.Event.Item.Acquired",
                                "Fired server-side on a player's ASC when they genuinely acquire item(s). EventMagnitude = quantity; TargetTags carries the item's ItemType. Drives 'collect N' objectives.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_REACHED_LOCATION, "GAS.Event.ReachedLocation",
+                               "Fired server-side on a player's ASC when they first enter an AMythicLocationObjectiveVolume. TargetTags carries the volume's LocationTag. Drives non-combat 'reach/visit X' objectives.");
 
 /** GameplayCues */
 UE_DEFINE_GAMEPLAY_TAG(GAMEPLAYCUE_ABILITY_HEAL_ACTIVATED, "GameplayCue.Ability.Heal.Activated");
