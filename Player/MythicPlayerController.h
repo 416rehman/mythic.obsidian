@@ -250,6 +250,26 @@ public:
     UFUNCTION(Server, Reliable, WithValidation, Category = "Vendor")
     void ServerVendorRepairAll(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory);
 
+    // ---- Co-op item GIFT (one-directional give with the recipient's consent) ----
+    // GIVER → server: offer the item in SourceSlotIndex of one of the giver's OWN inventories to Recipient. Validated
+    // (different valid players, in range, takeable item); on success the offer is parked on the recipient + they get a prompt.
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Gift")
+    void ServerOfferGift(AMythicPlayerController *Recipient, UMythicInventoryComponent *SourceInv, int32 SourceSlotIndex);
+
+    // SERVER → RECIPIENT client: a gift was offered — drives the accept/decline prompt (BP UI calls ServerRespondGift).
+    UFUNCTION(Client, Reliable, Category = "Gift")
+    void ClientReceiveGiftOffer(AMythicPlayerController *Giver, const FText &ItemName);
+
+    // RECIPIENT → server: accept (true) or decline (false) the pending offer. On accept the server re-validates everything
+    // (giver still in range + still holds the exact offered item) and atomically moves the stack; otherwise it clears.
+    UFUNCTION(Server, Reliable, Category = "Gift")
+    void ServerRespondGift(bool bAccept);
+
+    // RECIPIENT client BP hook: a gift was offered. The gift-prompt widget implements this to show Accept/Decline and call
+    // ServerRespondGift. (ClientReceiveGiftOffer also floats a beat so the offer isn't silent before the widget is wired.)
+    UFUNCTION(BlueprintImplementableEvent, Category = "Gift")
+    void OnGiftOffered(AMythicPlayerController *Giver, const FText &ItemName);
+
     // deploy the placeable item in SlotIndex of Inventory into the world
     UFUNCTION(Server, Reliable, WithValidation, Category = "Placeable")
     void ServerDeployPlaceable(UMythicInventoryComponent *Inventory, int32 SlotIndex, FVector AimOrigin, FVector AimDirection);
@@ -403,6 +423,19 @@ public:
 private:
     // checks if the player is allowed to access the given inventory
     bool CanPlayerAccessInventory(UMythicInventoryComponent *Inventory) const;
+
+    // ---- Co-op gift: the ONE pending offer THIS player has been given (server-only; not replicated — the prompt is a
+    //      one-shot Client RPC). Re-validated at accept; auto-expires after GiftOfferTimeoutSeconds. ----
+    TWeakObjectPtr<AMythicPlayerController> PendingGiftGiver;
+    TWeakObjectPtr<UMythicInventoryComponent> PendingGiftSourceInv;
+    TWeakObjectPtr<UMythicItemInstance> PendingGiftItem; // the exact instance offered — re-checked still-in-slot at accept
+    int32 PendingGiftSourceSlot = INDEX_NONE;
+    FTimerHandle PendingGiftTimerHandle;
+    bool HasPendingGift() const { return PendingGiftGiver.IsValid() && PendingGiftItem.IsValid(); }
+    void ClearPendingGift();        // drop the offer + its timeout timer
+    void OnPendingGiftExpired();    // timer callback: clear a stale offer
+    // Pawn-to-pawn distance gate shared by offer + accept (uses Settings->GiftRange).
+    bool IsWithinGiftRange(const AMythicPlayerController *Other) const;
 
     // handles completion of async class loading for placeable deploy
     void HandleDeployClassLoaded(FSoftObjectPath ClassPath, FMythicPendingDeploy Pending);

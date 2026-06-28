@@ -118,6 +118,16 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Co-op")
     bool bReviveInterruptOnReviverDamage = true;
 
+    /** Max distance (cm) between giver and recipient for a co-op item gift offer/accept. Re-validated server-side at both
+     *  the offer and the accept (so neither player can drift out of range to complete an unfair hand-off). */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Co-op", meta = (ClampMin = "1.0"))
+    float GiftRange = 350.0f;
+
+    /** Seconds a pending gift offer waits for the recipient to accept before it auto-expires (clears + the item stays with
+     *  the giver). 0 = no timeout (the offer waits indefinitely until accepted, declined, or superseded). */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Co-op", meta = (ClampMin = "0.0"))
+    float GiftOfferTimeoutSeconds = 20.0f;
+
     /**
      * Friendly-fire policy. When FALSE (default), a combat hit from one player onto ANOTHER player is negated in the
      * damage-application execution (no damage/shield/status) — the standard co-op default. When TRUE, players can

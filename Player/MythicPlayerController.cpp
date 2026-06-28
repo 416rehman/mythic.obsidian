@@ -33,6 +33,8 @@
 #include "UI/MythicDamageNumberSubsystem.h" // recruit-result callout
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
+#include "Player/MythicGift.h"                      // co-op gift pure decision gates
+#include "Settings/MythicDeveloperSettings.h"       // GiftRange / GiftOfferTimeoutSeconds
 #include "Itemization/Inventory/Fragments/Passive/AffixesFragment.h"
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
@@ -546,6 +548,118 @@ void AMythicPlayerController::ServerVendorRepairAll_Implementation(AMythicVendor
     else if (MythicTrade::IsFailureWorthShowing(Plan.Result)) {
         ClientNotifyTradeResult(Plan.Result);
     }
+}
+
+// ─────────────────────────────── Co-op item gift ───────────────────────────────
+
+bool AMythicPlayerController::IsWithinGiftRange(const AMythicPlayerController *Other) const {
+    const APawn *MyPawn = GetPawn();
+    const APawn *OtherPawn = Other ? Other->GetPawn() : nullptr;
+    if (!MyPawn || !OtherPawn) {
+        return false;
+    }
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    const float Range = Settings ? FMath::Max(1.0f, Settings->GiftRange) : 350.0f;
+    return FVector::DistSquared(MyPawn->GetActorLocation(), OtherPawn->GetActorLocation()) <= FMath::Square(Range);
+}
+
+void AMythicPlayerController::ClearPendingGift() {
+    if (UWorld *W = GetWorld()) {
+        W->GetTimerManager().ClearTimer(PendingGiftTimerHandle);
+    }
+    PendingGiftGiver = nullptr;
+    PendingGiftSourceInv = nullptr;
+    PendingGiftItem = nullptr;
+    PendingGiftSourceSlot = INDEX_NONE;
+}
+
+void AMythicPlayerController::OnPendingGiftExpired() {
+    ClearPendingGift(); // a stale offer just lapses — nothing was moved, so the item stays with the giver
+}
+
+bool AMythicPlayerController::ServerOfferGift_Validate(AMythicPlayerController *Recipient, UMythicInventoryComponent *SourceInv, int32 SourceSlotIndex) {
+    return Recipient != nullptr && SourceInv != nullptr && SourceSlotIndex >= 0;
+}
+
+void AMythicPlayerController::ServerOfferGift_Implementation(AMythicPlayerController *Recipient, UMythicInventoryComponent *SourceInv, int32 SourceSlotIndex) {
+    // Runs on the GIVER's PC (this == giver). Re-validate server-side; never trust the client-named recipient / inventory.
+    if (!HasAuthority() || !Recipient || !SourceInv) {
+        return;
+    }
+    if (!GetAllInventoryComponents().Contains(SourceInv)) {
+        return; // the source must be one of the GIVER's own inventories
+    }
+    UMythicItemInstance *Item = SourceInv->GetItem(SourceSlotIndex);
+    const bool bTakeable = (Item != nullptr) && SourceInv->CanPlayerTakeFromSlot(SourceSlotIndex);
+    if (!MythicGift::CanOfferGift(/*bRecipientValid*/ true, /*bDifferentPlayers*/ Recipient != this,
+                                  IsWithinGiftRange(Recipient), bTakeable)) {
+        return;
+    }
+
+    // Park the offer on the RECIPIENT (superseding any prior one) + prompt them; arm the timeout on the recipient.
+    Recipient->ClearPendingGift();
+    Recipient->PendingGiftGiver = this;
+    Recipient->PendingGiftSourceInv = SourceInv;
+    Recipient->PendingGiftItem = Item;
+    Recipient->PendingGiftSourceSlot = SourceSlotIndex;
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    const float Timeout = Settings ? Settings->GiftOfferTimeoutSeconds : 20.0f;
+    if (UWorld *W = GetWorld(); W && Timeout > 0.0f) {
+        W->GetTimerManager().SetTimer(Recipient->PendingGiftTimerHandle, Recipient,
+                                      &AMythicPlayerController::OnPendingGiftExpired, Timeout, /*bLoop=*/false);
+    }
+
+    FText ItemName;
+    if (const UItemDefinition *Def = Item->GetItemDefinition()) {
+        ItemName = Def->Name;
+    }
+    Recipient->ClientReceiveGiftOffer(this, ItemName);
+}
+
+void AMythicPlayerController::ClientReceiveGiftOffer_Implementation(AMythicPlayerController *Giver, const FText &ItemName) {
+    // RECIPIENT client: surface the offer (a float beat so it's never silent) + hand it to the BP prompt widget.
+    if (const APawn *AvatarPawn = GetPawn()) {
+        if (UWorld *World = AvatarPawn->GetWorld()) {
+            if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+                DamageNumbers->AddDamageNumberCustom(AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 95.0f),
+                                                     TEXT("Gift offered"), FLinearColor(0.6f, 0.85f, 1.0f), 1.5f);
+            }
+        }
+    }
+    OnGiftOffered(Giver, ItemName); // BP shows Accept/Decline → calls ServerRespondGift
+}
+
+void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
+    // Runs on the RECIPIENT's PC (this == recipient). Re-validate the whole offer at accept (gotcha (d)).
+    if (!HasAuthority()) {
+        return;
+    }
+    AMythicPlayerController *Giver = PendingGiftGiver.Get();
+    UMythicInventoryComponent *SourceInv = PendingGiftSourceInv.Get();
+    UMythicItemInstance *OfferedItem = PendingGiftItem.Get();
+    const int32 SourceSlot = PendingGiftSourceSlot;
+
+    const bool bGiverValid = (Giver != nullptr) && (SourceInv != nullptr) && (OfferedItem != nullptr);
+    const bool bInRange = bGiverValid && IsWithinGiftRange(Giver);
+    // The EXACT offered instance must still occupy the offered slot — guards the giver moving / using / swapping it.
+    const bool bItemStillThere = bGiverValid && (SourceInv->GetItem(SourceSlot) == OfferedItem);
+
+    if (!MythicGift::CanCompleteGift(HasPendingGift(), bAccept, bGiverValid, bInRange, bItemStillThere)) {
+        ClearPendingGift(); // declined / expired / moved / out of range — drop the offer (item stays with the giver)
+        return;
+    }
+
+    // Route into the recipient's inventory for the item's type; atomic + loss-safe (the move puts it back on no/partial room).
+    UMythicInventoryComponent *DestInv = nullptr;
+    if (const UItemDefinition *Def = OfferedItem->GetItemDefinition()) {
+        DestInv = GetInventoryForItemType(Def->ItemType);
+    }
+    if (DestInv) {
+        // Server RPC invoked on the authority → executes the move locally (atomic, loss-safe: it puts the item back on
+        // no/partial room). Moves the whole offered stack; partial-quantity gifts are a logged follow-up.
+        SourceInv->ServerQuickMoveToInventory(SourceSlot, DestInv);
+    }
+    ClearPendingGift();
 }
 
 bool AMythicPlayerController::ServerDeployPlaceable_Validate(UMythicInventoryComponent *Inventory, int32 SlotIndex,
