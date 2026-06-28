@@ -12,6 +12,7 @@
 
 class AHUD;
 class UFont;
+class UTexture2D;
 
 /**
  * Animation styles for damage numbers.
@@ -273,10 +274,65 @@ public:
 };
 
 /**
+ * Screen-space notification kinds for the unified feedback system.
+ * Toast = minor non-combat beat (stacked HUD list); Banner = major beat (animated center-screen hero banner, added in a
+ * follow-up slice). Both are HUD-anchored, NOT world-projected.
+ */
+UENUM(BlueprintType)
+enum class EMythicScreenNotifyKind : uint8 {
+    Toast,
+    Banner,
+};
+
+/**
+ * One screen-space notification (toast or hero banner). HUD-anchored — used for non-combat feedback (loot, quest, party,
+ * ...) that is about the player, not a world point. Plain struct for cache-friendly iteration (same rationale as the
+ * damage numbers).
+ */
+USTRUCT()
+struct FMythicScreenNotification {
+    GENERATED_BODY()
+
+    // Label, cached as FText at creation (not per-frame) for draw performance.
+    UPROPERTY()
+    FText CachedText;
+
+    // Optional icon drawn to the left of the label (null = text only).
+    UPROPERTY()
+    TObjectPtr<UTexture2D> Icon = nullptr;
+
+    // Tint for the label (and icon, if a white/mask texture).
+    UPROPERTY()
+    FLinearColor Color = FLinearColor::White;
+
+    // World time this notification was spawned.
+    UPROPERTY()
+    float SpawnTime = 0.0f;
+
+    // Seconds the notification is visible.
+    UPROPERTY()
+    float Lifetime = 3.0f;
+
+    // Unique id.
+    UPROPERTY()
+    int32 ID = 0;
+
+    // Toast (stacked) vs Banner (animated hero).
+    UPROPERTY()
+    EMythicScreenNotifyKind Kind = EMythicScreenNotifyKind::Toast;
+
+    bool IsExpired(float CurrentTime) const {
+        return (CurrentTime - SpawnTime) >= Lifetime;
+    }
+};
+
+/**
  * UMythicDamageNumberSubsystem
  *
- * High-performance world subsystem for managing and rendering damage numbers.
- * Uses a simple array pool with Canvas drawing for minimal overhead.
+ * The unified, high-performance, NON-WBP feedback subsystem. Combat damage numbers (world-projected, floating off the
+ * target) AND non-combat screen notifications (toasts / animated hero banners) are rendered in ONE immediate-mode Canvas
+ * pass via AHUD::OnHUDPostRender, over pooled flat arrays. (Being renamed to UMythicFeedbackSubsystem once the merge of
+ * the former UMythicWorldFeedbackSubsystem completes.)
  */
 UCLASS()
 class MYTHIC_API UMythicDamageNumberSubsystem : public UWorldSubsystem {
@@ -320,6 +376,26 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|DamageNumbers")
     void ClearAll();
 
+    // ─── Screen-space notifications (non-combat) ───────────────────────────────────────────────────────────────────
+
+    /**
+     * Queue a screen-space TOAST (minor non-combat beat: loot, trade, durability, party). HUD-anchored stacked list,
+     * NOT world-projected. Icon optional (null = text only). DurationOverride <= 0 uses a sensible default.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Feedback")
+    void AddScreenToast(const FText &Text, FLinearColor Color, UTexture2D *Icon = nullptr, float DurationOverride = 0.0f);
+
+    // ─── Pure presentation math for screen notifications (public + static so it is unit-testable) ──────────────────
+
+    /** Toast opacity over its life: ramp 0->1 over FadeInTime, hold 1, ramp 1->0 over FadeOutTime; clamp [0,1]; Lifetime<=0 -> 0. */
+    static float ComputeToastAlpha(float Elapsed, float Lifetime, float FadeInTime, float FadeOutTime);
+
+    /** Remaining horizontal slide-in distance, easing SlideDistance -> 0 over FadeInTime (cubic ease-out); 0 once settled. */
+    static float ComputeToastSlideOffset(float Elapsed, float FadeInTime, float SlideDistance);
+
+    /** Vertical pixel offset of a toast at stack slot SlotFromAnchor (0 = nearest the anchor edge); negative slots clamp to 0. */
+    static float ComputeToastStackOffset(int32 SlotFromAnchor, float EntryStep);
+
     /**
      * Called by HUD to draw all damage numbers. Do not call directly.
      */
@@ -357,13 +433,20 @@ protected:
     // Checks if this is a critical hit from context
     bool IsCriticalHit(const FGameplayEffectContextHandle &EffectContext) const;
 
-    // Removes expired entries from the pool
+    // Removes expired entries from the pool (both the damage numbers and the screen notifications).
     void CleanupExpired();
+
+    // Draws the screen-space notifications (toasts/banners). Called from OnHUDPostRender after the damage numbers.
+    void DrawScreenNotifications(UCanvas *Canvas, APlayerController *PC);
 
 protected:
     // Active damage numbers
     UPROPERTY()
     TArray<FMythicDamageNumberData> ActiveDamageNumbers;
+
+    // Active screen-space notifications (non-combat toasts / hero banners).
+    UPROPERTY()
+    TArray<FMythicScreenNotification> ActiveNotifications;
 
     // Configuration
     UPROPERTY()

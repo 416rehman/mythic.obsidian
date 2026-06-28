@@ -6,6 +6,9 @@
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
+#include "Engine/Texture2D.h"
+#include "CanvasItem.h"
+#include "CanvasTypes.h"
 #include "GameFramework/HUD.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
@@ -63,6 +66,7 @@ void UMythicDamageNumberSubsystem::OnHUDPostRender(AHUD *HUD, UCanvas *Canvas) {
     }
 
     DrawDamageNumbers(Canvas, PC);
+    DrawScreenNotifications(Canvas, PC);
 }
 
 // Swap-remove every expired entry. Declared in the header but previously never defined — the ONLY pruning was inside
@@ -74,6 +78,12 @@ void UMythicDamageNumberSubsystem::CleanupExpired() {
     for (int32 i = ActiveDamageNumbers.Num() - 1; i >= 0; --i) {
         if (ActiveDamageNumbers[i].IsExpired(CurrentTime)) {
             ActiveDamageNumbers.RemoveAtSwap(i, EAllowShrinking::No);
+        }
+    }
+    // Same backward-RemoveAtSwap pruning for the screen notifications (toasts/banners share the pool-bounding contract).
+    for (int32 i = ActiveNotifications.Num() - 1; i >= 0; --i) {
+        if (ActiveNotifications[i].IsExpired(CurrentTime)) {
+            ActiveNotifications.RemoveAtSwap(i, EAllowShrinking::No);
         }
     }
 }
@@ -136,6 +146,166 @@ void UMythicDamageNumberSubsystem::SetConfig(UMythicDamageNumberConfig *NewConfi
 
 void UMythicDamageNumberSubsystem::ClearAll() {
     ActiveDamageNumbers.Empty();
+    ActiveNotifications.Empty();
+}
+
+void UMythicDamageNumberSubsystem::AddScreenToast(const FText &Text, FLinearColor Color, UTexture2D *Icon, float DurationOverride) {
+    CleanupExpired(); // bound both pools even when the HUD isn't rendering
+
+    FMythicScreenNotification N;
+    N.CachedText = Text;
+    N.Icon = Icon;
+    N.Color = Color;
+    N.SpawnTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    N.Lifetime = DurationOverride > 0.0f ? DurationOverride : 3.0f; // toasts linger a touch longer than combat numbers
+    N.Kind = EMythicScreenNotifyKind::Toast;
+    N.ID = NextID++;
+
+    ActiveNotifications.Add(MoveTemp(N));
+}
+
+// ─── Pure presentation math for screen notifications (mirrors the world-callout fade; unit-tested Mythic.UI.Feedback) ───
+
+float UMythicDamageNumberSubsystem::ComputeToastAlpha(float Elapsed, float Lifetime, float FadeInTime, float FadeOutTime) {
+    if (Lifetime <= 0.0f) {
+        return 0.0f;
+    }
+    Elapsed = FMath::Clamp(Elapsed, 0.0f, Lifetime);
+
+    float A = 1.0f;
+    if (FadeInTime > 0.0f && Elapsed < FadeInTime) {
+        A = Elapsed / FadeInTime; // ramp 0 -> 1
+    }
+    const float FadeOutStart = Lifetime - FadeOutTime;
+    if (FadeOutTime > 0.0f && Elapsed > FadeOutStart) {
+        A = FMath::Min(A, (Lifetime - Elapsed) / FadeOutTime); // ramp 1 -> 0
+    }
+    return FMath::Clamp(A, 0.0f, 1.0f);
+}
+
+float UMythicDamageNumberSubsystem::ComputeToastSlideOffset(float Elapsed, float FadeInTime, float SlideDistance) {
+    if (FadeInTime <= 0.0f || Elapsed >= FadeInTime) {
+        return 0.0f; // settled
+    }
+    if (Elapsed <= 0.0f) {
+        return SlideDistance; // fully offset at spawn
+    }
+    const float T = Elapsed / FadeInTime;                    // 0..1
+    const float EaseOut = 1.0f - FMath::Pow(1.0f - T, 3.0f); // cubic ease-out
+    return SlideDistance * (1.0f - EaseOut);                 // SlideDistance -> 0
+}
+
+float UMythicDamageNumberSubsystem::ComputeToastStackOffset(int32 SlotFromAnchor, float EntryStep) {
+    return FMath::Max(0, SlotFromAnchor) * EntryStep;
+}
+
+void UMythicDamageNumberSubsystem::DrawScreenNotifications(UCanvas *Canvas, APlayerController *PC) {
+    if (ActiveNotifications.Num() == 0) {
+        return;
+    }
+    const float CurrentTime = GetWorld()->GetTimeSeconds();
+
+    UFont *Font = (Config && Config->Font) ? Config->Font.Get() : nullptr;
+    if (!Font) {
+        Font = GEngine->GetMediumFont();
+    }
+    if (!Font) {
+        return;
+    }
+
+    // Code-default toast styling (no asset needed — works before any config .uasset exists). Bottom-left anchor; newest
+    // toast sits nearest the bottom, older ones stack upward. Banners (Kind == Banner) are drawn by a later slice.
+    const float FontScale = Config ? Config->FontScaleMultiplier : 1.0f;
+    const float FadeIn = 0.2f;
+    const float FadeOut = 0.4f;
+    const float SlideDist = 60.0f; // slides in from the left edge
+    const float MarginX = 48.0f;
+    const float MarginY = 96.0f;
+    const float IconSize = 24.0f;
+    const float IconGap = 6.0f;
+    const float RowPad = 6.0f; // inner background padding
+    const float RowGap = 8.0f; // vertical gap between toasts
+    const FLinearColor BgTint(0.0f, 0.0f, 0.0f, 0.55f);
+    const bool bOutline = Config ? Config->bEnableOutline : true;
+    const FLinearColor OutlineColor = Config ? Config->OutlineColor : FLinearColor::Black;
+
+    const float AnchorX = MarginX;
+    const float AnchorBottomY = Canvas->ClipY - MarginY;
+
+    // Uniform row height/step so the stack aligns even when text heights differ (width still varies per entry).
+    float ProbeW = 0.0f, ProbeH = 0.0f;
+    Canvas->TextSize(Font, TEXT("Ag"), ProbeW, ProbeH, FontScale, FontScale);
+    const float RowH = FMath::Max(IconSize, ProbeH);
+    const float Step = RowH + RowPad * 2.0f + RowGap;
+
+    // Collect the live toast entries in insertion order (oldest first). Newest gets stack slot 0 (nearest the bottom).
+    TArray<int32, TInlineAllocator<16>> ToastIdx;
+    for (int32 i = 0; i < ActiveNotifications.Num(); ++i) {
+        const FMythicScreenNotification &N = ActiveNotifications[i];
+        if (N.Kind == EMythicScreenNotifyKind::Toast && !N.IsExpired(CurrentTime)) {
+            ToastIdx.Add(i);
+        }
+    }
+    const int32 NumToasts = ToastIdx.Num();
+
+    for (int32 Order = 0; Order < NumToasts; ++Order) {
+        const FMythicScreenNotification &N = ActiveNotifications[ToastIdx[Order]];
+        const float Elapsed = CurrentTime - N.SpawnTime;
+        const float Alpha = ComputeToastAlpha(Elapsed, N.Lifetime, FadeIn, FadeOut);
+        const float Slide = ComputeToastSlideOffset(Elapsed, FadeIn, SlideDist);
+
+        float TextW = 0.0f, TextH = 0.0f;
+        Canvas->TextSize(Font, N.CachedText.ToString(), TextW, TextH, FontScale, FontScale);
+
+        const bool bHasIcon = (N.Icon != nullptr);
+        const float IconW = bHasIcon ? IconSize : 0.0f;
+        const float Gap = bHasIcon ? IconGap : 0.0f;
+        const float RowW = IconW + Gap + TextW;
+
+        const int32 SlotFromBottom = (NumToasts - 1) - Order; // newest -> 0
+        const float StackUp = ComputeToastStackOffset(SlotFromBottom, Step);
+        const float RowTopY = AnchorBottomY - StackUp - (RowH + RowPad * 2.0f);
+        const float RowLeftX = AnchorX - Slide; // slides in from the left
+
+        // Background panel.
+        if (BgTint.A > 0.0f) {
+            FLinearColor Bg = BgTint;
+            Bg.A *= Alpha;
+            FCanvasTileItem BgItem(
+                FVector2D(RowLeftX - RowPad, RowTopY),
+                GWhiteTexture,
+                FVector2D(RowW + RowPad * 2.0f, RowH + RowPad * 2.0f),
+                Bg);
+            BgItem.BlendMode = SE_BLEND_Translucent;
+            Canvas->DrawItem(BgItem);
+        }
+
+        // Icon (left), vertically centered in the row.
+        if (bHasIcon && N.Icon->GetResource()) {
+            FLinearColor IconColor = N.Color;
+            IconColor.A *= Alpha;
+            FCanvasTileItem IconItem(
+                FVector2D(RowLeftX, RowTopY + RowPad + (RowH - IconSize) * 0.5f),
+                N.Icon->GetResource(),
+                FVector2D(IconSize, IconSize),
+                IconColor);
+            IconItem.BlendMode = SE_BLEND_Translucent;
+            Canvas->DrawItem(IconItem);
+        }
+
+        // Label (right of the icon), vertically centered.
+        FLinearColor TextColor = N.Color;
+        TextColor.A *= Alpha;
+        FCanvasTextItem TextItem(
+            FVector2D(RowLeftX + IconW + Gap, RowTopY + RowPad + (RowH - TextH) * 0.5f),
+            N.CachedText,
+            Font,
+            TextColor);
+        TextItem.Scale = FVector2D(FontScale, FontScale);
+        TextItem.bOutlined = bOutline;
+        TextItem.OutlineColor = OutlineColor;
+        Canvas->DrawItem(TextItem);
+    }
 }
 
 void UMythicDamageNumberSubsystem::DrawDamageNumbers(UCanvas *Canvas, APlayerController *PC) {
