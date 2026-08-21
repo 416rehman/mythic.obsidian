@@ -32,7 +32,7 @@ bool FMythicStatusRollTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("an unauthored range yields nothing to override with"), Reg::RollScaledMagnitude(Unauthored, 0, 1.0f, 0.5f), 0.0f);
 
     // Nothing here may produce a negative magnitude: a healing burn is not a status.
-    TestTrue(TEXT("a negative multiplier cannot invert the ailment"), Reg::RollScaledMagnitude(Range, 0, -2.0f, 1.0f) >= 0.0f);
+    TestTrue(TEXT("a negative multiplier cannot invert the status"), Reg::RollScaledMagnitude(Range, 0, -2.0f, 1.0f) >= 0.0f);
     TestEqual(TEXT("a roll outside 0..1 is clamped, not extrapolated"), Reg::RollScaledMagnitude(Range, 0, 1.0f, 5.0f), 20.0f);
 
     return true;

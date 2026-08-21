@@ -108,7 +108,7 @@ protected:
     FGameplayAttributeData OutgoingDamageMultiplier;
 
     // Scales how much status buildup each landed proc applies. 1.0 is normal; 2.0 reaches the threshold in half
-    // the hits. This is what an ailment build stacks to make its status land sooner.
+    // the hits. This is what a status build stacks to make its status land sooner.
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_StatusBuildupMultiplier)
     FGameplayAttributeData StatusBuildupMultiplier;
 

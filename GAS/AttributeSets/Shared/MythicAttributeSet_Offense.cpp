@@ -27,7 +27,7 @@ void UMythicAttributeSet_Offense::PreAttributeChange(const FGameplayAttribute &A
     if (IsProbabilityAttribute(Attribute)) {
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     }
-    // A negative multiplier would drain buildup on hit, which reads as curing the ailment by attacking.
+    // A negative multiplier would drain buildup on hit, which reads as curing the status by attacking.
     else if (Attribute == GetStatusBuildupMultiplierAttribute()) {
         NewValue = FMath::Max(0.0f, NewValue);
     }
@@ -39,7 +39,7 @@ void UMythicAttributeSet_Offense::PreAttributeBaseChange(const FGameplayAttribut
     if (IsProbabilityAttribute(Attribute)) {
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     }
-    // A negative multiplier would drain buildup on hit, which reads as curing the ailment by attacking.
+    // A negative multiplier would drain buildup on hit, which reads as curing the status by attacking.
     else if (Attribute == GetStatusBuildupMultiplierAttribute()) {
         NewValue = FMath::Max(0.0f, NewValue);
     }
