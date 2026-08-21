@@ -163,6 +163,36 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetReflexMode(int32 Mode);
 
+    /** True when the DLSS plugin is compiled in AND this card and driver can actually run it. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    static bool IsDLSSAvailable();
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    static bool IsFrameGenerationAvailable();
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    static bool IsRayReconstructionAvailable();
+
+    /** 0 off, 1 DLAA, 2 Quality, 3 Balanced, 4 Performance, 5 Ultra Performance. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    int32 GetDLSSMode() const { return DLSSMode; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetDLSSMode(int32 Mode);
+
+    /** 0 off, 1 auto, 2 two frames, 3 three, 4 four. Multi-frame needs a 50-series card. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    int32 GetFrameGenerationMode() const { return FrameGenerationMode; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetFrameGenerationMode(int32 Mode);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    bool GetRayReconstruction() const { return bRayReconstruction; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetRayReconstruction(bool bEnabled);
+
 
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     bool GetMuteWhenUnfocused() const { return bMuteWhenUnfocused; }
@@ -290,6 +320,8 @@ private:
 
     void ApplyReflex() const;
 
+    void ApplyDLSS() const;
+
     UPROPERTY(Config)
     int32 AntiAliasingMethod = 4; // TSR: the engine default for UE5 and the right one for an open world
 
@@ -332,6 +364,15 @@ private:
 
     UPROPERTY(Config)
     int32 ReflexMode = 1;
+
+    UPROPERTY(Config)
+    int32 DLSSMode = 0;
+
+    UPROPERTY(Config)
+    int32 FrameGenerationMode = 0;
+
+    UPROPERTY(Config)
+    bool bRayReconstruction = false;
 
     UPROPERTY(Config)
     int32 MaxAnisotropy = 8;

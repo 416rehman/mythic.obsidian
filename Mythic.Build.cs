@@ -63,6 +63,17 @@ public class Mythic : ModuleRules
 			"StructUtils"
 		});
 
+		// NVIDIA DLSS is an optional, separately-licensed plugin. Depend on it only when it is actually
+		// present, so the game still builds for anyone who has not installed it, and gate the code on the
+		// define rather than assuming the headers exist.
+		bool bHasDLSS = System.IO.Directory.Exists(
+			System.IO.Path.Combine(ModuleDirectory, "..", "..", "Plugins", "DLSS"));
+		PublicDefinitions.Add("MYTHIC_WITH_DLSS=" + (bHasDLSS ? "1" : "0"));
+		if (bHasDLSS)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[] { "DLSSBlueprint", "StreamlineDLSSGBlueprint" });
+		}
+
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"InputCore",

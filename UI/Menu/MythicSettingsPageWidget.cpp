@@ -439,6 +439,60 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
         Definitions.Last().IsEnabled = ReflexUsable;
     }
 
+    {
+        // Each row asks the feature itself, not just the vendor. Upscaling, frame generation and ray
+        // reconstruction need progressively newer cards, so one gate for all three would offer a 30-series
+        // player a mode their card cannot run.
+        AddChoice(NSLOCTEXT("Mythic", "SetDLSS", "NVIDIA DLSS"),
+                  NSLOCTEXT("Mythic", "DescDLSS",
+                            "Renders the world at a lower resolution and reconstructs it, which buys back a "
+                            "lot of frames. DLAA does the reconstruction at full resolution instead, so it "
+                            "costs frames and buys image quality. Further down the list is faster and softer."),
+                  ESettingControl::Stepper,
+                  []() { return 6; },
+                  []() { UMythicUserSettings *S = UMythicUserSettings::Get(); return S ? S->GetDLSSMode() : 0; },
+                  [](int32 I) { if (UMythicUserSettings *S = UMythicUserSettings::Get()) { S->SetDLSSMode(I); } },
+                  [](int32 I) {
+                      switch (I) {
+                          case 0: return NSLOCTEXT("Mythic", "DLSSOff", "Off");
+                          case 1: return NSLOCTEXT("Mythic", "DLSSDLAA", "DLAA");
+                          case 2: return NSLOCTEXT("Mythic", "DLSSQuality", "Quality");
+                          case 3: return NSLOCTEXT("Mythic", "DLSSBalanced", "Balanced");
+                          case 4: return NSLOCTEXT("Mythic", "DLSSPerf", "Performance");
+                          default: return NSLOCTEXT("Mythic", "DLSSUltraPerf", "Ultra Performance");
+                      }
+                  });
+        Definitions.Last().IsEnabled = []() { return UMythicUserSettings::IsDLSSAvailable(); };
+
+        AddChoice(NSLOCTEXT("Mythic", "SetFrameGen", "DLSS Frame Generation"),
+                  NSLOCTEXT("Mythic", "DescFrameGen",
+                            "Generates extra frames between the ones the game draws. It makes motion look "
+                            "smoother but does not make the game respond faster, and it needs a 40 series "
+                            "card or newer. Reflex is kept on underneath to hold the added delay down."),
+                  ESettingControl::Stepper,
+                  []() { return 5; },
+                  []() { UMythicUserSettings *S = UMythicUserSettings::Get(); return S ? S->GetFrameGenerationMode() : 0; },
+                  [](int32 I) { if (UMythicUserSettings *S = UMythicUserSettings::Get()) { S->SetFrameGenerationMode(I); } },
+                  [](int32 I) {
+                      switch (I) {
+                          case 0: return NSLOCTEXT("Mythic", "FGOff", "Off");
+                          case 1: return NSLOCTEXT("Mythic", "FGAuto", "Auto");
+                          case 2: return NSLOCTEXT("Mythic", "FG2X", "2x");
+                          case 3: return NSLOCTEXT("Mythic", "FG3X", "3x");
+                          default: return NSLOCTEXT("Mythic", "FG4X", "4x");
+                      }
+                  });
+        Definitions.Last().IsEnabled = []() { return UMythicUserSettings::IsFrameGenerationAvailable(); };
+
+        AddToggle(NSLOCTEXT("Mythic", "SetRayRecon", "DLSS Ray Reconstruction"),
+                  NSLOCTEXT("Mythic", "DescRayRecon",
+                            "Replaces the denoiser on ray traced lighting with a trained model, which cleans "
+                            "up the grain in reflections and shadows. Only does anything when ray tracing is on."),
+                  []() { UMythicUserSettings *S = UMythicUserSettings::Get(); return S && S->GetRayReconstruction(); },
+                  [](bool b) { if (UMythicUserSettings *S = UMythicUserSettings::Get()) { S->SetRayReconstruction(b); } });
+        Definitions.Last().IsEnabled = []() { return UMythicUserSettings::IsRayReconstructionAvailable(); };
+    }
+
     Heading(NSLOCTEXT("Mythic", "SetImage", "IMAGE"));
 
     {

@@ -10,6 +10,10 @@
 #include "Performance/MaxTickRateHandlerModule.h"
 #include "Features/IModularFeatures.h"
 #include "RHI.h"
+#if MYTHIC_WITH_DLSS
+#include "DLSSLibrary.h"
+#include "StreamlineLibraryDLSSG.h"
+#endif
 #include "Misc/App.h"
 #include "Scalability.h"
 
@@ -76,6 +80,87 @@ IMaxTickRateHandlerModule *FindReflexHandler() {
     }
     return nullptr;
 }
+}
+
+#if MYTHIC_WITH_DLSS
+namespace {
+// The quality ladder we expose, in the order the player steps through it. Auto and UltraQuality are left out:
+// Auto is not a real mode (the plugin says so in its own tooltip) and UltraQuality is unsupported on most cards.
+const UDLSSMode GDLSSModes[] = {
+    UDLSSMode::Off, UDLSSMode::DLAA, UDLSSMode::Quality,
+    UDLSSMode::Balanced, UDLSSMode::Performance, UDLSSMode::UltraPerformance,
+};
+
+const EStreamlineDLSSGMode GFrameGenModes[] = {
+    EStreamlineDLSSGMode::Off, EStreamlineDLSSGMode::Auto,
+    EStreamlineDLSSGMode::On2X, EStreamlineDLSSGMode::On3X, EStreamlineDLSSGMode::On4X,
+};
+}
+#endif
+
+bool UMythicUserSettings::IsDLSSAvailable() {
+#if MYTHIC_WITH_DLSS
+    // Asks the plugin, not the vendor: an NVIDIA card too old for DLSS, or one with a stale driver, says no
+    // here and the row greys out rather than offering a mode that silently does nothing.
+    return UDLSSLibrary::IsDLSSSupported();
+#else
+    return false;
+#endif
+}
+
+bool UMythicUserSettings::IsFrameGenerationAvailable() {
+#if MYTHIC_WITH_DLSS
+    // Separate from IsDLSSAvailable on purpose - frame generation needs a 40-series card or newer, so a 30-series
+    // player gets upscaling but not this.
+    return UStreamlineLibraryDLSSG::IsDLSSGSupported();
+#else
+    return false;
+#endif
+}
+
+bool UMythicUserSettings::IsRayReconstructionAvailable() {
+#if MYTHIC_WITH_DLSS
+    return UDLSSLibrary::IsDLSSRRSupported();
+#else
+    return false;
+#endif
+}
+
+void UMythicUserSettings::ApplyDLSS() const {
+#if MYTHIC_WITH_DLSS
+    if (UDLSSLibrary::IsDLSSSupported()) {
+        const int32 Index = FMath::Clamp(DLSSMode, 0, UE_ARRAY_COUNT(GDLSSModes) - 1);
+        const UDLSSMode Mode = GDLSSModes[Index];
+        if (Mode == UDLSSMode::Off || UDLSSLibrary::IsDLSSModeSupported(Mode)) {
+            UDLSSLibrary::SetDLSSMode(GEngine ? GEngine->GetCurrentPlayWorld() : nullptr, Mode);
+        }
+    }
+    if (UDLSSLibrary::IsDLSSRRSupported()) {
+        UDLSSLibrary::EnableDLSSRR(bRayReconstruction);
+    }
+    if (UStreamlineLibraryDLSSG::IsDLSSGSupported()) {
+        const int32 Index = FMath::Clamp(FrameGenerationMode, 0, UE_ARRAY_COUNT(GFrameGenModes) - 1);
+        const EStreamlineDLSSGMode Mode = GFrameGenModes[Index];
+        if (Mode == EStreamlineDLSSGMode::Off || UStreamlineLibraryDLSSG::IsDLSSGModeSupported(Mode)) {
+            UStreamlineLibraryDLSSG::SetDLSSGMode(Mode);
+        }
+    }
+#endif
+}
+
+void UMythicUserSettings::SetDLSSMode(int32 Mode) {
+    DLSSMode = FMath::Clamp(Mode, 0, 5);
+    ApplyDLSS();
+}
+
+void UMythicUserSettings::SetFrameGenerationMode(int32 Mode) {
+    FrameGenerationMode = FMath::Clamp(Mode, 0, 4);
+    ApplyDLSS();
+}
+
+void UMythicUserSettings::SetRayReconstruction(bool bEnabled) {
+    bRayReconstruction = bEnabled;
+    ApplyDLSS();
 }
 
 bool UMythicUserSettings::IsNvidiaGpu() {
@@ -340,6 +425,7 @@ void UMythicUserSettings::ApplySettings(bool bCheckForCommandLineOverrides) {
     ApplyImageSettings();
     ApplyRenderingSettings();
     ApplyReflex();
+    ApplyDLSS();
     ApplyDisplayGamma();
     ApplyInterfaceSettings();
     ApplyVibration();
