@@ -52,46 +52,69 @@ bool FMythicTriggeredProcTest::RunTest(const FString &Parameters) {
         World.AddTag(FGameplayTag::RequestGameplayTag(FName("Environment.Time.Night"), false));
 
         FMythicTriggerCondition None;
-        TestTrue(TEXT("a default condition is no gate"), GA::PassesCondition(None, World, Empty, Empty, 1.0f, 1.0f));
-        TestTrue(TEXT("a default condition ignores health entirely"), GA::PassesCondition(None, Empty, Empty, Empty, 0.01f, 0.01f));
+        TestTrue(TEXT("a default condition is no gate"), GA::PassesCondition(None, World, Empty, Empty, Empty, 1.0f, 1.0f));
+        TestTrue(TEXT("a default condition ignores health entirely"), GA::PassesCondition(None, Empty, Empty, Empty, Empty, 0.01f, 0.01f));
 
         FMythicTriggerCondition Snow;
         Snow.RequiredWorldTag = FGameplayTag::RequestGameplayTag(FName("Environment.Weather.Snow"), false);
         TestTrue(TEXT("the snow tag is registered, or this whole block proves nothing"), Snow.RequiredWorldTag.IsValid());
-        TestTrue(TEXT("a weather gate opens in that weather"), GA::PassesCondition(Snow, World, Empty, Empty, 1.0f, 1.0f));
-        TestFalse(TEXT("a weather gate stays shut with no world state"), GA::PassesCondition(Snow, Empty, Empty, Empty, 1.0f, 1.0f));
+        TestTrue(TEXT("a weather gate opens in that weather"), GA::PassesCondition(Snow, World, Empty, Empty, Empty, 1.0f, 1.0f));
+        TestFalse(TEXT("a weather gate stays shut with no world state"), GA::PassesCondition(Snow, Empty, Empty, Empty, Empty, 1.0f, 1.0f));
 
         FMythicTriggerCondition Rain;
         Rain.RequiredWorldTag = FGameplayTag::RequestGameplayTag(FName("Environment.Weather.Rain"), false);
-        TestFalse(TEXT("a rain gate stays shut while it snows"), GA::PassesCondition(Rain, World, Empty, Empty, 1.0f, 1.0f));
+        TestFalse(TEXT("a rain gate stays shut while it snows"), GA::PassesCondition(Rain, World, Empty, Empty, Empty, 1.0f, 1.0f));
 
         // Authoring the parent gates on any weather, matching FMythicWeatherDamageMod.
         FMythicTriggerCondition AnyWeather;
         AnyWeather.RequiredWorldTag = FGameplayTag::RequestGameplayTag(FName("Environment.Weather"), false);
-        TestTrue(TEXT("the parent tag gates on any weather"), GA::PassesCondition(AnyWeather, World, Empty, Empty, 1.0f, 1.0f));
+        TestTrue(TEXT("the parent tag gates on any weather"), GA::PassesCondition(AnyWeather, World, Empty, Empty, Empty, 1.0f, 1.0f));
+
+        // Proficiency tracks ride on the event payload, which is how a talent keys off fishing not mining.
+        FGameplayTagContainer FishingEvent;
+        FishingEvent.AddTag(FGameplayTag::RequestGameplayTag(FName("Proficiency.Fishing"), false));
+
+        FMythicTriggerCondition Fishing;
+        Fishing.RequiredEventTag = FGameplayTag::RequestGameplayTag(FName("Proficiency.Fishing"), false);
+        TestTrue(TEXT("the fishing track is registered, or this block proves nothing"), Fishing.RequiredEventTag.IsValid());
+        TestTrue(TEXT("a fishing gate opens on a fishing event"),
+                 GA::PassesCondition(Fishing, Empty, FishingEvent, Empty, Empty, 1.0f, 1.0f));
+        TestFalse(TEXT("a fishing gate stays shut on an event carrying nothing"),
+                  GA::PassesCondition(Fishing, Empty, Empty, Empty, Empty, 1.0f, 1.0f));
+
+        FMythicTriggerCondition Mining;
+        Mining.RequiredEventTag = FGameplayTag::RequestGameplayTag(FName("Proficiency.Mining"), false);
+        TestFalse(TEXT("a mining gate stays shut on a fishing event"),
+                  GA::PassesCondition(Mining, Empty, FishingEvent, Empty, Empty, 1.0f, 1.0f));
+
+        // The parent tag keys off any kind of work at all, which is what Scholar's Edge describes.
+        FMythicTriggerCondition AnyWork;
+        AnyWork.RequiredEventTag = FGameplayTag::RequestGameplayTag(FName("Proficiency"), false);
+        TestTrue(TEXT("the parent track gates on any work"),
+                 GA::PassesCondition(AnyWork, Empty, FishingEvent, Empty, Empty, 1.0f, 1.0f));
 
         // Cornered Beast: "Below half your life, every blow tears deeper."
         FMythicTriggerCondition Cornered;
         Cornered.SourceHealthMax = 0.5f;
-        TestTrue(TEXT("a wounded owner passes a below-half gate"), GA::PassesCondition(Cornered, Empty, Empty, Empty, 0.4f, 1.0f));
-        TestFalse(TEXT("a healthy owner fails a below-half gate"), GA::PassesCondition(Cornered, Empty, Empty, Empty, 0.9f, 1.0f));
-        TestTrue(TEXT("exactly half passes a below-half gate"), GA::PassesCondition(Cornered, Empty, Empty, Empty, 0.5f, 1.0f));
+        TestTrue(TEXT("a wounded owner passes a below-half gate"), GA::PassesCondition(Cornered, Empty, Empty, Empty, Empty, 0.4f, 1.0f));
+        TestFalse(TEXT("a healthy owner fails a below-half gate"), GA::PassesCondition(Cornered, Empty, Empty, Empty, Empty, 0.9f, 1.0f));
+        TestTrue(TEXT("exactly half passes a below-half gate"), GA::PassesCondition(Cornered, Empty, Empty, Empty, Empty, 0.5f, 1.0f));
 
         // Executioner: "Anything already dying takes a killing blow."
         FMythicTriggerCondition Dying;
         Dying.TargetHealthMax = 0.2f;
-        TestTrue(TEXT("a dying target passes an execute gate"), GA::PassesCondition(Dying, Empty, Empty, Empty, 1.0f, 0.15f));
-        TestFalse(TEXT("a healthy target fails an execute gate"), GA::PassesCondition(Dying, Empty, Empty, Empty, 1.0f, 0.5f));
+        TestTrue(TEXT("a dying target passes an execute gate"), GA::PassesCondition(Dying, Empty, Empty, Empty, Empty, 1.0f, 0.15f));
+        TestFalse(TEXT("a healthy target fails an execute gate"), GA::PassesCondition(Dying, Empty, Empty, Empty, Empty, 1.0f, 0.5f));
 
         // Envious Edge: "The first blow against an unbloodied foe bites far deeper."
         FMythicTriggerCondition Unbloodied;
         Unbloodied.TargetHealthMin = 1.0f;
-        TestTrue(TEXT("an untouched target passes an unbloodied gate"), GA::PassesCondition(Unbloodied, Empty, Empty, Empty, 1.0f, 1.0f));
-        TestFalse(TEXT("a scratched target fails an unbloodied gate"), GA::PassesCondition(Unbloodied, Empty, Empty, Empty, 1.0f, 0.99f));
+        TestTrue(TEXT("an untouched target passes an unbloodied gate"), GA::PassesCondition(Unbloodied, Empty, Empty, Empty, Empty, 1.0f, 1.0f));
+        TestFalse(TEXT("a scratched target fails an unbloodied gate"), GA::PassesCondition(Unbloodied, Empty, Empty, Empty, Empty, 1.0f, 0.99f));
 
         // An actor with no health reads as full, so a below-half gate cannot fire on something that cannot bleed.
         TestFalse(TEXT("something with no health fails a below-half gate"),
-                  GA::PassesCondition(Cornered, Empty, Empty, Empty, GA::GetHealthFraction(nullptr), 1.0f));
+                  GA::PassesCondition(Cornered, Empty, Empty, Empty, Empty, GA::GetHealthFraction(nullptr), 1.0f));
     }
 
     // A clause must do something. One with neither a status nor an effect is authored but inert.

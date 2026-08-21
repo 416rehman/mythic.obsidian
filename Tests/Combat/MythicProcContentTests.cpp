@@ -77,6 +77,11 @@ bool FMythicProcContentTest::RunTest(const FString &Parameters) {
                          Spec.Condition.RequiredWorldTag.ToString().StartsWith(TEXT("Environment.")));
             }
 
+            if (Spec.Condition.RequiredEventTag.IsValid()) {
+                TestTrue(*FString::Printf(TEXT("%s event gate is a registered tag"), *Where),
+                         Tags.RequestGameplayTag(Spec.Condition.RequiredEventTag.GetTagName(), false).IsValid());
+            }
+
             TestTrue(*FString::Printf(TEXT("%s source health window is not inverted"), *Where),
                      Spec.Condition.SourceHealthMin <= Spec.Condition.SourceHealthMax);
             TestTrue(*FString::Printf(TEXT("%s target health window is not inverted"), *Where),

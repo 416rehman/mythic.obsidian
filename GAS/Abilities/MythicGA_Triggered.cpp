@@ -50,9 +50,13 @@ bool UMythicGA_Triggered::HasPayload(const FMythicTriggerSpec &Spec) {
 }
 
 bool UMythicGA_Triggered::PassesCondition(const FMythicTriggerCondition &Condition, const FGameplayTagContainer &WorldTags,
-                                         const FGameplayTagContainer &SourceTags, const FGameplayTagContainer &TargetTags,
-                                         float SourceHealthFraction, float TargetHealthFraction) {
+                                         const FGameplayTagContainer &EventTags, const FGameplayTagContainer &SourceTags,
+                                         const FGameplayTagContainer &TargetTags, float SourceHealthFraction,
+                                         float TargetHealthFraction) {
     if (Condition.RequiredWorldTag.IsValid() && !WorldTags.HasTag(Condition.RequiredWorldTag)) {
+        return false;
+    }
+    if (Condition.RequiredEventTag.IsValid() && !EventTags.HasTag(Condition.RequiredEventTag)) {
         return false;
     }
     if (!Condition.SourceQuery.IsEmpty() && !Condition.SourceQuery.Matches(SourceTags)) {
@@ -193,7 +197,9 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
         if (const UAbilitySystemComponent *TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Target)) {
             TargetASC->GetOwnedGameplayTags(TargetTags);
         }
-        if (!PassesCondition(Spec.Condition, WorldTags, SourceTags, TargetTags, SourceHealth, GetHealthFraction(Target))) {
+        const FGameplayTagContainer &EventTags = Payload ? Payload->InstigatorTags : FGameplayTagContainer::EmptyContainer;
+        if (!PassesCondition(Spec.Condition, WorldTags, EventTags, SourceTags, TargetTags, SourceHealth,
+                             GetHealthFraction(Target))) {
             continue;
         }
 

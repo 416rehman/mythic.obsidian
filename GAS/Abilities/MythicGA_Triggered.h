@@ -30,6 +30,14 @@ struct MYTHIC_API FMythicTriggerCondition {
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Condition", meta = (Categories = "Environment"))
     FGameplayTag RequiredWorldTag;
 
+    /**
+      * Tag the event itself must carry. GAS.Event.Proficiency.Gained carries the proficiency's track tag, which is
+      * how a talent keys off fishing rather than mining; Proficiency alone keys off any kind of work. Matches the
+      * tag or any child. Invalid = any event of that type.
+      */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Condition")
+    FGameplayTag RequiredEventTag;
+
     // Matched against the tags the ability's owner currently holds.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Condition")
     FGameplayTagQuery SourceQuery;
@@ -147,8 +155,9 @@ public:
 
     // Whether a clause's gate is open. Pure, so every world and health combination is testable without a world.
     static bool PassesCondition(const FMythicTriggerCondition &Condition, const FGameplayTagContainer &WorldTags,
-                                const FGameplayTagContainer &SourceTags, const FGameplayTagContainer &TargetTags,
-                                float SourceHealthFraction, float TargetHealthFraction);
+                                const FGameplayTagContainer &EventTags, const FGameplayTagContainer &SourceTags,
+                                const FGameplayTagContainer &TargetTags, float SourceHealthFraction,
+                                float TargetHealthFraction);
 
     // Health as a 0..1 fraction. Returns 1 for anything with no health, so a "below half" gate stays shut on it.
     static float GetHealthFraction(const AActor *Actor);
