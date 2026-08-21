@@ -49,4 +49,24 @@ public:
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Diminishing")
     FMythicStatDiminishingConfig StatDiminishing;
+
+    /**
+     * What a status does before anything on the applier touches it. A status definition that authors its own band
+     * overrides the base; one that does not falls back to it, so a new status is playable before it is tuned.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0"))
+    float StatusBaseDamagePerTick = 3.0f;
+
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0"))
+    float StatusBaseDurationSeconds = 5.0f;
+
+    /**
+     * Global scales applied to every status on top of its own band. These are the one place to answer "statuses
+     * last too long" or "damage over time hits too hard" without opening eight assets.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0"))
+    float StatusDamageScale = 1.0f;
+
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0"))
+    float StatusDurationScale = 1.0f;
 };

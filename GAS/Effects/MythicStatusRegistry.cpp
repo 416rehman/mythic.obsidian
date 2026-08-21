@@ -149,21 +149,47 @@ float UMythicStatusRegistry::RollScaledMagnitude(const FRollDefinition &Range, i
     return FMath::Max(0.0f, Rolled * FMath::Max(0.0f, SourceMultiplier));
 }
 
-float UMythicStatusRegistry::ResolveApplierScale(const AActor *Instigator, const FGameplayAttribute &Attribute) {
+bool UMythicStatusRegistry::TryReadApplierStat(const AActor *Instigator, const FGameplayAttribute &Attribute, float &OutRaw) {
+    OutRaw = 0.0f;
     if (!Attribute.IsValid()) {
-        return 1.0f;
+        return false;
     }
     const UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Instigator);
-    // An applier without the stat is not an applier with zero of it. Environmental and scripted sources have no
+    // An applier without the stat is not an applier with zero of it. Traps, hazards and scripted sources have no
     // ability system at all, and must inflict the authored band rather than nothing.
     if (!ASC || !ASC->HasAttributeSetForAttribute(Attribute)) {
+        return false;
+    }
+    OutRaw = ASC->GetNumericAttribute(Attribute);
+    return true;
+}
+
+float UMythicStatusRegistry::ResolveApplierMultiplier(const AActor *Instigator, const FGameplayAttribute &Attribute) {
+    float Raw = 0.0f;
+    if (!TryReadApplierStat(Instigator, Attribute, Raw)) {
         return 1.0f;
     }
-
-    const float Raw = ASC->GetNumericAttribute(Attribute);
     const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
     return Settings ? FMythicStatDiminishingRules::Apply(Settings->StatDiminishing, Attribute, Raw)
                     : FMath::Max(0.0f, Raw);
+}
+
+float UMythicStatusRegistry::ResolveApplierBonus(const AActor *Instigator, const FGameplayAttribute &Attribute) {
+    float Raw = 0.0f;
+    if (!TryReadApplierStat(Instigator, Attribute, Raw)) {
+        return 1.0f;
+    }
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    return Settings ? FMythicStatDiminishingRules::ApplyToBonus(Settings->StatDiminishing, Attribute, Raw)
+                    : 1.0f + FMath::Max(0.0f, Raw);
+}
+
+float UMythicStatusRegistry::RollMagnitudeOrBase(const FRollDefinition &Range, float BaseWhenUnauthored, float Scale, float Roll01) {
+    const bool bAuthored = Range.Min > 0.0f || Range.Max > 0.0f;
+    if (!bAuthored) {
+        return FMath::Max(0.0f, BaseWhenUnauthored) * FMath::Max(0.0f, Scale);
+    }
+    return RollScaledMagnitude(Range, 0, Scale, Roll01);
 }
 
 bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC, const UMythicStatusEffectDefinition *Definition, AActor *Instigator,
@@ -182,13 +208,21 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
 
     // Two applications differ by the roll AND by what the applier has stacked, so a poison build hits harder
     // than a passer-by inflicting the same poison.
-    const float DamageScale = ResolveApplierScale(Instigator, Definition->DamageMultiplierAttribute);
-    const float Damage = RollScaledMagnitude(Definition->DamagePerTick, 0, DamageScale, FMath::FRand());
+    const UMythicCombatSettings *CombatSettings = GetDefault<UMythicCombatSettings>();
+    const float BaseDamage = CombatSettings ? CombatSettings->StatusBaseDamagePerTick : 3.0f;
+    const float BaseDuration = CombatSettings ? CombatSettings->StatusBaseDurationSeconds : 5.0f;
+
+    // Two applications differ by the roll AND by what the applier has stacked, so a poison build hits harder than
+    // a passer-by inflicting the same poison. The global scale is the one knob that moves every status at once.
+    const float DamageScale = (CombatSettings ? CombatSettings->StatusDamageScale : 1.0f)
+        * ResolveApplierBonus(Instigator, Definition->BonusDamageAttribute);
+    const float Damage = RollMagnitudeOrBase(Definition->DamagePerTick, BaseDamage, DamageScale, FMath::FRand());
     if (Damage > 0.0f) {
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_DAMAGE, Damage);
     }
-    const float DurationScale = ResolveApplierScale(Instigator, Definition->DurationMultiplierAttribute);
-    const float Duration = RollScaledMagnitude(Definition->DurationSeconds, 0, DurationScale, FMath::FRand());
+    const float DurationScale = (CombatSettings ? CombatSettings->StatusDurationScale : 1.0f)
+        * ResolveApplierMultiplier(Instigator, Definition->DurationMultiplierAttribute);
+    const float Duration = RollMagnitudeOrBase(Definition->DurationSeconds, BaseDuration, DurationScale, FMath::FRand());
     if (Duration > 0.0f) {
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_DURATION, Duration);
     }

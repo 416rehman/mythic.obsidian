@@ -60,10 +60,25 @@ public:
     static bool ShouldTeachStatus(bool bTargetIsPlayer, bool bAlreadyKnown, bool bHasDescription);
 
     /**
-     * What the applier's gear multiplies a status by, after its diminishing curve. 1.0 when the status names no
-     * stat, when there is no applier, or when the applier has no ability system.
+     * What the applier's gear scales a status by, after its diminishing curve. Returns 1.0 - no change - when the
+     * status names no stat, when there is no applier, or when the applier has no ability system.
+     *
+     * Two flavours because the project runs two stat conventions and the name picks which: a *Multiplier stat is
+     * 1.0-based and read bare, a Bonus* stat is 0.0-based and read as (1 + x). Passing one to the other is off by
+     * exactly one, in a direction nothing would catch.
      */
-    static float ResolveApplierScale(const AActor *Instigator, const FGameplayAttribute &Attribute);
+    static float ResolveApplierMultiplier(const AActor *Instigator, const FGameplayAttribute &Attribute);
+
+    static float ResolveApplierBonus(const AActor *Instigator, const FGameplayAttribute &Attribute);
+
+    // Shared by both: the applier's raw stat value, or a sentinel when there is no stat to read.
+    static bool TryReadApplierStat(const AActor *Instigator, const FGameplayAttribute &Attribute, float &OutRaw);
+
+    /**
+     * The status's own band, or the global baseline when it authors none, scaled by everything the applier brings.
+     * A status with no authored band is playable before it is tuned rather than silently dealing nothing.
+     */
+    static float RollMagnitudeOrBase(const FRollDefinition &Range, float BaseWhenUnauthored, float Scale, float Roll01);
 
     // Rolls a range, scales it by the applier's multiplier, and never returns a negative.
     static float RollScaledMagnitude(const FRollDefinition &Range, int32 Level, float SourceMultiplier, float Roll01);

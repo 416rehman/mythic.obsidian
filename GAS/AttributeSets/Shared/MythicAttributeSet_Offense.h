@@ -120,14 +120,14 @@ protected:
      * same build. Only the three damage-over-time statuses carry a damage band, so only they get a damage stat -
      * a FreezeDamageMultiplier would be a stat with nothing to multiply.
      */
-    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BurnDamageMultiplier)
-    FGameplayAttributeData BurnDamageMultiplier;
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BurnBonusDamage)
+    FGameplayAttributeData BurnBonusDamage;
 
-    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BleedDamageMultiplier)
-    FGameplayAttributeData BleedDamageMultiplier;
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BleedBonusDamage)
+    FGameplayAttributeData BleedBonusDamage;
 
-    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_PoisonDamageMultiplier)
-    FGameplayAttributeData PoisonDamageMultiplier;
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_PoisonBonusDamage)
+    FGameplayAttributeData PoisonBonusDamage;
 
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BurnDurationMultiplier)
     FGameplayAttributeData BurnDurationMultiplier;
@@ -182,9 +182,9 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, OutgoingDamageMultiplier);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, StatusBuildupMultiplier);
 
-    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BurnDamageMultiplier);
-    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BleedDamageMultiplier);
-    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, PoisonDamageMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BurnBonusDamage);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BleedBonusDamage);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, PoisonBonusDamage);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BurnDurationMultiplier);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BleedDurationMultiplier);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, PoisonDurationMultiplier);
@@ -254,13 +254,13 @@ public:
     virtual void OnRep_StatusBuildupMultiplier(const FGameplayAttributeData &OldStatusBuildupMultiplier);
 
     UFUNCTION()
-    virtual void OnRep_BurnDamageMultiplier(const FGameplayAttributeData &OldBurnDamageMultiplier);
+    virtual void OnRep_BurnBonusDamage(const FGameplayAttributeData &OldBurnBonusDamage);
 
     UFUNCTION()
-    virtual void OnRep_BleedDamageMultiplier(const FGameplayAttributeData &OldBleedDamageMultiplier);
+    virtual void OnRep_BleedBonusDamage(const FGameplayAttributeData &OldBleedBonusDamage);
 
     UFUNCTION()
-    virtual void OnRep_PoisonDamageMultiplier(const FGameplayAttributeData &OldPoisonDamageMultiplier);
+    virtual void OnRep_PoisonBonusDamage(const FGameplayAttributeData &OldPoisonBonusDamage);
 
     UFUNCTION()
     virtual void OnRep_BurnDurationMultiplier(const FGameplayAttributeData &OldBurnDurationMultiplier);

@@ -59,6 +59,18 @@ struct FMythicStatDiminishingRules {
         OutCeilingBonus = Config.DefaultCeilingBonus;
     }
 
+    /**
+     * A raw 0.0-based bonus stat bent by its authored curve, returned as a ready-to-multiply scale. A stat named
+     * Bonus* or Increased* is a fraction where 0 means no bonus, so 0.4 comes back as 1.4.
+     */
+    static float ApplyToBonus(const FMythicStatDiminishingConfig &Config, const FGameplayAttribute &Attribute, float RawBonus) {
+        float Soft = 0.0f;
+        float Ceiling = 0.0f;
+        FindCurve(Config, Attribute, Soft, Ceiling);
+        const float Bonus = FMath::Max(0.0f, RawBonus);
+        return 1.0f + (Ceiling > 0.0f ? MythicCombat::Diminish(Bonus, Soft, Ceiling) : Bonus);
+    }
+
     // A raw 1.0-based stat bent by its authored curve. Ready to multiply.
     static float Apply(const FMythicStatDiminishingConfig &Config, const FGameplayAttribute &Attribute, float RawMultiplier) {
         float Soft = 0.0f;

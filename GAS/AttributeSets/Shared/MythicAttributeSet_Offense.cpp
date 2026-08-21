@@ -7,9 +7,6 @@
 UMythicAttributeSet_Offense::UMythicAttributeSet_Offense() {
     InitOutgoingDamageMultiplier(1.0f);
     InitStatusBuildupMultiplier(1.0f);
-    InitBurnDamageMultiplier(1.0f);
-    InitBleedDamageMultiplier(1.0f);
-    InitPoisonDamageMultiplier(1.0f);
     InitBurnDurationMultiplier(1.0f);
     InitBleedDurationMultiplier(1.0f);
     InitPoisonDurationMultiplier(1.0f);
@@ -21,9 +18,9 @@ UMythicAttributeSet_Offense::UMythicAttributeSet_Offense() {
 }
 
 bool UMythicAttributeSet_Offense::IsStatusScalingAttribute(const FGameplayAttribute &Attribute) {
-    return Attribute == GetBurnDamageMultiplierAttribute()
-        || Attribute == GetBleedDamageMultiplierAttribute()
-        || Attribute == GetPoisonDamageMultiplierAttribute()
+    return Attribute == GetBurnBonusDamageAttribute()
+        || Attribute == GetBleedBonusDamageAttribute()
+        || Attribute == GetPoisonBonusDamageAttribute()
         || Attribute == GetBurnDurationMultiplierAttribute()
         || Attribute == GetBleedDurationMultiplierAttribute()
         || Attribute == GetPoisonDurationMultiplierAttribute()
@@ -196,9 +193,9 @@ void UMythicAttributeSet_Offense::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, OutgoingDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, StatusBuildupMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BurnDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BleedDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, PoisonDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BurnBonusDamage, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BleedBonusDamage, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, PoisonBonusDamage, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BurnDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BleedDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, PoisonDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
@@ -209,16 +206,16 @@ void UMythicAttributeSet_Offense::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, TerrifyDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
 }
 
-void UMythicAttributeSet_Offense::OnRep_BurnDamageMultiplier(const FGameplayAttributeData &OldBurnDamageMultiplier) {
-    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BurnDamageMultiplier, OldBurnDamageMultiplier);
+void UMythicAttributeSet_Offense::OnRep_BurnBonusDamage(const FGameplayAttributeData &OldBurnBonusDamage) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BurnBonusDamage, OldBurnBonusDamage);
 }
 
-void UMythicAttributeSet_Offense::OnRep_BleedDamageMultiplier(const FGameplayAttributeData &OldBleedDamageMultiplier) {
-    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BleedDamageMultiplier, OldBleedDamageMultiplier);
+void UMythicAttributeSet_Offense::OnRep_BleedBonusDamage(const FGameplayAttributeData &OldBleedBonusDamage) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BleedBonusDamage, OldBleedBonusDamage);
 }
 
-void UMythicAttributeSet_Offense::OnRep_PoisonDamageMultiplier(const FGameplayAttributeData &OldPoisonDamageMultiplier) {
-    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, PoisonDamageMultiplier, OldPoisonDamageMultiplier);
+void UMythicAttributeSet_Offense::OnRep_PoisonBonusDamage(const FGameplayAttributeData &OldPoisonBonusDamage) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, PoisonBonusDamage, OldPoisonBonusDamage);
 }
 
 void UMythicAttributeSet_Offense::OnRep_BurnDurationMultiplier(const FGameplayAttributeData &OldBurnDurationMultiplier) {

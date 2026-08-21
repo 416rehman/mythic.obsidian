@@ -34,9 +34,9 @@ UMythicCombatSettings::UMythicCombatSettings() {
     StatDiminishing.Stats = {
         // Damage over time is where a specialised build should be able to go furthest, so it gets the longest
         // runway: face value to +100%, then bending, approaching but never reaching +400%.
-        MakeCurve(Off::GetBurnDamageMultiplierAttribute(), 1.0f, 4.0f),
-        MakeCurve(Off::GetBleedDamageMultiplierAttribute(), 1.0f, 4.0f),
-        MakeCurve(Off::GetPoisonDamageMultiplierAttribute(), 1.0f, 4.0f),
+        MakeCurve(Off::GetBurnBonusDamageAttribute(), 1.0f, 4.0f),
+        MakeCurve(Off::GetBleedBonusDamageAttribute(), 1.0f, 4.0f),
+        MakeCurve(Off::GetPoisonBonusDamageAttribute(), 1.0f, 4.0f),
 
         // Duration compounds with damage - a longer burn is also a bigger burn - so it bends sooner and lower.
         MakeCurve(Off::GetBurnDurationMultiplierAttribute(), 0.5f, 1.5f),
