@@ -32,11 +32,13 @@ void UMythicUserSettings::SetLookSensitivity(float NewSensitivity) {
 void UMythicUserSettings::SetAntiAliasingMethod(int32 Method) {
     AntiAliasingMethod = FMath::Clamp(Method, 0, 5);
     ApplyImageSettings();
+    ApplyRenderingSettings();
 }
 
 void UMythicUserSettings::SetSharpness(float NewSharpness) {
     Sharpness = NewSharpness < 0.0f ? -1.0f : FMath::Clamp(NewSharpness, 0.0f, 1.0f);
     ApplyImageSettings();
+    ApplyRenderingSettings();
 }
 
 void UMythicUserSettings::SetAlwaysShowHUD(bool bAlways) {
@@ -54,6 +56,49 @@ void UMythicUserSettings::ApplyImageSettings() const {
     PushCVar(TEXT("r.BloomQuality"), bBloom ? 5 : 0);
     PushCVar(TEXT("r.MaxAnisotropy"), MaxAnisotropy);
     PushCVar(TEXT("r.VT.MaxAnisotropy"), MaxAnisotropy);
+}
+
+void UMythicUserSettings::ApplyRenderingSettings() const {
+    // 0 off, 1 SSAO, 2 GTAO. Levels is the actual off switch; the method only picks the solver.
+    PushCVar(TEXT("r.AmbientOcclusionLevels"), AmbientOcclusionMode == 0 ? 0 : -1);
+    PushCVar(TEXT("r.AmbientOcclusion.Method"), AmbientOcclusionMode == 2 ? 1 : 0);
+    if (AmbientOcclusionMode == 2) {
+        // The owner's authored GTAO profile. Normals on and four angles is the quality/cost point they chose;
+        // the spatial filter is off deliberately, so do not "fix" it back on.
+        PushCVar(TEXT("r.GTAO.UseNormals"), 1);
+        PushCVar(TEXT("r.GTAO.NumAngles"), 4);
+        PushCVar(TEXT("r.GTAO.SpatialFilter"), 0);
+    }
+
+    PushCVar(TEXT("r.DynamicGlobalIlluminationMethod"), GlobalIlluminationMethod);
+    PushCVar(TEXT("r.ReflectionMethod"), ReflectionMethod);
+    PushCVar(TEXT("r.Shadow.Virtual.Enable"), bVirtualShadowMaps ? 1 : 0);
+    PushCVar(TEXT("r.Nanite"), bNanite ? 1 : 0);
+}
+
+void UMythicUserSettings::SetAmbientOcclusionMode(int32 Mode) {
+    AmbientOcclusionMode = FMath::Clamp(Mode, 0, 2);
+    ApplyRenderingSettings();
+}
+
+void UMythicUserSettings::SetGlobalIlluminationMethod(int32 Method) {
+    GlobalIlluminationMethod = FMath::Clamp(Method, 0, 2);
+    ApplyRenderingSettings();
+}
+
+void UMythicUserSettings::SetReflectionMethod(int32 Method) {
+    ReflectionMethod = FMath::Clamp(Method, 0, 2);
+    ApplyRenderingSettings();
+}
+
+void UMythicUserSettings::SetVirtualShadowMaps(bool bEnabled) {
+    bVirtualShadowMaps = bEnabled;
+    ApplyRenderingSettings();
+}
+
+void UMythicUserSettings::SetNanite(bool bEnabled) {
+    bNanite = bEnabled;
+    ApplyRenderingSettings();
 }
 
 void UMythicUserSettings::ApplyMasterVolume() const {

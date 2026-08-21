@@ -138,6 +138,7 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
         FSettingDef Def;
         Def.Label = Text;
         Def.bHeading = true;
+        Def.Category = Text;
         Definitions.Add(MoveTemp(Def));
     };
 
@@ -662,6 +663,18 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
                         "strength, permanently."),
               [Settings]() { UMythicUserSettings *S = Settings(); return S && S->GetAlwaysShowHUD(); },
               [Settings](bool b) { if (UMythicUserSettings *S = Settings()) { S->SetAlwaysShowHUD(b); } });
+
+    // Every definition inherits the heading above it. Done in one pass here rather than threaded through the
+    // eight Add* helpers, so adding a ninth helper cannot forget to set it.
+    FText CurrentCategory;
+    for (FSettingDef &Def : Definitions) {
+        if (Def.bHeading) {
+            CurrentCategory = Def.Label;
+        }
+        else {
+            Def.Category = CurrentCategory;
+        }
+    }
 }
 
 
@@ -756,14 +769,42 @@ FMythicSettingsRow &UMythicSettingsPageWidget::GetOrCreateRow(int32 Index) {
     return RowPool.Last();
 }
 
+TArray<FText> UMythicSettingsPageWidget::GetCategoryNames() const {
+    TArray<FText> Names;
+    for (const FSettingDef &Def : Definitions) {
+        if (Def.bHeading) {
+            Names.Add(Def.Label);
+        }
+    }
+    return Names;
+}
+
+void UMythicSettingsPageWidget::SetActiveCategory(int32 CategoryIndex) {
+    ActiveCategory = CategoryIndex;
+    Refresh();
+}
+
 void UMythicSettingsPageWidget::Refresh() {
     if (!SettingsList) {
         return;
     }
 
+    const TArray<FText> Categories = GetCategoryNames();
+    const bool bTabbed = Categories.IsValidIndex(ActiveCategory);
+    const FText ShownCategory = bTabbed ? Categories[ActiveCategory] : FText::GetEmpty();
+
     for (int32 i = 0; i < Definitions.Num(); ++i) {
         FMythicSettingsRow &Row = GetOrCreateRow(i);
         const FSettingDef &Def = Definitions[i];
+
+        if (bTabbed) {
+            // The tab already says what the category is, so its heading row would be the label twice.
+            const bool bInTab = !Def.bHeading && Def.Category.EqualTo(ShownCategory);
+            if (!bInTab) {
+                Row.Box->SetVisibility(ESlateVisibility::Collapsed);
+                continue;
+            }
+        }
 
         Row.Box->SetVisibility(ESlateVisibility::Visible);
         Row.Label->SetText(Def.Label);

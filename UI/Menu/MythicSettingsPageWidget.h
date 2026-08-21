@@ -73,6 +73,20 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void RestoreDefaults();
 
+    /**
+     * Category names in authored order, for the page's tab strip. Seven of them, which is past the three-or-four
+     * a reader holds at once - which is exactly why they are tabs rather than one scrolling list.
+     */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    TArray<FText> GetCategoryNames() const;
+
+    /** Shows one category. An index outside the list shows everything, which is the pre-tab behaviour. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetActiveCategory(int32 CategoryIndex);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    int32 GetActiveCategory() const { return ActiveCategory; }
+
 protected:
     virtual void NativeConstruct() override;
     virtual void NativeOnActivated() override;
@@ -104,6 +118,9 @@ private:
     struct FSettingDef {
         FText Label;
         bool bHeading = false;
+
+        // Which tab this belongs to. Inherited from the most recent Heading() when the definition is built.
+        FText Category;
         TFunction<FText()> Read;
         TFunction<void(int32)> Step;
         bool bNeedsApply = false;
@@ -149,4 +166,7 @@ private:
 
     bool bPendingApply = false;
     bool bBuilt = false;
+
+    // Index into GetCategoryNames(). INDEX_NONE shows every category, the behaviour before tabs existed.
+    int32 ActiveCategory = 0;
 };

@@ -112,6 +112,43 @@ public:
     void SetMaxAnisotropy(int32 Samples);
 
 
+    /**
+     * Ambient occlusion: 0 off, 1 SSAO, 2 GTAO. GTAO is the newer ground-truth solver - it costs more and is
+     * markedly better in interiors and under foliage, which is most of this game.
+     */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    int32 GetAmbientOcclusionMode() const { return AmbientOcclusionMode; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetAmbientOcclusionMode(int32 Mode);
+
+    /** Dynamic global illumination: 0 none, 1 Lumen, 2 screen space. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    int32 GetGlobalIlluminationMethod() const { return GlobalIlluminationMethod; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetGlobalIlluminationMethod(int32 Method);
+
+    /** Reflections: 0 none, 1 Lumen, 2 screen space. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    int32 GetReflectionMethod() const { return ReflectionMethod; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetReflectionMethod(int32 Method);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    bool GetVirtualShadowMaps() const { return bVirtualShadowMaps; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetVirtualShadowMaps(bool bEnabled);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    bool GetNanite() const { return bNanite; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetNanite(bool bEnabled);
+
+
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     bool GetMuteWhenUnfocused() const { return bMuteWhenUnfocused; }
 
@@ -233,6 +270,9 @@ private:
 
     void ApplyImageSettings() const;
 
+    /** Pushes the renderer-feature cvars. Separate from image settings because these are the expensive ones. */
+    void ApplyRenderingSettings() const;
+
     UPROPERTY(Config)
     int32 AntiAliasingMethod = 4; // TSR: the engine default for UE5 and the right one for an open world
 
@@ -257,6 +297,21 @@ private:
 
     UPROPERTY(Config)
     bool bBloom = true;
+
+    UPROPERTY(Config)
+    int32 AmbientOcclusionMode = 2;
+
+    UPROPERTY(Config)
+    int32 GlobalIlluminationMethod = 1;
+
+    UPROPERTY(Config)
+    int32 ReflectionMethod = 1;
+
+    UPROPERTY(Config)
+    bool bVirtualShadowMaps = true;
+
+    UPROPERTY(Config)
+    bool bNanite = true;
 
     UPROPERTY(Config)
     int32 MaxAnisotropy = 8;
