@@ -47,27 +47,6 @@
 }
 class UMythicTargetType;
 
-namespace {
-    FString ReadApplierKeyForStatus(const UAbilitySystemComponent *TargetASC, const FGameplayTag &StatusTag) {
-        if (!TargetASC || !StatusTag.IsValid()) {
-            return FString();
-        }
-        const FGameplayEffectQuery Query =
-            FGameplayEffectQuery::MakeQuery_MatchAnyOwningTags(FGameplayTagContainer(StatusTag));
-        for (const FActiveGameplayEffectHandle &Handle : TargetASC->GetActiveEffects(Query)) {
-            if (const FActiveGameplayEffect *Active = TargetASC->GetActiveGameplayEffect(Handle)) {
-                if (const FMythicGameplayEffectContext *Ctx =
-                        FMythicGameplayEffectContext::ExtractEffectContext(Active->Spec.GetContext())) {
-                    if (!Ctx->GetApplierPlayerKey().IsEmpty()) {
-                        return Ctx->GetApplierPlayerKey();
-                    }
-                }
-            }
-        }
-        return FString();
-    }
-}
-
 UMythicGameplayAbility::UMythicGameplayAbility(const FObjectInitializer &ObjectInitializer) {
     ReplicationPolicy = EGameplayAbilityReplicationPolicy::ReplicateNo;
     InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
@@ -138,7 +117,6 @@ FMythicDamageContainerSpec UMythicGameplayAbility::MakeDamageContainerSpec(const
         UE_LOG(Myth, Error, TEXT("UMythicGameplayAbility::MakeDamageContainerSpec: Container.DamageApplicationEffect is null"));
     }
 
-    ReturnSpec.StatusEffects = Container.StatusEffects;
 
     if (UObject *Src = GetCurrentSourceObject()) {
         if (UItemFragment *SrcFragment = Cast<UItemFragment>(Src)) {
@@ -210,7 +188,6 @@ TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainer
             UE_LOG(Myth, Error, TEXT("UMythicGameplayAbility::ApplyDamageContainerSpec: ContainerSpec.DamageApplicationEffectSpec is null"));
         }
         else {
-            const float DebuffLevel = ContainerSpec.DamageApplicationEffectSpec.Data->GetLevel();
             for (int32 i = 0; i < ContainerSpec.TargetsHandle.Data.Num(); ++i) {
                 if (!ContainerSpec.TargetsHandle.Data[i].IsValid()) {
                     continue;
