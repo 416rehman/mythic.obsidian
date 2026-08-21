@@ -95,6 +95,25 @@ bool FMythicStatusPipelineTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("crossing consumes the buildup it spent"),
              ASC->GetNumericAttribute(Burn->BuildupAttribute) < UMythicAttributeSet_Defense::ComputeBuildupThreshold(0.0f));
 
+    // The rolled magnitudes have to reach the effect. Without this the tag still lands and the status does
+    // nothing at all, which every other assertion here would happily pass.
+    const FGameplayEffectQuery Query = FGameplayEffectQuery::MakeQuery_MatchAnyOwningTags(FGameplayTagContainer(GAS_DEBUFF_BURNING));
+    const TArray<FActiveGameplayEffectHandle> Active = ASC->GetActiveEffects(Query);
+    if (TestTrue(TEXT("the burn is present as an active effect"), Active.Num() > 0)) {
+        const FActiveGameplayEffect *Effect = ASC->GetActiveGameplayEffect(Active[0]);
+        if (TestNotNull(TEXT("the active burn resolves"), Effect)) {
+            const float Damage = Effect->Spec.GetSetByCallerMagnitude(GAS_SETBYCALLER_AILMENT_DAMAGE, false, -1.0f);
+            const float Duration = Effect->Spec.GetSetByCallerMagnitude(GAS_SETBYCALLER_AILMENT_DURATION, false, -1.0f);
+
+            TestTrue(*FString::Printf(TEXT("burn carries rolled damage inside its authored band, got %.2f"), Damage),
+                     Damage >= Burn->DamagePerTick.Min && Damage <= Burn->DamagePerTick.Max);
+            TestTrue(*FString::Printf(TEXT("burn carries a rolled duration inside its authored band, got %.2f"), Duration),
+                     Duration >= Burn->DurationSeconds.Min && Duration <= Burn->DurationSeconds.Max);
+            TestTrue(TEXT("the authored damage band is not degenerate, so two applications can differ"),
+                     Burn->DamagePerTick.Max > Burn->DamagePerTick.Min);
+        }
+    }
+
     return true;
 }
 
