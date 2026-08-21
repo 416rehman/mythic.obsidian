@@ -4,6 +4,9 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/Effects/MythicStatusEffectDefinition.h"
 #include "GAS/Effects/MythicStatusRegistry.h"
+#include "GameplayEffect.h"
+#include "GameplayEffectComponents/TargetTagsGameplayEffectComponent.h"
+#include "GameplayTagsManager.h"
 #include "Settings/MythicDeveloperSettings.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -38,6 +41,12 @@ bool FMythicStatusLibraryTest::RunTest(const FString &Parameters) {
 
         TestTrue(*FString::Printf(TEXT("%s has a StatusType tag"), *Label), Definition->StatusType.IsValid());
         TestTrue(*FString::Printf(TEXT("%s StatusType lives under Status.Type"), *Label), Definition->StatusType.ToString().StartsWith(TypePrefix));
+
+        // An unregistered tag still round-trips through the asset but resolves to nothing at runtime, so
+        // IsValid() alone passes while the status can never be found. Ask the manager directly.
+        const FGameplayTag Registered = UGameplayTagsManager::Get().RequestGameplayTag(Definition->StatusType.GetTagName(), false);
+        TestTrue(*FString::Printf(TEXT("%s StatusType %s is registered with the tag manager"), *Label, *Definition->StatusType.ToString()),
+                 Registered.IsValid());
         TestFalse(*FString::Printf(TEXT("%s StatusType is unique"), *Label), SeenTypes.Contains(Definition->StatusType));
         SeenTypes.Add(Definition->StatusType);
 
@@ -48,6 +57,19 @@ bool FMythicStatusLibraryTest::RunTest(const FString &Parameters) {
         TestTrue(*FString::Printf(TEXT("%s has a ResistanceAttribute"), *Label), Definition->ResistanceAttribute.IsValid());
         TestFalse(*FString::Printf(TEXT("%s has a display name"), *Label), Definition->DisplayName.IsEmpty());
         TestFalse(*FString::Printf(TEXT("%s has an icon"), *Label), Definition->Icon.IsNull());
+
+        // GrantedStateTag drives UI and damage modifiers, but the tag is really granted by the effect.
+        // If the two drift apart the status silently stops matching anything that reads it.
+        if (Definition->EffectToApply && Definition->GrantedStateTag.IsValid()) {
+            const UGameplayEffect *EffectCDO = GetDefault<UGameplayEffect>(Definition->EffectToApply);
+            const UTargetTagsGameplayEffectComponent *TagComponent =
+                EffectCDO ? EffectCDO->FindComponent<UTargetTagsGameplayEffectComponent>() : nullptr;
+            if (TestNotNull(*FString::Printf(TEXT("%s effect grants target tags"), *Label), TagComponent)) {
+                TestTrue(*FString::Printf(TEXT("%s GrantedStateTag %s matches what the effect actually grants"), *Label,
+                                          *Definition->GrantedStateTag.ToString()),
+                         TagComponent->GetConfiguredTargetTagChanges().CombinedTags.HasTagExact(Definition->GrantedStateTag));
+            }
+        }
 
         for (const FMythicStatusReaction &Reaction : Definition->Reactions) {
             TestTrue(*FString::Printf(TEXT("%s reaction has a RequiredTargetTag"), *Label), Reaction.RequiredTargetTag.IsValid());

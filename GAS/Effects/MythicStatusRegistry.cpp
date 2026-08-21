@@ -9,8 +9,6 @@
 #include "Settings/MythicDeveloperSettings.h"
 
 void UMythicStatusRegistry::BuildIndex() {
-    bIndexed = true;
-
     const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
     if (!Settings || Settings->StatusEffectLibrary.IsNull()) {
         UE_LOG(Myth, Warning, TEXT("StatusRegistry: no StatusEffectLibrary configured — no status effect can be applied."));
@@ -25,6 +23,8 @@ void UMythicStatusRegistry::BuildIndex() {
         UE_LOG(Myth, Warning, TEXT("StatusRegistry: StatusEffectLibrary failed to load (%s)"), *Settings->StatusEffectLibrary.ToString());
         return;
     }
+
+    bIndexed = true;
 
     for (UMythicStatusEffectDefinition *Definition : Library->Statuses) {
         if (!Definition) {
@@ -109,6 +109,10 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
 }
 
 bool UMythicStatusRegistry::ApplyStatusToActor(AActor *Target, FGameplayTag StatusType, AActor *Instigator) {
+    if (!Target || !Target->HasAuthority()) {
+        return false;
+    }
+
     UAbilitySystemComponent *TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Target);
     if (!TargetASC) {
         return false;
