@@ -2,6 +2,9 @@
 #include "World/POI/MythicLandmarkPOI.h"
 
 #include "World/POI/MythicPOIDiscoverySubsystem.h"
+#include "Player/MythicPlayerState.h"
+#include "Progression/MythicStatLedgerComponent.h"
+#include "Progression/MythicTags_MetaProgression.h"
 #include "World/POI/MythicPOIDiscoveryRules.h"
 #include "World/POI/MythicTags_POI.h"
 #include "GAS/MythicAbilitySystemComponent.h"
@@ -71,6 +74,16 @@ void AMythicLandmarkPOI::OnDiscoverySphereBeginOverlap(UPrimitiveComponent *, AA
     }
 
     Sub->ServerUnlockPOI(POIId, GetActorLocation(), POITag, DisplayName, DiscoveryRadius);
+
+    // Credited to whoever walked in. ShouldRegisterDiscovery already rejects a repeat, so this counts each
+    // landmark once.
+    if (const AController *Discoverer = Pawn ? Pawn->GetController() : nullptr) {
+        if (const AMythicPlayerState *PS = Discoverer->GetPlayerState<AMythicPlayerState>()) {
+            if (UMythicStatLedgerComponent *Ledger = PS->GetStatLedgerComponent()) {
+                Ledger->RecordStat(STAT_DISCOVERY);
+            }
+        }
+    }
 
     if (UMythicAbilitySystemComponent *DiscovererASC =
             Cast<UMythicAbilitySystemComponent>(UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(OtherActor))) {
