@@ -166,6 +166,21 @@ bool UTalentFragment::CanBeStackedWith(const UItemFragment *Other) const {
     return false;
 }
 
+bool UTalentFragment::GetRolledAbilityValue(const FGameplayAbilitySpecHandle &Handle, const FGameplayTag &Parameter, float &OutValue) const {
+    for (const FTalentSpec &TalentSpec : this->TalentRuntimeReplicatedData.RolledTalents) {
+        if (TalentSpec.AbilitySpec.Handle != Handle) {
+            continue;
+        }
+        for (const FRolledTagSpec &Rolled : TalentSpec.RolledAttributes) {
+            if (Rolled.Tag == Parameter) {
+                OutValue = Rolled.Value;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 void UTalentFragment::ServerRemoveAbility_Implementation() {
     for (auto &TalentSpec : this->TalentRuntimeReplicatedData.RolledTalents) {
         if (!TalentSpec.AbilitySpec.Handle.IsValid()) {

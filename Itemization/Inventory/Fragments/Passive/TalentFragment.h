@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Itemization/Inventory/Fragments/FragmentTypes.h"
+#include "GAS/Abilities/MythicAbilityRollSource.h"
 #include "Itemization/Inventory/Fragments/ItemFragment.h"
 #include "TalentFragment.generated.h"
 
@@ -76,7 +77,7 @@ struct FTalentBuildData {
 };
 
 UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
-class MYTHIC_API UTalentFragment : public UItemFragment {
+class MYTHIC_API UTalentFragment : public UItemFragment, public IMythicAbilityRollSource {
     GENERATED_BODY()
 
 public:
@@ -141,6 +142,8 @@ public:
 
     UFUNCTION(Server, Reliable)
     void ServerRemoveAbility();
+
+    virtual bool GetRolledAbilityValue(const FGameplayAbilitySpecHandle &Handle, const FGameplayTag &Parameter, float &OutValue) const override;
 
     // Helper function to get the talent for a specific TalentDefinition
     UFUNCTION(BlueprintCallable, Category = "Talent")
