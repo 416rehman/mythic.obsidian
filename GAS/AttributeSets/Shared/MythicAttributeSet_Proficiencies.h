@@ -217,6 +217,12 @@ public:
 
     virtual void PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const override;
 
+    /**
+     * The multiplier a gain of XP is worth once everything that scales it is folded together. Rested multiplies
+     * rather than adds, because it is a state the player earned away from the work rather than a stat they carry.
+     */
+    static float ComposeXpMultipliers(float ProficiencyXpBonus, float EnlightenBonus, float RestedMultiplier);
+
     float ScaleProficiencyXpGain(float BaseXp, const UAbilitySystemComponent *ASC) const;
 
     static float ApplyWorldTierXpMultiplier(float ScaledXp, float WorldTierMultiplier);

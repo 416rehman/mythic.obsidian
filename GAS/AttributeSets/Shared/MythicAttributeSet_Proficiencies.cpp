@@ -10,6 +10,7 @@
 #include "Player/MythicPlayerController.h"
 #include "Player/Proficiency/ProficiencyComponent.h"
 #include "GameFramework/PlayerState.h"
+#include "World/Camping/MythicRestedXp.h"
 
 void UMythicAttributeSet_Proficiencies::OnRep_CombatProficiency(const FGameplayAttributeData &OldValue) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Proficiencies, CombatProficiency, OldValue);
@@ -248,6 +249,11 @@ void UMythicAttributeSet_Proficiencies::PreAttributeBaseChange(const FGameplayAt
     NewValue = OldValue + ScaledDelta;
 }
 
+float UMythicAttributeSet_Proficiencies::ComposeXpMultipliers(float ProficiencyXpBonus, float EnlightenBonus, float RestedMultiplier) {
+    const float Additive = 1.0f + ProficiencyXpBonus + EnlightenBonus;
+    return FMath::Max(0.0f, Additive) * FMath::Max(0.0f, RestedMultiplier);
+}
+
 float UMythicAttributeSet_Proficiencies::ScaleProficiencyXpGain(
     float BaseXp,
     const UAbilitySystemComponent* ASC) const
@@ -257,13 +263,13 @@ float UMythicAttributeSet_Proficiencies::ScaleProficiencyXpGain(
         return BaseXp;
     }
 
-    float Multiplier = 1.0f;
-
+    float ProficiencyBonus = 0.0f;
     if (const UMythicAttributeSet_Utility* Util = ASC->GetSet<UMythicAttributeSet_Utility>())
     {
-        Multiplier += Util->GetProficiencyXPBonus();
+        ProficiencyBonus = Util->GetProficiencyXPBonus();
     }
 
+    float EnlightenBonus = 0.0f;
     float WorldTierXpMultiplier = 1.0f;
     if (const UWorld* World = GetWorld())
     {
@@ -271,7 +277,7 @@ float UMythicAttributeSet_Proficiencies::ScaleProficiencyXpGain(
         {
             if (ASC->HasMatchingGameplayTag(GAS_BUFF_ENLIGHTEN))
             {
-                Multiplier += GS->EnlightenProficiencyBonus;
+                EnlightenBonus = GS->EnlightenProficiencyBonus;
             }
             if (const UWorldTierAttributes* WTA = GS->WorldTierAttributes)
             {
@@ -280,8 +286,11 @@ float UMythicAttributeSet_Proficiencies::ScaleProficiencyXpGain(
         }
     }
 
-    const float ScaledXp = BaseXp * FMath::Max(0.0f, Multiplier);
-    return ApplyWorldTierXpMultiplier(ScaledXp, WorldTierXpMultiplier);
+    // Rested lives here rather than at one caller, so every kind of work is worth more while rested instead of
+    // only the kinds that happen to pay out through a reward asset.
+    const float Multiplier = ComposeXpMultipliers(ProficiencyBonus, EnlightenBonus,
+                                                  MythicCampsite::ReadRestedXpMultiplier(ASC));
+    return ApplyWorldTierXpMultiplier(BaseXp * Multiplier, WorldTierXpMultiplier);
 }
 
 float UMythicAttributeSet_Proficiencies::ApplyWorldTierXpMultiplier(float ScaledXp, float WorldTierMultiplier)

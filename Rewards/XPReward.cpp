@@ -5,7 +5,8 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
 #include "GameFramework/PlayerController.h"
-#include "World/Camping/MythicRestedXp.h"
+#include "Player/MythicPlayerController.h"
+#include "Player/Proficiency/ProficiencyComponent.h"
 
 bool UXPReward::Give(FRewardContext &Context) const {
     FXPRewardContext *XPContext = static_cast<FXPRewardContext *>(&Context);
@@ -21,12 +22,23 @@ bool UXPReward::Give(FRewardContext &Context) const {
     auto OverlevelBonus = this->OverlevelXPBonus;
     auto PercentageOfActionXPtoGive = this->Percentage;
 
-    float XPToReward = CalculateXP(AbilitySystemComponent, Proficiency, TargetLvl, OverlevelBonus, PercentageOfActionXPtoGive);
+    const float XPToReward = CalculateXP(AbilitySystemComponent, Proficiency, TargetLvl, OverlevelBonus, PercentageOfActionXPtoGive);
 
-    XPToReward *= MythicCampsite::ReadRestedXpMultiplier(AbilitySystemComponent);
+    /**
+     * Granted through the proficiency component rather than written straight onto the attribute. That path writes
+     * the BASE value, which is what progression persists, and it is the only one that runs the scaling in
+     * PreAttributeBaseChange - the XP bonus stat, Enlighten, rested and the world tier multiplier. It also emits
+     * GAS.Event.Proficiency.Gained, so a talent that rewards work sees a kill's XP like any other.
+     */
+    AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(Context.PlayerController);
+    UProficiencyComponent *ProfComp = MythicPC
+        ? const_cast<UProficiencyComponent *>(MythicPC->GetProficiencyComponent())
+        : nullptr;
+    if (!ProfComp) {
+        return false;
+    }
 
-    AbilitySystemComponent->ApplyModToAttribute(Proficiency->ProgressAttribute, EGameplayModOp::Additive, XPToReward);
-
+    ProfComp->GrantProficiencyXP(Proficiency, XPToReward);
     return true;
 }
 
