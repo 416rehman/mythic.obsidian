@@ -2,6 +2,10 @@
 
 #include "Engine/HitResult.h"
 
+#include "GameFramework/Controller.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerState.h"
+
 #if UE_WITH_IRIS
 #include "Iris/ReplicationState/PropertyNetSerializerInfoRegistry.h"
 #include "Serialization/GameplayEffectContextNetSerializer.h"
@@ -191,4 +195,43 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
 
     bOutSuccess = true;
     return true;
+}
+
+void UMythicGameplayEffectContextLibrary::ResolveInstigator(AActor *Instigator, APawn *&OutPawn, AController *&OutController,
+                                                            APlayerState *&OutPlayerState) {
+    OutPawn = nullptr;
+    OutController = nullptr;
+    OutPlayerState = nullptr;
+
+    if (!Instigator) {
+        return;
+    }
+
+    if (APawn *AsPawn = Cast<APawn>(Instigator)) {
+        OutPawn = AsPawn;
+        OutController = AsPawn->GetController();
+    }
+    else if (AController *AsController = Cast<AController>(Instigator)) {
+        OutController = AsController;
+        OutPawn = AsController->GetPawn();
+    }
+    else if (APlayerState *AsPlayerState = Cast<APlayerState>(Instigator)) {
+        OutPlayerState = AsPlayerState;
+        OutController = AsPlayerState->GetOwningController();
+        if (OutController) {
+            OutPawn = OutController->GetPawn();
+        }
+        else {
+            OutPawn = AsPlayerState->GetPawn();
+        }
+    }
+
+    if (!OutPlayerState) {
+        if (OutController) {
+            OutPlayerState = OutController->PlayerState;
+        }
+        else if (OutPawn) {
+            OutPlayerState = OutPawn->GetPlayerState();
+        }
+    }
 }

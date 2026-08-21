@@ -168,6 +168,8 @@ public:
 
     static bool IsEligibleForSharedKillCredit(bool bIsKiller, float DistSqToVictim, float RangeSq);
 
+    static bool IsKillCreditedToOther(const AActor *Victim, const AActor *Killer, const APawn *KillerPawn);
+
     // True while the owner is in the co-op downed state (incapacitated, bleeding out, revivable).
     UFUNCTION(BlueprintPure, Category = "Mythic|Health")
     bool IsDowned() const { return bIsDowned; }

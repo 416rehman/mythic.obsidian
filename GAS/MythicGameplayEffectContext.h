@@ -9,6 +9,9 @@
 #include "MythicGameplayEffectContext.generated.h"
 
 class AActor;
+class AController;
+class APawn;
+class APlayerState;
 class FArchive;
 class UObject;
 class UPhysicalMaterial;
@@ -99,6 +102,14 @@ class MYTHIC_API UMythicGameplayEffectContextLibrary : public UBlueprintFunction
     GENERATED_BODY()
 
 public:
+    /**
+     * Resolves the pawn, controller and player state behind whatever GAS names as an instigator. A player
+     * instigates from their PlayerState because that owns their ASC, an NPC from its pawn, so a cast chain
+     * that only handles pawns and controllers silently drops every player.
+     */
+    UFUNCTION(BlueprintPure, Category = "Mythic|GAS|GameplayEffectContext")
+    static void ResolveInstigator(AActor *Instigator, APawn *&OutPawn, AController *&OutController, APlayerState *&OutPlayerState);
+
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static void SetCriticalHit(UPARAM(ref) FGameplayEffectContextHandle &ContextHandle, bool bInIsCriticalHit) {
         if (ContextHandle.IsValid()) {

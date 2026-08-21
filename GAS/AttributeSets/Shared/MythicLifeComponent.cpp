@@ -543,6 +543,15 @@ bool UMythicLifeComponent::IsEligibleForSharedKillCredit(bool bIsKiller, float D
     return bIsKiller || (RangeSq > 0.0f && DistSqToVictim <= RangeSq);
 }
 
+bool UMythicLifeComponent::IsKillCreditedToOther(const AActor *Victim, const AActor *Killer, const APawn *KillerPawn) {
+    if (!Victim || !Killer) {
+        return false;
+    }
+    // A player instigates from their PlayerState, so comparing the instigator alone lets a suicide pay out
+    // kill rewards. The pawn behind the instigator is what has to differ from the victim.
+    return Killer != Victim && KillerPawn != Victim;
+}
+
 namespace {
     void NotifyDeathMemorySystems(AActor *Owner, UAbilitySystemComponent *ASC, AActor *Killer) {
         if (!Owner || !ASC || !Owner->HasAuthority()) {
@@ -584,16 +593,12 @@ namespace {
         Record.SourceTier = TierRank;
         Record.Significance = static_cast<float>(TierRank);
 
-        AMythicPlayerState *KillerPS = nullptr;
-        AMythicPlayerController *KillerPC = nullptr;
-        if (APawn *KillerPawn = Cast<APawn>(Killer)) {
-            KillerPS = KillerPawn->GetPlayerState<AMythicPlayerState>();
-            KillerPC = Cast<AMythicPlayerController>(KillerPawn->GetController());
-        }
-        else if (AController *KillerController = Cast<AController>(Killer)) {
-            KillerPS = KillerController->GetPlayerState<AMythicPlayerState>();
-            KillerPC = Cast<AMythicPlayerController>(KillerController);
-        }
+        APawn *KillerPawn = nullptr;
+        AController *KillerController = nullptr;
+        APlayerState *KillerBasePS = nullptr;
+        UMythicGameplayEffectContextLibrary::ResolveInstigator(Killer, KillerPawn, KillerController, KillerBasePS);
+        AMythicPlayerState *KillerPS = Cast<AMythicPlayerState>(KillerBasePS);
+        AMythicPlayerController *KillerPC = Cast<AMythicPlayerController>(KillerController);
         uint32 KillerNameHash = 0;
         if (KillerPS) {
             KillerNameHash = GetTypeHash(KillerPS->GetCanonicalPlayerKey());
@@ -642,6 +647,13 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
     }
     AActor *Owner = GetOwner();
 
+    APawn *KillerPawn = nullptr;
+    AController *KillerController = nullptr;
+    APlayerState *KillerBasePS = nullptr;
+    UMythicGameplayEffectContextLibrary::ResolveInstigator(Killer, KillerPawn, KillerController, KillerBasePS);
+    AMythicPlayerState *KillerPS = Cast<AMythicPlayerState>(KillerBasePS);
+    const bool bKilledByOther = IsKillCreditedToOther(Owner, Killer, KillerPawn);
+
     AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DYING, 1);
     AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DEAD, 1);
     AbilitySystemComponent->CancelAllAbilities();
@@ -668,15 +680,7 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
 
     NotifyDeathMemorySystems(Owner, AbilitySystemComponent, Killer);
 
-    if (XPReward > 0.0f && Killer && Killer != Owner) {
-        const AController *KillerController = nullptr;
-        if (const APawn *KillerPawn = Cast<APawn>(Killer)) {
-            KillerController = KillerPawn->GetController();
-        }
-        else {
-            KillerController = Cast<AController>(Killer);
-        }
-
+    if (XPReward > 0.0f && bKilledByOther) {
         if (Cast<AMythicPlayerController>(KillerController)) {
             const FVector VictimLocation = Owner ? Owner->GetActorLocation() : FVector::ZeroVector;
             const float RangeSq = FMath::Square(FMath::Max(0.0f, SharedKillCreditRange));
@@ -708,17 +712,10 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
         }
     }
 
-    if (Killer && Killer != Owner && Owner) {
+    if (bKilledByOther) {
         if (UMythicCognitiveBrainComponent *VictimBrain = Owner->FindComponentByClass<UMythicCognitiveBrainComponent>()) {
             const FMythicFactionId VictimFaction = VictimBrain->GetFaction();
             if (VictimFaction.IsValid()) {
-                AMythicPlayerState *KillerPS = nullptr;
-                if (const APawn *KillerPawn = Cast<APawn>(Killer)) {
-                    KillerPS = KillerPawn->GetPlayerState<AMythicPlayerState>();
-                }
-                else if (const AController *KillerController = Cast<AController>(Killer)) {
-                    KillerPS = KillerController->GetPlayerState<AMythicPlayerState>();
-                }
                 if (KillerPS) {
                     if (UMythicFactionStandingComponent *Standing = KillerPS->GetFactionStanding()) {
                         Standing->ServerApplyKillStanding(VictimFaction);
@@ -728,16 +725,9 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
         }
     }
 
-    if (Killer && Killer != Owner && AbilitySystemComponent) {
-        AMythicPlayerState *KillerCodexPS = nullptr;
-        if (const APawn *KillerPawn = Cast<APawn>(Killer)) {
-            KillerCodexPS = KillerPawn->GetPlayerState<AMythicPlayerState>();
-        }
-        else if (const AController *KillerAsController = Cast<AController>(Killer)) {
-            KillerCodexPS = KillerAsController->GetPlayerState<AMythicPlayerState>();
-        }
-        if (KillerCodexPS) {
-            if (UMythicCodexComponent *KillerCodex = KillerCodexPS->GetCodexComponent()) {
+    if (bKilledByOther && AbilitySystemComponent) {
+        if (KillerPS) {
+            if (UMythicCodexComponent *KillerCodex = KillerPS->GetCodexComponent()) {
                 FGameplayTagContainer VictimOwnedTags;
                 AbilitySystemComponent->GetOwnedGameplayTags(VictimOwnedTags);
                 const FGameplayTag BestiaryKey = FMythicBestiaryRules::MakeBestiaryKeyFromOwnedTags(VictimOwnedTags);
@@ -747,7 +737,7 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
             }
         }
 
-        if (KillerCodexPS) {
+        if (KillerPS) {
             FGameplayTagContainer VictimOwnedTags;
             AbilitySystemComponent->GetOwnedGameplayTags(VictimOwnedTags);
             if (VictimOwnedTags.HasTag(AI_KIND_CREATURE)) {
@@ -776,15 +766,16 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
         }
     }
 
-    if (Killer && Killer != Owner) {
+    if (bKilledByOther) {
         if (UMythicActionEventSubsystem *ActionSub = GetWorld() ? GetWorld()->GetSubsystem<UMythicActionEventSubsystem>() : nullptr) {
             FMythicActionEvent KillAction;
-            KillAction.Perpetrator = Killer;
+            KillAction.Perpetrator = KillerPawn ? static_cast<AActor *>(KillerPawn) : Killer;
             KillAction.Victim = Owner;
             if (UMythicCognitiveBrainComponent *VictimBrain = Owner->FindComponentByClass<UMythicCognitiveBrainComponent>()) {
                 KillAction.VictimFactionOverride = VictimBrain->GetFaction();
             }
-            if (UMythicCognitiveBrainComponent *KillerBrain = Killer->FindComponentByClass<UMythicCognitiveBrainComponent>()) {
+            AActor *KillerBrainSource = KillerPawn ? static_cast<AActor *>(KillerPawn) : Killer;
+            if (UMythicCognitiveBrainComponent *KillerBrain = KillerBrainSource->FindComponentByClass<UMythicCognitiveBrainComponent>()) {
                 KillAction.PerpFactionOverride = KillerBrain->GetFaction();
             }
             KillAction.ActionTag = TAG_LIVINGWORLD_ACTION_VIOLENCE_KILL;
@@ -792,17 +783,7 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
             KillAction.Significance = 1.0f;
             KillAction.MoralVector = FMythicMoralSignature::MakeKillActionMoralVector();
 
-            FString KillerKey;
-            if (const APawn *KillerPawn = Cast<APawn>(Killer)) {
-                if (const AMythicPlayerState *KillerPS = KillerPawn->GetPlayerState<AMythicPlayerState>()) {
-                    KillerKey = KillerPS->GetCanonicalPlayerKey();
-                }
-            }
-            else if (const APlayerController *KillerPC = Cast<APlayerController>(Killer)) {
-                if (const AMythicPlayerState *KillerPS = KillerPC->GetPlayerState<AMythicPlayerState>()) {
-                    KillerKey = KillerPS->GetCanonicalPlayerKey();
-                }
-            }
+            const FString KillerKey = KillerPS ? KillerPS->GetCanonicalPlayerKey() : FString();
             KillAction.PerpPlayerKey = KillerKey;
             ActionSub->SubmitAction(KillAction);
 
@@ -814,14 +795,8 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
         }
     }
 
-    if (Owner && LootDrop.LootTables.Num() > 0 && Killer && Killer != Owner) {
-        APlayerController *KillerPC = nullptr;
-        if (const APawn *KillerPawn = Cast<APawn>(Killer)) {
-            KillerPC = Cast<APlayerController>(KillerPawn->GetController());
-        }
-        else {
-            KillerPC = Cast<APlayerController>(Killer);
-        }
+    if (LootDrop.LootTables.Num() > 0 && bKilledByOther) {
+        APlayerController *KillerPC = Cast<APlayerController>(KillerController);
         if (KillerPC) {
             const FVector DropLoc = Owner->GetActorLocation();
 
