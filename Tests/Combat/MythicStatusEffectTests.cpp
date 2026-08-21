@@ -1,12 +1,13 @@
 
 #include "Misc/AutomationTest.h"
 
-#include "GAS/Effects/MythicStatusEffects.h"
-#include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
-#include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
-#include "GAS/MythicTags_GAS.h"
 #include "GameplayEffect.h"
 #include "GameplayEffectComponents/TargetTagsGameplayEffectComponent.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
+#include "GAS/Effects/MythicStatusEffectDefinition.h"
+#include "GAS/Effects/MythicStatusRegistry.h"
+#include "Settings/MythicDeveloperSettings.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicStatusEffectTest,
@@ -16,73 +17,49 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicStatusEffectTest::RunTest(const FString &Parameters) {
     using Def = UMythicAttributeSet_Defense;
 
-    const FGameplayTag TypeBurn = FGameplayTag::RequestGameplayTag(FName("Status.Type.Burn"));
-    const FGameplayTag TypePoison = FGameplayTag::RequestGameplayTag(FName("Status.Type.Poison"));
-    const FGameplayTag TypeBleed = FGameplayTag::RequestGameplayTag(FName("Status.Type.Bleed"));
-    const FGameplayTag TypeSlow = FGameplayTag::RequestGameplayTag(FName("Status.Type.Slow"));
-    const FGameplayTag TypeFreeze = FGameplayTag::RequestGameplayTag(FName("Status.Type.Freeze"));
-    const FGameplayTag TypeStun = FGameplayTag::RequestGameplayTag(FName("Status.Type.Stun"));
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    UMythicStatusEffectLibrary *Library = Settings ? Settings->StatusEffectLibrary.LoadSynchronous() : nullptr;
+    if (!TestNotNull(TEXT("status library loads"), Library)) {
+        return false;
+    }
 
-    TestTrue(TEXT("resolve Burn"), FMythicStatusEffectResolver::ResolveDebuffGEForStatus(TypeBurn).Get() == UMythicGE_Burn::StaticClass());
-    TestTrue(TEXT("resolve Poison"), FMythicStatusEffectResolver::ResolveDebuffGEForStatus(TypePoison).Get() == UMythicGE_Poison::StaticClass());
-    TestTrue(TEXT("resolve Bleed"), FMythicStatusEffectResolver::ResolveDebuffGEForStatus(TypeBleed).Get() == UMythicGE_Bleed::StaticClass());
-    TestTrue(TEXT("resolve Slow"), FMythicStatusEffectResolver::ResolveDebuffGEForStatus(TypeSlow).Get() == UMythicGE_Slow::StaticClass());
-    TestTrue(TEXT("resolve Freeze"), FMythicStatusEffectResolver::ResolveDebuffGEForStatus(TypeFreeze).Get() == UMythicGE_Freeze::StaticClass());
-    TestTrue(TEXT("resolve Stun"), FMythicStatusEffectResolver::ResolveDebuffGEForStatus(TypeStun).Get() == UMythicGE_Stun::StaticClass());
-
-    const FGameplayTag Unrelated = FGameplayTag::RequestGameplayTag(FName("GAS.Debuff.Bleeding"));
-    TestNull(TEXT("resolve unrelated tag → nullptr"), FMythicStatusEffectResolver::ResolveDebuffGEForStatus(Unrelated).Get());
-    TestNull(TEXT("resolve invalid tag → nullptr"), FMythicStatusEffectResolver::ResolveDebuffGEForStatus(FGameplayTag()).Get());
-
-    auto CheckGranted = [&](const UGameplayEffect *GE, const FGameplayTag &Expected, const TCHAR *Label) {
-        const UTargetTagsGameplayEffectComponent *TagComp = GE ? GE->FindComponent<UTargetTagsGameplayEffectComponent>() : nullptr;
-        if (TestNotNull(Label, TagComp)) {
-            TestTrue(Label, TagComp->GetConfiguredTargetTagChanges().CombinedTags.HasTagExact(Expected));
+    for (const UMythicStatusEffectDefinition *Definition : Library->Statuses) {
+        if (!Definition) {
+            continue;
         }
-    };
-
-    auto CheckDoT = [&](const UGameplayEffect *GE, const TCHAR *Label) {
-        TestTrue(Label, GE->DurationPolicy == EGameplayEffectDurationType::HasDuration);
-        TestTrue(Label, GE->Period.GetValueAtLevel(0.0f) > 0.0f);
-        TestFalse(Label, GE->bExecutePeriodicEffectOnApplication);
-        if (TestEqual(Label, GE->Modifiers.Num(), 1)) {
-            TestTrue(Label, GE->Modifiers[0].ModifierOp == EGameplayModOp::Additive);
-            TestTrue(Label, GE->Modifiers[0].Attribute == UMythicAttributeSet_Life::GetDamageAttribute());
+        const FString Label = Definition->GetName();
+        const UGameplayEffect *Effect = Definition->EffectToApply ? GetDefault<UGameplayEffect>(Definition->EffectToApply) : nullptr;
+        if (!TestNotNull(*FString::Printf(TEXT("%s resolves its effect"), *Label), Effect)) {
+            continue;
         }
-    };
 
-    auto CheckTagOnly = [&](const UGameplayEffect *GE, const TCHAR *Label) {
-        TestTrue(Label, GE->DurationPolicy == EGameplayEffectDurationType::HasDuration);
-        TestEqual(Label, GE->Modifiers.Num(), 0);
-    };
+        // A status the player wears has to expire on its own. Instant cannot be "on" you, and Infinite never lifts.
+        TestTrue(*FString::Printf(TEXT("%s lasts for a duration"), *Label),
+                 Effect->DurationPolicy == EGameplayEffectDurationType::HasDuration);
+        float DurationSeconds = 0.0f;
+        if (Effect->DurationMagnitude.GetStaticMagnitudeIfPossible(1.0f, DurationSeconds)) {
+            TestTrue(*FString::Printf(TEXT("%s lasts a non-zero time"), *Label), DurationSeconds > 0.0f);
+        }
 
-    const UMythicGE_Burn *Burn = GetDefault<UMythicGE_Burn>();
-    const UMythicGE_Poison *Poison = GetDefault<UMythicGE_Poison>();
-    const UMythicGE_Bleed *Bleed = GetDefault<UMythicGE_Bleed>();
-    const UMythicGE_Slow *Slow = GetDefault<UMythicGE_Slow>();
-    const UMythicGE_Freeze *Freeze = GetDefault<UMythicGE_Freeze>();
-    const UMythicGE_Stun *Stun = GetDefault<UMythicGE_Stun>();
-    const UMythicGE_Weaken *Weaken = GetDefault<UMythicGE_Weaken>();
-    const UMythicGE_Terrify *Terrify = GetDefault<UMythicGE_Terrify>();
+        // A damage-over-time needs a tick, or the modifier lands once and the status is a flat hit wearing a timer.
+        if (Effect->Modifiers.Num() > 0) {
+            TestTrue(*FString::Printf(TEXT("%s ticks, since it modifies an attribute over time"), *Label),
+                     Effect->Period.GetValueAtLevel(0.0f) > 0.0f);
+            TestFalse(*FString::Printf(TEXT("%s does not tick on application, so the first tick is a beat later"), *Label),
+                      Effect->bExecutePeriodicEffectOnApplication);
+            for (const FGameplayModifierInfo &Mod : Effect->Modifiers) {
+                TestTrue(*FString::Printf(TEXT("%s modifies an attribute that exists"), *Label), Mod.Attribute.IsValid());
+            }
+        }
 
-    CheckDoT(Burn, TEXT("Burn is a configured DoT"));
-    CheckDoT(Poison, TEXT("Poison is a configured DoT"));
-    CheckDoT(Bleed, TEXT("Bleed is a configured DoT"));
-    CheckGranted(Burn, GAS_DEBUFF_BURNING, TEXT("Burn grants GAS.Debuff.Burning"));
-    CheckGranted(Bleed, GAS_DEBUFF_BLEEDING, TEXT("Bleed grants GAS.Debuff.Bleeding"));
-    CheckGranted(Poison, FGameplayTag::RequestGameplayTag(FName("Status.State.Poisoned")), TEXT("Poison grants Status.State.Poisoned"));
-    CheckGranted(Poison, GAS_DEBUFF_POISONED, TEXT("Poison grants GAS.Debuff.Poisoned"));
-
-    CheckTagOnly(Slow, TEXT("Slow is tag-only"));
-    CheckTagOnly(Freeze, TEXT("Freeze is tag-only"));
-    CheckTagOnly(Stun, TEXT("Stun is tag-only"));
-    CheckTagOnly(Weaken, TEXT("Weaken is tag-only"));
-    CheckTagOnly(Terrify, TEXT("Terrify is tag-only"));
-    CheckGranted(Slow, GAS_DEBUFF_SLOWED, TEXT("Slow grants GAS.Debuff.Slowed"));
-    CheckGranted(Freeze, GAS_DEBUFF_FROZEN, TEXT("Freeze grants GAS.Debuff.Frozen"));
-    CheckGranted(Stun, GAS_DEBUFF_STUNNED, TEXT("Stun grants GAS.Debuff.Stunned"));
-    CheckGranted(Weaken, GAS_DEBUFF_WEAKENED, TEXT("Weaken grants GAS.Debuff.Weakened"));
-    CheckGranted(Terrify, GAS_DEBUFF_TERRIFIED, TEXT("Terrify grants GAS.Debuff.Terrified"));
+        // What the definition claims it grants has to be what the effect really grants, or every reader of the tag
+        // silently stops matching.
+        const UTargetTagsGameplayEffectComponent *TagComponent = Effect->FindComponent<UTargetTagsGameplayEffectComponent>();
+        if (TestNotNull(*FString::Printf(TEXT("%s grants target tags"), *Label), TagComponent)) {
+            TestTrue(*FString::Printf(TEXT("%s grants %s"), *Label, *Definition->GrantedStateTag.ToString()),
+                     TagComponent->GetConfiguredTargetTagChanges().CombinedTags.HasTagExact(Definition->GrantedStateTag));
+        }
+    }
 
     TestEqual(TEXT("threshold @0 resistance = 100"), Def::ComputeBuildupThreshold(0.0f), 100.0f);
     TestEqual(TEXT("threshold @full resistance = 102"), Def::ComputeBuildupThreshold(1.0f), 102.0f);
