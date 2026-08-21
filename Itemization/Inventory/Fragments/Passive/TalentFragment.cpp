@@ -79,7 +79,10 @@ void UTalentFragment::RollTalents(UTalentPool *TalentPool, int NumTalentsToRoll,
     EligibleIndexes.Reserve(TalentPool->TalentDefs.Num());
     for (int32 i = 0; i < TalentPool->TalentDefs.Num(); i++) {
         const UTalentDefinition *Def = TalentPool->TalentDefs[i];
-        if (Def && IsTalentEligible(ItemRarity, Def->MinRarity) && IsTalentAllowedOnItem(Def->AllowedItemTypes, TypeProbe)) {
+        // A talent that grants nothing must not be eligible. Filtering it after the draw lets it consume a slot,
+        // so an item silently ends up with fewer talents than its rarity promised.
+        if (Def && Def->HasAnyPayload() && IsTalentEligible(ItemRarity, Def->MinRarity)
+            && IsTalentAllowedOnItem(Def->AllowedItemTypes, TypeProbe)) {
             EligibleIndexes.Add(i);
         }
     }
@@ -94,8 +97,10 @@ void UTalentFragment::RollTalents(UTalentPool *TalentPool, int NumTalentsToRoll,
             continue;
         }
 
+        // Unreachable while eligibility filters payload, kept so a future eligibility change cannot grant an
+        // empty talent silently.
         if (!TalentAtIdx->HasAnyPayload()) {
-            UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInstanced: talent '%s' grants nothing (no ability)."),
+            UE_LOG(Myth, Error, TEXT("UTalentFragment::RollTalents: talent '%s' grants nothing (no ability)."),
                    *TalentAtIdx->Name.ToString());
             continue;
         }
