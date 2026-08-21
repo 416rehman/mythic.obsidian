@@ -119,7 +119,7 @@ public:
      * As GrantProficiencyXP, but the caller also describes WHAT the work was.
      *
      * ContextTags ride the emitted GAS.Event.Proficiency.Gained payload alongside the track tag, so a proc rule can
-     * gate on them via RequiredEventTags. The track tag turns one event into twelve; this turns each of those into
+     * gate on them via RequiredEventTag. The track tag turns one event into twelve; this turns each of those into
      * as many as the caller can distinguish -- the station that did the work, the quality tier that came out, the
      * kind of thing gathered.
      *
