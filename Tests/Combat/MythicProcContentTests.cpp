@@ -50,11 +50,16 @@ bool FMythicProcContentTest::RunTest(const FString &Parameters) {
             const FMythicTriggerSpec &Spec = Proc->Triggers[Index];
             const FString Where = FString::Printf(TEXT("%s clause %d"), *Name, Index);
 
+            TestTrue(*FString::Printf(TEXT("%s applies a status or an effect"), *Where),
+                     UMythicGA_Triggered::HasPayload(Spec));
+
             // An unregistered tag still passes IsValid() in the editor, so ask the manager.
             TestTrue(*FString::Printf(TEXT("%s trigger event is a registered tag"), *Where),
                      Tags.RequestGameplayTag(Spec.TriggerEvent.GetTagName(), false).IsValid());
-            TestTrue(*FString::Printf(TEXT("%s status is a registered tag"), *Where),
-                     Tags.RequestGameplayTag(Spec.StatusToApply.GetTagName(), false).IsValid());
+            if (Spec.StatusToApply.IsValid()) {
+                TestTrue(*FString::Printf(TEXT("%s status is a registered tag"), *Where),
+                         Tags.RequestGameplayTag(Spec.StatusToApply.GetTagName(), false).IsValid());
+            }
 
             // A clause naming a rolled chance the talent never rolls falls back to its constant without a word,
             // which reads as authored variance that is not there.

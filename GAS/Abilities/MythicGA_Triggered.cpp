@@ -31,18 +31,22 @@ bool UMythicGA_Triggered::ShouldProc(float ResolvedChance, float InternalCooldow
     return MythicCombat::RollSucceeds(MythicCombat::ClampProbability(ResolvedChance), Roll01);
 }
 
-float UMythicGA_Triggered::ResolveChance(const FMythicTriggerSpec &Spec) const {
-    if (Spec.ChanceParameter.IsValid()) {
+float UMythicGA_Triggered::ResolveRolledValue(const FGameplayTag &Parameter, float Fallback) const {
+    if (Parameter.IsValid()) {
         if (const UObject *Source = GetCurrentSourceObject()) {
             if (const IMythicAbilityRollSource *RollSource = Cast<IMythicAbilityRollSource>(Source)) {
                 float Rolled = 0.0f;
-                if (RollSource->GetRolledAbilityValue(GetCurrentAbilitySpecHandle(), Spec.ChanceParameter, Rolled)) {
+                if (RollSource->GetRolledAbilityValue(GetCurrentAbilitySpecHandle(), Parameter, Rolled)) {
                     return Rolled;
                 }
             }
         }
     }
-    return Spec.Chance;
+    return Fallback;
+}
+
+bool UMythicGA_Triggered::HasPayload(const FMythicTriggerSpec &Spec) {
+    return Spec.StatusToApply.IsValid() || Spec.EffectToApply != nullptr;
 }
 
 bool UMythicGA_Triggered::PassesCondition(const FMythicTriggerCondition &Condition, const FGameplayTagContainer &WorldTags,
@@ -126,6 +130,28 @@ void UMythicGA_Triggered::EndAbility(const FGameplayAbilitySpecHandle Handle, co
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }
 
+bool UMythicGA_Triggered::ApplyClauseEffect(const FMythicTriggerSpec &Spec, AActor *Target, AActor *Owner) const {
+    UAbilitySystemComponent *OwnerASC = GetAbilitySystemComponentFromActorInfo();
+    UAbilitySystemComponent *TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Target);
+    if (!OwnerASC || !TargetASC || !Spec.EffectToApply) {
+        return false;
+    }
+
+    FGameplayEffectContextHandle Context = OwnerASC->MakeEffectContext();
+    Context.AddInstigator(Owner, Owner);
+
+    const FGameplayEffectSpecHandle EffectSpec = OwnerASC->MakeOutgoingSpec(Spec.EffectToApply, 1.0f, Context);
+    if (!EffectSpec.IsValid()) {
+        return false;
+    }
+    if (Spec.MagnitudeParameter.IsValid()) {
+        EffectSpec.Data->SetSetByCallerMagnitude(Spec.MagnitudeParameter,
+                                                 ResolveRolledValue(Spec.MagnitudeParameter, Spec.Magnitude));
+    }
+
+    return OwnerASC->ApplyGameplayEffectSpecToTarget(*EffectSpec.Data.Get(), TargetASC).WasSuccessfullyApplied();
+}
+
 void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, FGameplayTag EventTag) {
     AActor *Owner = GetAvatarActorFromActorInfo();
     if (!Owner || !Owner->HasAuthority()) {
@@ -153,7 +179,7 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
 
     for (int32 Index = 0; Index < Triggers.Num(); ++Index) {
         const FMythicTriggerSpec &Spec = Triggers[Index];
-        if (Spec.TriggerEvent != EventTag || !Spec.StatusToApply.IsValid()) {
+        if (Spec.TriggerEvent != EventTag || !HasPayload(Spec)) {
             continue;
         }
 
@@ -172,11 +198,19 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
         }
 
         const double *LastFire = LastFireTimes.Find(Index);
-        if (!ShouldProc(ResolveChance(Spec), Spec.InternalCooldown, Now, LastFire ? *LastFire : 0.0, FMath::FRand())) {
+        if (!ShouldProc(ResolveRolledValue(Spec.ChanceParameter, Spec.Chance), Spec.InternalCooldown, Now,
+                        LastFire ? *LastFire : 0.0, FMath::FRand())) {
             continue;
         }
 
-        if (UMythicStatusRegistry::ApplyStatusToActor(Target, Spec.StatusToApply, Owner)) {
+        bool bLanded = false;
+        if (Spec.StatusToApply.IsValid()) {
+            bLanded |= UMythicStatusRegistry::ApplyStatusToActor(Target, Spec.StatusToApply, Owner);
+        }
+        if (Spec.EffectToApply) {
+            bLanded |= ApplyClauseEffect(Spec, Target, Owner);
+        }
+        if (bLanded) {
             LastFireTimes.Add(Index, Now);
         }
     }

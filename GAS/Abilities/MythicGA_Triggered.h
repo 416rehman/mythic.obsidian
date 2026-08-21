@@ -76,9 +76,27 @@ struct MYTHIC_API FMythicTriggerSpec {
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float Chance = 1.0f;
 
-    // Status handed to the status registry when the clause lands.
+    // Status handed to the status registry when the clause lands. Optional if the clause applies an effect.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger", meta = (Categories = "Status.Type"))
     FGameplayTag StatusToApply;
+
+    /**
+     * Effect applied when the clause lands — a heal, a buff, anything a status cannot express. Optional if the
+     * clause applies a status.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger")
+    TSubclassOf<UGameplayEffect> EffectToApply;
+
+    /**
+     * SetByCaller tag the effect reads its magnitude from, and the key the granting item rolled it under — one
+     * tag for both, so an authored effect and its rolled value cannot drift apart.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger")
+    FGameplayTag MagnitudeParameter;
+
+    // Magnitude used when MagnitudeParameter resolves no roll.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger")
+    float Magnitude = 0.0f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger")
     EMythicTriggerTarget Target = EMythicTriggerTarget::Other;
@@ -118,8 +136,11 @@ public:
     // Chance and internal cooldown in one decision, so the gate is testable without a world.
     static bool ShouldProc(float ResolvedChance, float InternalCooldown, double Now, double LastFireTime, float Roll01);
 
-    // Rolled chance for a clause, falling back to its authored Chance when the granting source rolled nothing.
-    float ResolveChance(const FMythicTriggerSpec &Spec) const;
+    // Value the granting source rolled under Parameter, or Fallback when it rolled nothing under that tag.
+    float ResolveRolledValue(const FGameplayTag &Parameter, float Fallback) const;
+
+    // True when the clause would do something. A clause with neither a status nor an effect is inert.
+    static bool HasPayload(const FMythicTriggerSpec &Spec);
 
     // The actor a clause acts on, given the event that fired it.
     static AActor *ResolveTarget(const FMythicTriggerSpec &Spec, const FGameplayEventData *Payload, AActor *Owner);
@@ -133,6 +154,9 @@ public:
     static float GetHealthFraction(const AActor *Actor);
 
 protected:
+    // Applies the clause's effect to the resolved target, with its rolled magnitude set by caller.
+    bool ApplyClauseEffect(const FMythicTriggerSpec &Spec, AActor *Target, AActor *Owner) const;
+
     // Payload-bound args follow the delegate's own, so EventTag comes second.
     void HandleTriggerEvent(const FGameplayEventData *Payload, FGameplayTag EventTag);
 

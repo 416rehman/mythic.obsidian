@@ -1,6 +1,8 @@
 
 #include "Misc/AutomationTest.h"
 
+#include "GameplayEffect.h"
+
 #include "GAS/Abilities/MythicGA_Triggered.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -32,9 +34,9 @@ bool FMythicTriggeredProcTest::RunTest(const FString &Parameters) {
     {
         AActor *Owner = reinterpret_cast<AActor *>(0x1);
         FGameplayEventData Payload;
-        TestEqual(TEXT("Self resolves the owner"),
-                  GA::ResolveTarget({FGameplayTag(), FGameplayTag(), 1.0f, FGameplayTag(), EMythicTriggerTarget::Self, 0.0f}, &Payload, Owner),
-                  Owner);
+        FMythicTriggerSpec SelfSpec;
+        SelfSpec.Target = EMythicTriggerTarget::Self;
+        TestEqual(TEXT("Self resolves the owner"), GA::ResolveTarget(SelfSpec, &Payload, Owner), Owner);
 
         FMythicTriggerSpec OtherSpec;
         OtherSpec.Target = EMythicTriggerTarget::Other;
@@ -90,6 +92,20 @@ bool FMythicTriggeredProcTest::RunTest(const FString &Parameters) {
         // An actor with no health reads as full, so a below-half gate cannot fire on something that cannot bleed.
         TestFalse(TEXT("something with no health fails a below-half gate"),
                   GA::PassesCondition(Cornered, Empty, Empty, Empty, GA::GetHealthFraction(nullptr), 1.0f));
+    }
+
+    // A clause must do something. One with neither a status nor an effect is authored but inert.
+    {
+        FMythicTriggerSpec Empty;
+        TestFalse(TEXT("a clause with no status and no effect is inert"), GA::HasPayload(Empty));
+
+        FMythicTriggerSpec WithStatus;
+        WithStatus.StatusToApply = FGameplayTag::RequestGameplayTag(FName("Status.Type.Burn"), false);
+        TestTrue(TEXT("a status alone is a payload"), GA::HasPayload(WithStatus));
+
+        FMythicTriggerSpec WithEffect;
+        WithEffect.EffectToApply = UGameplayEffect::StaticClass();
+        TestTrue(TEXT("an effect alone is a payload"), GA::HasPayload(WithEffect));
     }
 
     // The class must stay passive: talent validation rejects anything else, so a wrong default would make every
