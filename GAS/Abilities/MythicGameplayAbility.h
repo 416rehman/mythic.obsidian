@@ -120,6 +120,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Ability")
     float GetClampedAttackSpeedPlayRate() const;
 
+    // AttackSpeed is a bonus fraction over the normal rate. Never returns zero: a stalled montage never
+    // completes, so PlayMontageAndWait would hang the ability forever.
+    static float ComputeAttackSpeedPlayRate(float AttackSpeedBonus, float MinRate, float MaxRate);
+
     UFUNCTION(BlueprintCallable, Category = "Mythic|Ability")
     AMythicPlayerController *GetMythicPlayerControllerFromActorInfo() const;
 

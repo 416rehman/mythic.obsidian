@@ -697,14 +697,29 @@ AMythicPlayerController *UMythicGameplayAbility::GetMythicPlayerControllerFromAc
 }
 
 float UMythicGameplayAbility::GetClampedAttackSpeedPlayRate() const {
-    float AttackSpeedScale = 1.0f;
+    // AttackSpeed is a bonus fraction that defaults to zero, so the play rate is one plus the bonus.
+    float PlayRate = 1.0f;
+    float MinRate = 0.8f;
+    float MaxRate = 1.4f;
+
     if (UAbilitySystemComponent *ASC = GetAbilitySystemComponentFromActorInfo()) {
         if (const UMythicAttributeSet_Offense *Offense = ASC->GetSet<UMythicAttributeSet_Offense>()) {
-            AttackSpeedScale = Offense->GetAttackSpeed();
+            PlayRate = 1.0f + Offense->GetAttackSpeed();
+        }
+        if (const UWorld *World = ASC->GetWorld()) {
+            if (const AMythicGameState *GS = World->GetGameState<AMythicGameState>()) {
+                MinRate = GS->MinAttackSpeedPlayRate;
+                MaxRate = GS->MaxAttackSpeedPlayRate;
+            }
         }
     }
 
-    return FMath::Clamp(AttackSpeedScale, 0.8f, 1.4f);
+    return ComputeAttackSpeedPlayRate(PlayRate - 1.0f, MinRate, MaxRate);
+}
+
+float UMythicGameplayAbility::ComputeAttackSpeedPlayRate(float AttackSpeedBonus, float MinRate, float MaxRate) {
+    const float Floor = FMath::Max(KINDA_SMALL_NUMBER, MinRate);
+    return FMath::Clamp(1.0f + AttackSpeedBonus, Floor, FMath::Max(Floor, MaxRate));
 }
 
 FGameplayTagContainer UMythicGameplayAbility::BuildAbilityContextTags() const {

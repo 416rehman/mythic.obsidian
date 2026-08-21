@@ -63,6 +63,14 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float EnlightenProficiencyBonus = 0.5f;
 
+    // Bounds on the attack montage play rate once AttackSpeed is applied. The floor keeps a stacked slow from
+    // stalling a montage, which never finishes and leaves the ability running.
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
+    float MinAttackSpeedPlayRate = 0.8f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
+    float MaxAttackSpeedPlayRate = 1.4f;
+
     // Upper bound on UMythicAttributeSet_Utility::CooldownReduction when it scales ability cooldown durations
     // (effective cooldown = base * (1 - clamp(CDR, 0, MaxCooldownReduction))). A safety cap, NOT a balance lever:
     // it keeps a sliver of cooldown so stacked CDR gear can't reach a degenerate zero/instant cooldown. 0.8 = at
