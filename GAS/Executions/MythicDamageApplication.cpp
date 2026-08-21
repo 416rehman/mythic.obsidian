@@ -480,7 +480,10 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         OutExecutionOutput.AddOutputModifier(FGameplayModifierEvaluatedData(
             UMythicAttributeSet_Defense::GetShieldAttribute(), EGameplayModOp::Additive, -ToShield));
     }
-    if (ToHealth > 0.0f) {
+    // Emitted even when the shield ate all of it. The life set's Damage branch owns the whole on-hit chain,
+    // so skipping the modifier means a shielded target never aggros and no on-hit effect fires.
+    if (FinalDamage > 0.0f) {
+        MythicContext->SetShieldAbsorbed(ToShield);
         OutExecutionOutput.AddOutputModifier(FGameplayModifierEvaluatedData(
             UMythicAttributeSet_Life::GetDamageAttribute(), EGameplayModOp::Additive, ToHealth));
     }

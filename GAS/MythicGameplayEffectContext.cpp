@@ -63,6 +63,7 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         REP_IsTerrify,
         REP_IsDodged,
         REP_ApplierPlayerKey,
+        REP_ShieldAbsorbed,
         REP_MAX
     };
     uint32 RepBits = 0;
@@ -120,6 +121,9 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         }
         if (!ApplierPlayerKey.IsEmpty()) {
             RepBits |= 1 << REP_ApplierPlayerKey;
+        }
+        if (ShieldAbsorbed > 0.0f) {
+            RepBits |= 1 << REP_ShieldAbsorbed;
         }
     }
 
@@ -187,6 +191,9 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
     }
     if (RepBits & (1 << REP_ApplierPlayerKey)) {
         Ar << ApplierPlayerKey;
+    }
+    if (RepBits & (1 << REP_ShieldAbsorbed)) {
+        Ar << ShieldAbsorbed;
     }
 
     if (Ar.IsLoading()) {

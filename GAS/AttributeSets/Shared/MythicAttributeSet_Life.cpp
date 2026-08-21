@@ -115,13 +115,16 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
 
         SetDamage(0.0f);
 
-        if (DamageDone > 0.0f) {
+        const FMythicGameplayEffectContext *MythicCtx = FMythicGameplayEffectContext::ExtractEffectContext(EffectContext);
+        const float TotalDealt = DamageDone + (MythicCtx ? FMath::Max(0.0f, MythicCtx->GetShieldAbsorbed()) : 0.0f);
+
+        if (TotalDealt > 0.0f) {
             const bool bDirectExternalHit =
                 (Data.EffectSpec.GetPeriod() <= 0.0f) && Instigator && (Instigator != ASC->GetOwnerActor());
             if (bDirectExternalHit) {
-                SendEventToInstigator(Data, Instigator, InstigatorASC, ASC, GAS_EVENT_DMG_DELIVERED, DamageDone);
+                SendEventToInstigator(Data, Instigator, InstigatorASC, ASC, GAS_EVENT_DMG_DELIVERED, TotalDealt);
             }
-            SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DMG_RECEIVED, DamageDone);
+            SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DMG_RECEIVED, TotalDealt);
 
             if (ASC && ASC->IsOwnerActorAuthoritative()) {
                 if (UMythicLifeComponent *VictimLife = UMythicLifeComponent::FindHealthComponent(ASC->GetAvatarActor())) {

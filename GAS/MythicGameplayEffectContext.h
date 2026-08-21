@@ -69,6 +69,16 @@ public:
     const FString &GetApplierPlayerKey() const { return ApplierPlayerKey; }
     void SetApplierPlayerKey(const FString &InApplierPlayerKey) { ApplierPlayerKey = InApplierPlayerKey; }
 
+protected:
+    UPROPERTY()
+    float ShieldAbsorbed = 0.0f;
+
+public:
+    // How much of this hit the target's shield ate. The on-hit chain adds it back so a fully absorbed hit
+    // still counts as a hit.
+    float GetShieldAbsorbed() const { return ShieldAbsorbed; }
+    void SetShieldAbsorbed(float InShieldAbsorbed) { ShieldAbsorbed = InShieldAbsorbed; }
+
     virtual FGameplayEffectContext *Duplicate() const override {
         FMythicGameplayEffectContext *NewContext = new FMythicGameplayEffectContext();
         *NewContext = *this;
