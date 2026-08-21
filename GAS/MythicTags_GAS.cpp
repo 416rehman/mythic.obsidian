@@ -47,6 +47,8 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_HITBOX, "GAS.Event.Hitbox", "Event call
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_PRE, "GAS.Event.Dmg.Pre", "Event called before owner deals damage to another entity");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_DELIVERED, "GAS.Event.Dmg.Delivered", "Event called when owner deals damage to another entity");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_HIT_CRITICAL, "GAS.Hit.Critical",
+                               "Rides on a damage event when the hit was critical, so a talent can gate on one");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_RECEIVED, "GAS.Event.Dmg.Received", "Event called when owner receives damage from another entity");
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DEATH_PRE, "GAS.Event.Death.Pre",

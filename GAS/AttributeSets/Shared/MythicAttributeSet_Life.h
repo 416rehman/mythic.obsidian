@@ -59,6 +59,10 @@ public:
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
     virtual bool PreGameplayEffectExecute(FGameplayEffectModCallbackData &Data) override;
+    // Tags describing the hit itself, beyond the source's own. Read from the Mythic effect context, which is
+    // where the damage execution records what the hit turned out to be.
+    static void AppendHitTags(const FGameplayEffectContextHandle &Context, FGameplayTagContainer &OutTags);
+
     void SendEventToInstigator(const FGameplayEffectModCallbackData &Data, AActor *Instigator, UAbilitySystemComponent *InstigatorASC,
                                UAbilitySystemComponent *OwnerASC,
                                FGameplayTag EventTag, float Magnitude);

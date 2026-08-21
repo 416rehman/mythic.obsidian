@@ -52,6 +52,14 @@ bool UMythicAttributeSet_Life::PreGameplayEffectExecute(FGameplayEffectModCallba
     return true;
 }
 
+void UMythicAttributeSet_Life::AppendHitTags(const FGameplayEffectContextHandle &Context, FGameplayTagContainer &OutTags) {
+    if (const FMythicGameplayEffectContext *MythicCtx = FMythicGameplayEffectContext::ExtractEffectContext(Context)) {
+        if (MythicCtx->IsCriticalHit()) {
+            OutTags.AddTag(GAS_HIT_CRITICAL);
+        }
+    }
+}
+
 void UMythicAttributeSet_Life::SendEventToInstigator(const FGameplayEffectModCallbackData &Data, AActor *Instigator, UAbilitySystemComponent *InstigatorASC,
                                                      UAbilitySystemComponent *OwnerASC, FGameplayTag EventTag, float Magnitude) {
     if (InstigatorASC && OwnerASC) {
@@ -62,6 +70,7 @@ void UMythicAttributeSet_Life::SendEventToInstigator(const FGameplayEffectModCal
         Payload.OptionalObject = Data.EffectSpec.Def;
         Payload.ContextHandle = Data.EffectSpec.GetContext();
         Payload.InstigatorTags = *Data.EffectSpec.CapturedSourceTags.GetAggregatedTags();
+        AppendHitTags(Data.EffectSpec.GetContext(), Payload.InstigatorTags);
         Payload.TargetTags = *Data.EffectSpec.CapturedTargetTags.GetAggregatedTags();
         Payload.EventMagnitude = Magnitude;
         InstigatorASC->HandleGameplayEvent(EventTag, &Payload);
@@ -78,6 +87,7 @@ void UMythicAttributeSet_Life::SendEventToOwner(const FGameplayEffectModCallback
         Payload.OptionalObject = Data.EffectSpec.Def;
         Payload.ContextHandle = Data.EffectSpec.GetContext();
         Payload.InstigatorTags = *Data.EffectSpec.CapturedSourceTags.GetAggregatedTags();
+        AppendHitTags(Data.EffectSpec.GetContext(), Payload.InstigatorTags);
         Payload.TargetTags = *Data.EffectSpec.CapturedTargetTags.GetAggregatedTags();
         Payload.EventMagnitude = Magnitude;
         OwnerASC->HandleGameplayEvent(EventTag, &Payload);
