@@ -6,6 +6,7 @@
 
 UMythicAttributeSet_Offense::UMythicAttributeSet_Offense() {
     InitOutgoingDamageMultiplier(1.0f);
+    InitStatusBuildupMultiplier(1.0f);
 }
 
 bool UMythicAttributeSet_Offense::IsProbabilityAttribute(const FGameplayAttribute &Attribute) {
@@ -26,6 +27,10 @@ void UMythicAttributeSet_Offense::PreAttributeChange(const FGameplayAttribute &A
     if (IsProbabilityAttribute(Attribute)) {
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     }
+    // A negative multiplier would drain buildup on hit, which reads as curing the ailment by attacking.
+    else if (Attribute == GetStatusBuildupMultiplierAttribute()) {
+        NewValue = FMath::Max(0.0f, NewValue);
+    }
 }
 
 void UMythicAttributeSet_Offense::PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const {
@@ -33,6 +38,10 @@ void UMythicAttributeSet_Offense::PreAttributeBaseChange(const FGameplayAttribut
 
     if (IsProbabilityAttribute(Attribute)) {
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    }
+    // A negative multiplier would drain buildup on hit, which reads as curing the ailment by attacking.
+    else if (Attribute == GetStatusBuildupMultiplierAttribute()) {
+        NewValue = FMath::Max(0.0f, NewValue);
     }
 }
 
@@ -130,6 +139,10 @@ void UMythicAttributeSet_Offense::OnRep_OutgoingDamageMultiplier(const FGameplay
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, OutgoingDamageMultiplier, OldOutgoingDamageMultiplier);
 }
 
+void UMythicAttributeSet_Offense::OnRep_StatusBuildupMultiplier(const FGameplayAttributeData &OldStatusBuildupMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, StatusBuildupMultiplier, OldStatusBuildupMultiplier);
+}
+
 void UMythicAttributeSet_Offense::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
@@ -157,4 +170,5 @@ void UMythicAttributeSet_Offense::GetLifetimeReplicatedProps(TArray<FLifetimePro
                                    REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, OutgoingDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, StatusBuildupMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
 }

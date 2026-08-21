@@ -31,6 +31,10 @@ bool UMythicDamageApplication::ShouldNegateFriendlyFire(bool bSourceIsPlayer, bo
     return bSourceIsPlayer && bTargetIsPlayer && !bSameActor && !bFriendlyFireEnabled;
 }
 
+float UMythicDamageApplication::ComputeBuildupPerProc(float BasePerProc, float SourceMultiplier) {
+    return FMath::Max(0.0f, BasePerProc) * FMath::Max(0.0f, SourceMultiplier);
+}
+
 float UMythicDamageApplication::ApplySkillDamageBonus(float Damage, bool bIsSkillHit, float BonusSkillDamage) {
     return FMath::Max(0.0f, bIsSkillHit ? Damage * (1.0f + BonusSkillDamage) : Damage);
 }
@@ -49,6 +53,7 @@ struct FDamageApplicationStatics {
     FGameplayEffectAttributeCaptureDefinition IncreasedDamageToEnemiesUnderStatusEffects;
     FGameplayEffectAttributeCaptureDefinition BonusDamageToSuperiorEnemies;
     FGameplayEffectAttributeCaptureDefinition OutgoingDamageMultiplier;
+    FGameplayEffectAttributeCaptureDefinition StatusBuildupMultiplier;
 
     FGameplayEffectAttributeCaptureDefinition Armor;
     FGameplayEffectAttributeCaptureDefinition Shield;
@@ -91,6 +96,8 @@ struct FDamageApplicationStatics {
                                                                                  EGameplayEffectAttributeCaptureSource::Source, false);
         OutgoingDamageMultiplier = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Offense::GetOutgoingDamageMultiplierAttribute(),
                                                                              EGameplayEffectAttributeCaptureSource::Source, false);
+        StatusBuildupMultiplier = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Offense::GetStatusBuildupMultiplierAttribute(),
+                                                                                    EGameplayEffectAttributeCaptureSource::Source, false);
 
         Armor = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Defense::GetArmorAttribute(), EGameplayEffectAttributeCaptureSource::Target,
                                                           false);
@@ -140,6 +147,7 @@ UMythicDamageApplication::UMythicDamageApplication() {
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().IncreasedDamageToEnemiesUnderStatusEffects);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().BonusDamageToSuperiorEnemies);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().OutgoingDamageMultiplier);
+    RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().StatusBuildupMultiplier);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().Armor);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().Shield);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().DecreasedDamageFromEnemiesUnderStatusEffects);
@@ -477,7 +485,9 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
             UMythicAttributeSet_Life::GetDamageAttribute(), EGameplayModOp::Additive, ToHealth));
     }
 
-    static constexpr float StatusBuildupPerProc = 25.0f;
+    float BuildupMultiplier = 1.0f;
+    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.StatusBuildupMultiplier, EvaluateParameters, BuildupMultiplier);
+    const float StatusBuildupPerProc = ComputeBuildupPerProc(GS ? GS->StatusBuildupPerProc : 25.0f, BuildupMultiplier);
     auto AddBuildup = [&](bool bProcSurvived, const FGameplayAttribute &BuildupAttr) {
         if (bProcSurvived) {
             OutExecutionOutput.AddOutputModifier(FGameplayModifierEvaluatedData(

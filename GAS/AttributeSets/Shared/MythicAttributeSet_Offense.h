@@ -107,6 +107,11 @@ protected:
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_OutgoingDamageMultiplier)
     FGameplayAttributeData OutgoingDamageMultiplier;
 
+    // Scales how much status buildup each landed proc applies. 1.0 is normal; 2.0 reaches the threshold in half
+    // the hits. This is what an ailment build stacks to make its status land sooner.
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_StatusBuildupMultiplier)
+    FGameplayAttributeData StatusBuildupMultiplier;
+
 public:
     UMythicAttributeSet_Offense();
 
@@ -133,6 +138,7 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, IncreasedDamageToEnemiesUnderStatusEffects);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, OutgoingDamageMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, StatusBuildupMultiplier);
 
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
@@ -186,6 +192,9 @@ public:
     virtual void OnRep_BonusDamageToSuperiorEnemies(const FGameplayAttributeData &OldBonusDamageToSuperiorEnemies);
     UFUNCTION()
     virtual void OnRep_OutgoingDamageMultiplier(const FGameplayAttributeData &OldOutgoingDamageMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_StatusBuildupMultiplier(const FGameplayAttributeData &OldStatusBuildupMultiplier);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 };

@@ -15,6 +15,9 @@ public:
 
     static float ApplySkillDamageBonus(float Damage, bool bIsSkillHit, float BonusSkillDamage);
 
+    // Buildup one landed proc contributes. Never negative: a hit must never drain the meter it is filling.
+    static float ComputeBuildupPerProc(float BasePerProc, float SourceMultiplier);
+
 protected:
     virtual void Execute_Implementation(const FGameplayEffectCustomExecutionParameters& ExecutionParams, FGameplayEffectCustomExecutionOutput& OutExecutionOutput) const override;
 

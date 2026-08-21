@@ -71,6 +71,13 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float MaxAttackSpeedPlayRate = 1.4f;
 
+    /**
+     * Buildup a single landed proc contributes, before the source's StatusBuildupMultiplier. Against the ~100
+     * threshold this decides how many procs an unmodified attacker needs to land a status.
+     */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline", meta = (ClampMin = "0.0"))
+    float StatusBuildupPerProc = 25.0f;
+
     // Upper bound on UMythicAttributeSet_Utility::CooldownReduction when it scales ability cooldown durations
     // (effective cooldown = base * (1 - clamp(CDR, 0, MaxCooldownReduction))). A safety cap, NOT a balance lever:
     // it keeps a sliver of cooldown so stacked CDR gear can't reach a degenerate zero/instant cooldown. 0.8 = at
