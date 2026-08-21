@@ -288,12 +288,7 @@ bool UMythicPlayerStatusWidget::BindToLocalPlayer() {
     ViewModel->AddFieldValueChangedDelegate(FDesc::ShieldPercent, Delegate);
     ViewModel->AddFieldValueChangedDelegate(FDesc::bInCombat, Delegate);
     ViewModel->AddFieldValueChangedDelegate(FDesc::bExhausted, Delegate);
-    ViewModel->AddFieldValueChangedDelegate(FDesc::bBurning, Delegate);
-    ViewModel->AddFieldValueChangedDelegate(FDesc::bBleeding, Delegate);
-    ViewModel->AddFieldValueChangedDelegate(FDesc::bPoisoned, Delegate);
-    ViewModel->AddFieldValueChangedDelegate(FDesc::bStunned, Delegate);
-    ViewModel->AddFieldValueChangedDelegate(FDesc::bSlowed, Delegate);
-    ViewModel->AddFieldValueChangedDelegate(FDesc::bFrozen, Delegate);
+    ViewModel->AddFieldValueChangedDelegate(FDesc::StatusBadges, Delegate);
 
     ViewModel->OnHealthDamaged.AddDynamic(this, &UMythicPlayerStatusWidget::HandleHealthDamaged);
 
@@ -486,14 +481,24 @@ void UMythicPlayerStatusWidget::RefreshAll() {
     Readout(Txt_Shield, ViewModel->GetCurrentShield(), ViewModel->GetMaxShield());
 
     ApplyFlag(Icon_Exhausted, ViewModel->GetExhausted());
-    ApplyFlag(Icon_Burning, ViewModel->GetBurning());
-    ApplyFlag(Icon_Bleeding, ViewModel->GetBleeding());
-    ApplyFlag(Icon_Poisoned, ViewModel->GetPoisoned());
-    ApplyFlag(Icon_Stunned, ViewModel->GetStunned());
-    ApplyFlag(Icon_Slowed, ViewModel->GetSlowed());
-    ApplyFlag(Icon_Frozen, ViewModel->GetFrozen());
+    RefreshStatusBadges();
 
     RefreshSalience();
+}
+
+void UMythicPlayerStatusWidget::RefreshStatusBadges() {
+    if (!ViewModel) {
+        return;
+    }
+    for (const FMythicStatusBadgeEntry &Entry : ViewModel->GetStatusBadges()) {
+        if (!Entry.GrantedStateTag.IsValid()) {
+            continue;
+        }
+        const FString TagPath = Entry.GrantedStateTag.ToString();
+        int32 Dot = INDEX_NONE;
+        const FString Leaf = TagPath.FindLastChar(TCHAR('.'), Dot) ? TagPath.RightChop(Dot + 1) : TagPath;
+        ApplyFlag(GetWidgetFromName(FName(*(TEXT("Icon_") + Leaf))), Entry.bActive);
+    }
 }
 
 void UMythicPlayerStatusWidget::ApplyFlag(UWidget *Widget, bool bActive) {
@@ -529,9 +534,10 @@ void UMythicPlayerStatusWidget::RefreshSalience() {
     }
 
     const float LowestVital = FMath::Min(ViewModel->GetHealthPercent(), ViewModel->GetStaminaPercent());
-    const bool bAfflicted = ViewModel->GetExhausted() || ViewModel->GetBurning() || ViewModel->GetBleeding()
-                            || ViewModel->GetPoisoned() || ViewModel->GetStunned() || ViewModel->GetSlowed()
-                            || ViewModel->GetFrozen();
+    bool bAfflicted = ViewModel->GetExhausted();
+    for (const FMythicStatusBadgeEntry &Entry : ViewModel->GetStatusBadges()) {
+        bAfflicted |= Entry.bActive;
+    }
 
     EMythicHUDSalience Want = EMythicHUDSalience::Hidden;
     if (ViewModel->GetInCombat() || LowestVital < UrgentVitalFraction || bAfflicted) {

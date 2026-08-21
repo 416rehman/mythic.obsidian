@@ -86,24 +86,6 @@ public:
     UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetExhausted, Getter = GetExhausted, meta = (AllowPrivateAccess))
     bool bExhausted = false;
 
-    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetBurning, Getter = GetBurning, meta = (AllowPrivateAccess))
-    bool bBurning = false;
-
-    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetBleeding, Getter = GetBleeding, meta = (AllowPrivateAccess))
-    bool bBleeding = false;
-
-    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetPoisoned, Getter = GetPoisoned, meta = (AllowPrivateAccess))
-    bool bPoisoned = false;
-
-    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetStunned, Getter = GetStunned, meta = (AllowPrivateAccess))
-    bool bStunned = false;
-
-    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetSlowed, Getter = GetSlowed, meta = (AllowPrivateAccess))
-    bool bSlowed = false;
-
-    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetFrozen, Getter = GetFrozen, meta = (AllowPrivateAccess))
-    bool bFrozen = false;
-
     /**
      * Every authored status, sorted by tag so the row never reshuffles between runs. Built from the status
      * registry, so a status added in data shows up with its icon, colour and text without any code change.
@@ -140,18 +122,6 @@ public:
 
     void SetExhausted(bool V);
     bool GetExhausted() const { return bExhausted; }
-    void SetBurning(bool V);
-    bool GetBurning() const { return bBurning; }
-    void SetBleeding(bool V);
-    bool GetBleeding() const { return bBleeding; }
-    void SetPoisoned(bool V);
-    bool GetPoisoned() const { return bPoisoned; }
-    void SetStunned(bool V);
-    bool GetStunned() const { return bStunned; }
-    void SetSlowed(bool V);
-    bool GetSlowed() const { return bSlowed; }
-    void SetFrozen(bool V);
-    bool GetFrozen() const { return bFrozen; }
 
     virtual void BeginDestroy() override;
 

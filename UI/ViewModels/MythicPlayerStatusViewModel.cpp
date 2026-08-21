@@ -30,12 +30,6 @@ void UMythicPlayerStatusViewModel::InitializeForASC(UAbilitySystemComponent *InA
 
     SetInCombat(InASC->HasMatchingGameplayTag(GAS_STATE_INCOMBAT));
     SetExhausted(InASC->HasMatchingGameplayTag(GAS_STATE_EXHAUSTED));
-    SetBurning(InASC->HasMatchingGameplayTag(GAS_DEBUFF_BURNING));
-    SetBleeding(InASC->HasMatchingGameplayTag(GAS_DEBUFF_BLEEDING));
-    SetPoisoned(InASC->HasMatchingGameplayTag(GAS_DEBUFF_POISONED));
-    SetStunned(InASC->HasMatchingGameplayTag(GAS_DEBUFF_STUNNED));
-    SetSlowed(InASC->HasMatchingGameplayTag(GAS_DEBUFF_SLOWED));
-    SetFrozen(InASC->HasMatchingGameplayTag(GAS_DEBUFF_FROZEN));
 
     InASC->GetGameplayAttributeValueChangeDelegate(UMythicAttributeSet_Life::GetHealthAttribute()).AddUObject(this, &UMythicPlayerStatusViewModel::HandleAttributeChanged);
     InASC->GetGameplayAttributeValueChangeDelegate(UMythicAttributeSet_Life::GetMaxHealthAttribute()).AddUObject(this, &UMythicPlayerStatusViewModel::HandleAttributeChanged);
@@ -44,7 +38,7 @@ void UMythicPlayerStatusViewModel::InitializeForASC(UAbilitySystemComponent *InA
     InASC->GetGameplayAttributeValueChangeDelegate(UMythicAttributeSet_Defense::GetShieldAttribute()).AddUObject(this, &UMythicPlayerStatusViewModel::HandleAttributeChanged);
     InASC->GetGameplayAttributeValueChangeDelegate(UMythicAttributeSet_Defense::GetMaxShieldAttribute()).AddUObject(this, &UMythicPlayerStatusViewModel::HandleAttributeChanged);
 
-    const FGameplayTag StatusTags[] = {GAS_STATE_INCOMBAT, GAS_STATE_EXHAUSTED, GAS_DEBUFF_BURNING, GAS_DEBUFF_BLEEDING, GAS_DEBUFF_POISONED, GAS_DEBUFF_STUNNED, GAS_DEBUFF_SLOWED, GAS_DEBUFF_FROZEN};
+    const FGameplayTag StatusTags[] = {GAS_STATE_INCOMBAT, GAS_STATE_EXHAUSTED};
     for (const FGameplayTag &Tag : StatusTags) {
         if (Tag.IsValid()) {
             InASC->RegisterGameplayTagEvent(Tag, EGameplayTagEventType::NewOrRemoved).AddUObject(this, &UMythicPlayerStatusViewModel::HandleTagChanged);
@@ -194,24 +188,6 @@ void UMythicPlayerStatusViewModel::HandleTagChanged(const FGameplayTag Tag, int3
     else if (Tag == GAS_STATE_EXHAUSTED) {
         SetExhausted(bOn);
     }
-    else if (Tag == GAS_DEBUFF_BURNING) {
-        SetBurning(bOn);
-    }
-    else if (Tag == GAS_DEBUFF_BLEEDING) {
-        SetBleeding(bOn);
-    }
-    else if (Tag == GAS_DEBUFF_POISONED) {
-        SetPoisoned(bOn);
-    }
-    else if (Tag == GAS_DEBUFF_STUNNED) {
-        SetStunned(bOn);
-    }
-    else if (Tag == GAS_DEBUFF_SLOWED) {
-        SetSlowed(bOn);
-    }
-    else if (Tag == GAS_DEBUFF_FROZEN) {
-        SetFrozen(bOn);
-    }
 }
 
 void UMythicPlayerStatusViewModel::Unbind() {
@@ -226,7 +202,7 @@ void UMythicPlayerStatusViewModel::Unbind() {
     A->GetGameplayAttributeValueChangeDelegate(UMythicAttributeSet_Defense::GetShieldAttribute()).RemoveAll(this);
     A->GetGameplayAttributeValueChangeDelegate(UMythicAttributeSet_Defense::GetMaxShieldAttribute()).RemoveAll(this);
 
-    const FGameplayTag StatusTags[] = {GAS_STATE_INCOMBAT, GAS_STATE_EXHAUSTED, GAS_DEBUFF_BURNING, GAS_DEBUFF_BLEEDING, GAS_DEBUFF_POISONED, GAS_DEBUFF_STUNNED, GAS_DEBUFF_SLOWED, GAS_DEBUFF_FROZEN};
+    const FGameplayTag StatusTags[] = {GAS_STATE_INCOMBAT, GAS_STATE_EXHAUSTED};
     for (const FGameplayTag &Tag : StatusTags) {
         if (Tag.IsValid()) {
             A->RegisterGameplayTagEvent(Tag, EGameplayTagEventType::NewOrRemoved).RemoveAll(this);
@@ -272,35 +248,5 @@ void UMythicPlayerStatusViewModel::SetInCombat(bool V) {
 void UMythicPlayerStatusViewModel::SetExhausted(bool V) {
     if (UE_MVVM_SET_PROPERTY_VALUE(bExhausted, V)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bExhausted);
-    }
-}
-void UMythicPlayerStatusViewModel::SetBurning(bool V) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(bBurning, V)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bBurning);
-    }
-}
-void UMythicPlayerStatusViewModel::SetBleeding(bool V) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(bBleeding, V)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bBleeding);
-    }
-}
-void UMythicPlayerStatusViewModel::SetPoisoned(bool V) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(bPoisoned, V)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bPoisoned);
-    }
-}
-void UMythicPlayerStatusViewModel::SetStunned(bool V) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(bStunned, V)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bStunned);
-    }
-}
-void UMythicPlayerStatusViewModel::SetSlowed(bool V) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(bSlowed, V)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bSlowed);
-    }
-}
-void UMythicPlayerStatusViewModel::SetFrozen(bool V) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(bFrozen, V)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bFrozen);
     }
 }

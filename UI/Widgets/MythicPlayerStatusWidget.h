@@ -91,20 +91,13 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|HUD|Colours")
     FLinearColor ShieldEnd = FLinearColor(0.06f, 0.15f, 0.30f);
 
+    /**
+     * Exhausted is a player state rather than an inflicted status, so it keeps its own pin. Every status badge is
+     * found by name instead: a badge named Icon_<GrantedStateTag leaf> is shown whenever that status is active, so
+     * adding a status is a data asset plus an image named to match, with no code change here.
+     */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UWidget> Icon_Exhausted;
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UWidget> Icon_Burning;
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UWidget> Icon_Bleeding;
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UWidget> Icon_Poisoned;
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UWidget> Icon_Stunned;
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UWidget> Icon_Slowed;
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UWidget> Icon_Frozen;
 
     /** How fast the delayed-damage chip catches up, in bar fractions per second. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|HUD", meta = (ClampMin = "0.05"))
@@ -149,6 +142,8 @@ private:
     bool DecayStates(FMythicVitalBar &Bar, float DeltaSeconds);
 
     static void ApplyFlag(UWidget *Widget, bool bActive);
+
+    void RefreshStatusBadges();
 
     UPROPERTY()
     TObjectPtr<UMythicPlayerStatusViewModel> ViewModel;
