@@ -12,6 +12,7 @@
 #include "World/EnvironmentController/MythicEnvironmentSubsystem.h"
 
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
+#include "GAS/Effects/MythicStatusEffectDefinition.h"
 #include "GAS/Effects/MythicStatusRegistry.h"
 #include "GAS/Executions/MythicCombatRoll.h"
 #include "Mythic.h"
@@ -74,6 +75,33 @@ bool UMythicGA_Triggered::PassesCondition(const FMythicTriggerCondition &Conditi
     return true;
 }
 
+float UMythicGA_Triggered::SurviveChanceFromResistance(float Resistance) {
+    return MythicCombat::ClampProbability(1.0f - Resistance);
+}
+
+float UMythicGA_Triggered::GetStatusResistance(const AActor *Target, const FGameplayTag &StatusType) {
+    const UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Target);
+    const UWorld *World = Target ? Target->GetWorld() : nullptr;
+    const UGameInstance *GI = World ? World->GetGameInstance() : nullptr;
+    const UMythicStatusRegistry *Registry = GI ? GI->GetSubsystem<UMythicStatusRegistry>() : nullptr;
+    if (!ASC || !Registry) {
+        return 0.0f;
+    }
+    const UMythicStatusEffectDefinition *Definition = Registry->FindStatus(StatusType);
+    if (!Definition || !Definition->ResistanceAttribute.IsValid()) {
+        return 0.0f;
+    }
+    bool bFound = false;
+    return ASC->GetGameplayAttributeValue(Definition->ResistanceAttribute, bFound);
+}
+
+bool UMythicGA_Triggered::IsNthEvent(int32 EveryNth, int32 Count) {
+    if (EveryNth <= 1) {
+        return true;
+    }
+    return Count > 0 && (Count % EveryNth) == 0;
+}
+
 float UMythicGA_Triggered::GetHealthFraction(const AActor *Actor) {
     const UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Actor);
     const UMythicAttributeSet_Life *Life = ASC ? ASC->GetSet<UMythicAttributeSet_Life>() : nullptr;
@@ -130,6 +158,7 @@ void UMythicGA_Triggered::EndAbility(const FGameplayAbilitySpecHandle Handle, co
     }
     BoundEvents.Empty();
     LastFireTimes.Empty();
+    EventCounts.Empty();
 
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }
@@ -207,6 +236,13 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
             continue;
         }
 
+        // Counted after the gate, so a clause gated on snow counts strikes in snow rather than every swing.
+        int32 &Count = EventCounts.FindOrAdd(Index);
+        ++Count;
+        if (!IsNthEvent(Spec.EveryNthEvent, Count)) {
+            continue;
+        }
+
         const double *LastFire = LastFireTimes.Find(Index);
         if (!ShouldProc(ResolveRolledValue(Spec.ChanceParameter, Spec.Chance), Spec.InternalCooldown, Now,
                         LastFire ? *LastFire : 0.0, FMath::FRand())) {
@@ -215,7 +251,10 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
 
         bool bLanded = false;
         if (Spec.StatusToApply.IsValid()) {
-            bLanded |= UMythicStatusRegistry::ApplyStatusToActor(Target, Spec.StatusToApply, Owner);
+            const float Survives = SurviveChanceFromResistance(GetStatusResistance(Target, Spec.StatusToApply));
+            if (MythicCombat::RollSucceeds(Survives, FMath::FRand())) {
+                bLanded |= UMythicStatusRegistry::ApplyStatusToActor(Target, Spec.StatusToApply, Owner);
+            }
         }
         if (Spec.EffectToApply) {
             bLanded |= ApplyClauseEffect(Spec, Target, Owner);

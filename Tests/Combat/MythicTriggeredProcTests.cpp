@@ -3,6 +3,8 @@
 
 #include "GameplayEffect.h"
 
+#include "GAS/Executions/MythicCombatRoll.h"
+
 #include "GAS/Abilities/MythicGA_Triggered.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -115,6 +117,39 @@ bool FMythicTriggeredProcTest::RunTest(const FString &Parameters) {
         // An actor with no health reads as full, so a below-half gate cannot fire on something that cannot bleed.
         TestFalse(TEXT("something with no health fails a below-half gate"),
                   GA::PassesCondition(Cornered, Empty, Empty, Empty, Empty, GA::GetHealthFraction(nullptr), 1.0f));
+    }
+
+    // Every-Nth counting. "Every third strike falls like a hammer" must land on 3, 6, 9 and nothing between.
+    {
+        TestTrue(TEXT("no cadence fires on the first event"), GA::IsNthEvent(0, 1));
+        TestTrue(TEXT("a cadence of one fires on every event"), GA::IsNthEvent(1, 7));
+
+        TestFalse(TEXT("third strike does not fire on the first"), GA::IsNthEvent(3, 1));
+        TestFalse(TEXT("third strike does not fire on the second"), GA::IsNthEvent(3, 2));
+        TestTrue(TEXT("third strike fires on the third"), GA::IsNthEvent(3, 3));
+        TestFalse(TEXT("third strike does not fire on the fourth"), GA::IsNthEvent(3, 4));
+        TestTrue(TEXT("third strike fires again on the sixth"), GA::IsNthEvent(3, 6));
+
+        // A count of zero means nothing has happened yet, which is never the Nth.
+        TestFalse(TEXT("a cadence never fires before any event"), GA::IsNthEvent(3, 0));
+
+        TestTrue(TEXT("one blow in five fires on the fifth"), GA::IsNthEvent(5, 5));
+        TestFalse(TEXT("one blow in five does not fire on the fourth"), GA::IsNthEvent(5, 4));
+    }
+
+    // Resistance. A talent must not ignore a resistance that a weapon proc respects.
+    {
+        TestEqual(TEXT("no resistance lets everything through"), GA::SurviveChanceFromResistance(0.0f), 1.0f);
+        TestEqual(TEXT("half resistance halves the chance"), GA::SurviveChanceFromResistance(0.5f), 0.5f);
+        TestEqual(TEXT("full resistance is immunity"), GA::SurviveChanceFromResistance(1.0f), 0.0f);
+
+        // Resistances are rolled fractions and stack, so one above 1 is reachable exactly as dodge was.
+        TestEqual(TEXT("resistance beyond full is still immunity, not negative"),
+                  GA::SurviveChanceFromResistance(3.0f), 0.0f);
+        TestFalse(TEXT("a fully resistant target is never affected"),
+                  MythicCombat::RollSucceeds(GA::SurviveChanceFromResistance(1.0f), 0.0f));
+        TestTrue(TEXT("an unresistant target is always affected"),
+                 MythicCombat::RollSucceeds(GA::SurviveChanceFromResistance(0.0f), 0.999999f));
     }
 
     // A clause must do something. One with neither a status nor an effect is authored but inert.

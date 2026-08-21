@@ -127,6 +127,14 @@ struct MYTHIC_API FMythicTriggerSpec {
     // What must be true before the clause rolls at all. Defaults to no gate.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger")
     FMythicTriggerCondition Condition;
+
+    /**
+     * Fire only on every Nth qualifying event — "every third strike". 0 or 1 fires on every one. Counted per
+     * clause, and only events that already passed the condition advance the count, so a gated clause counts the
+     * strikes that mattered rather than every swing.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger", meta = (ClampMin = "0"))
+    int32 EveryNthEvent = 0;
 };
 
 /**
@@ -173,6 +181,18 @@ public:
     // Health as a 0..1 fraction. Returns 1 for anything with no health, so a "below half" gate stays shut on it.
     static float GetHealthFraction(const AActor *Actor);
 
+    // Whether this occurrence is the Nth. Count includes the current event.
+    static bool IsNthEvent(int32 EveryNth, int32 Count);
+
+    /**
+     * Chance a status gets through the target's resistance to it — the same 1 - Resist rule the damage execution
+     * applies, so a talent cannot ignore a resistance a weapon proc respects.
+     */
+    static float SurviveChanceFromResistance(float Resistance);
+
+    // The target's resistance to a status, read from the attribute the status definition names. 0 when unknown.
+    static float GetStatusResistance(const AActor *Target, const FGameplayTag &StatusType);
+
 protected:
     // Applies the clause's effect to the resolved target, with its rolled magnitude set by caller.
     bool ApplyClauseEffect(const FMythicTriggerSpec &Spec, AActor *Target, AActor *Owner) const;
@@ -185,4 +205,7 @@ private:
 
     // Keyed by index into Triggers, so two clauses on the same event keep separate cooldowns.
     TMap<int32, double> LastFireTimes;
+
+    // Qualifying events seen per clause, for EveryNthEvent.
+    TMap<int32, int32> EventCounts;
 };
