@@ -6,6 +6,12 @@
 #include "GameFramework/Actor.h"
 
 #include "GAS/Abilities/MythicAbilityRollSource.h"
+#include "AbilitySystemGlobals.h"
+#include "Engine/GameInstance.h"
+
+#include "World/EnvironmentController/MythicEnvironmentSubsystem.h"
+
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/Effects/MythicStatusRegistry.h"
 #include "GAS/Executions/MythicCombatRoll.h"
 #include "Mythic.h"
@@ -37,6 +43,40 @@ float UMythicGA_Triggered::ResolveChance(const FMythicTriggerSpec &Spec) const {
         }
     }
     return Spec.Chance;
+}
+
+bool UMythicGA_Triggered::PassesCondition(const FMythicTriggerCondition &Condition, const FGameplayTagContainer &WorldTags,
+                                         const FGameplayTagContainer &SourceTags, const FGameplayTagContainer &TargetTags,
+                                         float SourceHealthFraction, float TargetHealthFraction) {
+    if (Condition.RequiredWorldTag.IsValid() && !WorldTags.HasTag(Condition.RequiredWorldTag)) {
+        return false;
+    }
+    if (!Condition.SourceQuery.IsEmpty() && !Condition.SourceQuery.Matches(SourceTags)) {
+        return false;
+    }
+    if (!Condition.TargetQuery.IsEmpty() && !Condition.TargetQuery.Matches(TargetTags)) {
+        return false;
+    }
+    if (SourceHealthFraction < Condition.SourceHealthMin || SourceHealthFraction > Condition.SourceHealthMax) {
+        return false;
+    }
+    if (TargetHealthFraction < Condition.TargetHealthMin || TargetHealthFraction > Condition.TargetHealthMax) {
+        return false;
+    }
+    return true;
+}
+
+float UMythicGA_Triggered::GetHealthFraction(const AActor *Actor) {
+    const UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Actor);
+    const UMythicAttributeSet_Life *Life = ASC ? ASC->GetSet<UMythicAttributeSet_Life>() : nullptr;
+    if (!Life) {
+        return 1.0f;
+    }
+    const float Max = Life->GetMaxHealth();
+    if (Max <= 0.0f) {
+        return 1.0f;
+    }
+    return FMath::Clamp(Life->GetHealth() / Max, 0.0f, 1.0f);
 }
 
 AActor *UMythicGA_Triggered::ResolveTarget(const FMythicTriggerSpec &Spec, const FGameplayEventData *Payload, AActor *Owner) {
@@ -95,19 +135,44 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
     const UWorld *World = Owner->GetWorld();
     const double Now = World ? World->GetTimeSeconds() : 0.0;
 
+    // Exactly the three axes the environment subsystem publishes as tags. Gathered once, not per clause.
+    FGameplayTagContainer WorldTags;
+    if (const UGameInstance *GI = World ? World->GetGameInstance() : nullptr) {
+        if (const UMythicEnvironmentSubsystem *Env = GI->GetSubsystem<UMythicEnvironmentSubsystem>()) {
+            WorldTags.AddTag(Env->GetWeather());
+            WorldTags.AddTag(Env->GetDayTimeTag());
+            WorldTags.AddTag(Env->GetSeasonTag());
+        }
+    }
+
+    FGameplayTagContainer SourceTags;
+    if (const UAbilitySystemComponent *OwnerASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Owner)) {
+        OwnerASC->GetOwnedGameplayTags(SourceTags);
+    }
+    const float SourceHealth = GetHealthFraction(Owner);
+
     for (int32 Index = 0; Index < Triggers.Num(); ++Index) {
         const FMythicTriggerSpec &Spec = Triggers[Index];
         if (Spec.TriggerEvent != EventTag || !Spec.StatusToApply.IsValid()) {
             continue;
         }
 
-        const double *LastFire = LastFireTimes.Find(Index);
-        if (!ShouldProc(ResolveChance(Spec), Spec.InternalCooldown, Now, LastFire ? *LastFire : 0.0, FMath::FRand())) {
+        AActor *Target = ResolveTarget(Spec, Payload, Owner);
+        if (!Target) {
             continue;
         }
 
-        AActor *Target = ResolveTarget(Spec, Payload, Owner);
-        if (!Target) {
+        // Gated before the roll, so a clause whose condition is shut does not burn its chance.
+        FGameplayTagContainer TargetTags;
+        if (const UAbilitySystemComponent *TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Target)) {
+            TargetASC->GetOwnedGameplayTags(TargetTags);
+        }
+        if (!PassesCondition(Spec.Condition, WorldTags, SourceTags, TargetTags, SourceHealth, GetHealthFraction(Target))) {
+            continue;
+        }
+
+        const double *LastFire = LastFireTimes.Find(Index);
+        if (!ShouldProc(ResolveChance(Spec), Spec.InternalCooldown, Now, LastFire ? *LastFire : 0.0, FMath::FRand())) {
             continue;
         }
 

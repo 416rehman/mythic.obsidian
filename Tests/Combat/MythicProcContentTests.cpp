@@ -63,6 +63,20 @@ bool FMythicProcContentTest::RunTest(const FString &Parameters) {
                          Talent->AbilityDef.ParameterRolls.Contains(Spec.ChanceParameter));
             }
 
+            // A world gate outside Environment.* can never open: the world container holds only weather, time
+            // and season, so the clause would be authored and permanently inert.
+            if (Spec.Condition.RequiredWorldTag.IsValid()) {
+                TestTrue(*FString::Printf(TEXT("%s world gate is a registered tag"), *Where),
+                         Tags.RequestGameplayTag(Spec.Condition.RequiredWorldTag.GetTagName(), false).IsValid());
+                TestTrue(*FString::Printf(TEXT("%s world gate is an Environment tag"), *Where),
+                         Spec.Condition.RequiredWorldTag.ToString().StartsWith(TEXT("Environment.")));
+            }
+
+            TestTrue(*FString::Printf(TEXT("%s source health window is not inverted"), *Where),
+                     Spec.Condition.SourceHealthMin <= Spec.Condition.SourceHealthMax);
+            TestTrue(*FString::Printf(TEXT("%s target health window is not inverted"), *Where),
+                     Spec.Condition.TargetHealthMin <= Spec.Condition.TargetHealthMax);
+
             TestTrue(*FString::Printf(TEXT("%s fallback chance is a probability"), *Where),
                      Spec.Chance >= 0.0f && Spec.Chance <= 1.0f);
             TestTrue(*FString::Printf(TEXT("%s internal cooldown is not negative"), *Where), Spec.InternalCooldown >= 0.0f);
