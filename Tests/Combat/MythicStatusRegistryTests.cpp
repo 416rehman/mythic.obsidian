@@ -12,6 +12,33 @@
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Itemization/Affixes/MythicAffixPoolDataAsset.h"
 
+namespace MythicTest {
+// Every attribute any shipped affix pool can actually roll. Read from the asset registry rather than a
+// hardcoded pool list, so a new pool counts automatically.
+static TSet<FString> GatherRollableAttributes() {
+    FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry &Registry = Module.Get();
+    Registry.SearchAllAssets(true);
+
+    TArray<FAssetData> PoolAssets;
+    Registry.GetAssetsByClass(UMythicAffixPoolDataAsset::StaticClass()->GetClassPathName(), PoolAssets);
+
+    TSet<FString> Out;
+    for (const FAssetData &PoolAsset : PoolAssets) {
+        const UMythicAffixPoolDataAsset *Pool = Cast<UMythicAffixPoolDataAsset>(PoolAsset.GetAsset());
+        if (!Pool) {
+            continue;
+        }
+        for (const FMythicTieredAffixDef &Def : Pool->Defs) {
+            if (Def.Attribute.IsValid() && Def.Tiers.Num() > 0) {
+                Out.Add(Def.Attribute.GetName());
+            }
+        }
+    }
+    return Out;
+}
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicStatusLibraryTest,
     "Mythic.Combat.StatusLibrary",
@@ -114,29 +141,10 @@ bool FMythicStatusRollableTest::RunTest(const FString &Parameters) {
         return false;
     }
 
-    FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-    IAssetRegistry &Registry = Module.Get();
-    Registry.SearchAllAssets(true);
-
-    TArray<FAssetData> PoolAssets;
-    Registry.GetAssetsByClass(UMythicAffixPoolDataAsset::StaticClass()->GetClassPathName(), PoolAssets);
-    if (!TestTrue(TEXT("the project ships at least one affix pool"), PoolAssets.Num() > 0)) {
+    const TSet<FString> RollableAttributes = MythicTest::GatherRollableAttributes();
+    if (!TestTrue(TEXT("the project ships affix pools that grant something"), RollableAttributes.Num() > 0)) {
         return false;
     }
-
-    TSet<FString> RollableAttributes;
-    for (const FAssetData &PoolAsset : PoolAssets) {
-        const UMythicAffixPoolDataAsset *Pool = Cast<UMythicAffixPoolDataAsset>(PoolAsset.GetAsset());
-        if (!Pool) {
-            continue;
-        }
-        for (const FMythicTieredAffixDef &Def : Pool->Defs) {
-            if (Def.Attribute.IsValid() && Def.Tiers.Num() > 0) {
-                RollableAttributes.Add(Def.Attribute.GetName());
-            }
-        }
-    }
-    TestTrue(TEXT("affix pools grant something"), RollableAttributes.Num() > 0);
 
     // A status a player cannot roll for is a status no build can be made of. This is the check that would have
     // caught Poison and Freeze being absent from every pool while still looking wired up in code.
@@ -151,6 +159,45 @@ bool FMythicStatusRollableTest::RunTest(const FString &Parameters) {
 
         TestTrue(*FString::Printf(TEXT("%s can be rolled by loot (%s appears in an affix pool)"), *Leaf, *ChanceAttribute),
                  RollableAttributes.Contains(ChanceAttribute));
+    }
+
+    return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicBuildStatsRollableTest,
+    "Mythic.Combat.BuildStatsRollable",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicBuildStatsRollableTest::RunTest(const FString &Parameters) {
+    const TSet<FString> RollableAttributes = MythicTest::GatherRollableAttributes();
+    if (!TestTrue(TEXT("the project ships affix pools that grant something"), RollableAttributes.Num() > 0)) {
+        return false;
+    }
+
+    /**
+     * The stats a build is made of. Each is read by the damage pipeline, so any of them that no pool rolls is a
+     * lever the player can see working in code and never obtain. IncreasedDamageToEnemiesUnderStatusEffects and
+     * BonusDamageToSuperiorEnemies were both in exactly that state: live in the execution, granted by nothing.
+     * This list is the specification — add to it when a new build stat ships.
+     */
+    const TCHAR *BuildStats[] = {
+        TEXT("Power"),
+        TEXT("CriticalHitChance"),
+        TEXT("CriticalHitDamage"),
+        TEXT("BonusSkillDamage"),
+        TEXT("StatusBuildupMultiplier"),
+        TEXT("IncreasedDamageToEnemiesUnderStatusEffects"),
+        TEXT("BonusDamageToSuperiorEnemies"),
+        TEXT("DecreasedDamageFromEnemiesUnderStatusEffects"),
+        TEXT("MovementSpeedMultiplier"),
+        TEXT("Armor"),
+        TEXT("MaxHealth"),
+    };
+
+    for (const TCHAR *Stat : BuildStats) {
+        TestTrue(*FString::Printf(TEXT("%s can be rolled by loot"), Stat), RollableAttributes.Contains(FString(Stat)));
     }
 
     return true;
