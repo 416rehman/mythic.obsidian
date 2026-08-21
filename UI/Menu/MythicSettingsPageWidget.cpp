@@ -194,8 +194,15 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
     const auto Heading = [this](const FText &Text) {
         FSettingDef Def;
         Def.Label = Text;
-        Def.bHeading = true;
+        Def.bCategory = true;
         Def.Category = Text;
+        Definitions.Add(MoveTemp(Def));
+    };
+
+    const auto Group = [this](const FText &Text) {
+        FSettingDef Def;
+        Def.Label = Text;
+        Def.bHeading = true;
         Definitions.Add(MoveTemp(Def));
     };
 
@@ -270,6 +277,8 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
     };
 
     Heading(NSLOCTEXT("Mythic", "SetDisplay", "DISPLAY"));
+
+    Group(NSLOCTEXT("Mythic", "GrpScreen", "Screen"));
 
     AddChoice(NSLOCTEXT("Mythic", "SetWindowMode", "Window Mode"),
               NSLOCTEXT("Mythic", "DescWindowMode",
@@ -348,6 +357,8 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
         Definitions.Add(MoveTemp(Def));
     }
 
+    Group(NSLOCTEXT("Mythic", "GrpFrame", "Frame Rate"));
+
     AddToggle(NSLOCTEXT("Mythic", "SetVSync", "V-Sync"),
               NSLOCTEXT("Mythic", "DescVSync",
                         "Locks the game's frame rate to your monitor so images never tear halfway down the screen. "
@@ -385,6 +396,8 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
  true);
     }
 
+    Group(NSLOCTEXT("Mythic", "GrpBright", "Brightness"));
+
     AddSlider(NSLOCTEXT("Mythic", "SetBrightness", "Brightness"),
               NSLOCTEXT("Mythic", "DescBrightness",
                         "Screen gamma. Raise it until the darkest parts of a night scene are just readable, and no "
@@ -399,6 +412,8 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
               [Settings]() { if (UMythicUserSettings *S = Settings()) { S->SetDisplayGamma(2.2f); } });
 
     Heading(NSLOCTEXT("Mythic", "SetGraphics", "GRAPHICS"));
+
+    Group(NSLOCTEXT("Mythic", "GrpPreset", "Presets"));
 
     AddChoice(NSLOCTEXT("Mythic", "SetOverall", "Overall Quality"),
               NSLOCTEXT("Mythic", "DescOverall",
@@ -428,6 +443,8 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
               },
               [Settings]() { if (UMythicUserSettings *S = Settings()) { S->SetRenderScale(100.0f); } },
  true);
+
+    Group(NSLOCTEXT("Mythic", "GrpDetail", "Detail"));
 
     AddQuality(NSLOCTEXT("Mythic", "SetViewDist", "View Distance"),
                NSLOCTEXT("Mythic", "DescViewDist", "How far away objects keep being drawn. The most visible setting in "
@@ -471,12 +488,101 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
                [](UMythicUserSettings *S) { return S->GetShadingQuality(); },
                [](UMythicUserSettings *S, int32 V) { S->SetShadingQuality(V); });
 
+    Group(NSLOCTEXT("Mythic", "GrpNextGen", "Next-Gen Rendering"));
+
+    AddChoice(NSLOCTEXT("Mythic", "SetGIMethod", "Global Illumination Method"),
+              NSLOCTEXT("Mythic", "DescGIMethod",
+                        "How bounced light is traced. Software and hardware are both Lumen; software traces "
+                        "against a rough approximation of the scene, hardware traces the real geometry on RT "
+                        "cores for sharper contact and cleaner interiors, and costs more. Screen space only "
+                        "knows about what is currently on screen, so light vanishes at the edges."),
+              ESettingControl::Stepper,
+              []() { return UMythicUserSettings::IsHardwareRayTracingAvailable() ? 4 : 3; },
+              []() {
+                  UMythicUserSettings *S = UMythicUserSettings::Get();
+                  const int32 Raw = S ? S->GetGlobalIlluminationMethod() : 0;
+                  // With no ray tracing hardware the list has no hardware entry, so everything past it
+                  // shifts down by one rather than pointing at the wrong label.
+                  return UMythicUserSettings::IsHardwareRayTracingAvailable() ? Raw : (Raw > 1 ? Raw - 1 : 0);
+              },
+              [](int32 I) {
+                  if (UMythicUserSettings *S = UMythicUserSettings::Get()) {
+                      const bool bHW = UMythicUserSettings::IsHardwareRayTracingAvailable();
+                      S->SetGlobalIlluminationMethod(bHW ? I : (I >= 1 ? I + 1 : 0));
+                  }
+              },
+              [](int32 I) {
+                  const bool bHW = UMythicUserSettings::IsHardwareRayTracingAvailable();
+                  const int32 Real = bHW ? I : (I >= 1 ? I + 1 : 0);
+                  switch (Real) {
+                      case 0: return NSLOCTEXT("Mythic", "GISoft", "Software Ray Tracing");
+                      case 1: return NSLOCTEXT("Mythic", "GIHard", "Hardware Ray Tracing");
+                      case 2: return NSLOCTEXT("Mythic", "GIScreen", "Screen Space");
+                      default: return NSLOCTEXT("Mythic", "GINone", "None");
+                  }
+              },
+              true);
+
+    AddChoice(NSLOCTEXT("Mythic", "SetReflections2", "Reflection Method"),
+              NSLOCTEXT("Mythic", "DescReflections2",
+                        "Lumen reflects the whole scene and follows whichever tracing method is set above. "
+                        "Screen space is far cheaper but can only reflect what is already on screen, so "
+                        "reflections slide away as you turn."),
+              ESettingControl::Stepper,
+              []() { return 3; },
+              []() { UMythicUserSettings *S = UMythicUserSettings::Get(); return S ? S->GetReflectionMethod() : 1; },
+              [](int32 I) { if (UMythicUserSettings *S = UMythicUserSettings::Get()) { S->SetReflectionMethod(I); } },
+              [](int32 I) {
+                  switch (I) {
+                      case 0: return NSLOCTEXT("Mythic", "RefNone", "None");
+                      case 1: return NSLOCTEXT("Mythic", "RefLumen", "Lumen");
+                      default: return NSLOCTEXT("Mythic", "RefSSR", "Screen Space");
+                  }
+              },
+              true);
+
+    AddChoice(NSLOCTEXT("Mythic", "SetAO", "Ambient Occlusion"),
+              NSLOCTEXT("Mythic", "DescAO",
+                        "Darkens the creases where surfaces meet, which is most of what makes interiors and "
+                        "undergrowth read as solid. GTAO is the newer solver and is markedly better under "
+                        "foliage; SSAO is the cheaper older one."),
+              ESettingControl::Stepper,
+              []() { return 3; },
+              []() { UMythicUserSettings *S = UMythicUserSettings::Get(); return S ? S->GetAmbientOcclusionMode() : 2; },
+              [](int32 I) { if (UMythicUserSettings *S = UMythicUserSettings::Get()) { S->SetAmbientOcclusionMode(I); } },
+              [](int32 I) {
+                  switch (I) {
+                      case 0: return NSLOCTEXT("Mythic", "AOOff", "Off");
+                      case 1: return NSLOCTEXT("Mythic", "AOSSAO", "SSAO");
+                      default: return NSLOCTEXT("Mythic", "AOGTAO", "GTAO");
+                  }
+              });
+
+    AddToggle(NSLOCTEXT("Mythic", "SetVSM", "Virtual Shadow Maps"),
+              NSLOCTEXT("Mythic", "DescVSM",
+                        "Shadows that stay sharp close up and hold detail into the distance, instead of the "
+                        "usual soft blocky cascades. Costs more on dense foliage."),
+              []() { UMythicUserSettings *S = UMythicUserSettings::Get(); return S && S->GetVirtualShadowMaps(); },
+              [](bool b) { if (UMythicUserSettings *S = UMythicUserSettings::Get()) { S->SetVirtualShadowMaps(b); } },
+              true);
+
+    AddToggle(NSLOCTEXT("Mythic", "SetNanite", "Nanite"),
+              NSLOCTEXT("Mythic", "DescNanite",
+                        "Draws detailed meshes at whatever density the screen can actually show, so distant "
+                        "geometry keeps its silhouette. Turning it off falls back to traditional LODs and can "
+                        "help on older cards."),
+              []() { UMythicUserSettings *S = UMythicUserSettings::Get(); return S && S->GetNanite(); },
+              [](bool b) { if (UMythicUserSettings *S = UMythicUserSettings::Get()) { S->SetNanite(b); } },
+              true);
+
     {
         // Vendor-specific, so the row greys out rather than pretending to work on other cards. Reflex also
         // reports its own availability, which covers a driver too old for it on an NVIDIA card.
         const auto ReflexUsable = []() {
             return UMythicUserSettings::IsNvidiaGpu() && UMythicUserSettings::IsReflexAvailable();
         };
+        Group(NSLOCTEXT("Mythic", "GrpNvidia", "NVIDIA"));
+
         AddChoice(NSLOCTEXT("Mythic", "SetReflex", "NVIDIA Reflex"),
                   NSLOCTEXT("Mythic", "DescReflex",
                             "Cuts the delay between your input and the frame that answers it, by keeping the "
@@ -554,6 +660,8 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
 
     {
         static const int32 AAMethods[] = {0, 1, 2, 4, 5};
+        Group(NSLOCTEXT("Mythic", "GrpAA", "Anti-Aliasing"));
+
         AddChoice(NSLOCTEXT("Mythic", "SetAA", "Anti-Aliasing"),
                   NSLOCTEXT("Mythic", "DescAA",
                             "Smooths the jagged stair-steps on edges. TSR is sharpest and steadiest in motion and is "
@@ -600,6 +708,8 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
               },
               [Settings]() { if (UMythicUserSettings *S = Settings()) { S->SetSharpness(0.4f); } });
 
+    Group(NSLOCTEXT("Mythic", "GrpPost", "Post Processing"));
+
     AddChoice(NSLOCTEXT("Mythic", "SetMotionBlur", "Motion Blur"),
               NSLOCTEXT("Mythic", "DescMotionBlur",
                         "Smears the image in the direction things are moving. Some players find it cinematic; it is "
@@ -644,6 +754,8 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
 
     Heading(NSLOCTEXT("Mythic", "SetAudio", "AUDIO"));
 
+    Group(NSLOCTEXT("Mythic", "GrpVolume", "Volume"));
+
     AddSlider(NSLOCTEXT("Mythic", "SetMasterVolume", "Master Volume"),
               NSLOCTEXT("Mythic", "DescMasterVolume", "Overall loudness of everything the game plays."),
               0.05f,
@@ -661,6 +773,8 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
               [Settings](bool b) { if (UMythicUserSettings *S = Settings()) { S->SetMuteWhenUnfocused(b); } });
 
     Heading(NSLOCTEXT("Mythic", "SetControls", "CONTROLS"));
+
+    Group(NSLOCTEXT("Mythic", "GrpMouse", "Mouse"));
 
     AddSlider(NSLOCTEXT("Mythic", "SetMouseSens", "Mouse Sensitivity"),
               NSLOCTEXT("Mythic", "DescMouseSens", "How far the camera turns for a given mouse movement."),
@@ -743,6 +857,8 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
 
     Heading(NSLOCTEXT("Mythic", "SetInterface", "INTERFACE"));
 
+    Group(NSLOCTEXT("Mythic", "GrpScale", "Scale"));
+
     AddSlider(NSLOCTEXT("Mythic", "SetUIScale", "Interface Scale"),
               NSLOCTEXT("Mythic", "DescUIScale", "Size of every menu and HUD element. Raise it if text is hard to "
                                                  "read from where you sit."),
@@ -765,6 +881,8 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
                   return FText::FromString(FString::Printf(TEXT("%.0f%%"), (S ? S->GetHUDOpacity() : 1.0f) * 100.0f));
               },
               [Settings]() { if (UMythicUserSettings *S = Settings()) { S->SetHUDOpacity(1.0f); } });
+
+    Group(NSLOCTEXT("Mythic", "GrpDmgNum", "Damage Numbers"));
 
     AddChoice(NSLOCTEXT("Mythic", "SetDamageNumbers", "Damage Numbers"),
               NSLOCTEXT("Mythic", "DescDamageNumbers", "Whether hits show a number, and whose."),
@@ -804,7 +922,7 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
     // eight Add* helpers, so adding a ninth helper cannot forget to set it.
     FText CurrentCategory;
     for (FSettingDef &Def : Definitions) {
-        if (Def.bHeading) {
+        if (Def.bCategory) {
             CurrentCategory = Def.Label;
         }
         else {
@@ -908,7 +1026,7 @@ FMythicSettingsRow &UMythicSettingsPageWidget::GetOrCreateRow(int32 Index) {
 TArray<FText> UMythicSettingsPageWidget::GetCategoryNames() const {
     TArray<FText> Names;
     for (const FSettingDef &Def : Definitions) {
-        if (Def.bHeading) {
+        if (Def.bCategory) {
             Names.Add(Def.Label);
         }
     }
@@ -920,8 +1038,9 @@ bool UMythicSettingsPageWidget::IsRowVisible(bool bIsHeading, const FText &RowCa
     if (!Categories.IsValidIndex(ActiveCategoryIndex)) {
         return true;
     }
-    // The tab already names the category, so its heading row would be the same label twice.
-    return !bIsHeading && RowCategory.EqualTo(Categories[ActiveCategoryIndex]);
+    // bIsHeading here means a GROUP sub-heading, which belongs in its tab. The tab marker itself is filtered
+    // out earlier by having no category of its own to match.
+    return RowCategory.EqualTo(Categories[ActiveCategoryIndex]);
 }
 
 void UMythicSettingsPageWidget::SetActiveCategory(int32 CategoryIndex) {
@@ -940,6 +1059,11 @@ void UMythicSettingsPageWidget::Refresh() {
     for (int32 i = 0; i < Definitions.Num(); ++i) {
         FMythicSettingsRow &Row = GetOrCreateRow(i);
         const FSettingDef &Def = Definitions[i];
+
+        if (Def.bCategory) {
+            Row.Box->SetVisibility(ESlateVisibility::Collapsed);
+            continue;
+        }
 
         if (!IsRowVisible(Def.bHeading, Def.Category, ActiveCategory, Categories)) {
             Row.Box->SetVisibility(ESlateVisibility::Collapsed);

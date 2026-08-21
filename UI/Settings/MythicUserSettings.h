@@ -122,7 +122,13 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetAmbientOcclusionMode(int32 Mode);
 
-    /** Dynamic global illumination: 0 none, 1 Lumen, 2 screen space. */
+    /**
+     * How indirect light is traced: 0 software ray tracing, 1 hardware ray tracing, 2 screen space, 3 none.
+     *
+     * Software and hardware are both Lumen - the difference is whether the traces run against a distance-field
+     * approximation of the scene or against the real geometry on RT cores. That is why they are two entries in
+     * one list rather than a separate toggle: a player picks how their light is traced, once.
+     */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     int32 GetGlobalIlluminationMethod() const { return GlobalIlluminationMethod; }
 
@@ -172,6 +178,10 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     static bool IsRayReconstructionAvailable();
+
+    /** True when this machine can actually trace against real geometry. Gates the hardware option away. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    static bool IsHardwareRayTracingAvailable();
 
     /** 0 off, 1 DLAA, 2 Quality, 3 Balanced, 4 Performance, 5 Ultra Performance. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
@@ -351,7 +361,7 @@ private:
     int32 AmbientOcclusionMode = 2;
 
     UPROPERTY(Config)
-    int32 GlobalIlluminationMethod = 1;
+    int32 GlobalIlluminationMethod = 0;
 
     UPROPERTY(Config)
     int32 ReflectionMethod = 1;

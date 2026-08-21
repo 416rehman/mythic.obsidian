@@ -71,6 +71,22 @@ struct FMythicSettingsRow {
 
     UPROPERTY()
     TObjectPtr<UCommonTextBlock> Description;
+
+    /** Real controls, one per kind. Built once, shown according to the definition's declared control. */
+    UPROPERTY()
+    TObjectPtr<class UAnalogSlider> Slider;
+
+    UPROPERTY()
+    TObjectPtr<UWidget> Toggle;
+
+    UPROPERTY()
+    TObjectPtr<UCommonTextBlock> ToggleLabel;
+
+    UPROPERTY()
+    TObjectPtr<UMythicSettingStepProxy> SliderProxy;
+
+    UPROPERTY()
+    TObjectPtr<UMythicSettingStepProxy> ToggleProxy;
 };
 
 UCLASS()
@@ -145,7 +161,12 @@ private:
 
     struct FSettingDef {
         FText Label;
+
+        // A group sub-heading INSIDE a tab. Rendered as a row, so a tab reads as sections rather than a dump.
         bool bHeading = false;
+
+        // A tab boundary. Never rendered as a row - the tab button is its label.
+        bool bCategory = false;
 
         // Which tab this belongs to. Inherited from the most recent Heading() when the definition is built.
         FText Category;

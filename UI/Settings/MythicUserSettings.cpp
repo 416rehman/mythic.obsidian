@@ -10,6 +10,7 @@
 #include "Performance/MaxTickRateHandlerModule.h"
 #include "Features/IModularFeatures.h"
 #include "RHI.h"
+#include "RenderUtils.h"
 #if MYTHIC_WITH_DLSS
 #include "DLSSLibrary.h"
 #include "StreamlineLibraryDLSSG.h"
@@ -118,6 +119,12 @@ bool UMythicUserSettings::IsFrameGenerationAvailable() {
 #endif
 }
 
+bool UMythicUserSettings::IsHardwareRayTracingAvailable() {
+    // Covers both halves: the project must have ray tracing compiled in, and the card must support it.
+    // Offering the option without this check gives a row that looks live and changes nothing.
+    return IsRayTracingEnabled();
+}
+
 bool UMythicUserSettings::IsRayReconstructionAvailable() {
 #if MYTHIC_WITH_DLSS
     return UDLSSLibrary::IsDLSSRRSupported();
@@ -202,7 +209,15 @@ void UMythicUserSettings::ApplyRenderingSettings() const {
         PushCVar(TEXT("r.GTAO.SpatialFilter"), 0);
     }
 
-    PushCVar(TEXT("r.DynamicGlobalIlluminationMethod"), GlobalIlluminationMethod);
+    // Software and hardware ray tracing are both Lumen; only the tracing backend differs. Anything past
+    // hardware is a different method entirely.
+    const bool bLumen = GlobalIlluminationMethod <= 1;
+    const bool bHardware = GlobalIlluminationMethod == 1 && IsHardwareRayTracingAvailable();
+    PushCVar(TEXT("r.DynamicGlobalIlluminationMethod"),
+             bLumen ? 1 : (GlobalIlluminationMethod == 2 ? 2 : 0));
+    PushCVar(TEXT("r.Lumen.HardwareRayTracing"), bHardware ? 1 : 0);
+
+    // Lumen reflections follow the same tracing backend as Lumen GI, so reflections only choose the method.
     PushCVar(TEXT("r.ReflectionMethod"), ReflectionMethod);
     PushCVar(TEXT("r.Shadow.Virtual.Enable"), bVirtualShadowMaps ? 1 : 0);
     PushCVar(TEXT("r.Nanite"), bNanite ? 1 : 0);
@@ -214,7 +229,7 @@ void UMythicUserSettings::SetAmbientOcclusionMode(int32 Mode) {
 }
 
 void UMythicUserSettings::SetGlobalIlluminationMethod(int32 Method) {
-    GlobalIlluminationMethod = FMath::Clamp(Method, 0, 2);
+    GlobalIlluminationMethod = FMath::Clamp(Method, 0, 3);
     ApplyRenderingSettings();
 }
 
