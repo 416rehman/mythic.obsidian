@@ -11,6 +11,7 @@ UMythicAttributeSet_Utility::UMythicAttributeSet_Utility() {
     InitStaminaRegenRate(10.0f);
 
     InitMaxCooldownReduction(0.60f);
+    InitMovementSpeedMultiplier(1.0f);
 }
 
 bool UMythicAttributeSet_Utility::IsReductionFractionAttribute(const FGameplayAttribute &Attribute) {
@@ -34,6 +35,10 @@ void UMythicAttributeSet_Utility::PreAttributeChange(const FGameplayAttribute &A
     }
     else if (Attribute == GetStaminaCostReductionAttribute()) {
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    }
+    // Stacked slows must bottom out at a standstill rather than invert movement.
+    else if (Attribute == GetMovementSpeedMultiplierAttribute()) {
+        NewValue = FMath::Max(0.0f, NewValue);
     }
 }
 
@@ -116,6 +121,10 @@ void UMythicAttributeSet_Utility::OnRep_BonusSprintSpeed(const FGameplayAttribut
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, BonusSprintSpeed, OldValue);
 }
 
+void UMythicAttributeSet_Utility::OnRep_MovementSpeedMultiplier(const FGameplayAttributeData &OldValue) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, MovementSpeedMultiplier, OldValue);
+}
+
 void UMythicAttributeSet_Utility::OnRep_ItemRarityFind(const FGameplayAttributeData &OldValue) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, ItemRarityFind, OldValue);
 }
@@ -136,6 +145,7 @@ void UMythicAttributeSet_Utility::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, MaxCooldownReduction, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ProficiencyXPBonus, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, BonusSprintSpeed, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, MovementSpeedMultiplier, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ItemRarityFind, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ItemQuantityFind, COND_OwnerOnly, REPNOTIFY_Always);
 }

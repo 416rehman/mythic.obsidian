@@ -45,6 +45,10 @@ protected:
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_BonusSprintSpeed)
     FGameplayAttributeData BonusSprintSpeed;
 
+    // Scales walk and sprint speed. 1.0 is normal; 0.5 is half speed. Slows and haste effects modify this.
+    UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_MovementSpeedMultiplier)
+    FGameplayAttributeData MovementSpeedMultiplier;
+
     UPROPERTY(BlueprintReadOnly, Category = "Utility", ReplicatedUsing = OnRep_ItemRarityFind)
     FGameplayAttributeData ItemRarityFind;
 
@@ -73,6 +77,7 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, MaxCooldownReduction)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, ProficiencyXPBonus)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, BonusSprintSpeed)
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, MovementSpeedMultiplier)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, ItemRarityFind)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, ItemQuantityFind)
 
@@ -94,6 +99,8 @@ public:
     virtual void OnRep_ProficiencyXPBonus(const FGameplayAttributeData &OldValue);
     UFUNCTION()
     virtual void OnRep_BonusSprintSpeed(const FGameplayAttributeData &OldValue);
+    UFUNCTION()
+    virtual void OnRep_MovementSpeedMultiplier(const FGameplayAttributeData &OldValue);
     UFUNCTION()
     virtual void OnRep_ItemRarityFind(const FGameplayAttributeData &OldValue);
     UFUNCTION()

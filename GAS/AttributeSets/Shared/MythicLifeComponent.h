@@ -330,6 +330,8 @@ protected:
 
     void HandleCrowdControlTagChanged(const FGameplayTag Tag, int32 NewCount);
 
+    void HandleMovementAttributeChanged(const FOnAttributeChangeData &ChangeData);
+
     void ReevaluateCrowdControl();
 
     float ComputeEncumbranceSpeedScale() const;

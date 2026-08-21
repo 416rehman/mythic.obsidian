@@ -132,6 +132,15 @@ void UMythicLifeComponent::InitializeWithAbilitySystem(UAbilitySystemComponent *
         }
     }
 
+    const FGameplayAttribute MovementAttributes[] = {
+        UMythicAttributeSet_Utility::GetMovementSpeedMultiplierAttribute(),
+        UMythicAttributeSet_Utility::GetBonusSprintSpeedAttribute(),
+    };
+    for (const FGameplayAttribute &MoveAttribute : MovementAttributes) {
+        AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(MoveAttribute).AddUObject(
+            this, &ThisClass::HandleMovementAttributeChanged);
+    }
+
     BindEncumbranceInventoryDelegates();
 
     if (GetOwner()->HasAuthority() && RegenInterval > 0.0f && GetWorld()) {
@@ -1061,6 +1070,10 @@ void UMythicLifeComponent::HandleCrowdControlTagChanged(const FGameplayTag Tag, 
     ReevaluateCrowdControl();
 }
 
+void UMythicLifeComponent::HandleMovementAttributeChanged(const FOnAttributeChangeData &ChangeData) {
+    ReevaluateCrowdControl();
+}
+
 void UMythicLifeComponent::ReevaluateCrowdControl() {
     if (!AbilitySystemComponent) {
         return;
@@ -1105,6 +1118,10 @@ void UMythicLifeComponent::ReevaluateCrowdControl() {
         if (const UMythicAttributeSet_Utility *Util = AbilitySystemComponent->GetSet<UMythicAttributeSet_Utility>()) {
             SpeedScale *= (1.0f + Util->GetBonusSprintSpeed());
         }
+    }
+
+    if (const UMythicAttributeSet_Utility *SpeedUtil = AbilitySystemComponent->GetSet<UMythicAttributeSet_Utility>()) {
+        SpeedScale *= FMath::Max(0.0f, SpeedUtil->GetMovementSpeedMultiplier());
     }
 
     SpeedScale *= ComputeEncumbranceSpeedScale();
