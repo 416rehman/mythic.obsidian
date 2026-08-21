@@ -20,6 +20,26 @@ namespace {
         return Ref.IsNull() ? nullptr : Ref.LoadSynchronous();
     }
 
+    FText StationNameFromTag(const FGameplayTag &Tag) {
+        const FString Full = Tag.GetTagName().ToString();
+        FString Leaf = Full;
+        int32 LastDot = INDEX_NONE;
+        if (Full.FindLastChar(TEXT('.'), LastDot)) {
+            Leaf = Full.Mid(LastDot + 1);
+        }
+
+        FString Words;
+        Words.Reserve(Leaf.Len() + 4);
+        for (int32 i = 0; i < Leaf.Len(); ++i) {
+            const TCHAR C = Leaf[i];
+            if (i > 0 && FChar::IsUpper(C) && !FChar::IsUpper(Leaf[i - 1])) {
+                Words.AppendChar(TEXT(' '));
+            }
+            Words.AppendChar(C);
+        }
+        return FText::FromString(Words);
+    }
+
     UTexture2D *FirstProductIcon(const UConversionRecipe *Recipe) {
         if (!Recipe) {
             return nullptr;
@@ -65,9 +85,8 @@ namespace {
             }
         }
     }
-} // namespace
+}
 
-// ==================== UConversionIngredientVM ====================
 void UConversionIngredientVM::SetIcon(UTexture2D *In) { if (UE_MVVM_SET_PROPERTY_VALUE(Icon, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Icon); } }
 void UConversionIngredientVM::SetHaveCount(int32 In) { if (UE_MVVM_SET_PROPERTY_VALUE(HaveCount, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HaveCount); } }
 void UConversionIngredientVM::SetNeedCount(int32 In) { if (UE_MVVM_SET_PROPERTY_VALUE(NeedCount, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(NeedCount); } }
@@ -82,7 +101,6 @@ void UConversionIngredientVM::SetHaveNeedRichText(FText In) {
     if (UE_MVVM_SET_PROPERTY_VALUE(HaveNeedRichText, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(HaveNeedRichText); }
 }
 
-// ==================== UConversionOutputVM ====================
 void UConversionOutputVM::SetIcon(UTexture2D *In) { if (UE_MVVM_SET_PROPERTY_VALUE(Icon, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Icon); } }
 void UConversionOutputVM::SetQuantity(int32 In) { if (UE_MVVM_SET_PROPERTY_VALUE(Quantity, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Quantity); } }
 void UConversionOutputVM::SetChanceText(FText In) { if (UE_MVVM_SET_PROPERTY_VALUE(ChanceText, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(ChanceText); } }
@@ -93,7 +111,6 @@ void UConversionOutputVM::SetPreservesAffixes(bool In) {
 
 void UConversionOutputVM::SetTooltipName(FText In) { if (UE_MVVM_SET_PROPERTY_VALUE(TooltipName, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(TooltipName); } }
 
-// ==================== UConversionRecipeVM ====================
 void UConversionRecipeVM::SetRecipeId(FGameplayTag In) { if (UE_MVVM_SET_PROPERTY_VALUE(RecipeId, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(RecipeId); } }
 void UConversionRecipeVM::SetDisplayName(FText In) { if (UE_MVVM_SET_PROPERTY_VALUE(DisplayName, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(DisplayName); } }
 
@@ -139,7 +156,6 @@ void UConversionRecipeVM::RefreshFor(UConversionRecipe *Recipe, UConversionStati
     SetIsLockedByTag(!bEligible);
     SetReasonItCant(Reason);
 
-    // Available materials (from the interactor's inventories).
     TArray<UMythicItemInstance *> Owned;
     GatherProviderInstances(Interactor, Owned);
 
@@ -196,7 +212,6 @@ void UConversionRecipeVM::RefreshFor(UConversionRecipe *Recipe, UConversionStati
     SetCanCraft(bEligible && bAllSufficient);
 }
 
-// ==================== UConversionJobVM ====================
 void UConversionJobVM::SetJobId(int32 In) { if (UE_MVVM_SET_PROPERTY_VALUE(JobId, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(JobId); } }
 void UConversionJobVM::SetDisplayName(FText In) { if (UE_MVVM_SET_PROPERTY_VALUE(DisplayName, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(DisplayName); } }
 void UConversionJobVM::SetResultIcon(UTexture2D *In) { if (UE_MVVM_SET_PROPERTY_VALUE(ResultIcon, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(ResultIcon); } }
@@ -242,7 +257,7 @@ void UConversionJobVM::RefreshFromEntry(const FConversionJobEntry &Entry, UConve
 
 void UConversionJobVM::TickProgress(double NowServerTime) {
     if (IsStalled) {
-        return; // frozen
+        return;
     }
     if (EndServerTime - StartServerTime <= UE_KINDA_SMALL_NUMBER) {
         SetProgress(1.f);
@@ -255,7 +270,6 @@ void UConversionJobVM::TickProgress(double NowServerTime) {
     SetTimeRemainingText(FText::FromString(FString::Printf(TEXT("%.0fs"), Remaining)));
 }
 
-// ==================== UConversionStationVM ====================
 void UConversionStationVM::SetStationName(FText In) { if (UE_MVVM_SET_PROPERTY_VALUE(StationName, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(StationName); } }
 void UConversionStationVM::SetUsesFuel(bool In) { if (UE_MVVM_SET_PROPERTY_VALUE(UsesFuel, In)) { UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(UsesFuel); } }
 
@@ -300,7 +314,7 @@ void UConversionStationVM::InitializeForStation(UConversionStationComponent *Com
             break;
         }
         if (FirstTag.IsValid()) {
-            SetStationName(FText::FromName(FirstTag.GetTagName()));
+            SetStationName(StationNameFromTag(FirstTag));
         }
     }
 
@@ -313,7 +327,7 @@ void UConversionStationVM::InitializeForStation(UConversionStationComponent *Com
 
     RebuildJobs();
     HandleFuelChanged();
-    
+
     if (!TickerHandle.IsValid()) {
         TickerHandle = FTSTicker::GetCoreTicker().AddTicker(
             FTickerDelegate::CreateUObject(this, &UConversionStationVM::TickProgress), 0.0f);
@@ -343,10 +357,18 @@ void UConversionStationVM::RebuildRecipes() {
     TArray<UConversionRecipe *> Found;
     Subsystem->GetRecipesForStation(Component->GetStationTags(), ASC, Found);
 
+    FGameplayTagContainer InteractorOwned;
+    if (ASC) {
+        ASC->GetOwnedGameplayTags(InteractorOwned);
+    }
+
     bool bAnyFuel = false;
     TArray<TObjectPtr<UConversionRecipeVM>> VMs;
     for (UConversionRecipe *R : Found) {
         if (!R) {
+            continue;
+        }
+        if (!R->IsVisibleTo(InteractorOwned)) {
             continue;
         }
         UConversionRecipeVM *VM = NewObject<UConversionRecipeVM>(this);
@@ -367,13 +389,11 @@ void UConversionStationVM::RebuildJobs() {
     TArray<TObjectPtr<UConversionJobVM>> VMs;
     for (const FConversionJobEntry &Entry : Component->GetJobs().GetItems()) {
         UConversionJobVM *VM = NewObject<UConversionJobVM>(this);
-        // Heuristic ownership: unbounded (auto) jobs are not player-cancelable; the server re-validates anyway.
         VM->RefreshFromEntry(Entry, Subsystem.Get(), Entry.Quantity != 0);
         VMs.Add(VM);
     }
     SetJobs(VMs);
 
-    // Reflect the head job's auto-repeat state.
     const TArray<FConversionJobEntry> &Items = Component->GetJobs().GetItems();
     SetAutoRepeat(Items.Num() > 0 && Items[0].Quantity == 0);
 }
@@ -399,7 +419,7 @@ bool UConversionStationVM::TickProgress(float DeltaTime) {
     }
     const AGameStateBase *GS = Component->GetWorld()->GetGameState();
     if (!GS) {
-        return true; // freeze while no game state
+        return true;
     }
     const double Now = GS->GetServerWorldTimeSeconds();
     for (const TObjectPtr<UConversionJobVM> &JobVM : Jobs) {

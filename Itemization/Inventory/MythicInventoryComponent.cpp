@@ -1,4 +1,3 @@
-// 
 
 
 #include "MythicInventoryComponent.h"
@@ -14,8 +13,8 @@
 #include "ItemDefinition.h"
 #include "Mythic/Player/MythicPlayerController.h"
 #include "Mythic/Player/MythicCharacter.h"
-#include "AbilitySystemGlobals.h"      // equip-requirement: resolve the owner's ASC
-#include "AbilitySystemComponent.h"    // ...to read its owned gameplay tags
+#include "AbilitySystemGlobals.h"
+#include "AbilitySystemComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Fragments/ActionableItemFragment.h"
@@ -27,7 +26,6 @@ UMythicInventoryComponent::UMythicInventoryComponent(const FObjectInitializer &O
     SetIsReplicated(true);
     this->bReplicateUsingRegisteredSubObjectList = true;
 
-    // Set owner on the FastArray for client-side callbacks
     Slots.SetOwningInventory(this);
 }
 
@@ -39,9 +37,7 @@ void FMythicInventorySlotEntry::ClientUpdateActiveState(UMythicInventoryComponen
            bEquipmentSlot,
            bChanged);
 
-    // handle visual mesh deactivation and activation if item slot content changed
     if (bChanged) {
-        // deactivate old item and remove its local visual mesh from the character
         if (IsValid(ClientLastKnownItem)) {
             UE_LOG(Myth, Log, TEXT("ClientUpdateActiveState: Deactivating Old Item: %s"), *ClientLastKnownItem->GetName());
             ClientLastKnownItem->OnClientInactiveItem();
@@ -55,7 +51,6 @@ void FMythicInventorySlotEntry::ClientUpdateActiveState(UMythicInventoryComponen
             }
         }
 
-        // activate new item and spawn its local visual mesh on the character if slotted as equipment
         if (bEquipmentSlot && IsValid(SlottedItemInstance)) {
             UE_LOG(Myth, Log, TEXT("ClientUpdateActiveState: Activating New Item: %s"), *SlottedItemInstance->GetName());
             SlottedItemInstance->OnClientActiveItem();
@@ -73,7 +68,6 @@ void FMythicInventorySlotEntry::ClientUpdateActiveState(UMythicInventoryComponen
             }
         }
 
-        // keep track of the slotted item for the next change evaluation
         ClientLastKnownItem = SlottedItemInstance;
     }
 }
@@ -85,14 +79,12 @@ void FMythicInventorySlotEntry::ServerUpdateActiveState() {
 }
 
 void FMythicInventorySlotEntry::Clear() {
-    // Clear the slot references
     if (SlottedItemInstance) {
         this->SlottedItemInstance->SetInventory(nullptr, INDEX_NONE);
         this->SlottedItemInstance = nullptr;
     }
 }
 
-// FastArray replication callbacks
 void FMythicInventoryFastArray::PostReplicatedAdd(const TArrayView<int32> &AddedIndices, int32 FinalSize) {
     if (Owner) {
         UE_LOG(Myth, Log, TEXT("FastArray: PostReplicatedAdd called with %d indices"), AddedIndices.Num());
@@ -118,7 +110,6 @@ void FMythicInventoryFastArray::AddSlot(const FMythicInventorySlotEntry &NewSlot
     FMythicInventorySlotEntry &AddedItem = Items.Add_GetRef(NewSlot);
     MarkItemDirty(AddedItem);
 
-    // Manually trigger callback for Listen Server (Host)
     if (Owner && Owner->GetNetMode() != NM_Client) {
         int32 AddedIndex = Items.Num() - 1;
         PostReplicatedAdd(TArrayView<int32>(&AddedIndex, 1), Items.Num());
@@ -127,7 +118,6 @@ void FMythicInventoryFastArray::AddSlot(const FMythicInventorySlotEntry &NewSlot
 
 void FMythicInventoryFastArray::RemoveSlotAt(int32 Index) {
     if (Items.IsValidIndex(Index)) {
-        // Manually trigger callback for Listen Server (Host) BEFORE removal
         if (Owner && Owner->GetNetMode() != NM_Client) {
             int32 RemovedIndex = Index;
             PreReplicatedRemove(TArrayView<int32>(&RemovedIndex, 1), Items.Num() - 1);
@@ -135,10 +125,6 @@ void FMythicInventoryFastArray::RemoveSlotAt(int32 Index) {
 
         Items.RemoveAt(Index);
 
-        // Re-sync the replicated SlotIndex back-pointer of every entry shifted down by the stable RemoveAt. Each slotted
-        // item caches its index in the replicated SlotIndex (set via SetInventory on insertion); a mid-array removal
-        // (e.g. RemoveSlot dropping an EMPTY slot that sits before occupied ones) would otherwise leave trailing items
-        // pointing at the WRONG slot — GetSlot()/ReleaseFromSlot/OnDestroyed would then clear or release the wrong slot.
         for (int32 i = Index; i < Items.Num(); ++i) {
             if (IsValid(Items[i].SlottedItemInstance)) {
                 Items[i].SlottedItemInstance->SetInventory(Owner, i);
@@ -154,7 +140,6 @@ void FMythicInventoryFastArray::ModifySlotAtIndex(int32 Index, const TFunction<v
         Modifier(Items[Index]);
         MarkItemDirty(Items[Index]);
 
-        // Manually trigger callback for Listen Server (Host)
         if (Owner && Owner->GetNetMode() != NM_Client) {
             int32 ChangedIndex = Index;
             PostReplicatedChange(TArrayView<int32>(&ChangedIndex, 1), Items.Num());
@@ -163,7 +148,6 @@ void FMythicInventoryFastArray::ModifySlotAtIndex(int32 Index, const TFunction<v
 }
 
 void UMythicInventoryComponent::SetupLocalViewModel() {
-    // Only create VMs where they can be used (not on dedicated server)
     if (GetWorld() && GetWorld()->GetNetMode() == NM_DedicatedServer) {
         return;
     }
@@ -183,21 +167,17 @@ void UMythicInventoryComponent::SetupLocalViewModel() {
 void UMythicInventoryComponent::BeginPlay() {
     Super::BeginPlay();
 
-    // Ensure owner is set for callbacks
     Slots.Owner = this;
 
-    // Use the resize function to create the initial slots
     if (GetOwner()->HasAuthority()) {
         UE_LOG(Myth, Verbose, TEXT("Inventory Component BeginPlay: Has Authority"));
         InitializeSlots();
     }
 
-    // Setup or refresh the local view model; subsequent updates are driven by FastArray callbacks
     SetupLocalViewModel();
 }
 
 void UMythicInventoryComponent::OnRep_Slots() {
-    // Ensure owner is set for callbacks
     Slots.Owner = this;
 }
 
@@ -208,7 +188,6 @@ void UMythicInventoryComponent::InitializeSlots() {
 
     const int32 OldSlotsSize = Slots.Num();
 
-    // Clear out any existing slots first
     DestroyAllSlots();
 
     if (!InventoryProfile) {
@@ -216,7 +195,6 @@ void UMythicInventoryComponent::InitializeSlots() {
         return;
     }
 
-    // Create slots from groups
     for (const auto &GroupPair : InventoryProfile->SlotGroups) {
         const FGameplayTag &GroupTag = GroupPair.Key;
         const FInventorySlotGroup &Group = GroupPair.Value;
@@ -261,8 +239,6 @@ void UMythicInventoryComponent::InitializeSlots() {
 
 bool UMythicInventoryComponent::CanAcceptItemType(const FGameplayTag &ItemType) const {
     for (const auto &Slot : Slots.Items) {
-        // If a slot has an empty whitelist, it accepts all types.
-        // Otherwise, check if the item type matches the whitelist.
         if (Slot.SlotDefinition) {
             if (Slot.SlotDefinition->WhitelistedItemTypes.Num() == 0 || ItemType.MatchesAny(Slot.SlotDefinition->WhitelistedItemTypes)) {
                 return true;
@@ -286,8 +262,6 @@ bool UMythicInventoryComponent::CanSlotAcceptItem(int32 SlotIndex, UMythicItemIn
         return false;
     }
 
-    // Equip-requirement: a player equipping into an equipment slot must own the item's RequiredEquipTag (if any).
-    // Empty tag → always passes (default). Only gates player-driven equips — the loot/transfer systems are unaffected.
     if (bFromPlayer && Slot.bEquipmentSlot) {
         if (const UItemDefinition *Def = ItemInstance->GetItemDefinition()) {
             if (Def->RequiredEquipTag.IsValid()) {
@@ -319,7 +293,6 @@ bool UMythicInventoryComponent::CanSlotAcceptItem(int32 SlotIndex, UMythicItemIn
 }
 
 bool UMythicInventoryComponent::MeetsEquipRequirement(const FGameplayTag &RequiredTag, const FGameplayTagContainer &OwnerTags) {
-    // No requirement → always equippable (the default). Otherwise the owner must own the required tag.
     return !RequiredTag.IsValid() || OwnerTags.HasTag(RequiredTag);
 }
 
@@ -329,7 +302,6 @@ bool UMythicInventoryComponent::SlotWhitelistAccepts(int32 SlotIndex, const UMyt
     }
     const FMythicInventorySlotEntry &Slot = Slots.Items[SlotIndex];
 
-    // No definition / no whitelist => accepts all.
     if (!Slot.SlotDefinition || Slot.SlotDefinition->WhitelistedItemTypes.Num() == 0) {
         return true;
     }
@@ -351,8 +323,6 @@ UMythicItemInstance *UMythicInventoryComponent::ReleaseFromSlot(int32 SlotIndex)
         return nullptr;
     }
 
-    // Clear the slot (deactivates equipment, fires the UI notify) without touching the instance object,
-    // then detach the instance's back-pointers so it is owned by the caller / loot graph, NOT destroyed.
     SetItemInSlot(SlotIndex, nullptr);
     Inst->SetInventory(nullptr, INDEX_NONE);
     return Inst;
@@ -364,14 +334,11 @@ UMythicItemInstance *UMythicInventoryComponent::GetItem(int32 SlotIndex) {
 
 bool UMythicInventoryComponent::TryTransferToSlot(UMythicItemInstance *ItemInstance, int32 TargetSlotIndex) {
     if (!ItemInstance) {
-        // Mirrors the null guards on the sibling add paths (AddToSlot / AddToAnySlot). Current callers all guard, so
-        // this is defensive against a future/BP caller passing null rather than crashing the server on the derefs below.
         return false;
     }
     auto OldInventory = ItemInstance->GetInventoryComponent();
     auto OldItemSlot = ItemInstance->GetSlot();
 
-    // remove from old slot
     if (OldInventory) {
         OldInventory->SetItemInSlot(OldItemSlot, nullptr);
     }
@@ -380,7 +347,6 @@ bool UMythicInventoryComponent::TryTransferToSlot(UMythicItemInstance *ItemInsta
     }
 
     if (OldItemSlot != INDEX_NONE && OldInventory) {
-        // if we failed to add the item to the new slot, put it back in the old one
         UE_LOG(Myth, Verbose, TEXT("Failed to add item to slot, reverting to previous"));
         OldInventory->SetItemInSlot(OldItemSlot, ItemInstance);
     }
@@ -389,7 +355,6 @@ bool UMythicInventoryComponent::TryTransferToSlot(UMythicItemInstance *ItemInsta
 }
 
 bool UMythicInventoryComponent::SetItemInSlot(int32 SlotIndex, UMythicItemInstance *NewItemInstance) {
-    // Authority Check
     checkf(GetOwner()->HasAuthority(), TEXT("This function is server-only."));
 
     return SetItemInSlotInternal(SlotIndex, NewItemInstance);
@@ -397,11 +362,10 @@ bool UMythicInventoryComponent::SetItemInSlot(int32 SlotIndex, UMythicItemInstan
 
 bool UMythicInventoryComponent::SetItemInSlotInternal(int32 SlotIndex, UMythicItemInstance *NewItemInstance) {
     if (!Slots.IsValidIndex(SlotIndex)) {
-        return false; // Invalid index
+        return false;
     }
 
     if (!NewItemInstance) {
-        // Deactivate old item if applicable
         if (Slots.Items[SlotIndex].SlottedItemInstance && Slots.Items[SlotIndex].bEquipmentSlot) {
             Slots.Items[SlotIndex].SlottedItemInstance->OnInactiveItem();
         }
@@ -414,16 +378,13 @@ bool UMythicInventoryComponent::SetItemInSlotInternal(int32 SlotIndex, UMythicIt
         return true;
     }
 
-    // Get a mutable reference to the slot data
     FMythicInventorySlotEntry &Slot = Slots.Items[SlotIndex];
 
-    // If slot has an item already, reject the new item
     if (Slot.SlottedItemInstance) {
         UE_LOG(Myth, Warning, TEXT("There is already an item in this slot"));
         return false;
     }
 
-    // Whitelist check (effective type: {def ItemType} ∪ ItemTags).
     if (Slot.SlotDefinition && (Slot.SlotDefinition->WhitelistedItemTypes.Num() > 0)) {
         if (!NewItemInstance->GetItemDefinition()) {
             UE_LOG(Myth, Error, TEXT("SetItemInSlotInternal: ItemDefinition is null for item %s"), *NewItemInstance->GetName());
@@ -438,14 +399,12 @@ bool UMythicInventoryComponent::SetItemInSlotInternal(int32 SlotIndex, UMythicIt
         }
     }
 
-    // Uniqueness check for slots requiring unique items within the same entry
     if (Slot.bRequireUniqueInEntry && NewItemInstance->GetItemDefinition()) {
         for (int32 i = 0; i < Slots.Num(); ++i) {
             if (i == SlotIndex) {
                 continue;
             }
             const FMythicInventorySlotEntry &OtherSlot = Slots.Items[i];
-            // Check if same group and same entry index
             if (OtherSlot.GroupTag == Slot.GroupTag &&
                 OtherSlot.EntryIndex == Slot.EntryIndex &&
                 OtherSlot.SlottedItemInstance &&
@@ -457,19 +416,16 @@ bool UMythicInventoryComponent::SetItemInSlotInternal(int32 SlotIndex, UMythicIt
         }
     }
 
-    // Deactivate old item if applicable
     if (Slot.SlottedItemInstance && Slot.bEquipmentSlot) {
         Slot.SlottedItemInstance->OnInactiveItem();
     }
 
-    // Update the data in the replicated struct and mark dirty
     Slots.ModifySlotAtIndex(SlotIndex, [this, NewItemInstance, SlotIndex](FMythicInventorySlotEntry &Slot) {
         Slot.SlottedItemInstance = NewItemInstance;
         if (IsValid(Slot.SlottedItemInstance)) {
             Slot.SlottedItemInstance->SetOwner(this);
             Slot.SlottedItemInstance->SetInventory(this, SlotIndex);
 
-            // Activate new item if applicable
             Slot.ServerUpdateActiveState();
         }
     });
@@ -482,24 +438,18 @@ bool UMythicInventoryComponent::SetItemInSlotInternal(int32 SlotIndex, UMythicIt
 
 AMythicWorldItem *UMythicInventoryComponent::AddItem(UMythicItemInstance *ItemInstance, AController *TargetRecipient) {
     auto OriginalQty = ItemInstance->GetStacks();
-    // Capture name + rarity BEFORE the add: AddToAnySlot can Destroy() ItemInstance on a full stack-merge.
     auto PickupDef = ItemInstance->GetItemDefinition();
     auto AmountAdded = AddToAnySlot(ItemInstance);
 
-    // Genuine acquisition callout: fire ONLY when stacks were actually gained (AmountAdded > 0), player-owned inventory
-    // only (the guarded Cast no-ops for container/merchant inventories). This entry is a true grant (quest/loot/craft) —
-    // inventory MOVES go through SendItem, not here, so they never fire a pickup callout.
     if (AmountAdded > 0 && PickupDef) {
         if (AMythicPlayerController *OwningPC = Cast<AMythicPlayerController>(GetOwner())) {
             OwningPC->ClientNotifyLootPickup(PickupDef->Name, AmountAdded, UItemDefinition::GetRarityColor(PickupDef->Rarity));
-            OwningPC->NotifyItemAcquired(PickupDef, AmountAdded); // server: drive "collect N" objectives via GAS event
+            OwningPC->NotifyItemAcquired(PickupDef, AmountAdded);
         }
     }
 
     if (AmountAdded != OriginalQty) {
-        // Create a world item and return it
         UMythicLootManagerSubsystem *LootManager = GetOwner()->GetGameInstance()->GetSubsystem<UMythicLootManagerSubsystem>();
-        // If the ItemOwner is a player controller, use the player controller's pawn's location
         AMythicWorldItem *WorldItem = LootManager->Spawn(ItemInstance, GetOwner()->GetActorLocation(), 100, TargetRecipient);
         if (WorldItem) {
             return WorldItem;
@@ -517,32 +467,21 @@ int32 UMythicInventoryComponent::AddToAnySlot(UMythicItemInstance *ItemInstance,
 
     const int32 original_qty = ItemInstance->GetStacks();
 
-    // Can be stacked? Guard GetItemDefinition() — ItemDefinition is a replicated + SaveGame UPROPERTY that can resolve
-    // to null on load (an unresolvable data-asset ref); a raw deref here would crash, so treat a null def as
-    // non-stackable and fall through to fresh-slot placement (mirrors the sibling add paths' null-checks).
     const UItemDefinition *StackDef = ItemInstance->GetItemDefinition();
-    // Merge into existing partial stacks if this is a STACKABLE TYPE — not "if the incoming isn't full". Merging drains
-    // the incoming into existing stacks, so the incoming's own fullness is irrelevant; the old `> GetStacks()` gate made
-    // a full incoming stack skip merging entirely, so it never topped off partials and wasted slots. (isStackableWith below
-    // still guards real compatibility.)
     if (StackDef && ShouldAttemptStackMerge(StackDef->StackSizeMax)) {
-        // Add to existing stack
         for (int32 i = 0; i < Slots.Num(); ++i) {
             auto ItemInSlot = Slots.Items[i].SlottedItemInstance;
             if (bFromPlayer && !Slots.Items[i].bCanPlayerPut) {
                 continue;
             }
 
-            // Check if the item can be stacked with the existing item
             if (ItemInSlot != nullptr && ItemInSlot->GetItemDefinition() == ItemInstance->GetItemDefinition() && ItemInstance->isStackableWith(ItemInSlot)) {
-                // Update existing stack
                 const int32 availableSpace = ItemInSlot->GetItemDefinition()->StackSizeMax - ItemInSlot->GetStacks();
                 const int32 QuantityToAdd = FMath::Min(ItemInstance->GetStacks(), availableSpace);
 
                 ItemInSlot->SetStackSize(ItemInSlot->GetStacks() + QuantityToAdd);
                 ItemInstance->SetStackSize(ItemInstance->GetStacks() - QuantityToAdd);
 
-                // Destroy the item if it's remaining quantity is 0 and return the amount added
                 if (ItemInstance->GetStacks() == 0) {
                     ItemInstance->Destroy();
                     return original_qty;
@@ -551,10 +490,6 @@ int32 UMythicInventoryComponent::AddToAnySlot(UMythicItemInstance *ItemInstance,
         }
     }
 
-    // Place the remaining quantity into empty slots, SPLITTING + CLAMPING to StackSizeMax per slot. Dumping the whole
-    // remainder into one slot (the old behavior) produced an over-cap stack that SetStackSize would later silently clamp
-    // — destroying the surplus — and made AddToAnySlot report a full add so AddItem / ConversionStation never spilled
-    // the overflow. Any true surplus is left on ItemInstance so the caller (AddItem) spawns the overflow WorldItem.
     const int32 MaxStack = (StackDef && StackDef->StackSizeMax > 0) ? StackDef->StackSizeMax : 1;
     for (int32 i = 0; i < Slots.Num(); ++i) {
         const int32 remaining = ItemInstance->GetStacks();
@@ -567,16 +502,14 @@ int32 UMythicInventoryComponent::AddToAnySlot(UMythicItemInstance *ItemInstance,
         if (!CanSlotAcceptItem(i, ItemInstance, bFromPlayer)) {
             continue;
         }
-        
+
         if (remaining <= MaxStack) {
-            // Whole remainder fits in this slot.
             if (TryTransferToSlot(ItemInstance, i)) {
                 return original_qty;
             }
             continue;
         }
 
-        // Remainder exceeds one stack: peel off a capped copy for this slot, keep the rest on ItemInstance.
         UMythicItemInstance *Split = DuplicateObject<UMythicItemInstance>(ItemInstance, this);
         Split->SetStackSize(MaxStack);
         if (TryTransferToSlot(Split, i)) {
@@ -602,7 +535,6 @@ int32 UMythicInventoryComponent::AddToSlot(UMythicItemInstance *ItemInstance, in
         }
 
         auto SlottedItem = Slots.Items[SlotIndex].SlottedItemInstance;
-        // If the target slot is empty, move the entire item there
         if (SlottedItem == nullptr) {
             if (!CanSlotAcceptItem(SlotIndex, ItemInstance, bFromPlayer)) {
                 return 0;
@@ -611,7 +543,6 @@ int32 UMythicInventoryComponent::AddToSlot(UMythicItemInstance *ItemInstance, in
                 return OriginalQty;
             }
         }
-        // If there is an item in the slot and it is stackable with the item being added, add as much as possible
         else if (SlottedItem->GetItemDefinition() == ItemInstance->GetItemDefinition() && SlottedItem->isStackableWith(ItemInstance)) {
             const int32 availableSpace = SlottedItem->GetItemDefinition()->StackSizeMax - SlottedItem->GetStacks();
             const int32 QuantityToAdd = FMath::Min(ItemInstance->GetStacks(), availableSpace);
@@ -619,7 +550,7 @@ int32 UMythicInventoryComponent::AddToSlot(UMythicItemInstance *ItemInstance, in
             SlottedItem->SetStackSize(SlottedItem->GetStacks() + QuantityToAdd);
             ItemInstance->SetStackSize(ItemInstance->GetStacks() - QuantityToAdd);
 
-            if (ItemInstance->GetStacks() == 0) { // If there are no more stacks left, destroy the item and return the amount added
+            if (ItemInstance->GetStacks() == 0) {
                 ItemInstance->Destroy();
                 return OriginalQty;
             }
@@ -648,20 +579,17 @@ int32 UMythicInventoryComponent::SendItem(int32 SlotIndex, UMythicInventoryCompo
     checkf(lOwner->HasAuthority(), TEXT("AddToAnySlot:: Called without Authority!"));
     checkf(TargetInventory != nullptr, TEXT("SendItem:: Invalid TargetInventory!"));
 
-    // If same slot, return 0
     if (this == TargetInventory && SlotIndex == TargetSlotIndex) {
         return 0;
     }
 
     auto itemInstance = Slots.GetItemInSlot(SlotIndex);
     if (!itemInstance) {
-        return 0; // No item in the slot
+        return 0;
     }
 
-    // ItemInstance could be destroyed by the ReceiveItem function if it is fully consumed so we need to store the quantity before calling it.
     int32 amountSent = TargetInventory->ReceiveItem(itemInstance, TargetSlotIndex, true);
 
-    // Clear source slot if item was fully consumed
     if (!IsValid(itemInstance) || itemInstance->GetStacks() == 0) {
         SetItemInSlot(SlotIndex, nullptr);
     }
@@ -684,7 +612,6 @@ bool UMythicInventoryComponent::DropItem(int32 SlotIndex, const FVector &locatio
 
     const FMythicInventorySlotEntry &Slot = Slots.Items[SlotIndex];
 
-    // Check if slot is protected
     if (!Slot.bCanPlayerTake) {
         UE_LOG(Myth, Warning, TEXT("DropItem: Cannot drop item from protected group"));
         return false;
@@ -696,23 +623,19 @@ bool UMythicInventoryComponent::DropItem(int32 SlotIndex, const FVector &locatio
         return false;
     }
 
-    // Get LootManager
     UMythicLootManagerSubsystem *loot_manager = lOwner->GetGameInstance()->GetSubsystem<UMythicLootManagerSubsystem>();
 
-    // Spawn the item
     AMythicWorldItem *world_item = loot_manager->Spawn(item_instance, location, radius, TargetRecipient);
     if (world_item == nullptr) {
         return false;
     }
 
-    // Verify the world item actually has our item instance
     if (world_item->ItemInstance != item_instance) {
         UE_LOG(Myth, Error, TEXT("DropItem:: World item failed to take ownership of item instance"));
-        world_item->Destroy(); // Clean up the failed world item
+        world_item->Destroy();
         return false;
     }
 
-    // Set the item slot's item instance to null
     SetItemInSlot(SlotIndex, nullptr);
 
     this->OnItemDropped.Broadcast(SlotIndex, world_item);
@@ -726,60 +649,49 @@ void UMythicInventoryComponent::PickupItem_Implementation(AMythicWorldItem *worl
     checkf(lOwner->HasAuthority(), TEXT("AddToAnySlot:: Called without Authority!"));
     checkf(world_item != nullptr, TEXT("PickupItem:: Invalid WorldItem!"));
 
-    // Make sure we are the TargetRecipient if one is set
     auto Recipient = world_item->GetTargetRecipient();
     if (Recipient && Recipient != lOwner) {
         UE_LOG(Myth, Verbose, TEXT("PickupItem:: Not the TargetRecipient!"));
         return;
     }
 
-    // Get the item instance from the world item
     UMythicItemInstance *item_instance = world_item->ItemInstance;
     if (item_instance == nullptr) {
         return;
     }
 
-    // Copy of the item instance. Doing this so the world item's item instance can be modified without affecting the inventory's item instance
-    // in case the item is partially picked up.
     auto copied_item_instance = DuplicateObject<UMythicItemInstance>(item_instance, this);
 
-    // If not all items could be added, AddItem will return a pointer to the dropped item
     auto OriginalQty = copied_item_instance->GetStacks();
-    // Capture name + rarity BEFORE the add: AddToAnySlot can Destroy() copied_item_instance on a full pickup.
     auto PickupDef = copied_item_instance->GetItemDefinition();
     auto AmountAdded = AddToAnySlot(copied_item_instance);
 
     if (AmountAdded >= OriginalQty) {
-        // All items were picked up
         world_item->Destroy();
     }
     else if (AmountAdded > 0) {
-        // Partial pickup - update the world item's remaining quantity
         auto RemainingQty = OriginalQty - AmountAdded;
         world_item->ItemInstance->SetStackSize(RemainingQty);
+        world_item->FlushNetDormancy();
     }
     else {
-        // Nothing was picked up - clean up the copied instance
         if (IsValid(copied_item_instance)) {
             copied_item_instance->Destroy();
         }
     }
 
-    // Genuine world-item pickup callout: fire ONLY when stacks were actually gained, player-owned inventory only.
     if (AmountAdded > 0 && PickupDef) {
         if (AMythicPlayerController *OwningPC = Cast<AMythicPlayerController>(GetOwner())) {
             OwningPC->ClientNotifyLootPickup(PickupDef->Name, AmountAdded, UItemDefinition::GetRarityColor(PickupDef->Rarity));
-            OwningPC->NotifyItemAcquired(PickupDef, AmountAdded); // server: drive "collect N" objectives via GAS event
+            OwningPC->NotifyItemAcquired(PickupDef, AmountAdded);
         }
     }
 }
 
-// FastArray -> Component handlers
 void UMythicInventoryComponent::HandleSlotsAdded(const TArrayView<int32> &AddedIndices, int32 FinalSize) {
     const int32 NumAdded = AddedIndices.Num();
     const int32 OldSize = FinalSize - NumAdded;
 
-    // Structural change: rebuild VM once, then refresh changed slots (no-cost if rebuild already covers)
     SetupLocalViewModel();
 
     if (NumAdded > 0) {
@@ -798,7 +710,7 @@ void UMythicInventoryComponent::HandleSlotsAdded(const TArrayView<int32> &AddedI
     }
 }
 
-void UMythicInventoryComponent::HandleSlotsChanged(const TArrayView<int32> &ChangedIndices, int32 /*FinalSize*/) {
+void UMythicInventoryComponent::HandleSlotsChanged(const TArrayView<int32> &ChangedIndices, int32) {
     for (int32 idx : ChangedIndices) {
         if (Slots.IsValidIndex(idx)) {
             Slots.Items[idx].ClientUpdateActiveState(this);
@@ -812,7 +724,6 @@ void UMythicInventoryComponent::HandleSlotsChanged(const TArrayView<int32> &Chan
 }
 
 void UMythicInventoryComponent::HandleSlotsRemoved(const TArrayView<int32> &RemovedIndices, int32 FinalSize) {
-    // deactivate items that are about to be removed
     for (int32 idx : RemovedIndices) {
         if (Slots.IsValidIndex(idx)) {
             FMythicInventorySlotEntry &Slot = Slots.Items[idx];
@@ -835,7 +746,6 @@ void UMythicInventoryComponent::HandleSlotsRemoved(const TArrayView<int32> &Remo
     const int32 NumRemoved = RemovedIndices.Num();
     const int32 OldSize = FinalSize + NumRemoved;
 
-    // Structural change: rebuild VM
     SetupLocalViewModel();
 
     if (NumRemoved > 0) {
@@ -849,7 +759,7 @@ UInventoryVM *UMythicInventoryComponent::GetViewModel() const {
 
 int32 UMythicInventoryComponent::GetItemCount(UItemDefinition *RequiredItem) const {
     if (!RequiredItem) {
-        return 0; // Early return for null definition
+        return 0;
     }
 
     int32 count = 0;
@@ -863,14 +773,12 @@ int32 UMythicInventoryComponent::GetItemCount(UItemDefinition *RequiredItem) con
 }
 
 void UMythicInventoryComponent::ServerRemoveItem_Implementation(UMythicItemInstance *ItemInstance, int32 Amount) {
-    // Remove the given amount of items from the inventory that match the given item definition. Returns the amount of items that were removed.
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("RemoveItem:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("RemoveItem:: Called without Authority!"));
     checkf(Amount > 0, TEXT("RemoveItem:: Invalid Amount!"));
     checkf(ItemInstance != nullptr, TEXT("RemoveItem:: Invalid ItemInstance!"));
 
-    // Check item is from this inventory
     if (ItemInstance->GetInventoryComponent() != this) {
         UE_LOG(Myth, Error, TEXT("RemoveItem:: ItemInstance is not from this inventory!"));
         return;
@@ -891,7 +799,6 @@ void UMythicInventoryComponent::ServerRemoveItem_Implementation(UMythicItemInsta
 }
 
 void UMythicInventoryComponent::ServerRemoveItemByDefinition_Implementation(UItemDefinition *ItemDef, int32 Amount) {
-    // Remove the given amount of items from the inventory that match the given item definition. Returns the amount of items that were removed.
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("RemoveItem:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("RemoveItem:: Called without Authority!"));
@@ -934,12 +841,11 @@ bool UMythicInventoryComponent::DestroySlot(int32 SlotIndex) {
     checkf(lOwner->HasAuthority(), TEXT("Called without Authority!"));
 
     if (!Slots.IsValidIndex(SlotIndex)) {
-        return false; // Invalid index
+        return false;
     }
 
     FMythicInventorySlotEntry &InSlot = Slots.Items[SlotIndex];
 
-    // Server Deactivate
     if (InSlot.SlottedItemInstance && InSlot.bEquipmentSlot) {
         InSlot.SlottedItemInstance->OnInactiveItem();
     }
@@ -1015,8 +921,6 @@ int32 UMythicInventoryComponent::SpendCurrency(int32 Amount) {
     }
 
     int32 SpentSoFar = 0;
-    // Iterate by index and re-read each slot: ServerRemoveItem may clear a fully-drained slot, but we only ever read
-    // the current slot's instance, so a cleared earlier slot can't corrupt later reads.
     for (int32 i = 0; i < Slots.Items.Num() && SpentSoFar < Amount; ++i) {
         UMythicItemInstance *Item = Slots.Items[i].SlottedItemInstance;
         if (!Item) {
@@ -1031,7 +935,7 @@ int32 UMythicInventoryComponent::SpendCurrency(int32 Amount) {
             continue;
         }
         const int32 Take = FMath::Min(Stacks, Amount - SpentSoFar);
-        ServerRemoveItem(Item, Take); // authoritative decrement/destroy + replication notify (same path as ConsumeItem)
+        ServerRemoveItem(Item, Take);
         SpentSoFar += Take;
     }
     return SpentSoFar;
@@ -1049,7 +953,6 @@ void UMythicInventoryComponent::AddSlot(UInventorySlotDefinition *SlotDefinition
         return;
     }
 
-    // Authority check
     if (!GetOwner()->HasAuthority()) {
         UE_LOG(Myth, Warning, TEXT("AddSlot called without authority!"));
         return;
@@ -1071,7 +974,6 @@ bool UMythicInventoryComponent::RemoveSlot(UInventorySlotDefinition *SlotDefinit
         return false;
     }
 
-    // Authority check
     if (!GetOwner()->HasAuthority()) {
         UE_LOG(Myth, Warning, TEXT("RemoveSlot called without authority!"));
         return false;
@@ -1079,7 +981,6 @@ bool UMythicInventoryComponent::RemoveSlot(UInventorySlotDefinition *SlotDefinit
 
     int32 RemovedCount = 0;
 
-    // Prioritize removal of slots with no items
     for (int32 i = Slots.Items.Num() - 1; i >= 0; --i) {
         if (RemovedCount >= Count) {
             break;
@@ -1097,7 +998,6 @@ bool UMythicInventoryComponent::RemoveSlot(UInventorySlotDefinition *SlotDefinit
         }
 
         if (Slots.Items[i].SlotDefinition == SlotDefinition) {
-            // Drop or destroy any item in the slot
             if (Slots.Items[i].SlottedItemInstance) {
                 if (bDropItems) {
                     DropItem(i, GetOwner()->GetActorLocation());
@@ -1116,36 +1016,38 @@ bool UMythicInventoryComponent::RemoveSlot(UInventorySlotDefinition *SlotDefinit
 }
 
 void UMythicInventoryComponent::ServerSplitStack_Implementation(int32 SourceSlotIndex, int32 SplitAmount) {
+    SplitStackToFreeSlot(SourceSlotIndex, SplitAmount);
+}
+
+int32 UMythicInventoryComponent::SplitStackToFreeSlot(int32 SourceSlotIndex, int32 SplitAmount) {
     AActor *lOwner = GetOwner();
     if (!lOwner || !lOwner->HasAuthority()) {
-        return;
+        return INDEX_NONE;
     }
 
     if (!Slots.IsValidIndex(SourceSlotIndex)) {
         UE_LOG(Myth, Warning, TEXT("ServerSplitStack: invalid source slot %d"), SourceSlotIndex);
-        return;
+        return INDEX_NONE;
     }
 
     const FMythicInventorySlotEntry &SourceSlot = Slots.Items[SourceSlotIndex];
 
-    // cannot split from equipment slots
     if (SourceSlot.bEquipmentSlot) {
         UE_LOG(Myth, Warning, TEXT("ServerSplitStack: cannot split from equipment slot %d"), SourceSlotIndex);
-        return;
+        return INDEX_NONE;
     }
 
     UMythicItemInstance *SourceItem = SourceSlot.SlottedItemInstance;
     if (!SourceItem) {
         UE_LOG(Myth, Warning, TEXT("ServerSplitStack: source slot %d is empty"), SourceSlotIndex);
-        return;
+        return INDEX_NONE;
     }
 
     if (SplitAmount <= 0 || SplitAmount >= SourceItem->GetStacks()) {
         UE_LOG(Myth, Warning, TEXT("ServerSplitStack: invalid split amount %d for stack of %d"), SplitAmount, SourceItem->GetStacks());
-        return;
+        return INDEX_NONE;
     }
 
-    // find first empty slot in the same group
     int32 TargetSlotIndex = INDEX_NONE;
     for (int32 i = 0; i < Slots.Num(); ++i) {
         if (i == SourceSlotIndex) {
@@ -1162,14 +1064,13 @@ void UMythicInventoryComponent::ServerSplitStack_Implementation(int32 SourceSlot
 
     if (TargetSlotIndex == INDEX_NONE) {
         UE_LOG(Myth, Warning, TEXT("ServerSplitStack: no empty slot in group %s for split"), *SourceSlot.GroupTag.ToString());
-        return;
+        return INDEX_NONE;
     }
 
-    // create a new item instance via the loot manager with the same definition
     UMythicLootManagerSubsystem *LootManager = lOwner->GetGameInstance()->GetSubsystem<UMythicLootManagerSubsystem>();
     if (!LootManager) {
         UE_LOG(Myth, Error, TEXT("ServerSplitStack: no LootManagerSubsystem"));
-        return;
+        return INDEX_NONE;
     }
 
     UMythicItemInstance *NewItem = LootManager->Create(
@@ -1181,18 +1082,17 @@ void UMythicInventoryComponent::ServerSplitStack_Implementation(int32 SourceSlot
 
     if (!NewItem) {
         UE_LOG(Myth, Error, TEXT("ServerSplitStack: failed to create split item"));
-        return;
+        return INDEX_NONE;
     }
 
-    // place the new item into the target slot
     if (!SetItemInSlot(TargetSlotIndex, NewItem)) {
         UE_LOG(Myth, Error, TEXT("ServerSplitStack: failed to place split item in slot %d"), TargetSlotIndex);
         NewItem->Destroy();
-        return;
+        return INDEX_NONE;
     }
 
-    // decrement source stack
     SourceItem->SetStackSize(SourceItem->GetStacks() - SplitAmount);
+    return TargetSlotIndex;
 }
 
 void UMythicInventoryComponent::ServerSwapSlots_Implementation(int32 SlotA, int32 SlotB) {
@@ -1213,31 +1113,26 @@ void UMythicInventoryComponent::ServerSwapSlots_Implementation(int32 SlotA, int3
     UMythicItemInstance *ItemA = Slots.Items[SlotA].SlottedItemInstance;
     UMythicItemInstance *ItemB = Slots.Items[SlotB].SlottedItemInstance;
 
-    // both empty, nothing to do
     if (!ItemA && !ItemB) {
         return;
     }
 
-    // one slot empty: simple move
     if (!ItemA) {
         if (!SlotWhitelistAccepts(SlotA, ItemB)) {
             UE_LOG(Myth, Warning, TEXT("ServerSwapSlots: slot %d does not accept item from slot %d"), SlotA, SlotB);
             return;
         }
 
-        // deactivate from equipment slot B if applicable
         if (Slots.Items[SlotB].bEquipmentSlot && IsValid(ItemB)) {
             ItemB->OnInactiveItem();
         }
 
-        // clear slot B without deactivating again (we just did it)
         Slots.ModifySlotAtIndex(SlotB, [](FMythicInventorySlotEntry &SlotData) {
             SlotData.SlottedItemInstance = nullptr;
         });
         ItemB->SetInventory(nullptr, INDEX_NONE);
         NotifyItemInstanceUpdated(SlotB);
 
-        // place into slot A
         SetItemInSlot(SlotA, ItemB);
         return;
     }
@@ -1248,30 +1143,25 @@ void UMythicInventoryComponent::ServerSwapSlots_Implementation(int32 SlotA, int3
             return;
         }
 
-        // deactivate from equipment slot A if applicable
         if (Slots.Items[SlotA].bEquipmentSlot && IsValid(ItemA)) {
             ItemA->OnInactiveItem();
         }
 
-        // clear slot A
         Slots.ModifySlotAtIndex(SlotA, [](FMythicInventorySlotEntry &SlotData) {
             SlotData.SlottedItemInstance = nullptr;
         });
         ItemA->SetInventory(nullptr, INDEX_NONE);
         NotifyItemInstanceUpdated(SlotA);
 
-        // place into slot B
         SetItemInSlot(SlotB, ItemA);
         return;
     }
 
-    // both slots occupied: verify cross-acceptance
     if (!SlotWhitelistAccepts(SlotA, ItemB) || !SlotWhitelistAccepts(SlotB, ItemA)) {
         UE_LOG(Myth, Warning, TEXT("ServerSwapSlots: whitelist rejection for swap between %d and %d"), SlotA, SlotB);
         return;
     }
 
-    // deactivate both if in equipment slots
     if (Slots.Items[SlotA].bEquipmentSlot && IsValid(ItemA)) {
         ItemA->OnInactiveItem();
     }
@@ -1279,11 +1169,9 @@ void UMythicInventoryComponent::ServerSwapSlots_Implementation(int32 SlotA, int3
         ItemB->OnInactiveItem();
     }
 
-    // detach both items from their slots
     ItemA->SetInventory(nullptr, INDEX_NONE);
     ItemB->SetInventory(nullptr, INDEX_NONE);
 
-    // swap the pointers, set inventory back-pointers, and activate equipment if needed
     Slots.ModifySlotAtIndex(SlotA, [this, ItemB, SlotA](FMythicInventorySlotEntry &Slot) {
         Slot.SlottedItemInstance = ItemB;
         ItemB->SetOwner(this);
@@ -1327,7 +1215,6 @@ void UMythicInventoryComponent::ServerQuickMoveToInventory_Implementation(int32 
         return;
     }
 
-    // release the item from the source slot (handles deactivation)
     UMythicItemInstance *Released = ReleaseFromSlot(SourceSlotIndex);
     if (!Released) {
         return;
@@ -1336,13 +1223,11 @@ void UMythicInventoryComponent::ServerQuickMoveToInventory_Implementation(int32 
     int32 OriginalQty = Released->GetStacks();
     int32 Added = TargetInventory->AddToAnySlot(Released, true);
 
-    // if nothing was added, put it back
     if (Added == 0) {
         SetItemInSlot(SourceSlotIndex, Released);
         return;
     }
 
-    // partial add: the item is still valid with reduced stacks, put remainder back
     if (Added < OriginalQty && IsValid(Released)) {
         SetItemInSlot(SourceSlotIndex, Released);
     }
@@ -1380,7 +1265,6 @@ void UMythicInventoryComponent::ServerSortGroup_Implementation(FGameplayTag Grou
         return;
     }
 
-    // sort items by the specified mode
     GroupItems.Sort([Mode](const UMythicItemInstance &A, const UMythicItemInstance &B) {
         const UItemDefinition *DefA = A.GetItemDefinition();
         const UItemDefinition *DefB = B.GetItemDefinition();
@@ -1403,7 +1287,6 @@ void UMythicInventoryComponent::ServerSortGroup_Implementation(FGameplayTag Grou
         return false;
     });
 
-    // detach all items from their slots
     for (int32 SlotIdx : GroupSlotIndices) {
         UMythicItemInstance *Inst = Slots.Items[SlotIdx].SlottedItemInstance;
         if (Inst) {
@@ -1414,7 +1297,6 @@ void UMythicInventoryComponent::ServerSortGroup_Implementation(FGameplayTag Grou
         }
     }
 
-    // reassign sorted items to group slots in order
     int32 ItemIdx = 0;
     for (int32 SlotIdx : GroupSlotIndices) {
         if (ItemIdx >= GroupItems.Num()) {
@@ -1431,7 +1313,6 @@ void UMythicInventoryComponent::ServerSortGroup_Implementation(FGameplayTag Grou
         ++ItemIdx;
     }
 
-    // notify remaining empty slots
     for (int32 i = ItemIdx; i < GroupSlotIndices.Num(); ++i) {
         NotifyItemInstanceUpdated(GroupSlotIndices[i]);
     }
@@ -1447,16 +1328,13 @@ void UMythicInventoryComponent::ServerDepositAll_Implementation(UMythicInventory
         return;
     }
 
-    // iterate in reverse so slot index removal doesn't invalidate later indices
     for (int32 i = Slots.Num() - 1; i >= 0; --i) {
         const FMythicInventorySlotEntry &Slot = Slots.Items[i];
 
-        // skip equipment slots
         if (Slot.bEquipmentSlot) {
             continue;
         }
 
-        // skip protected slots
         if (!Slot.bCanPlayerTake) {
             continue;
         }
@@ -1466,7 +1344,6 @@ void UMythicInventoryComponent::ServerDepositAll_Implementation(UMythicInventory
             continue;
         }
 
-        // apply optional type filter
         if (OptionalTypeFilter.IsValid()) {
             const UItemDefinition *Def = Item->GetItemDefinition();
             if (!Def || !Def->ItemType.MatchesTag(OptionalTypeFilter)) {
@@ -1474,7 +1351,6 @@ void UMythicInventoryComponent::ServerDepositAll_Implementation(UMythicInventory
             }
         }
 
-        // release and move to target
         UMythicItemInstance *Released = ReleaseFromSlot(i);
         if (!Released) {
             continue;
@@ -1483,13 +1359,11 @@ void UMythicInventoryComponent::ServerDepositAll_Implementation(UMythicInventory
         int32 OriginalQty = Released->GetStacks();
         int32 Added = Target->AddToAnySlot(Released, true);
 
-        // if nothing transferred, put it back
         if (Added == 0) {
             SetItemInSlot(i, Released);
             continue;
         }
 
-        // partial transfer: put remainder back in source
         if (Added < OriginalQty && IsValid(Released)) {
             SetItemInSlot(i, Released);
         }
@@ -1513,7 +1387,6 @@ void UMythicInventoryComponent::ServerUseItemInSlot_Implementation(int32 SlotInd
         return;
     }
 
-    // the item must have the InInventory action type tag
     if (!Item->HasTag(ITEMIZATION_ACTIONTYPE_ININVENTORY)) {
         const UItemDefinition *Def = Item->GetItemDefinition();
         if (!Def || !Def->ItemType.MatchesTag(ITEMIZATION_ACTIONTYPE_ININVENTORY)) {
@@ -1522,8 +1395,6 @@ void UMythicInventoryComponent::ServerUseItemInSlot_Implementation(int32 SlotInd
         }
     }
 
-    // find actionable fragment and execute its generic action
-    // GetFragment returns const T* but ExecuteGenericAction mutates state (server authority)
     if (const auto *ActionFrag = Item->GetFragment<UActionableItemFragment>()) {
         const_cast<UActionableItemFragment *>(ActionFrag)->ExecuteGenericAction(Item);
     }
@@ -1542,7 +1413,6 @@ bool UMythicInventoryComponent::CanUseItemInSlot(int32 SlotIndex) const {
         return false;
     }
 
-    // check for the InInventory action type tag on the item's tags or definition type
     if (!Item->HasTag(ITEMIZATION_ACTIONTYPE_ININVENTORY)) {
         const UItemDefinition *Def = Item->GetItemDefinition();
         if (!Def || !Def->ItemType.MatchesTag(ITEMIZATION_ACTIONTYPE_ININVENTORY)) {
@@ -1550,6 +1420,5 @@ bool UMythicInventoryComponent::CanUseItemInSlot(int32 SlotIndex) const {
         }
     }
 
-    // must have an actionable fragment
     return Item->GetFragment<UActionableItemFragment>() != nullptr;
 }

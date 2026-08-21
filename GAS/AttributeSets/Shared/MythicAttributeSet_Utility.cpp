@@ -1,4 +1,3 @@
-// 
 
 
 #include "MythicAttributeSet_Utility.h"
@@ -7,12 +6,10 @@
 #include "Net/UnrealNetwork.h"
 
 UMythicAttributeSet_Utility::UMythicAttributeSet_Utility() {
-    // baseline so stamina is usable before any data-driven init applies (otherwise max=0 -> regen/spend no-op)
     InitMaxStamina(100.0f);
     InitCurrentStamina(100.0f);
     InitStaminaRegenRate(10.0f);
 
-    // default dynamic cooldown reduction cap to 60 percent
     InitMaxCooldownReduction(0.60f);
 }
 
@@ -54,7 +51,6 @@ void UMythicAttributeSet_Utility::PreAttributeBaseChange(const FGameplayAttribut
 void UMythicAttributeSet_Utility::PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) {
     Super::PostAttributeChange(Attribute, OldValue, NewValue);
 
-    // apply saturation curve for diminishing returns resolve to max stamina mapping
     if (Attribute == GetResolveAttribute()) {
         if (!bIsUpdatingMaxStamina) {
             bIsUpdatingMaxStamina = true;
@@ -67,7 +63,6 @@ void UMythicAttributeSet_Utility::PostAttributeChange(const FGameplayAttribute &
         }
     }
 
-    // if max cooldown reduction drops below current cdr, pull current cdr down to the new limit
     if (Attribute == GetMaxCooldownReductionAttribute()) {
         if (GetCooldownReduction() > NewValue) {
             SetCooldownReduction(NewValue);
@@ -78,9 +73,6 @@ void UMythicAttributeSet_Utility::PostAttributeChange(const FGameplayAttribute &
 void UMythicAttributeSet_Utility::PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) {
     Super::PostGameplayEffectExecute(Data);
 
-    // When a GE lowers MaxStamina, PreAttributeChange only re-clamps the attribute actually written (MaxStamina), never
-    // CurrentStamina — so CurrentStamina would sit ABOVE the new max (the bar overfills, the player over-spends; regen
-    // only ADDS when Cur<Max, so it never pulls it down). Re-clamp here, mirroring the Life/Defense attribute sets.
     if (Data.EvaluatedData.Attribute == GetMaxStaminaAttribute()) {
         if (GetCurrentStamina() > GetMaxStamina()) {
             SetCurrentStamina(GetMaxStamina());
@@ -124,17 +116,26 @@ void UMythicAttributeSet_Utility::OnRep_BonusSprintSpeed(const FGameplayAttribut
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, BonusSprintSpeed, OldValue);
 }
 
+void UMythicAttributeSet_Utility::OnRep_ItemRarityFind(const FGameplayAttributeData &OldValue) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, ItemRarityFind, OldValue);
+}
+
+void UMythicAttributeSet_Utility::OnRep_ItemQuantityFind(const FGameplayAttributeData &OldValue) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, ItemQuantityFind, OldValue);
+}
+
 void UMythicAttributeSet_Utility::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-    // register the utility attributes for network replication
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, Resolve, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, MaxStamina, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, CurrentStamina, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, StaminaRegenRate, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, StaminaCostReduction, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, CooldownReduction, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, MaxCooldownReduction, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ProficiencyXPBonus, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, BonusSprintSpeed, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, Resolve, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, MaxStamina, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, CurrentStamina, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, StaminaRegenRate, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, StaminaCostReduction, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, CooldownReduction, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, MaxCooldownReduction, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ProficiencyXPBonus, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, BonusSprintSpeed, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ItemRarityFind, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ItemQuantityFind, COND_OwnerOnly, REPNOTIFY_Always);
 }

@@ -58,7 +58,6 @@ void UConversionSubsystem::OnAllRecipesLoaded() {
         }
     }
 
-    // Only load deps not already part of the recipe set.
     DepIds = DepIds.Difference(TSet<FPrimaryAssetId>(AllRecipeIds));
 
     if (DepIds.Num() > 0) {
@@ -149,8 +148,6 @@ UConversionRecipe *UConversionSubsystem::FindMatchingRecipe(const FGameplayTagCo
             Best = R;
             return;
         }
-        // Higher Priority wins; ties broken deterministically by RecipeId (author-stable, rename-safe), so an
-        // overlap never deadlocks the station.
         if (R->Process.Priority > Best->Process.Priority) {
             Best = R;
         }

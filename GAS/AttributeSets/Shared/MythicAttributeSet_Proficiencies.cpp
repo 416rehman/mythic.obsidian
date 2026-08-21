@@ -1,4 +1,3 @@
-// 
 #include "MythicAttributeSet_Proficiencies.h"
 
 #include "Mythic.h"
@@ -6,6 +5,7 @@
 #include "Net/UnrealNetwork.h"
 #include "GAS/MythicTags_GAS.h"
 #include "GameModes/GameState/MythicGameState.h"
+#include "GameModes/Attributes/WorldAttributes.h"
 #include "MythicAttributeSet_Utility.h"
 #include "Player/MythicPlayerController.h"
 #include "Player/Proficiency/ProficiencyComponent.h"
@@ -119,7 +119,6 @@ void UMythicAttributeSet_Proficiencies::OnRep_OverallXpMax(const FGameplayAttrib
 void UMythicAttributeSet_Proficiencies::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-    // register proficiency attributes for owner only replication to prevent client hacking
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CombatProficiency, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, CombatProficiencyMax, COND_OwnerOnly, REPNOTIFY_Always);
 
@@ -188,24 +187,21 @@ float UMythicAttributeSet_Proficiencies::GetMaxValueForAttribute(const FGameplay
     if (Attribute == GetOverallXpAttribute())
         return GetOverallXpMax();
 
-    return -1; // Default max value
+    return -1;
 }
 
 void UMythicAttributeSet_Proficiencies::PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) {
     Super::PreAttributeChange(Attribute, NewValue);
 
-    // skip overall level attributes as they are calculated
     if (Attribute == GetOverallXpAttribute()) {
         return;
     }
 
-    // prevent negative max values
     if (Attribute.GetName().EndsWith(TEXT("Max"))) {
         NewValue = FMath::Max(NewValue, 0.0f);
         return;
     }
 
-    // clamp regular proficiency attributes to their max values
     float MaxValue = GetMaxValueForAttribute(Attribute);
     if (MaxValue > 0.0f) {
         NewValue = FMath::Clamp(NewValue, 0.0f, MaxValue);
@@ -215,12 +211,10 @@ void UMythicAttributeSet_Proficiencies::PreAttributeChange(const FGameplayAttrib
 void UMythicAttributeSet_Proficiencies::PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const {
     Super::PreAttributeBaseChange(Attribute, NewValue);
 
-    // skip overall level and max attributes as they do not receive direct progression xp
     if (Attribute == GetOverallXpAttribute() || Attribute == GetOverallXpMaxAttribute() || Attribute.GetName().EndsWith(TEXT("Max"))) {
         return;
     }
 
-    // check if the proficiency component is currently restoring loaded values
     const UAbilitySystemComponent *ASC = GetOwningAbilitySystemComponent();
     if (ASC) {
         AMythicPlayerController *MythicPC = nullptr;
@@ -248,9 +242,9 @@ void UMythicAttributeSet_Proficiencies::PreAttributeBaseChange(const FGameplayAt
 
     const float OldValue = Attribute.GetNumericValue(this);
     const float Delta = NewValue - OldValue;
-    
+
     auto ScaledDelta= ScaleProficiencyXpGain(Delta, GetOwningAbilitySystemComponent());
-    
+
     NewValue = OldValue + ScaledDelta;
 }
 
@@ -270,29 +264,38 @@ float UMythicAttributeSet_Proficiencies::ScaleProficiencyXpGain(
         Multiplier += Util->GetProficiencyXPBonus();
     }
 
-    if (ASC->HasMatchingGameplayTag(GAS_BUFF_ENLIGHTEN))
+    float WorldTierXpMultiplier = 1.0f;
+    if (const UWorld* World = GetWorld())
     {
-        if (const UWorld* World = GetWorld())
+        if (const AMythicGameState* GS = World->GetGameState<AMythicGameState>())
         {
-            if (const AMythicGameState* GS = World->GetGameState<AMythicGameState>())
+            if (ASC->HasMatchingGameplayTag(GAS_BUFF_ENLIGHTEN))
             {
                 Multiplier += GS->EnlightenProficiencyBonus;
+            }
+            if (const UWorldTierAttributes* WTA = GS->WorldTierAttributes)
+            {
+                WorldTierXpMultiplier = WTA->GetExperienceGainMultiplier();
             }
         }
     }
 
-    return BaseXp * FMath::Max(0.0f, Multiplier);
+    const float ScaledXp = BaseXp * FMath::Max(0.0f, Multiplier);
+    return ApplyWorldTierXpMultiplier(ScaledXp, WorldTierXpMultiplier);
+}
+
+float UMythicAttributeSet_Proficiencies::ApplyWorldTierXpMultiplier(float ScaledXp, float WorldTierMultiplier)
+{
+    return ScaledXp * (WorldTierMultiplier > 0.0f ? WorldTierMultiplier : 1.0f);
 }
 
 void UMythicAttributeSet_Proficiencies::PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) {
     Super::PostAttributeChange(Attribute, OldValue, NewValue);
 
-    // if the attribute name ends with Max, update OverallXpMax
     if (Attribute.GetName().EndsWith(TEXT("Max")) && Attribute != GetOverallXpMaxAttribute()) {
         SetOverallXpMax(CalculateOverallXpMax());
     }
     else {
-        // otherwise, update OverallXp
         if (Attribute != GetOverallXpAttribute()) {
             auto OverallLevel = CalculateOverallXp();
             SetOverallXp(OverallLevel);
@@ -322,10 +325,6 @@ int32 UMythicAttributeSet_Proficiencies::GetLevel(const UAbilitySystemComponent 
 
     auto MaxLevel = Settings->MaxLevel;
 
-    // Guard divide-by-zero: OverallXpMax is 0 until the first proficiency-Max GE initializes it (SetOverallXpMax in
-    // PostGameplayEffectExecute). Calling GetLevel before then — e.g. a loot drop at spawn (LootReward uses this level
-    // for the rarity curve) — would compute CurrentXp/0 → NaN/Inf → FloorToInt32 garbage level → garbage loot rarity.
-    // An un-progressed character (no max XP yet) is level 1.
     if (MaxXp <= 0.0f) {
         return 1;
     }
@@ -335,7 +334,6 @@ int32 UMythicAttributeSet_Proficiencies::GetLevel(const UAbilitySystemComponent 
 }
 
 float UMythicAttributeSet_Proficiencies::CalculateOverallXpMax() {
-    // Calculate theoretical maximum using same weighting system
     struct ProficiencyWeight {
         float Value;
         float Weight;
@@ -367,7 +365,6 @@ float UMythicAttributeSet_Proficiencies::CalculateOverallXpMax() {
 
     float WeightedAverage = WeightedSum / TotalWeight;
 
-    // Apply maximum possible progression multiplier (all bonuses)
     float MaxProgressionMultiplier = 1.0f + HIGH_SKILL_MULTIPLIER + MEDIUM_SKILL_MULTIPLIER + LOW_SKILL_MULTIPLIER;
 
     float CalculatedOverallXpMax = WeightedAverage * MaxProgressionMultiplier;
@@ -376,7 +373,6 @@ float UMythicAttributeSet_Proficiencies::CalculateOverallXpMax() {
 }
 
 float UMythicAttributeSet_Proficiencies::CalculateOverallXp() {
-    // Define weights for each proficiency based on their importance for gatekeeping
     struct ProficiencyWeight {
         float Value;
         float Weight;
@@ -385,28 +381,23 @@ float UMythicAttributeSet_Proficiencies::CalculateOverallXp() {
         float GetPercentage() const { return MaxValue > 0 ? Value / MaxValue : 0.0f; }
     };
     TArray<ProficiencyWeight> WeightedProficiencies = {
-        // Core survival and combat (highest weight)
         {GetCombatProficiency(), COMBAT_WEIGHT, GetCombatProficiencyMax()},
 
-        // Primary resource gathering (high weight)
         {GetMiningProficiency(), MINING_WEIGHT, GetMiningProficiencyMax()},
         {GetWoodcuttingProficiency(), WOODCUTTING_WEIGHT, GetWoodcuttingProficiencyMax()},
         {GetHuntingProficiency(), HUNTING_WEIGHT, GetHuntingProficiencyMax()},
         {GetFarmingProficiency(), FARMING_WEIGHT, GetFarmingProficiencyMax()},
 
-        // Secondary gathering and utility (medium weight)
         {GetFishingProficiency(), FISHING_WEIGHT, GetFishingProficiencyMax()},
         {GetHarvestingProficiency(), HARVESTING_WEIGHT, GetHarvestingProficiencyMax()},
         {GetTradingProficiency(), TRADING_WEIGHT, GetTradingProficiencyMax()},
 
-        // Crafting and production (lower weight but still important)
         {GetCraftingProficiency(), CRAFTING_WEIGHT, GetCraftingProficiencyMax()},
         {GetConstructionProficiency(), CONSTRUCTION_WEIGHT, GetConstructionProficiencyMax()},
         {GetAlchemyProficiency(), ALCHEMY_WEIGHT, GetAlchemyProficiencyMax()},
         {GetCookingProficiency(), COOKING_WEIGHT, GetCookingProficiencyMax()}
     };
 
-    // Calculate weighted sum
     float WeightedSum = 0.0f;
     float TotalWeight = 0.0f;
 
@@ -415,16 +406,13 @@ float UMythicAttributeSet_Proficiencies::CalculateOverallXp() {
         TotalWeight += Prof.Weight;
     }
 
-    // Base weighted average
     float WeightedAverage = WeightedSum / TotalWeight;
 
-    // Apply progression curve - rewards having multiple high-level skills
     float ProgressionMultiplier = 1.0f;
 
-    // Count how many skills are at different thresholds
-    int32 HighSkills = 0; // 75%+ of max
-    int32 MediumSkills = 0; // 50%+ of max
-    int32 LowSkills = 0; // 25%+ of max
+    int32 HighSkills = 0;
+    int32 MediumSkills = 0;
+    int32 LowSkills = 0;
 
     for (const auto &Prof : WeightedProficiencies) {
         float Percentage = Prof.GetPercentage();
@@ -436,23 +424,19 @@ float UMythicAttributeSet_Proficiencies::CalculateOverallXp() {
             LowSkills++;
     }
 
-    // Bonus for well-rounded development
     if (HighSkills >= 3)
-        ProgressionMultiplier += HIGH_SKILL_MULTIPLIER; // 3+ high skills
+        ProgressionMultiplier += HIGH_SKILL_MULTIPLIER;
     if (MediumSkills >= 6)
-        ProgressionMultiplier += MEDIUM_SKILL_MULTIPLIER; // 6+ medium skills
+        ProgressionMultiplier += MEDIUM_SKILL_MULTIPLIER;
     if (LowSkills >= 9)
-        ProgressionMultiplier += LOW_SKILL_MULTIPLIER; // 9+ basic skills
+        ProgressionMultiplier += LOW_SKILL_MULTIPLIER;
 
-    // Penalty for having only one high skill (prevents cheese)
     if (HighSkills == 1 && MediumSkills <= 2) {
         ProgressionMultiplier -= 0.20f;
     }
 
-    // Final overall xp calculation
     float CalculatedOverallXp = WeightedAverage * ProgressionMultiplier;
 
-    // Ensure we don't exceed theoretical maximum
     float MaxPossible = GetOverallXpMax();
     if (MaxPossible > 0) {
         CalculatedOverallXp = FMath::Min(CalculatedOverallXp, MaxPossible);

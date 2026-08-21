@@ -9,13 +9,9 @@ UCLASS(BlueprintType, Blueprintable, Abstract)
 class MYTHIC_API UMythicReplicatedObject : public UObject {
     GENERATED_BODY()
 
-    // The actor that is responsible for replicating this object
     UPROPERTY(Replicated)
     AActor *OwningActor;
 
-    // The component in the OwningActor through which this object is being replicated. Can be null.
-    // Server-only bookkeeping (UpdateComponentOwnership) — it was NOT registered in GetLifetimeReplicatedProps, so the
-    // `Replicated` specifier was inert (silently never replicated) and tripped an engine validation warning. Dropped it.
     UPROPERTY()
     UActorComponent *OwningComponent;
 
@@ -35,7 +31,6 @@ public:
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly)
     void SetOwner(AActor *NewOwner) {
-        // Validate input and authority
         if (!ensureMsgf(NewOwner, TEXT("SetOwner: NewOwner cannot be null"))) {
             return;
         }
@@ -50,7 +45,6 @@ public:
             return;
         }
 
-        // Skip if already owned by this actor
         if (OwningActor == NewOwner) {
             UE_LOG(Myth, Verbose, TEXT("SetOwner: Object already owned by %s"), *NewOwner->GetName());
             return;
@@ -60,14 +54,7 @@ public:
         UpdateOwnership(NewOwner);
     }
 
-    /**
-     * Sets the owning component for this replicated object.
-     * Updates ownership for all child replicated objects that share the same owner.
-     * 
-     * @param NewComponent The component to set as the new owner
-     */
     void SetOwner(UActorComponent *NewComponent) {
-        // Validate input and component owner
         if (!ensureMsgf(NewComponent, TEXT("SetOwner: NewComponent cannot be null"))) {
             return;
         }
@@ -87,7 +74,6 @@ public:
             return;
         }
 
-        // Skip if already owned by this component's actor
         if (OwningActor == NewComponentOwner && OwningComponent == NewComponent) {
             UE_LOG(Myth, Verbose, TEXT("SetOwner: Object already owned by component %s"),
                    *NewComponent->GetName());
@@ -99,9 +85,6 @@ public:
     }
 
 private:
-    /**
-     * Updates ownership for all child replicated objects.
-     */
     void UpdateChildrenOwnership(AActor *NewOwner) const {
         TArray<UObject *> Children;
         GetObjectsWithOuter(this, Children, EGetObjectsFlags::IncludeNestedObjects, RF_NoFlags);
@@ -124,9 +107,6 @@ private:
         }
     }
 
-    /**
-     * Updates ownership for all child replicated objects with component ownership.
-     */
     void UpdateChildrenComponentOwnership(AActor *NewOwner, UActorComponent *NewComponent) const {
         if (!NewOwner) {
             return;
@@ -150,9 +130,6 @@ private:
         }
     }
 
-    /**
-     * Updates the ownership of this object.
-     */
     void UpdateOwnership(AActor *NewOwner) {
         if (OwningActor && OwningActor->IsReplicatedSubObjectRegistered(this)) {
             OwningActor->RemoveReplicatedSubObject(this);
@@ -162,9 +139,6 @@ private:
         OwningActor->AddReplicatedSubObject(this);
     }
 
-    /**
-     * Updates the component ownership of this object.
-     */
     void UpdateComponentOwnership(AActor *NewOwner, UActorComponent *NewComponent) {
         if (OwningActor && OwningComponent) {
             if (OwningActor->IsActorComponentReplicatedSubObjectRegistered(OwningComponent, this)) {
@@ -181,7 +155,6 @@ public:
     // Marks the object as garbage so it will be destroyed and removes it from owning actor's replicated subobject list
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly)
     virtual void Destroy() {
-        // if (!IsValid(this)) {
         auto owner = GetOwningActor();
         if (!IsValid(owner)) {
             UE_LOG(Myth, Warning, TEXT("Destroy: Object is already invalid and has no valid owner"));
@@ -194,24 +167,20 @@ public:
             OnDestroyed();
         }
 
-        MarkAsGarbage(); // Mark the object as garbage so it will be destroyed
+        MarkAsGarbage();
 
         if (IsValid(owner) && owner->IsReplicatedSubObjectRegistered(this)) {
             owner->RemoveReplicatedSubObject(this);
         }
-        // }
     }
 
     virtual int32 GetFunctionCallspace(UFunction *Function, FFrame *Stack) override {
-        // If the owning actor is not set (e.g. during early replication), fallback to local execution
-        // This prevents crashes when RepNotifies are called before the OwningActor property is replicated
         if (!OwningActor) {
             return FunctionCallspace::Local;
         }
         return OwningActor->GetFunctionCallspace(Function, Stack);
     }
 
-    // Call "Remote" (aka, RPC) functions through the actors NetDriver
     virtual bool CallRemoteFunction(UFunction *Function, void *Parms, FOutParmRec *OutParms, FFrame *Stack) override {
         checkf(!HasAnyFlags(RF_ClassDefaultObject), TEXT("CallRemoteFunction: Cannot call remote function on class default object"));
         UNetDriver *NetDriver = OwningActor->GetNetDriver();
@@ -223,6 +192,5 @@ public:
     }
 
 protected:
-    // Called before the object is marked as garbage and removed from owning actor's replicated subobject list
     virtual void OnDestroyed() {}
 };

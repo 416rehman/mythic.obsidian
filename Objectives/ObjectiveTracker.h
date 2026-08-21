@@ -1,4 +1,3 @@
-// Per-player objective/quest tracker — subscribes to GAS kill events, advances active objectives, grants rewards.
 
 #pragma once
 
@@ -6,11 +5,29 @@
 #include "Components/ActorComponent.h"
 #include "GameplayTagContainer.h"
 #include "Subsystem/SaveSystem/Character/SavedObjective.h"
+#include "ObjectiveDefinition.h"
 #include "ObjectiveTracker.generated.h"
 
 class UObjectiveDefinition;
 class UAbilitySystemComponent;
+class UMythicNarrativeStateComponent;
 struct FGameplayEventData;
+struct FMythicObjectiveBranch;
+enum class EMythicObjectiveOutcome : uint8;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMythicOnObjectivesChanged);
+
+struct FMythicObjectiveBranchResult {
+    bool bMatched = false;
+    TArray<UObjectiveDefinition *> Assignable;
+    FGameplayTagContainer GrantStoryTags;
+    TArray<UObjectiveDefinition *> CancelSiblings;
+};
+
+struct FMythicPendingObjectiveCompletion {
+    TObjectPtr<UObjectiveDefinition> Definition = nullptr;
+    FGameplayTag AchievedOutcome;
+};
 
 USTRUCT(BlueprintType)
 struct FObjectiveSummary {
@@ -47,7 +64,8 @@ enum class EObjectiveOfferResult : uint8 {
     AlreadyCompleted,
     NoOffer,
     OutOfRange,
-    PrerequisitesNotMet, // a prior step in this objective's chain isn't complete yet — assignment is gated
+    PrerequisitesNotMet,
+    PreconditionNotMet,
     Invalid
 };
 
@@ -60,8 +78,6 @@ enum class EObjectiveNotifyCategory : uint8 {
     RewardResult
 };
 
-/** Per-player runtime progress toward one objective. Mirrors the faction-standing entry (small replicated struct
- *  in a TArray — no TMap). */
 USTRUCT(BlueprintType)
 struct FObjectiveProgress {
     GENERATED_BODY()
@@ -74,19 +90,13 @@ struct FObjectiveProgress {
 
     UPROPERTY(BlueprintReadOnly, Category = "Objective")
     bool bCompleted = false;
+
+    // Server world-time (seconds) at which this objective completed — drives the bRepeatable re-accept cooldown
+    // (CanRepeatObjective). 0 until completed. Runtime-only (not saved; resets on reload — see UObjectiveDefinition).
+    UPROPERTY(BlueprintReadOnly, Category = "Objective")
+    float CompletedTimeSeconds = 0.0f;
 };
 
-/**
- * Hosted on AMythicPlayerController. On the server it binds to the player's ASC GAS.Event.Kill callback (the same
- * attributed event combat already emits on the killer's ASC), advances every active matching objective, and on
- * reaching the required count grants the objective's rewards via FRewardsToGive::Give and latches it complete. The
- * objective list replicates COND_OwnerOnly so only the owning client sees its own quest progress (for UI).
- *
- * Scope: combat AND item-acquisition triggers (with optional payload-tag + magnitude objective filters), reward-on-
- * complete, owner-only replication, and save persistence (SaveObjectives/RestoreObjectives via the character save).
- * Multi-step chains, branching, prerequisites, other non-combat verbs (reach-location, talk-to-NPC), and the
- * persistent tracker UI are follow-ups.
- */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class MYTHIC_API UObjectiveTracker : public UActorComponent {
     GENERATED_BODY()
@@ -100,56 +110,60 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Objectives")
     void ServerAddObjective(UObjectiveDefinition *Definition);
 
-    // SERVER/internal authority method, not a client RPC. Callers must derive Definition from server-owned state.
     EObjectiveOfferResult ServerTryAddObjective(UObjectiveDefinition *Definition, FObjectiveProgress &OutProgress);
 
     // True if this player already tracks the given objective (active or completed). Used to gate re-offers.
     UFUNCTION(BlueprintPure, Category = "Objectives")
     bool HasObjective(const UObjectiveDefinition *Definition) const;
 
+    bool FindObjectiveProgress(const UObjectiveDefinition *Def, FObjectiveProgress &OutProgress) const;
+
+    const TArray<FObjectiveProgress> &GetActiveObjectives() const { return ActiveObjectives; }
+
+    // Server-side task-completion signal — see FMythicOnObjectivesChanged. BlueprintAssignable so UI/systems can react.
+    UPROPERTY(BlueprintAssignable, Category = "Objectives")
+    FMythicOnObjectivesChanged OnObjectivesChanged;
+
     static EObjectiveOfferResult ResolveObjectiveOfferResult(const TArray<FObjectiveProgress> &TrackedObjectives,
                                                              const UObjectiveDefinition *Definition,
-                                                             FObjectiveProgress &OutProgress);
+                                                             FObjectiveProgress &OutProgress,
+                                                             const FGameplayTagContainer &OwnedStoryTags = FGameplayTagContainer());
 
-    // Pure: every prerequisite definition must appear COMPLETED in the player's tracked set. Empty prerequisites →
-    // always met (no chain). A null prerequisite entry is ignored (designer slop, not a blocker); a prerequisite that
-    // is untracked or tracked-but-incomplete fails the gate. Static so the chain rule is unit-testable without a tracker.
     static bool AreObjectivePrerequisitesMet(const TArray<TObjectPtr<UObjectiveDefinition>> &Prerequisites,
                                              const TArray<FObjectiveProgress> &TrackedObjectives);
 
-    // Pure: of CandidateNext, which objectives are newly assignable given TrackedObjectives — i.e. those for which
-    // ResolveObjectiveOfferResult would return Assigned (not already active/completed, prerequisites met). Null entries
-    // skipped; deduped. This is the chain-advance set: when an objective completes, its NextObjectives run through here.
     static void CollectAssignableNextObjectives(const TArray<TObjectPtr<UObjectiveDefinition>> &CandidateNext,
                                                 const TArray<FObjectiveProgress> &TrackedObjectives,
-                                                TArray<UObjectiveDefinition *> &OutAssignable);
+                                                TArray<UObjectiveDefinition *> &OutAssignable,
+                                                const FGameplayTagContainer &OwnedStoryTags = FGameplayTagContainer());
+
+    static FGameplayTag DeriveAchievedOutcome(const UObjectiveDefinition *Def, const FGameplayTag &CompletingEventTag,
+                                              const FGameplayTagContainer &CompletingPayloadTags);
+
+    static EMythicObjectiveOutcome ClassifyOutcome(const FGameplayTag &CompletingEventTag);
+
+    static FMythicObjectiveBranchResult SelectBranchForOutcome(const TArray<FMythicObjectiveBranch> &Branches,
+                                                               FGameplayTag AchievedOutcome,
+                                                               const TArray<FObjectiveProgress> &TrackedObjectives,
+                                                               const FGameplayTagContainer &OwnedStoryTags = FGameplayTagContainer());
 
     static FText BuildObjectiveNotificationText(const FText &DisplayText, EObjectiveNotifyCategory Category,
                                                 EObjectiveOfferResult OfferResult, int32 Current, int32 Required,
                                                 bool bRewardSucceeded, bool bRewardDroppedNearby);
 
-    // Pure: one objective-advance step. Adds the advance (the event magnitude rounded + floored at 1 when the
-    // objective counts by magnitude, else +1) to CurrentCount, clamps to RequiredCount on completion (magnitude can
-    // overshoot), and reports whether THIS step completed it. Assumes the objective is not already complete (the
-    // caller skips completed ones). Static so the quest-progression arithmetic is unit-testable without a live ASC/event.
+    void ApplySharedKillCredit(const FGameplayEventData &Payload);
+
     static void ComputeObjectiveProgress(int32 CurrentCount, bool bCountByMagnitude, float EventMagnitude,
                                          int32 RequiredCount, int32 &OutNewCount, bool &OutJustCompleted);
 
-    // Pure: how many of DeliverItem to consume on a turn-in — the remaining needed (RequiredCount - CurrentCount),
-    // clamped to what the player actually has (Available) and floored at 0. Static → unit-testable without inventory.
     static int32 ComputeDeliverConsumeCount(int32 CurrentCount, int32 RequiredCount, int32 Available);
 
-    // SERVER: attempt to turn in every active delivery objective whose DeliverToNpcTag matches NpcTag — consume up to the
-    // remaining count of its DeliverItem from PlayerInventory and advance it by the amount consumed (chain + rewards as
-    // usual). Authority-gated; a no-op off authority / with no inventory / for non-delivery objectives. Called from the
-    // player's dialogue path when talking to a quest NPC (range-gated there).
+    static bool CanRepeatObjective(bool bRepeatable, float CompletedTimeSeconds, float NowSeconds, float RepeatCooldownSeconds);
+
     void ServerTurnInDeliveriesTo(const FGameplayTag &NpcTag, class UMythicInventoryComponent *PlayerInventory);
 
-    // SERVER (save): snapshot every tracked objective (definition soft-path + count + completed) for the character save.
     void SaveObjectives(TArray<FSerializedObjectiveData> &OutData) const;
 
-    // SERVER (load): replace the tracked set from a save, re-subscribing each restored objective's trigger tag so an
-    // incomplete one keeps advancing. Authority-gated. Idempotent (rebuilds from InData).
     void RestoreObjectives(const TArray<FSerializedObjectiveData> &InData);
 
     // server-authoritative: abandon an active, non-completed objective
@@ -174,40 +188,38 @@ protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    // SERVER: GAS gameplay-event callback bound to GAS.Event.Kill on the owning player's ASC.
     void HandleGameplayEvent(const FGameplayEventData *Payload);
 
-    // SERVER: advance ONE active, non-completed objective by (bCountByMagnitude ? round(Magnitude) : 1), latch completion,
-    // grant rewards, queue chain successors into PendingNextSteps, and emit the per-step client callout. Shared by the GAS
-    // event path and the turn-in path so the count/complete/reward/callout logic lives in one place. NotifyIndex is the
-    // per-update floater stack offset (incremented as callouts are sent).
     void AdvanceObjectiveProgress(FObjectiveProgress &Prog, bool bCountByMagnitude, float Magnitude,
-                                  class APlayerController *PC,
-                                  TArray<TObjectPtr<UObjectiveDefinition>> &PendingNextSteps, int32 &NotifyIndex);
+                                  class APlayerController *PC, const FGameplayTag &CompletingEventTag,
+                                  const FGameplayTagContainer &CompletingPayloadTags,
+                                  TArray<FMythicPendingObjectiveCompletion> &PendingCompletions, int32 &NotifyIndex);
 
-    // SERVER: assign each newly-unlocked chain successor in PendingNextSteps (prerequisites now met, not already tracked)
-    // and announce it. Called AFTER the advance loop — ServerTryAddObjective mutates ActiveObjectives, so it must never
-    // run mid-iteration. Shared by the GAS event + turn-in paths.
-    void ProcessChainAdvance(class APlayerController *PC, TArray<TObjectPtr<UObjectiveDefinition>> &PendingNextSteps,
-                             int32 &NotifyIndex);
+    void ProcessChainAdvance(class APlayerController *PC,
+                             TArray<FMythicPendingObjectiveCompletion> &PendingCompletions, int32 &NotifyIndex);
+
+    UMythicNarrativeStateComponent *ResolveNarrativeComponent() const;
+
+    FGameplayTagContainer GatherOwnedStoryTags() const;
 
     // Active + completed objectives for this player. Owner-only so quest progress stays private to its owner.
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Objectives")
+    // ReplicatedUsing, so the OWNING CLIENT gets the same OnObjectivesChanged signal the server fires locally. Without
+    // it a remote client received full objective data and was never told it had arrived, which is why quest UI could
+    // only ever work on a listen-server host.
+    UPROPERTY(ReplicatedUsing = OnRep_ActiveObjectives, BlueprintReadOnly, Category = "Objectives")
     TArray<FObjectiveProgress> ActiveObjectives;
 
+    UFUNCTION()
+    void OnRep_ActiveObjectives();
+
 private:
-    // The ASC we bound on (the PlayerState's ASC, reused across pawns).
     UPROPERTY()
     UAbilitySystemComponent *BoundASC = nullptr;
 
-    // SERVER: subscribe HandleGameplayEvent to a given trigger tag's gameplay event on BoundASC (idempotent).
     void EnsureSubscribedToTag(const FGameplayTag &Tag);
 
-    // One bound handle per DISTINCT objective TriggerEventTag, so objectives keyed to any emitted GAS.Event.*
-    // (Kill / Death / Dmg.Delivered / Heal.* …) advance — not just kills. EndPlay unbinds each.
     TMap<FGameplayTag, FDelegateHandle> BoundEventHandles;
 
-    // client RPC notifying the player that an objective was abandoned
     UFUNCTION(Client, Reliable)
     void ClientNotifyObjectiveAbandoned(const FText& ObjectiveName);
 };

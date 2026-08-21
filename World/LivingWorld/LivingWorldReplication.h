@@ -1,6 +1,3 @@
-// Mythic Living World — Replication Proxies
-// Lightweight, delta-compressed structs for syncing high-level Living World state to clients.
-// Clients do not run the world sim thread, but need faction wealth, territory boundaries, etc.
 
 #pragma once
 
@@ -9,12 +6,9 @@
 #include "LivingWorldTypes.h"
 #include "Factions/FactionDatabase.h"
 #include "GameFramework/Info.h"
-#include "World/LivingWorld/Encounters/EncounterTemplate.h" // EMythicEncounterState + FGameplayTag
+#include "World/LivingWorld/Encounters/EncounterTemplate.h"
 #include "LivingWorldReplication.generated.h"
 
-// ─────────────────────────────────────────────────────────────
-// Faction Proxy — Networked representation of a Faction
-// ─────────────────────────────────────────────────────────────
 
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicFactionProxyItem : public FFastArraySerializerItem {
@@ -42,14 +36,11 @@ struct MYTHIC_API FMythicFactionProxyItem : public FFastArraySerializerItem {
     UPROPERTY(BlueprintReadOnly, Category = "Living World|Faction")
     uint8 MilitaryStrength = 0;
 
-    // Client-side ingest hooks: route through the owning replicator so the client subsystem fires its change
-    // delegate (UI updates). Defined out-of-line (need the full array + replicator types).
     void PreReplicatedRemove(const struct FMythicFactionProxyArray &InArraySerializer);
     void PostReplicatedAdd(const struct FMythicFactionProxyArray &InArraySerializer);
     void PostReplicatedChange(const struct FMythicFactionProxyArray &InArraySerializer);
 };
 
-/** Fast array for replicating faction proxies */
 USTRUCT()
 struct MYTHIC_API FMythicFactionProxyArray : public FFastArraySerializer {
     GENERATED_BODY()
@@ -57,8 +48,6 @@ struct MYTHIC_API FMythicFactionProxyArray : public FFastArraySerializer {
     UPROPERTY()
     TArray<FMythicFactionProxyItem> Items;
 
-    // Non-replicated back-pointer to the owning replicator (set in the replicator's ctor on BOTH server + client),
-    // so the FastArray item callbacks can reach it on the client to notify the subsystem. Not a UPROPERTY.
     class AMythicLivingWorldReplicator *OwnerReplicator = nullptr;
 
     bool NetDeltaSerialize(FNetDeltaSerializeInfo &DeltaParms) {
@@ -71,9 +60,6 @@ struct TStructOpsTypeTraits<FMythicFactionProxyArray> : public TStructOpsTypeTra
     enum { WithNetDeltaSerializer = true };
 };
 
-// ─────────────────────────────────────────────────────────────
-// Territory Cell Proxy — Networked territory grid changes
-// ─────────────────────────────────────────────────────────────
 
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicTerritoryProxyItem : public FFastArraySerializerItem {
@@ -88,13 +74,11 @@ struct MYTHIC_API FMythicTerritoryProxyItem : public FFastArraySerializerItem {
     UPROPERTY(BlueprintReadOnly, Category = "Living World|Territory")
     uint8 ContestedLevel = 0;
 
-    // Client-side ingest hooks (see faction proxy). Defined out-of-line.
     void PreReplicatedRemove(const struct FMythicTerritoryProxyArray &InArraySerializer);
     void PostReplicatedAdd(const struct FMythicTerritoryProxyArray &InArraySerializer);
     void PostReplicatedChange(const struct FMythicTerritoryProxyArray &InArraySerializer);
 };
 
-/** Fast array for replicating territory cell changes */
 USTRUCT()
 struct MYTHIC_API FMythicTerritoryProxyArray : public FFastArraySerializer {
     GENERATED_BODY()
@@ -102,7 +86,6 @@ struct MYTHIC_API FMythicTerritoryProxyArray : public FFastArraySerializer {
     UPROPERTY()
     TArray<FMythicTerritoryProxyItem> Items;
 
-    // Non-replicated back-pointer to the owning replicator (set in the replicator's ctor). Not a UPROPERTY.
     class AMythicLivingWorldReplicator *OwnerReplicator = nullptr;
 
     bool NetDeltaSerialize(FNetDeltaSerializeInfo &DeltaParms) {
@@ -110,25 +93,16 @@ struct MYTHIC_API FMythicTerritoryProxyArray : public FFastArraySerializer {
     }
 };
 
-// REQUIRED — without this trait the engine never treats FMythicTerritoryProxyArray as a net-delta serializer, so
-// FastArrayDeltaSerialize (and thus the per-item PostReplicatedAdd/Change/PreReplicatedRemove callbacks that fire
-// NotifyClientProxiesChanged) never run on clients — territory ownership changes would silently never refresh the
-// client map/HUD. Mirrors the faction (above) and encounter (below) proxy traits.
 template <>
 struct TStructOpsTypeTraits<FMythicTerritoryProxyArray> : public TStructOpsTypeTraitsBase2<FMythicTerritoryProxyArray> {
     enum { WithNetDeltaSerializer = true };
 };
 
-// ─────────────────────────────────────────────────────────────
-// Encounter Proxy — Networked active-encounter state (client map/HUD)
-// ─────────────────────────────────────────────────────────────
 
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicEncounterProxyItem : public FFastArraySerializerItem {
     GENERATED_BODY()
 
-    // Stable instance id (matches FMythicActiveEncounter::EncounterId — the dedup/removal key). uint32 is not a
-    // Blueprint-compatible type, so this stays C++-only (BP doesn't need the raw id — it keys UI off type/state/cell).
     UPROPERTY()
     uint32 EncounterId = 0;
 
@@ -144,13 +118,11 @@ struct MYTHIC_API FMythicEncounterProxyItem : public FFastArraySerializerItem {
     UPROPERTY(BlueprintReadOnly, Category = "Living World|Encounter")
     FMythicFactionId OriginFaction;
 
-    // Client-side ingest hooks (see faction proxy). Defined out-of-line.
     void PreReplicatedRemove(const struct FMythicEncounterProxyArray &InArraySerializer);
     void PostReplicatedAdd(const struct FMythicEncounterProxyArray &InArraySerializer);
     void PostReplicatedChange(const struct FMythicEncounterProxyArray &InArraySerializer);
 };
 
-/** Fast array for replicating active encounters (unlike factions/territory, items are REMOVED on completion). */
 USTRUCT()
 struct MYTHIC_API FMythicEncounterProxyArray : public FFastArraySerializer {
     GENERATED_BODY()
@@ -158,7 +130,6 @@ struct MYTHIC_API FMythicEncounterProxyArray : public FFastArraySerializer {
     UPROPERTY()
     TArray<FMythicEncounterProxyItem> Items;
 
-    // Non-replicated back-pointer to the owning replicator (set in the replicator's ctor). Not a UPROPERTY.
     class AMythicLivingWorldReplicator *OwnerReplicator = nullptr;
 
     bool NetDeltaSerialize(FNetDeltaSerializeInfo &DeltaParms) {
@@ -171,16 +142,11 @@ struct TStructOpsTypeTraits<FMythicEncounterProxyArray> : public TStructOpsTypeT
     enum { WithNetDeltaSerializer = true };
 };
 
-// ─────────────────────────────────────────────────────────────
-// Settlement Proxy — Networked settlement state (client war-map / minimap markers)
-// ─────────────────────────────────────────────────────────────
 
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicSettlementProxyItem : public FFastArraySerializerItem {
     GENERATED_BODY()
 
-    // Stable runtime settlement id (the dedup/removal key). Settlements are placed actors that persist for the level's
-    // life, so this is effectively stable per session. Not BP-relevant on its own (UI keys off cell/name/faction).
     UPROPERTY()
     int32 SettlementId = INDEX_NONE;
 
@@ -196,13 +162,11 @@ struct MYTHIC_API FMythicSettlementProxyItem : public FFastArraySerializerItem {
     UPROPERTY(BlueprintReadOnly, Category = "Living World|Settlement")
     bool bIsCapital = false;
 
-    // Client-side ingest hooks (see faction proxy). Defined out-of-line.
     void PreReplicatedRemove(const struct FMythicSettlementProxyArray &InArraySerializer);
     void PostReplicatedAdd(const struct FMythicSettlementProxyArray &InArraySerializer);
     void PostReplicatedChange(const struct FMythicSettlementProxyArray &InArraySerializer);
 };
 
-/** Fast array for replicating settlements (added on registration, GoverningFaction updated on conquest). */
 USTRUCT()
 struct MYTHIC_API FMythicSettlementProxyArray : public FFastArraySerializer {
     GENERATED_BODY()
@@ -210,7 +174,6 @@ struct MYTHIC_API FMythicSettlementProxyArray : public FFastArraySerializer {
     UPROPERTY()
     TArray<FMythicSettlementProxyItem> Items;
 
-    // Non-replicated back-pointer to the owning replicator (set in the replicator's ctor). Not a UPROPERTY.
     class AMythicLivingWorldReplicator *OwnerReplicator = nullptr;
 
     bool NetDeltaSerialize(FNetDeltaSerializeInfo &DeltaParms) {
@@ -223,15 +186,7 @@ struct TStructOpsTypeTraits<FMythicSettlementProxyArray> : public TStructOpsType
     enum { WithNetDeltaSerializer = true };
 };
 
-// ─────────────────────────────────────────────────────────────
-// Replicator Actor — Server->Client sync manager
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Transient actor spawned by the Living World Subsystem on the server.
- * Replicates the fast arrays to all connected clients.
- * Clients use this to update their local UMythicLivingWorldSubsystem caches.
- */
 UCLASS(NotBlueprintable, Transient)
 class MYTHIC_API AMythicLivingWorldReplicator : public AInfo {
     GENERATED_BODY()
@@ -243,64 +198,41 @@ public:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    /** The replicated list of faction states */
     UPROPERTY(Replicated)
     FMythicFactionProxyArray FactionProxies;
 
-    /** The replicated list of territory cell ownership changes */
     UPROPERTY(Replicated)
     FMythicTerritoryProxyArray TerritoryProxies;
 
-    /** The replicated list of currently-active encounters (added on spawn, removed on completion). */
     UPROPERTY(Replicated)
     FMythicEncounterProxyArray EncounterProxies;
 
-    /** The replicated list of settlements (added on registration; GoverningFaction updated on conquest). */
     UPROPERTY(Replicated)
     FMythicSettlementProxyArray SettlementProxies;
 
-    /** Fast lookup for faction proxies */
     TMap<FMythicFactionId, int32> FactionProxyIndex;
 
-    /** Fast lookup for territory proxies */
     TMap<FMythicCellCoord, int32> TerritoryProxyIndex;
 
-    /** Sync current subsystem state into these arrays (called on Server by Subsystem) */
     void SyncProxies(class UMythicLivingWorldSubsystem *Subsystem);
 
-    /** True iff a territory proxy's CLIENT-VISIBLE fields (dominant faction, contested level) differ from the new grid
-     *  state. SyncProxies uses this to avoid re-replicating cells whose influence shifted but whose dominant faction
-     *  didn't change (GetChangedCells returns every influence-changed cell) — without it the delta re-sends unchanged
-     *  proxies to every client each tick. Static + pure → unit-testable. */
     static bool TerritoryProxyNeedsUpdate(const FMythicTerritoryProxyItem &Existing, FMythicFactionId NewFaction, uint8 NewContestedLevel);
 
-    // ─── Client read API (the replicated proxies are the client's living-world cache) ───
 
-    /** CLIENT/SERVER: the faction proxy for a faction, or null if not currently replicated. Linear scan (factions
-     *  are few — bounded by GetMaxFactions). */
     const FMythicFactionProxyItem *GetFactionProxy(FMythicFactionId FactionId) const;
 
-    /** All currently-replicated faction proxies (active factions only — dormant/annihilated are not synced). */
     const TArray<FMythicFactionProxyItem> &GetAllFactionProxies() const { return FactionProxies.Items; }
 
-    /** CLIENT/SERVER: the territory proxy for a cell. Returns false if that cell hasn't been synced. */
     bool GetTerritoryProxy(FMythicCellCoord Cell, FMythicTerritoryProxyItem &OutProxy) const;
 
-    /** All currently-replicated territory proxies (changed cells). */
     const TArray<FMythicTerritoryProxyItem> &GetAllTerritoryProxies() const { return TerritoryProxies.Items; }
 
-    /** All currently-replicated active encounters (for a client map/HUD: type, state, cell, faction). */
     const TArray<FMythicEncounterProxyItem> &GetAllEncounterProxies() const { return EncounterProxies.Items; }
 
-    /** All currently-replicated settlements (for a client war-map/minimap: center cell, faction, name, capital). */
     const TArray<FMythicSettlementProxyItem> &GetAllSettlementProxies() const { return SettlementProxies.Items; }
 
-    /** Called by the FastArray item callbacks on the CLIENT when proxies replicate in — broadcasts the subsystem's
-     *  change delegate so UI/gameplay can react. No-op on the server (it is the source). */
     void NotifyClientProxiesChanged();
 
 private:
-    /** CLIENT only: the local subsystem this replicator registers with (so subsystem accessors + delegate work
-     *  client-side, where the subsystem otherwise never learns about the server-spawned replicator). */
     TWeakObjectPtr<class UMythicLivingWorldSubsystem> ClientSubsystem;
 };

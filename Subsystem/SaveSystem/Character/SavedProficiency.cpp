@@ -11,7 +11,6 @@ void FSerializedProficiencyHelper::Serialize(UProficiencyComponent *Component, T
         return;
     }
 
-    // Get ASC to read current XP values
     UAbilitySystemComponent *ASC = nullptr;
     if (AActor *Owner = Component->GetOwner()) {
         if (IAbilitySystemInterface *ASCInterface = Cast<IAbilitySystemInterface>(Owner)) {
@@ -24,19 +23,16 @@ void FSerializedProficiencyHelper::Serialize(UProficiencyComponent *Component, T
     for (const FProficiency &Prof : Component->Proficiencies) {
         FSerializedProficiencyData Data;
 
-        // Save the proficiency definition asset reference
         if (Prof.Definition) {
             Data.ProficiencyAsset = FSoftObjectPath(Prof.Definition);
         }
 
-        // Save progress attribute identity as strings
         if (Prof.ProgressAttribute.IsValid()) {
             if (UStruct *AttrSet = Prof.ProgressAttribute.GetAttributeSetClass()) {
                 Data.ProgressAttributeSetClass = AttrSet->GetPathName();
             }
             Data.ProgressAttributeName = Prof.ProgressAttribute.GetName();
 
-            // Get current XP from ASC
             if (ASC) {
                 Data.CurrentXP = ASC->GetNumericAttribute(Prof.ProgressAttribute);
             }
@@ -59,7 +55,6 @@ void FSerializedProficiencyHelper::Deserialize(UProficiencyComponent *Component,
     for (const FSerializedProficiencyData &Data : InData) {
         FProficiency Prof;
 
-        // Load the proficiency definition
         Prof.Definition = Cast<UProficiencyDefinition>(Data.ProficiencyAsset.TryLoad());
         if (!Prof.Definition) {
             UE_LOG(MythSaveLoad, Error, TEXT("SavedProficiency::Deserialize - Failed to load definition: %s"),
@@ -67,7 +62,6 @@ void FSerializedProficiencyHelper::Deserialize(UProficiencyComponent *Component,
             continue;
         }
 
-        // Reconstruct the progress attribute from strings
         if (!Data.ProgressAttributeSetClass.IsEmpty() && !Data.ProgressAttributeName.IsEmpty()) {
             UClass *SetClass = LoadClass<UAttributeSet>(nullptr, *Data.ProgressAttributeSetClass);
             if (SetClass) {
@@ -86,8 +80,6 @@ void FSerializedProficiencyHelper::Deserialize(UProficiencyComponent *Component,
             }
         }
 
-        // Store XP to apply in BeginPlay (ASC not ready yet)
-        // ClaimedLevels will be derived from XP in BeginPlay
         Prof.SavedXP = Data.CurrentXP;
 
         Component->Proficiencies.Add(Prof);

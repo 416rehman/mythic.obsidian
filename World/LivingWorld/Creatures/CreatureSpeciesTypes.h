@@ -1,7 +1,3 @@
-// Mythic Living World — Creature species data source
-// Schema for the wildlife species table + a built-in code-default species set so the creature spawner RUNS unauthored.
-// A "species" answers WHAT creature belongs in a given biome (deer in plains, wolves in forest, etc.) and how it
-// packs/territorial-defends. Pure data — no behavior lives here.
 
 #pragma once
 
@@ -10,14 +6,7 @@
 #include "World/LivingWorld/Territory/MythicBiome.h"
 #include "CreatureSpeciesTypes.generated.h"
 
-// ─────────────────────────────────────────────────────────────
-// Species Row — one wildlife species
-// ─────────────────────────────────────────────────────────────
 
-/**
- * One creature species. Rows are keyed (in an authored DataTable) by an arbitrary RowName; the runtime identity is
- * SpeciesId. The spawner buckets rows by Biome and weighted-picks one per wilderness cell by SpawnWeight.
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicCreatureSpeciesRow : public FTableRowBase {
     GENERATED_BODY()
@@ -57,18 +46,18 @@ struct MYTHIC_API FMythicCreatureSpeciesRow : public FTableRowBase {
     /** Maximum pack/herd size (inclusive). Ignored when bIsPackAnimal is false (treated as 1). */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Creature", meta = (ClampMin = "1", ClampMax = "32"))
     uint8 MaxPackSize = 1;
+
+    /**
+     * E4 (ecology arm): is this species drawn to CARRION? When corpses are rotting in a wilderness cell, scavengers'
+     * spawn weight is amplified there (and the cell's population deficit widens), so a battlefield or a lazy hunter's
+     * leavings physically pull predators in. FALSE (the default) leaves a species completely unaffected by corpses,
+     * so an unauthored species table behaves byte-identically.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Creature")
+    bool bIsScavenger = false;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Code-default species set
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Built-in species set so the creature ecology runs with ZERO authored data. Covers every EMythicBiome with at least
- * one herbivore + one predator (deer/boar/wolf/goat/bear/scavenger/...). The spawner uses these whenever
- * UMythicLivingWorldSettings::CreatureSpeciesTable is unset. SpeciesIds are stable and unique across the set.
- */
 namespace MythicCreatureDefaults {
-    /** Returns a view over a static, immutable array of default species rows (safe to call from any thread). */
     MYTHIC_API TConstArrayView<FMythicCreatureSpeciesRow> GetCodeDefaultSpecies();
 }

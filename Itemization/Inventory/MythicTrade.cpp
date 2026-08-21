@@ -1,4 +1,3 @@
-// Mythic — pure vendor trade decisions. See MythicTrade.h.
 
 #include "MythicTrade.h"
 
@@ -27,7 +26,7 @@ namespace MythicTrade {
             Plan.Result = EMythicTradeResult::NoRoom;
             return Plan;
         }
-        const int32 AffordableQty = BuyerCurrency / UnitPrice; // whole units only
+        const int32 AffordableQty = BuyerCurrency / UnitPrice;
         if (AffordableQty <= 0) {
             Plan.Result = EMythicTradeResult::InsufficientFunds;
             return Plan;
@@ -35,9 +34,8 @@ namespace MythicTrade {
 
         const int32 Qty = FMath::Min3(RequestedQty, AvailableStock, AffordableQty);
         Plan.Quantity = Qty;
-        Plan.TotalPrice = UnitPrice * Qty; // == ComputeBuyPrice(UnitValue, Qty, mult) by per-unit linearity
+        Plan.TotalPrice = UnitPrice * Qty;
         if (Qty < RequestedQty) {
-            // The binding constraint is whichever of stock / affordability is smaller.
             Plan.Result = (AffordableQty < AvailableStock) ? EMythicTradeResult::PartialFunds : EMythicTradeResult::PartialStock;
         }
         else {
@@ -69,7 +67,7 @@ namespace MythicTrade {
         const int32 Qty = FMath::Min(RequestedQty, AvailableStacks);
         const int32 Proceeds = MythicCurrency::ComputeSalePrice(UnitValue, Qty, SellRate);
         if (Proceeds <= 0) {
-            Plan.Result = EMythicTradeResult::NotSellable; // worthless even at full quantity
+            Plan.Result = EMythicTradeResult::NotSellable;
             return Plan;
         }
 
@@ -83,12 +81,12 @@ namespace MythicTrade {
                                 int32 PayerCurrency) {
         FMythicTradePlan Plan;
         if (MaxDurability <= 0) {
-            Plan.Result = EMythicTradeResult::NothingToRepair; // item has no durability concept
+            Plan.Result = EMythicTradeResult::NothingToRepair;
             return Plan;
         }
         const int32 Missing = FMath::Clamp(MaxDurability - CurrentDurability, 0, MaxDurability);
         if (Missing <= 0) {
-            Plan.Result = EMythicTradeResult::NothingToRepair; // already at full durability
+            Plan.Result = EMythicTradeResult::NothingToRepair;
             return Plan;
         }
         const int32 Cost = MythicCurrency::ComputeRepairCost(CurrentDurability, MaxDurability, ItemValue, RepairCostFraction);
@@ -96,7 +94,6 @@ namespace MythicTrade {
             Plan.Result = EMythicTradeResult::InsufficientFunds;
             return Plan;
         }
-        // Success — restore the full missing amount (a 0 cost is a free repair of a valueless item, still allowed).
         Plan.Result = EMythicTradeResult::Success;
         Plan.Quantity = Missing;
         Plan.TotalPrice = Cost;
@@ -106,16 +103,14 @@ namespace MythicTrade {
     FMythicTradePlan ComputeRepairAllPlan(const TArray<int32> &CostsAscending, int32 PayerCurrency) {
         FMythicTradePlan Plan;
         if (CostsAscending.Num() == 0) {
-            Plan.Result = EMythicTradeResult::NothingToRepair; // no damaged items to repair
+            Plan.Result = EMythicTradeResult::NothingToRepair;
             return Plan;
         }
-        // Cheapest-first greedy prefix (the caller passes positive costs sorted ascending). 64-bit running total so a long
-        // / large cost list can't overflow the budget compare (gotcha (e)); TotalPrice fits int32 since it's <= PayerCurrency.
         int64 Running = 0;
         int32 Count = 0;
         for (const int32 Cost : CostsAscending) {
             if (Running + static_cast<int64>(Cost) > static_cast<int64>(PayerCurrency)) {
-                break; // can't afford this (or any costlier) item — stop
+                break;
             }
             Running += Cost;
             ++Count;
@@ -135,9 +130,10 @@ namespace MythicTrade {
             case EMythicTradeResult::NotSellable:
             case EMythicTradeResult::VendorCannotPay:
             case EMythicTradeResult::NothingToRepair:
+            case EMythicTradeResult::RequiresStation:
                 return true;
             default:
-                return false; // Success / PartialStock / PartialFunds / InvalidRequest -> no failure callout
+                return false;
         }
     }
 
@@ -157,6 +153,8 @@ namespace MythicTrade {
                 return LOCTEXT("VendorCannotPay", "Merchant can't pay");
             case EMythicTradeResult::NothingToRepair:
                 return LOCTEXT("NothingToRepair", "Nothing to repair");
+            case EMythicTradeResult::RequiresStation:
+                return LOCTEXT("RequiresStation", "Requires a nearby Forge");
             default:
                 return FText::GetEmpty();
         }

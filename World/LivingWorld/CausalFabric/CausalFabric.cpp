@@ -1,15 +1,7 @@
-// Mythic Living World System — Causal Fabric Implementation
 
 #include "World/LivingWorld/CausalFabric/CausalFabric.h"
 
 void UMythicCausalFabric::Initialize(int32 InCapacity) {
-    // Capacity is the divisor of every ring-buffer `% Capacity` wrap below. InCapacity comes from
-    // LivingWorldSettings.FabricCapacity (a UDataAsset, default 4096) whose editor ClampMin (256) guards the property
-    // panel but is NOT enforced for a value set programmatically or persisted in an asset authored before that clamp.
-    // The check() catches a <= 0 in Development but is compiled out in Shipping, where a 0 would turn those wraps into a
-    // modulo-by-zero server crash. Clamp to >= 1 at this chokepoint (cheap defense-in-depth — reachability is low given
-    // the editor clamp + 4096 default) so such a value degrades to a minimal valid buffer instead of crashing the
-    // server; a valid (>= 1) capacity passes through unchanged.
     check(InCapacity > 0);
     if (InCapacity <= 0) {
         UE_LOG(LogMythCausalFabric, Warning,
@@ -39,13 +31,6 @@ uint32 UMythicCausalFabric::AppendEvent(const FMythicWorldEvent &InEvent) {
 
     FMythicWorldEvent &Slot = WriteBuffer[WriteHead];
 
-    // O(1) In-place Pruning:
-    // If the ring is wrapping around, we are about to overwrite the oldest event.
-    // We strictly prune it from the spatial index exactly now.
-    // This is vastly more performant than a periodic "background cleanup" because:
-    // 1. It spreads the cost across individual appends (no latency spikes).
-    // 2. It requires exactly one Map Lookup and one Array RemoveSwap (O(1)).
-    // 3. A periodic cleanup would require iterating the entire Map and all Arrays (O(N) spike).
     if (WriteCount == Capacity && Slot.EventId > 0) {
         if (TArray<uint32> *OldCellEvents = WriteSpatialIndex.Find(Slot.Cell)) {
             OldCellEvents->RemoveSwap(Slot.EventId);
@@ -55,24 +40,17 @@ uint32 UMythicCausalFabric::AppendEvent(const FMythicWorldEvent &InEvent) {
         }
     }
 
-    // Overwrite the slot with the new event
     Slot = InEvent;
     Slot.EventId = AssignedId;
-    // Stamp a WorldTime for sim-thread events that left it at the default 0.0 (game-thread producers set it from game
-    // time before submitting). Without this, every time-windowed sim query rejects them and the diplomacy / ideology /
-    // schism feedback loops never observe a single sim event. FPlatformTime::Seconds() is the clock the sim's own query
-    // windows already use, so the loops become self-consistent.
     if (Slot.WorldTime == 0.0) {
         Slot.WorldTime = FPlatformTime::Seconds();
     }
 
-    // Add to spatial index
     WriteSpatialIndex.FindOrAdd(Slot.Cell).Add(AssignedId);
 
     WriteHead = (WriteHead + 1) % Capacity;
     WriteCount = FMath::Min(WriteCount + 1, Capacity);
 
-    // Advance BaseEventId so EventId→index translation stays correct.
     if (WriteCount == Capacity) {
         BaseEventId = AssignedId - Capacity + 1;
     }
@@ -81,16 +59,12 @@ uint32 UMythicCausalFabric::AppendEvent(const FMythicWorldEvent &InEvent) {
 }
 
 void UMythicCausalFabric::CommitWrites() {
-    // Snapshot the write buffer into the read buffer.
-    // Use an FRWLock to guarantee game thread readers don't see half-copied state.
     FWriteScopeLock Lock(FabricLock);
 
     FMemory::Memcpy(ReadBuffer.GetData(), WriteBuffer.GetData(), Capacity * sizeof(FMythicWorldEvent));
     ReadSpatialIndex = WriteSpatialIndex;
     ReadHead = WriteHead;
     ReadCount = WriteCount;
-    // Snapshot the id-translation basis alongside the buffer so reads (under the read lock) stay self-consistent with
-    // the committed ring instead of racing the live, lock-free write-side counters.
     ReadBaseEventId = BaseEventId;
     ReadNewestEventId = NextEventId.load(std::memory_order_relaxed) - 1;
 }
@@ -115,14 +89,11 @@ TArray<FMythicWorldEvent> UMythicCausalFabric::GetRecentEvents(int32 MaxCount) c
     }
     Out.Reserve(Count);
 
-    // Copy the window under the read lock so the result never aliases ReadBuffer (which the sim thread's
-    // CommitWrites memcpy-overwrites). Stitch BOTH ring segments so a wrap-straddling window keeps the newest
-    // events instead of dropping the wrapped tail.
     const int32 StartIndex = ((ReadHead - Count) % Capacity + Capacity) % Capacity;
     const int32 FirstLen = FMath::Min(Count, Capacity - StartIndex);
-    Out.Append(ReadBuffer.GetData() + StartIndex, FirstLen); // [StartIndex, Capacity)
+    Out.Append(ReadBuffer.GetData() + StartIndex, FirstLen);
     if (FirstLen < Count) {
-        Out.Append(ReadBuffer.GetData(), Count - FirstLen); // wrapped segment [0, ...)
+        Out.Append(ReadBuffer.GetData(), Count - FirstLen);
     }
     return Out;
 }
@@ -141,21 +112,16 @@ void UMythicCausalFabric::QueryEventsByCell(
         return;
     }
 
-    // O(1) Fast path via spatial index
     const TArray<uint32> *CellEvents = ReadSpatialIndex.Find(Cell);
     if (!CellEvents) {
         return;
     }
 
-    // The cell's id list is NOT reliably chronological: the in-place RemoveSwap pruning in AppendEvent (on ring wrap)
-    // moves the last element into the pruned slot, scrambling order. So we CANNOT early-break on an out-of-window
-    // event — scan the whole (MaxResults-capped) cell list and filter each by the time window, copying matches by
-    // value (the result must not alias ReadBuffer, which CommitWrites overwrites on the sim thread).
     for (int32 i = CellEvents->Num() - 1; i >= 0 && OutEvents.Num() < MaxResults; --i) {
         const uint32 EventId = (*CellEvents)[i];
         const int32 Index = EventIdToIndex(EventId, ReadHead, ReadCount);
         if (Index < 0) {
-            continue; // Event was overwritten in the ring buffer
+            continue;
         }
         const FMythicWorldEvent &Event = ReadBuffer[Index];
         if (Event.WorldTime >= MinWorldTime && Event.WorldTime <= MaxWorldTime) {
@@ -178,10 +144,6 @@ void UMythicCausalFabric::QueryEventsByCategory(
         return;
     }
 
-    // NO early-break on WorldTime: the ring is NOT globally WorldTime-monotonic — events from different producers /
-    // clocks interleave (game-thread events carry game time; sim events were unstamped/zero), so a low-WorldTime
-    // record can sit between high ones and would wrongly truncate a newest-first early-break. Scan the full
-    // (MaxResults-capped) window and filter each. Copy matches by value (the result must not alias ReadBuffer).
     for (int32 i = 0; i < ReadCount && OutEvents.Num() < MaxResults; ++i) {
         const int32 Index = ((ReadHead - 1 - i) % Capacity + Capacity) % Capacity;
         const FMythicWorldEvent &Event = ReadBuffer[Index];
@@ -196,8 +158,6 @@ int32 UMythicCausalFabric::EventIdToIndex(uint32 EventId, int32 HeadPos, int32 C
         return -1;
     }
 
-    // Check if this event is still within the COMMITTED read-snapshot range — NOT the live write-side counters, which
-    // the sim thread advances lock-free between a commit and a game-thread read (a logical mismatch + a torn read).
     const uint32 OldestId = ReadBaseEventId;
     const uint32 NewestId = ReadNewestEventId;
 
@@ -205,7 +165,6 @@ int32 UMythicCausalFabric::EventIdToIndex(uint32 EventId, int32 HeadPos, int32 C
         return -1;
     }
 
-    // Ring index = (HeadPos - (NewestId - EventId) - 1) wrapped to capacity
     const int32 Age = static_cast<int32>(NewestId - EventId);
     if (Age >= Count) {
         return -1;
@@ -227,7 +186,6 @@ void UMythicCausalFabric::QueryEventsByFaction(
         return;
     }
 
-    // Scan from newest to oldest, filtering by PrimaryFaction
     for (int32 i = 0; i < ReadCount && OutEvents.Num() < MaxResults; ++i) {
         const int32 Index = ((ReadHead - 1 - i) % Capacity + Capacity) % Capacity;
         const FMythicWorldEvent &Event = ReadBuffer[Index];
@@ -239,16 +197,12 @@ void UMythicCausalFabric::QueryEventsByFaction(
 }
 
 void UMythicCausalFabric::Serialize(FArchive &Ar) {
-    // Version for forward compatibility
     int32 Version = 1;
     Ar << Version;
 
     Ar << Capacity;
 
     if (Ar.IsLoading()) {
-        // Bound-check the stream-controlled Capacity BEFORE SetNum: a corrupted/tampered save with a garbage Capacity
-        // would otherwise SetNum(garbage) → a massive allocation (OOM/crash). Mirrors the PersistentNPCRegistry Count
-        // guard. 10,000,000 is far above any legitimate ring capacity; SetError flags the load as failed for the caller.
         if (Capacity < 0 || Capacity > 10000000) {
             Ar.SetError();
             return;
@@ -262,8 +216,6 @@ void UMythicCausalFabric::Serialize(FArchive &Ar) {
     Ar << BaseEventId;
 
     if (Ar.IsLoading()) {
-        // Likewise bound the ring cursors read from the stream — a garbage WriteHead/WriteCount would drive
-        // out-of-bounds ring access in CommitWrites / EventIdToIndex below. Valid range is [0, Capacity].
         if (WriteCount < 0 || WriteCount > Capacity || WriteHead < 0 || WriteHead > Capacity) {
             Ar.SetError();
             return;
@@ -276,8 +228,12 @@ void UMythicCausalFabric::Serialize(FArchive &Ar) {
         NextEventId.store(NextId, std::memory_order_relaxed);
     }
 
-    // Serialize all valid events in the write buffer
-    for (int32 i = 0; i < Capacity; ++i) {
+    const int32 EventCount = FMath::Min(Capacity, WriteBuffer.Num());
+    if (EventCount < Capacity) {
+        UE_LOG(LogTemp, Verbose, TEXT("CausalFabric::Serialize: Capacity %d but buffer holds %d; serialising %d."),
+               Capacity, WriteBuffer.Num(), EventCount);
+    }
+    for (int32 i = 0; i < EventCount; ++i) {
         FMythicWorldEvent &Event = WriteBuffer[i];
         Ar << Event.EventId;
         Ar << Event.ParentEventId;
@@ -292,7 +248,6 @@ void UMythicCausalFabric::Serialize(FArchive &Ar) {
         Ar << Event.Significance;
         Ar << Event.CategoryFlags;
 
-        // Serialize moral vector (array of floats)
         for (int32 Axis = 0; Axis < MoralAxisCount; ++Axis) {
             Ar << Event.MoralVector.AxisValues[Axis];
         }
@@ -301,9 +256,8 @@ void UMythicCausalFabric::Serialize(FArchive &Ar) {
     if (Ar.IsLoading()) {
         WriteSpatialIndex.Empty();
 
-        // Rebuild spatial index with correct chronological ordering
         TArray<FMythicWorldEvent *> ValidEvents;
-        for (int32 i = 0; i < Capacity; ++i) {
+        for (int32 i = 0; i < EventCount; ++i) {
             if (WriteBuffer[i].EventId > 0) {
                 ValidEvents.Add(&WriteBuffer[i]);
             }
@@ -317,7 +271,6 @@ void UMythicCausalFabric::Serialize(FArchive &Ar) {
             WriteSpatialIndex.FindOrAdd(Ev->Cell).Add(Ev->EventId);
         }
 
-        // Restore read buffer from loaded write buffer
         CommitWrites();
     }
 }

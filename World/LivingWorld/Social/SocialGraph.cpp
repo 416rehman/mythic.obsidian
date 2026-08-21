@@ -1,15 +1,10 @@
-// Mythic Living World — Social Graph Implementation
-// Sparse adjacency list with lazy decay, budget-capped pruning, and O(1) entity lookup.
 
 #include "World/LivingWorld/Social/SocialGraph.h"
 
-#include "Misc/ScopeRWLock.h" // FReadScopeLock / FWriteScopeLock
+#include "Misc/ScopeRWLock.h"
 
 DEFINE_LOG_CATEGORY(LogMythSocialGraph);
 
-// ─────────────────────────────────────────────────────────────
-// Initialize
-// ─────────────────────────────────────────────────────────────
 
 void UMythicSocialGraph::Initialize(int32 InMaxEdgesPerEntity, float InPruneStrengthThreshold, float InEdgeDecayRate) {
     MaxEdgesPerEntity = FMath::Clamp(InMaxEdgesPerEntity, 1, 32);
@@ -22,9 +17,6 @@ void UMythicSocialGraph::Initialize(int32 InMaxEdgesPerEntity, float InPruneStre
            MaxEdgesPerEntity, PruneStrengthThreshold, EdgeDecayRate);
 }
 
-// ─────────────────────────────────────────────────────────────
-// Edge CRUD
-// ─────────────────────────────────────────────────────────────
 
 void UMythicSocialGraph::AddOrStrengthenEdge(
     FMassEntityHandle Source,
@@ -43,20 +35,16 @@ void UMythicSocialGraph::AddOrStrengthenEdge(
 
     TArray<FMythicSocialEdge> &Edges = AdjacencyMap.FindOrAdd(Source);
 
-    // Check if edge already exists — strengthen it
     for (FMythicSocialEdge &Edge : Edges) {
         if (Edge.TargetEntity == Target) {
-            // Refresh interaction time and boost strength (clamped to 1.0)
             Edge.Strength = FMath::Min(Edge.Strength + InitStrength, 1.0f);
             Edge.LastInteractionTime = WorldTime;
-            Edge.Relation = Relation; // Update relation type if changed
+            Edge.Relation = Relation;
             return;
         }
     }
 
-    // New edge — check capacity
     if (Edges.Num() >= MaxEdgesPerEntity) {
-        // Evict weakest edge (with decay applied)
         int32 WeakestIndex = 0;
         float WeakestStrength = ApplyDecay(Edges[0], WorldTime, EdgeDecayRate);
 
@@ -71,7 +59,6 @@ void UMythicSocialGraph::AddOrStrengthenEdge(
         Edges.RemoveAtSwap(WeakestIndex);
     }
 
-    // Add new edge
     FMythicSocialEdge &NewEdge = Edges.AddDefaulted_GetRef();
     NewEdge.TargetEntity = Target;
     NewEdge.Relation = Relation;
@@ -91,7 +78,6 @@ bool UMythicSocialGraph::RemoveEdge(FMassEntityHandle Source, FMassEntityHandle 
         if ((*Edges)[i].TargetEntity == Target) {
             Edges->RemoveAtSwap(i);
 
-            // Clean up empty entries
             if (Edges->Num() == 0) {
                 AdjacencyMap.Remove(Source);
             }
@@ -109,7 +95,6 @@ void UMythicSocialGraph::RemoveAllEdges(FMassEntityHandle Entity, TArray<FMassEn
 
     OutSeveredConnections.Reset();
 
-    // Remove outgoing edges
     if (TArray<FMythicSocialEdge> *Edges = AdjacencyMap.Find(Entity)) {
         for (const FMythicSocialEdge &Edge : *Edges) {
             OutSeveredConnections.Add(Edge.TargetEntity);
@@ -117,15 +102,10 @@ void UMythicSocialGraph::RemoveAllEdges(FMassEntityHandle Entity, TArray<FMassEn
         AdjacencyMap.Remove(Entity);
     }
 
-    // Remove incoming edges (Entity appears as target in other entities' lists)
-    // This is O(n×m) where n=entities, m=edges per entity, but:
-    // - Only called on entity death (rare)
-    // - Typical graph is sparse (100 entities × 8 edges = 800 checks)
     for (auto It = AdjacencyMap.CreateIterator(); It; ++It) {
         TArray<FMythicSocialEdge> &Edges = It->Value;
         for (int32 i = Edges.Num() - 1; i >= 0; --i) {
             if (Edges[i].TargetEntity == Entity) {
-                // This source entity lost a connection — notify for Grief
                 if (!OutSeveredConnections.Contains(It->Key)) {
                     OutSeveredConnections.Add(It->Key);
                 }
@@ -133,16 +113,12 @@ void UMythicSocialGraph::RemoveAllEdges(FMassEntityHandle Entity, TArray<FMassEn
             }
         }
 
-        // Clean up empty adjacency entries
         if (Edges.Num() == 0) {
             It.RemoveCurrent();
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Queries
-// ─────────────────────────────────────────────────────────────
 
 int32 UMythicSocialGraph::GetEdges(FMassEntityHandle Source, double WorldTime, TArray<FMythicSocialEdge> &OutEdges) const {
     FReadScopeLock Lock(GraphLock);
@@ -215,16 +191,10 @@ int32 UMythicSocialGraph::GetTotalEdgeCount() const {
 }
 
 int32 UMythicSocialGraph::GetEntityCount() const {
-    // Read-lock before AdjacencyMap.Num(): the BDI cognition worker Adds/Removes/rehashes this map off the game thread
-    // (AddOrStrengthenEdge / RemoveEdge / RemoveAllEdges / PruneStaleEdges all take the write lock), so a bare unlocked
-    // .Num() read races a concurrent rehash. Mirrors GetTotalEdgeCount.
     FReadScopeLock Lock(GraphLock);
     return AdjacencyMap.Num();
 }
 
-// ─────────────────────────────────────────────────────────────
-// Maintenance
-// ─────────────────────────────────────────────────────────────
 
 int32 UMythicSocialGraph::PruneStaleEdges(double WorldTime, int32 MaxEntitiesPerCall) {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicSocialGraph_PruneStaleEdges);
@@ -238,7 +208,6 @@ int32 UMythicSocialGraph::PruneStaleEdges(double WorldTime, int32 MaxEntitiesPer
     int32 TotalPruned = 0;
     int32 EntitiesProcessed = 0;
 
-    // Convert to array for stable indexed iteration
     TArray<FMassEntityHandle> Keys;
     AdjacencyMap.GetKeys(Keys);
 
@@ -246,7 +215,6 @@ int32 UMythicSocialGraph::PruneStaleEdges(double WorldTime, int32 MaxEntitiesPer
         return 0;
     }
 
-    // Wrap the iterator index
     PruneIteratorIndex = PruneIteratorIndex % Keys.Num();
 
     for (int32 i = 0; i < Keys.Num() && EntitiesProcessed < MaxEntitiesPerCall; ++i) {
@@ -258,7 +226,6 @@ int32 UMythicSocialGraph::PruneStaleEdges(double WorldTime, int32 MaxEntitiesPer
             continue;
         }
 
-        // Prune edges below threshold (iterate backwards for safe removal)
         for (int32 j = Edges->Num() - 1; j >= 0; --j) {
             const float DecayedStrength = ApplyDecay((*Edges)[j], WorldTime, EdgeDecayRate);
             if (DecayedStrength < PruneStrengthThreshold) {
@@ -266,13 +233,11 @@ int32 UMythicSocialGraph::PruneStaleEdges(double WorldTime, int32 MaxEntitiesPer
                 ++TotalPruned;
             }
             else {
-                // Write back decayed strength (lazy decay materialization)
                 (*Edges)[j].Strength = DecayedStrength;
                 (*Edges)[j].LastInteractionTime = WorldTime;
             }
         }
 
-        // Remove empty adjacency entries
         if (Edges->Num() == 0) {
             AdjacencyMap.Remove(Key);
         }
@@ -280,23 +245,17 @@ int32 UMythicSocialGraph::PruneStaleEdges(double WorldTime, int32 MaxEntitiesPer
         ++EntitiesProcessed;
     }
 
-    // Advance iterator for next call
     PruneIteratorIndex = (PruneIteratorIndex + EntitiesProcessed) % FMath::Max(Keys.Num(), 1);
 
     return TotalPruned;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Internals
-// ─────────────────────────────────────────────────────────────
 
 float UMythicSocialGraph::ApplyDecay(const FMythicSocialEdge &Edge, double WorldTime, float DecayRate) {
     if (DecayRate <= 0.0f || WorldTime <= Edge.LastInteractionTime) {
         return Edge.Strength;
     }
 
-    // Exponential decay: S(t) = S₀ × e^(-rate × Δt)
-    // Same pattern as PressureProcessor for consistency
     const double Elapsed = WorldTime - Edge.LastInteractionTime;
     return Edge.Strength * FMath::Exp(-DecayRate * static_cast<float>(Elapsed));
 }

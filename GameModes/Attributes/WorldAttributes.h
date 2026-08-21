@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -7,9 +6,6 @@
 #include "GAS/AttributeSets/MythicAttributeSet.h"
 #include "WorldAttributes.generated.h"
 
-/**
- * Contains the attributes for the current world tier
- */
 UCLASS()
 class MYTHIC_API UWorldTierAttributes : public UMythicAttributeSet {
     GENERATED_BODY()

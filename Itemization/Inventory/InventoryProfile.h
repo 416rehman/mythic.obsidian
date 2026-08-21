@@ -6,9 +6,6 @@
 #include "Itemization/MythicDataAsset.h"
 #include "InventoryProfile.generated.h"
 
-/**
- * Entry for a slot within a group - defines what slot type and how many.
- */
 USTRUCT(BlueprintType)
 struct FInventoryProfileEntry {
     GENERATED_BODY()
@@ -24,9 +21,6 @@ struct FInventoryProfileEntry {
     bool bRequireUniqueItems = false;
 };
 
-/**
- * A group of inventory slots that share a UI tab and behavior settings.
- */
 USTRUCT(BlueprintType)
 struct FInventorySlotGroup {
     GENERATED_BODY()
@@ -64,9 +58,6 @@ struct FInventorySlotGroup {
     TArray<FInventoryProfileEntry> Slots;
 };
 
-/**
- * Defines a collection of slot groups for an inventory (e.g., Player Inventory, Storage Chest).
- */
 UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API UInventoryProfile : public UMythicDataAsset {
     GENERATED_BODY()

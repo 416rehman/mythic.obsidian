@@ -4,6 +4,8 @@
 #include "ConversionStationComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
@@ -12,11 +14,7 @@
 AMythicConversionStation::AMythicConversionStation() {
     PrimaryActorTick.bCanEverTick = false;
     bReplicates = true;
-    // Item-instance subobjects replicate through the registered-subobject list (matches PlayerController /
-    // GameState / StorageContainer). Required so UMythicInventoryComponent::SetItemInSlotInternal ->
-    // UMythicReplicatedObject::SetOwner(UActorComponent*) doesn't trip its IsUsingRegisteredSubObjectList ensure.
     bReplicateUsingRegisteredSubObjectList = true;
-    // Far players should not receive job / fuel deltas.
     SetNetCullDistanceSquared(FMath::Square(4000.f));
 
     SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
@@ -33,7 +31,6 @@ AMythicConversionStation::AMythicConversionStation() {
 }
 
 void AMythicConversionStation::SetupLocalViewModel() {
-    // Only create VMs where they can be used (not on dedicated server)
     auto World = GetWorld();
     if (World && World->GetNetMode() == NM_DedicatedServer) {
         return;
@@ -46,10 +43,9 @@ void AMythicConversionStation::SetupLocalViewModel() {
 
 void AMythicConversionStation::BeginPlay() {
     Super::BeginPlay();
-    
+
     SetupLocalViewModel();
     if (StationViewModel) {
-        // Initialize early so world-space UI (like fire particles/progress bars) works without needing to interact first
         StationViewModel->InitializeForStation(ConversionComponent, nullptr);
     }
 }
@@ -79,18 +75,14 @@ void AMythicConversionStation::OnPrimaryInteract_Implementation(AActor *Interact
         return;
     }
 
-    // Runs on the interacting client: open the station server-side (registers the instigator) and let the
-    // Blueprint push the station widget.
     if (PC->IsLocalController()) {
         PC->ServerOpenConversionStation(this);
-        // Re-evaluate recipes using the specific player's inventory capabilities
         this->StationViewModel->RefreshForInteractor(PC);
         OnStationOpened(PC);
     }
 }
 
 void AMythicConversionStation::OnSecondaryInteract_Implementation(AActor *Interactor) {
-    // No default secondary action; Blueprints may override.
 }
 
 USceneComponent *AMythicConversionStation::GetWidgetAttachmentComponent_Implementation() const {
@@ -101,7 +93,6 @@ bool AMythicConversionStation::GetInteractionData_Implementation(AActor *Interac
     OutInteractionData.InputActionDataTable = InputActionDataTable;
     OutInteractionData.PrimaryInteractionName = PrimaryInteractionName;
 
-    // Advisory prompt gate: hide the prompt if the player can't satisfy the station-use requirement.
     if (ConversionComponent && !ConversionComponent->GetStationUseRequirement().IsEmpty()) {
         FGameplayTagContainer Owned;
         if (IInventoryProviderInterface *Prov = Cast<IInventoryProviderInterface>(ResolveController(Interactor))) {
@@ -118,9 +109,54 @@ bool AMythicConversionStation::GetInteractionData_Implementation(AActor *Interac
 }
 
 void AMythicConversionStation::OnFocused_Implementation(AActor *Interactor) {
-    // Visual feedback handled in Blueprint.
 }
 
 void AMythicConversionStation::OnUnfocused_Implementation(AActor *Interactor) {
-    // Visual feedback handled in Blueprint.
 }
+
+static void MythicOpenNearestStation(const TArray<FString> &Args, UWorld *World) {
+    if (!World) {
+        UE_LOG(LogTemp, Warning, TEXT("Mythic.OpenNearestStation: no world"));
+        return;
+    }
+
+    APlayerController *PC = World->GetFirstPlayerController();
+    APawn *Pawn = PC ? PC->GetPawn() : nullptr;
+    if (!Pawn) {
+        UE_LOG(LogTemp, Warning, TEXT("Mythic.OpenNearestStation: no local pawn - is PIE running?"));
+        return;
+    }
+
+    const FVector From = Pawn->GetActorLocation();
+    AMythicConversionStation *Best = nullptr;
+    double BestDistSq = TNumericLimits<double>::Max();
+    int32 Seen = 0;
+
+    for (TActorIterator<AMythicConversionStation> It(World); It; ++It) {
+        AMythicConversionStation *Station = *It;
+        if (!IsValid(Station)) {
+            continue;
+        }
+        ++Seen;
+        const double DistSq = FVector::DistSquared(From, Station->GetActorLocation());
+        if (DistSq < BestDistSq) {
+            BestDistSq = DistSq;
+            Best = Station;
+        }
+    }
+
+    if (!Best) {
+        UE_LOG(LogTemp, Warning, TEXT("Mythic.OpenNearestStation: no conversion station is loaded (world partition may not have streamed one in)"));
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Mythic.OpenNearestStation: opening %s at %.0f uu (%d station(s) loaded)"),
+           *Best->GetName(), FMath::Sqrt(BestDistSq), Seen);
+
+    IMythicInteractable::Execute_OnPrimaryInteract(Best, Pawn);
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GMythicOpenNearestStationCmd(
+    TEXT("Mythic.OpenNearestStation"),
+    TEXT("Open the crafting station nearest the local pawn, without having to aim at it."),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&MythicOpenNearestStation));

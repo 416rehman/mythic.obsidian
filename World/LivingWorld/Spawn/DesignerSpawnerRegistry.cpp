@@ -1,10 +1,8 @@
-// Mythic Living World — Designer Spawner Registry Implementation
 
 #include "World/LivingWorld/Spawn/DesignerSpawnerRegistry.h"
-#include "World/LivingWorld/LivingWorldTypes.h" // LogMythLivingWorld
+#include "World/LivingWorld/LivingWorldTypes.h"
 
 void UMythicDesignerSpawnerRegistry::Serialize(FArchive& Ar) {
-    // LocalVersion is the registry's own format version (independent of the LWS MasterVersion). Start at 1.
     int32 LocalVersion = 1;
     Ar << LocalVersion;
 
@@ -25,8 +23,6 @@ void UMythicDesignerSpawnerRegistry::Serialize(FArchive& Ar) {
         }
     }
     else {
-        // Bound-check before reserving: a desynced/corrupted stream can yield a garbage Count; an unbounded reserve
-        // would attempt a massive allocation (OOM/crash). 1,000,000 is far above any legitimate spawner count.
         if (Count < 0 || Count > 1000000) {
             Ar.SetError();
             return;

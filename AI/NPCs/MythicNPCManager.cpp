@@ -1,4 +1,3 @@
-// 
 
 
 #include "MythicNPCManager.h"
@@ -8,7 +7,6 @@
 #include "Engine/World.h"
 
 void UMythicNPCManager::Initialize(FSubsystemCollectionBase &Collection) {
-    // Server Only Subsystem
     if (GetWorld()->GetNetMode() >= NM_Client) {
         UE_LOG(Myth, Log, TEXT("Skipping NPC Manager initialization on client"));
         return;
@@ -26,11 +24,9 @@ AMythicNPCCharacter *UMythicNPCManager::GetFromPool(FGameplayTag NPCType) {
 
     if (NPCCharacterPool.Num() > 0) {
         if (AMythicNPCCharacter *PooledNPC = NPCCharacterPool.Pop()) {
-            UE_LOG(Myth, Log, TEXT("Reusing NPC %s from pool for type %s."), *PooledNPC->GetName(), *NPCType.ToString());
             return PooledNPC;
         }
 
-        // If the popped NPC is invalid, that means pool has nulls. Remove them.
         NPCCharacterPool.Remove(nullptr);
         UE_LOG(Myth, Warning, TEXT("Found and removed nullptr from NPC pool for type %s."), *NPCType.ToString());
     }
@@ -43,30 +39,23 @@ void UMythicNPCManager::ReturnToPool(AMythicNPCCharacter *NPC, bool bShouldCache
         return;
     }
 
-    auto NPCId = NPC->GetNPCId();
-    auto NPCIdAsStr = NPCId.ToString();
-    auto NPCTypeAsStr = NPC->GetNPCType().ToString();
+    const FGuid NPCId = NPC->GetNPCId();
 
     if (bShouldCache) {
-        UE_LOG(Myth, Log, TEXT("Caching NPC (ID: %s, Type: %s) for later use."), *NPCIdAsStr, *NPCTypeAsStr);
-
         auto NPCData = NPC->GetNPCData();
         CacheNPC(NPCData);
     }
 
-    UE_LOG(Myth, Log, TEXT("Returning NPC (ID: %s, Type: %s) to pool."), *NPCIdAsStr, *NPCTypeAsStr);
-    NPC->OnReturnedToPool(); // After this, the NPCData will not be valid.
-
+    NPC->OnReturnedToPool();
     ActiveNPCs.Remove(NPCId);
-    UE_LOG(Myth, Log, TEXT("Removed NPC (ID: %s, Type: %s) from active list."), *NPCIdAsStr, *NPCTypeAsStr);
-
     NPCCharacterPool.Add(NPC);
-    UE_LOG(Myth, Log, TEXT("Returned NPC (ID: %s, Type: %s) to pool."), *NPCIdAsStr, *NPCTypeAsStr);
+
+    UE_LOG(Myth, Verbose, TEXT("NPC returned to pool (ID: %s)"), *NPCId.ToString());
 }
 
 AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDef, FVector SpawnLocation, FRotator SpawnRotation) {
     if (!GetWorld()) {
-        return nullptr; // Basic safety check
+        return nullptr;
     }
     if (!NPCDef) {
         UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnPredefinedNPC: NPCDefinitionAsset is null."));
@@ -81,7 +70,6 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDe
         return nullptr;
     }
 
-    // If the NPC is already cached, redirect to SpawnCachedNPC
     if (CachedNPCs.Contains(NPCDef->NPCId)) {
         UE_LOG(Myth, Log, TEXT("SpawnPredefinedNPC: NPC ID %s found in cache, redirecting to SpawnCachedNPC."), *NPCDef->NPCId.ToString());
         return SpawnCachedNPC(NPCDef->NPCId, SpawnLocation, SpawnRotation);
@@ -96,7 +84,6 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDe
         SpawnedNPC->SetActorLocationAndRotation(SpawnLocation, SpawnRotation);
     }
     else {
-        // Should NPCDef have a class to spawn?
         UClass *NPCClassToSpawn = AMythicNPCCharacter::StaticClass();
 
         SpawnedNPC = GetWorld()->SpawnActor<AMythicNPCCharacter>(NPCClassToSpawn, SpawnLocation, SpawnRotation, SpawnInfo);
@@ -109,7 +96,6 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDe
                *NPCDef->NPCType.ToString());
     }
 
-    // After this OnSpawnedFromPool, the NPC's data should be set.
     SpawnedNPC->OnSpawnedFromPool(FMythicNPCData(NPCDef));
 
     ActiveNPCs.Add(NPCDef->NPCId, SpawnedNPC);
@@ -125,16 +111,6 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnRandomNPC(FGameplayTag NPCType, FVe
         return nullptr;
     }
 
-    // // TODO: 
-    // // might want to look up NPCType in NPCTypeDataTable to get UNPCTypeDefinition and pass that to FMythicNPCData()
-    // // which would then generate the NPCData for the NPC.
-    // auto NPCTypeDef = NPCTypeDataTable.FindRow<UNPCTypeDefinition>(NPCType);
-    // if (!NPCTypeDef) {
-    //     UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnRandomNPC: NPCType %s not found in NPCTypeDataTable."), *NPCType.ToString());
-    //     return nullptr;
-    // }
-    // auto NPCTypeDefinition = NPCTypeDef->NPCTypeDefinition;
-    // auto NPCData = FMythicNPCData(NPCTypeDefinition);
 
     AMythicNPCCharacter *SpawnedNPC = GetFromPool(NPCType);
 
@@ -144,7 +120,7 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnRandomNPC(FGameplayTag NPCType, FVe
     if (SpawnedNPC) {
         SpawnedNPC->SetActorLocationAndRotation(SpawnLocation, SpawnRotation);
     }
-    else { // NPC came from pool
+    else {
         UClass *NPCClassToSpawn = AMythicNPCCharacter::StaticClass();
 
         SpawnedNPC = GetWorld()->SpawnActor<AMythicNPCCharacter>(NPCClassToSpawn, SpawnLocation, SpawnRotation, SpawnInfo);
@@ -156,14 +132,6 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnRandomNPC(FGameplayTag NPCType, FVe
         UE_LOG(Myth, Log, TEXT("Spawned new NPC %s for Random Type %s."), *SpawnedNPC->GetName(), *NPCType.ToString());
     }
 
-    // if (IPoolableNPC *PoolableNPC = Cast<IPoolableNPC>(SpawnedNPC)) {
-    // PoolableNPC->OnSpawnedFromPool(NPCData);
-    // }
-    // else {
-    // UE_LOG(Myth, Error, TEXT("NPC %s (ID: %s) does not implement IPoolableNPC. Cannot call OnSpawnedFromPool."), *SpawnedNPC->GetName(), *NPCData.NPCId.ToString());
-    // }
-
-    // ActiveNPCs.Add(SpawnedNPC->GetNPCDataRef()->NPCId, SpawnedNPC);
 
     return SpawnedNPC;
 }
@@ -184,7 +152,6 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnCachedNPC(FGuid NPCId, FVector Spaw
         return nullptr;
     }
 
-    // Get NPCType from cached data
     FGameplayTag NPCType = CachedData->NPCData.NPCType;
     if (!NPCType.IsValid()) {
         UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnCachedNPC: NPCType in cached data for ID %s is invalid. Cannot determine pool category."),
@@ -197,12 +164,11 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnCachedNPC(FGuid NPCId, FVector Spaw
     FActorSpawnParameters SpawnInfo;
     SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
-    if (SpawnedNPC) { // NPC came from pool
+    if (SpawnedNPC) {
         SpawnedNPC->SetActorLocationAndRotation(SpawnLocation, SpawnRotation);
     }
     else {
         UClass *NPCClassToSpawn = AMythicNPCCharacter::StaticClass();
-        // For example: UClass* ClassFromData = GetClassFromCachedData(CachedData->NPCData); if (ClassFromData) NPCClassToSpawn = ClassFromData;
 
         SpawnedNPC = GetWorld()->SpawnActor<AMythicNPCCharacter>(NPCClassToSpawn, SpawnLocation, SpawnRotation, SpawnInfo);
         if (!SpawnedNPC) {
@@ -213,10 +179,8 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnCachedNPC(FGuid NPCId, FVector Spaw
         UE_LOG(Myth, Log, TEXT("Spawned new NPC %s for Cached ID %s, Type %s."), *SpawnedNPC->GetName(), *NPCId.ToString(), *NPCType.ToString());
     }
 
-    // After this OnSpawnedFromPool, the NPC's data should be set.
     SpawnedNPC->OnSpawnedFromPool(CachedData->NPCData);
 
-    // Once the NPC is spawned, it should be added to the ActiveNPCs map, and not cached anymore (NPC can be cached again later with updated data)
     ActiveNPCs.Add(NPCId, SpawnedNPC);
     CachedNPCs.Remove(NPCId);
 
@@ -224,9 +188,6 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnCachedNPC(FGuid NPCId, FVector Spaw
 }
 
 bool UMythicNPCManager::GetCachedNPCData(const FGuid NPCId, FMythicNPCData &NPCData) {
-    // Write the out-param before returning (was previously never assigned, so callers always got a default
-    // struct regardless of the bool). Mirrors GetCachedFamily below. FindRef returns a default entry on a miss,
-    // whose NPCId won't equal a valid NPCId, so the comparison still reports false correctly.
     NPCData = CachedNPCs.FindRef(NPCId).NPCData;
     return NPCData.NPCId == NPCId;
 }
@@ -240,26 +201,21 @@ void UMythicNPCManager::CacheNPC(FMythicNPCData NPCData) {
     auto CachedData = FMythicCachedNPCData(NPCData);
     CachedNPCs.Add(NPCData.NPCId, CachedData);
 
-    // If the NPC has a Family, cache the Family as well and its members
     if (NPCData.NPCFamilyId.IsValid()) {
         auto FamilySpec = this->ActiveFamilySpecs.FindRef(NPCData.NPCFamilyId);
         if (FamilySpec.FamilyId.IsValid()) {
-            // Cache the family spec itself
             CachedFamilies.Add(FamilySpec.FamilyId, FamilySpec);
 
-            // Cache the Father
             auto FatherNPC = ActiveNPCs.FindRef(FamilySpec.FatherId);
             if (FatherNPC) {
                 CachedNPCs.Add(FamilySpec.FatherId, FatherNPC->GetNPCData());
             }
 
-            // Cache the Mother
             auto MotherNPC = ActiveNPCs.FindRef(FamilySpec.MotherId);
             if (MotherNPC) {
                 CachedNPCs.Add(FamilySpec.MotherId, MotherNPC->GetNPCData());
             }
 
-            // Cache the Children
             for (auto ChildId : FamilySpec.ChildrenIds) {
                 auto ChildNPC = ActiveNPCs.FindRef(ChildId);
                 if (ChildNPC) {
@@ -273,11 +229,9 @@ void UMythicNPCManager::CacheNPC(FMythicNPCData NPCData) {
 void UMythicNPCManager::RemoveCachedNPC(FGuid NPCId) {
     auto CachedData = CachedNPCs.FindRef(NPCId);
 
-    // If the NPC member has a family, check if all of its family members are uncached, we can uncache the entire family.
     if (CachedData.NPCData.NPCFamilyId.IsValid()) {
         auto FamilySpec = CachedFamilies.FindRef(CachedData.NPCData.NPCFamilyId);
         if (FamilySpec.FamilyId.IsValid()) {
-            // Check if all of the family members are uncached
             bool AllFamilyMembersUncached = true;
             if (FamilySpec.FatherId.IsValid()) {
                 auto FatherData = CachedNPCs.FindRef(FamilySpec.FatherId);

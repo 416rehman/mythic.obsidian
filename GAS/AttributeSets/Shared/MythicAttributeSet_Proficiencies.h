@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -7,9 +6,6 @@
 #include "GAS/AttributeSets/MythicAttributeSet.h"
 #include "MythicAttributeSet_Proficiencies.generated.h"
 
-/**
- * 
- */
 UCLASS()
 class MYTHIC_API UMythicAttributeSet_Proficiencies : public UMythicAttributeSet {
     GENERATED_BODY()
@@ -130,32 +126,23 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Proficiencies, CookingProficiency);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Proficiencies, CookingProficiencyMax);
 
-    /*** Level Calculation **/
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Proficiencies, OverallXp);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Proficiencies, OverallXpMax);
-    // weights
-    // Core combat
     const float COMBAT_WEIGHT = 2.2f;
-    // Primary resource gathering (high importance)
     const float MINING_WEIGHT = 2.0f;
     const float WOODCUTTING_WEIGHT = 2.0f;
     const float HUNTING_WEIGHT = 2.0f;
-    // Major crafting and production (significant investment skills)
     const float CRAFTING_WEIGHT = 1.8f;
     const float CONSTRUCTION_WEIGHT = 1.8f;
-    // Secondary gathering and utility
     const float FISHING_WEIGHT = 1.5f;
     const float HARVESTING_WEIGHT = 1.5f;
     const float FARMING_WEIGHT = 1.5f;
     const float TRADING_WEIGHT = 1.5f;
-    // Specialized production (still valuable but more niche)
     const float ALCHEMY_WEIGHT = 1.3f;
     const float COOKING_WEIGHT = 1.0f;
-    //---------- BONUSES - well-rounded proficiencies boost the players overall level
-    const float HIGH_SKILL_MULTIPLIER = 0.15f; // When 3+ proficiencies are above 75%
-    const float MEDIUM_SKILL_MULTIPLIER = 0.10f; // When 6+ proficiencies are above 50%
-    const float LOW_SKILL_MULTIPLIER = 0.05f; // When 9+ proficiencies are belove 25%
-    //~ End of Level Calculation
+    const float HIGH_SKILL_MULTIPLIER = 0.15f;
+    const float MEDIUM_SKILL_MULTIPLIER = 0.10f;
+    const float LOW_SKILL_MULTIPLIER = 0.05f;
 
 public:
     UFUNCTION()
@@ -229,15 +216,16 @@ public:
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
     virtual void PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const override;
-    
+
     float ScaleProficiencyXpGain(float BaseXp, const UAbilitySystemComponent *ASC) const;
+
+    static float ApplyWorldTierXpMultiplier(float ScaledXp, float WorldTierMultiplier);
 
     virtual void PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) override;
 
     static int32 GetLevel(const UAbilitySystemComponent* ASC, bool& found);
 
 private:
-    // Calculate overall level from all proficiencies
     float CalculateOverallXpMax();
     float CalculateOverallXp();
 };

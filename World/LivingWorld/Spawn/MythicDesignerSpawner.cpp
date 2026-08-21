@@ -1,4 +1,3 @@
-// Mythic Living World — Designer Conditional / Stateful Spawner Implementation
 
 #include "World/LivingWorld/Spawn/MythicDesignerSpawner.h"
 
@@ -25,10 +24,8 @@
 #include "TimerManager.h"
 
 AMythicDesignerSpawner::AMythicDesignerSpawner() {
-    // Timer-throttled — never per-frame.
     PrimaryActorTick.bCanEverTick = false;
 
-    // Server-only logic actor: the spawned NPC replicates itself; this controller does not.
     bReplicates = false;
 }
 
@@ -44,7 +41,6 @@ UMythicLivingWorldSubsystem *AMythicDesignerSpawner::GetLWS() const {
 void AMythicDesignerSpawner::BeginPlay() {
     Super::BeginPlay();
 
-    // 100% server-authoritative.
     if (!HasAuthority()) {
         return;
     }
@@ -55,7 +51,6 @@ void AMythicDesignerSpawner::BeginPlay() {
         return;
     }
 
-    // Mirror the AUTHORITATIVE registry state into the cache.
     if (UMythicLivingWorldSubsystem *LWS = GetLWS()) {
         if (UMythicDesignerSpawnerRegistry *Reg = LWS->GetDesignerSpawnerRegistry()) {
             const FMythicDesignerSpawnerState &State = Reg->FindOrAdd(DesignerId);
@@ -65,13 +60,12 @@ void AMythicDesignerSpawner::BeginPlay() {
         }
     }
 
-    // Already terminal => stay dormant (NO timer).
     if (bCachedPermaDead || CachedSpawnsEver >= MaxSpawnsEver) {
         return;
     }
 
     GetWorldTimerManager().SetTimer(EvalTimerHandle, this, &AMythicDesignerSpawner::TickEvaluate,
-                                    EvaluationIntervalSeconds, /*bLoop=*/true);
+                                    EvaluationIntervalSeconds,true);
 }
 
 void AMythicDesignerSpawner::EndPlay(const EEndPlayReason::Type EndPlayReason) {
@@ -113,7 +107,6 @@ void AMythicDesignerSpawner::TickEvaluate() {
 
     ReapLiveNPCs();
 
-    // Cheap caps gate before the (slightly heavier) input gather.
     if (bCachedPermaDead || CachedSpawnsEver >= MaxSpawnsEver) {
         StopEvaluation();
         return;
@@ -128,7 +121,7 @@ void AMythicDesignerSpawner::TickEvaluate() {
     }
 
     FMythicDesignerConditionInputs Inputs;
-    GatherInputs(Inputs); // fills resolved flags; unresolved-required gates fail-safe inside EvaluateConditions
+    GatherInputs(Inputs);
 
     if (MythicDesignerSpawner::EvaluateConditions(Conditions, Inputs)) {
         SpawnNPC();
@@ -148,7 +141,6 @@ float AMythicDesignerSpawner::GetCurrentGameHour() const {
                 if (AMythicEnvironmentController *Controller = Env->GetEnvironmentController()) {
                     const FTimespan Ts = Controller->GetTimespan();
                     float Hour = static_cast<float>(Ts.GetHours()) + static_cast<float>(Ts.GetMinutes()) / 60.0f;
-                    // Defensive clamp into [0,24): GetHours() is already 0..23 for a normalized timespan.
                     Hour = FMath::Fmod(Hour, 24.0f);
                     if (Hour < 0.0f) {
                         Hour += 24.0f;
@@ -157,9 +149,6 @@ float AMythicDesignerSpawner::GetCurrentGameHour() const {
                 }
             }
         }
-        // Fallback: derive an hour from world time on a fixed 24-minute day (1440s) when no clock is present. This is
-        // only hit if the environment controller hasn't registered; a time-gated spawner without a clock degrades to
-        // a slowly-cycling hour rather than crashing.
         const double Seconds = World->GetTimeSeconds();
         const double DayLengthSeconds = 1440.0;
         const double Frac = FMath::Fmod(Seconds, DayLengthSeconds) / DayLengthSeconds;
@@ -186,10 +175,9 @@ bool AMythicDesignerSpawner::AnyPlayerSatisfiesPlayerGate() const {
         }
         APawn *Pawn = PC->GetPawn();
 
-        // Range gate (or the tag-gate proximity scope): the player must be within PlayerRangeCm.
         if (bRangeGate || bTagGate) {
             if (!Pawn) {
-                continue; // no body => cannot be in range / cannot carry pawn tags meaningfully
+                continue;
             }
             const float DistSq = FVector::DistSquared(Pawn->GetActorLocation(), MyLoc);
             if ((bRangeGate || bTagGate) && DistSq > RangeSq) {
@@ -197,7 +185,6 @@ bool AMythicDesignerSpawner::AnyPlayerSatisfiesPlayerGate() const {
             }
         }
 
-        // Tag gate: the player's ASC must own ALL required tags.
         if (bTagGate) {
             AActor *TagActor = Pawn ? static_cast<AActor *>(Pawn) : static_cast<AActor *>(PC);
             UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(TagActor);
@@ -206,7 +193,6 @@ bool AMythicDesignerSpawner::AnyPlayerSatisfiesPlayerGate() const {
             }
         }
 
-        // This player satisfied every active part of the player gate.
         return true;
     }
 
@@ -216,13 +202,11 @@ bool AMythicDesignerSpawner::AnyPlayerSatisfiesPlayerGate() const {
 bool AMythicDesignerSpawner::GatherInputs(FMythicDesignerConditionInputs &OutInputs) const {
     OutInputs.GameHour = GetCurrentGameHour();
 
-    // Player gate result (the actor folds tags + proximity into a single bool the pure evaluator consumes).
     OutInputs.bAnyPlayerSatisfiesTags = AnyPlayerSatisfiesPlayerGate();
 
     UMythicLivingWorldSubsystem *LWS = GetLWS();
     UMythicFactionDatabase *DB = LWS ? LWS->GetFactionDatabase() : nullptr;
 
-    // Faction-state gate input.
     if (DB && Conditions.GatingFactionTag.IsValid() &&
         Conditions.FactionState != EMythicDesignerFactionStatePredicate::Any) {
         FMythicFactionData Data;
@@ -233,7 +217,6 @@ bool AMythicDesignerSpawner::GatherInputs(FMythicDesignerConditionInputs &OutInp
         }
     }
 
-    // Relation gate input.
     if (DB && Conditions.Relation != EMythicDesignerRelationPredicate::Ignore &&
         Conditions.RelationFactionA.IsValid() && Conditions.RelationFactionB.IsValid()) {
         const FMythicFactionId A = DB->FindFactionId(Conditions.RelationFactionA);
@@ -255,13 +238,11 @@ void AMythicDesignerSpawner::SpawnNPC() {
         return;
     }
 
-    // ── Resolve the spawn transform ──
     FTransform SpawnTransform;
     if (bUseExactPlacedTransform) {
         SpawnTransform = GetActorTransform();
     }
     else {
-        // Build placement params from the NPC class CDO's capsule.
         FMythicPlacementParams Params;
         Params.CellCenterXY = GetActorLocation();
         if (const AMythicNPCCharacter *CDO = NPCClass.GetDefaultObject()) {
@@ -272,15 +253,13 @@ void AMythicDesignerSpawner::SpawnNPC() {
         }
         FTransform Validated;
         if (!MythicPlacement::FindValidSpawn(World, Params, Validated)) {
-            // No valid placement this eval — leave the timer running to retry next interval.
             return;
         }
         SpawnTransform = Validated;
     }
 
-    // ── Deferred spawn so we can read the placed transform's cell before BeginPlay-driven systems run ──
     AMythicNPCCharacter *NPC = World->SpawnActorDeferred<AMythicNPCCharacter>(
-        NPCClass, SpawnTransform, /*Owner=*/this, /*Instigator=*/nullptr,
+        NPCClass, SpawnTransform,this,nullptr,
         ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
     if (!NPC) {
         UE_LOG(LogMythLivingWorld, Warning, TEXT("DesignerSpawner '%s': SpawnActorDeferred returned null."),
@@ -289,7 +268,6 @@ void AMythicDesignerSpawner::SpawnNPC() {
     }
     NPC->FinishSpawning(SpawnTransform);
 
-    // ── Compute the stable NameHash (deterministic per DesignerId + cell + faction) for the perma-death record ──
     uint8 FactionIndex = 0;
     if (UMythicLivingWorldSubsystem *LWS = GetLWS()) {
         if (UMythicFactionDatabase *DB = LWS->GetFactionDatabase()) {
@@ -309,13 +287,10 @@ void AMythicDesignerSpawner::SpawnNPC() {
         }
     }
 
-    // Seed the SpawnIndex from a hash of DesignerId mixed with the cell so two spawners in the same cell+faction don't
-    // alias one NameHash. Stable across runs (DesignerId is authored, cell is the placed transform).
     const int32 SpawnIndex = static_cast<int32>(
         GetTypeHash(DesignerId) ^ (static_cast<uint32>(Cell.X) << 8) ^ static_cast<uint32>(Cell.Y));
     const uint32 NameHash = FMythicNPCGenerator::GenerateNameHash(FactionIndex, Cell, SpawnIndex);
 
-    // ── Bind death + bookkeeping ──
     if (NPC->LifeComponent) {
         NPC->LifeComponent->OnDeath.AddDynamic(this, &AMythicDesignerSpawner::OnDesignerNPCDeath);
     }
@@ -324,7 +299,6 @@ void AMythicDesignerSpawner::SpawnNPC() {
     LiveNPCs.Add(WeakNPC);
     LiveNameHashes.Add(WeakNPC, NameHash);
 
-    // ── Registry + cache ──
     if (UMythicLivingWorldSubsystem *LWS = GetLWS()) {
         if (UMythicDesignerSpawnerRegistry *Reg = LWS->GetDesignerSpawnerRegistry()) {
             Reg->RecordSpawn(DesignerId);
@@ -344,13 +318,11 @@ void AMythicDesignerSpawner::OnDesignerNPCDeath(AActor *DeadActor) {
     AMythicNPCCharacter *DeadNPC = Cast<AMythicNPCCharacter>(DeadActor);
     const TWeakObjectPtr<AMythicNPCCharacter> WeakDead(DeadNPC);
 
-    // Resolve the cached NameHash for the perma-death record BEFORE we drop it from the live maps.
     uint32 DeadNameHash = 0;
     if (const uint32 *Found = LiveNameHashes.Find(WeakDead)) {
         DeadNameHash = *Found;
     }
 
-    // Drop from the live set.
     LiveNPCs.RemoveAllSwap([&](const TWeakObjectPtr<AMythicNPCCharacter> &Ptr) {
         return Ptr == WeakDead || !Ptr.IsValid();
     });
@@ -359,7 +331,6 @@ void AMythicDesignerSpawner::OnDesignerNPCDeath(AActor *DeadActor) {
     const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
     CachedLastDeathTime = Now;
 
-    // This is the terminal (perma-death) death only when the spawner has exhausted MaxSpawnsEver.
     const bool bPerma = bMarkPermaDeadOnDeath && (CachedSpawnsEver >= MaxSpawnsEver);
 
     UMythicLivingWorldSubsystem *LWS = GetLWS();
@@ -373,10 +344,8 @@ void AMythicDesignerSpawner::OnDesignerNPCDeath(AActor *DeadActor) {
         bCachedPermaDead = true;
     }
 
-    // Route a terminal death through the PersistentNPCRegistry so the dead NameHash is permanently blocked from reuse
-    // (mirrors the embodied-NPC perma-death contract). Only on a terminal death — non-terminal respawns are NOT perma.
     if (bPerma && LWS && LWS->IsSystemActive() && DeadNameHash != 0) {
-        FMythicFactionId Faction; // governing faction of the gating tag (best-effort; invalid = factionless)
+        FMythicFactionId Faction;
         FMythicCellCoord Cell;
         if (UMythicFactionDatabase *DB = LWS->GetFactionDatabase()) {
             if (Conditions.GatingFactionTag.IsValid()) {
@@ -388,11 +357,10 @@ void AMythicDesignerSpawner::OnDesignerNPCDeath(AActor *DeadActor) {
             Cell = Grid->WorldToCell(DeathLoc);
         }
         if (UMythicPersistentNPCRegistry *PReg = LWS->GetPersistentNPCRegistry()) {
-            PReg->RegisterDeath(DeadNameHash, Faction, FGameplayTag() /*empty role*/, Cell, Now, LWS);
+            PReg->RegisterDeath(DeadNameHash, Faction, FGameplayTag(), Cell, Now, LWS);
         }
     }
 
-    // Terminal => stop forever.
     if (bCachedPermaDead || CachedSpawnsEver >= MaxSpawnsEver) {
         StopEvaluation();
     }

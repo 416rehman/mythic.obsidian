@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -10,7 +9,6 @@
 class UMythicItemInstance;
 class UMythicInventoryComponent;
 
-// the delta for a single attribute between an inspected item and the currently equipped one
 USTRUCT(BlueprintType)
 struct FAttributeDiff {
     GENERATED_BODY()
@@ -30,7 +28,6 @@ struct FAttributeDiff {
     UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison")
     bool bIsUpgrade = false;
 
-    // compare two attribute diff structures for equality
     bool operator==(const FAttributeDiff& Other) const {
         return AttributeName.EqualTo(Other.AttributeName) &&
                FMath::IsNearlyEqual(CurrentValue, Other.CurrentValue) &&
@@ -53,13 +50,29 @@ public:
     UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category="Mythic|Comparison")
     UItemTooltipVM *EquippedItem = nullptr;
 
-    // per-attribute diffs between inspected and equipped
+    // per-attribute diffs between inspected and equipped (key-union: rows for stats present on EITHER side; base
+    // weapon damage min/max, attack speed and durability are included alongside the rolled affixes)
     UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category="Mythic|Comparison")
     TArray<FAttributeDiff> AttributeDiffs;
 
-    // factory: builds a comparison between an inspected item and whatever is equipped in its matching slot
+    // net upgrade count across the diffs (+1 per upgraded stat, -1 per downgraded; see
+    // FMythicStatDeltaCore::ComputeUpgradeScore) — drives the at-a-glance verdict arrow
+    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category="Mythic|Comparison")
+    int32 UpgradeScore = 0;
+
+    // true when UpgradeScore > 0 (equipping is a net stat gain vs the slot it would occupy)
+    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = "SetIsUpgradeOverall", Getter = "GetIsUpgradeOverall", Category="Mythic|Comparison")
+    bool bIsUpgradeOverall = false;
+
+    // factory: builds a comparison between an inspected item and the equipped item it would actually REPLACE.
+    // TargetSlotIndex (an index into Inventory->GetAllSlots()) pins the candidate slot explicitly (e.g. hovering a
+    // specific ring slot); pass -1 to auto-pick. Auto-pick rule for an item that fits multiple equipment slots:
+    // a matching EMPTY slot wins first (equipping there replaces nothing — the comparison is vs nothing, a pure
+    // gain), otherwise the occupied matching slot with the BEST upgrade score (the replacement a rational player
+    // would make; also the old "first whitelisted slot" bug fix — see the .cpp).
     UFUNCTION(BlueprintCallable, Category="Mythic|Comparison")
-    static UItemComparisonVM *CreateComparison(UObject *Outer, UMythicItemInstance *Inspected, UMythicInventoryComponent *Inventory);
+    static UItemComparisonVM *CreateComparison(UObject *Outer, UMythicItemInstance *Inspected, UMythicInventoryComponent *Inventory,
+                                               int32 TargetSlotIndex = -1);
 
     void SetInspectedItem(UItemTooltipVM *InInspectedItem);
     UItemTooltipVM *GetInspectedItem() const;
@@ -67,4 +80,8 @@ public:
     UItemTooltipVM *GetEquippedItem() const;
     void SetAttributeDiffs(TArray<FAttributeDiff> InAttributeDiffs);
     TArray<FAttributeDiff> GetAttributeDiffs() const;
+    void SetUpgradeScore(int32 InUpgradeScore);
+    int32 GetUpgradeScore() const;
+    void SetIsUpgradeOverall(bool bInIsUpgradeOverall);
+    bool GetIsUpgradeOverall() const;
 };

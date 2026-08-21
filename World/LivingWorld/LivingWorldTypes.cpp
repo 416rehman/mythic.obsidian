@@ -1,4 +1,3 @@
-// Mythic Living World System — Core type log category definitions
 
 #include "World/LivingWorld/LivingWorldTypes.h"
 

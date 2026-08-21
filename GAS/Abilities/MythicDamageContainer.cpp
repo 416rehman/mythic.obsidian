@@ -2,7 +2,6 @@
 
 #include "Destructible.h"
 
-/// Determines if an actor or any of its components implement the Destructible interface.
 bool FMythicDamageContainerSpec::IsDestructible(AActor *Actor) {
     bool bIsDestructible = Actor->GetClass()->ImplementsInterface(UDestructible::StaticClass());
     if (!bIsDestructible) {
@@ -17,12 +16,10 @@ bool FMythicDamageContainerSpec::IsDestructible(AActor *Actor) {
     return bIsDestructible;
 }
 
-/// Adds hit results and target actors to the damage container, separating destructible and non-destructible targets.
 void FMythicDamageContainerSpec::AddTargets(const TArray<FHitResult> &HitResults, const TArray<AActor *> &TargetActors) {
     for (size_t i = 0; i < HitResults.Num(); i++) {
         FHitResult HitResult = HitResults[i];
 
-        // If actor is Destructible, add it to DestructionTargets
 
         auto Actor = HitResult.GetActor();
         if (!Actor) {
@@ -32,7 +29,6 @@ void FMythicDamageContainerSpec::AddTargets(const TArray<FHitResult> &HitResults
         FGameplayAbilityTargetData_SingleTargetHit *TargetHit = new FGameplayAbilityTargetData_SingleTargetHit();
         TargetHit->HitResult = HitResult;
 
-        // If the actor is Destructible, or any of its components implement the Destructible interface,
         if (IsDestructible(Actor)) {
             DestructibleTargetsHandle.Add(TargetHit);
         }
@@ -50,7 +46,6 @@ void FMythicDamageContainerSpec::AddTargets(const TArray<FHitResult> &HitResults
                 continue;
             }
 
-            // Cast to Destructible, if it implements it, add to DestructibleTargetsHandle, else add to TargetsHandle
             if (IsDestructible(Actor)) {
                 DestructibleActors->TargetActorArray.Add(Actor);
             }
@@ -59,9 +54,6 @@ void FMythicDamageContainerSpec::AddTargets(const TArray<FHitResult> &HitResults
             }
         }
 
-        // Hand ownership to the handle (which wraps the raw ptr in a TSharedPtr) ONLY for a non-empty category, and
-        // delete the other allocation — otherwise the empty category's `new` leaks on every hit. This is the common
-        // case on the melee/AoE chokepoint: a swing hitting only non-destructibles leaves DestructibleActors empty.
         if (DestructibleActors->TargetActorArray.Num() > 0) {
             DestructibleTargetsHandle.Add(DestructibleActors);
         }

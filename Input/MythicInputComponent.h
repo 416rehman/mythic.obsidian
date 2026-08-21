@@ -14,11 +14,6 @@ class UInputAction;
 class UObject;
 
 
-/**
- * UMythicInputComponent
- *
- *	Component used to manage input mappings and bindings using an input config data asset.
- */
 UCLASS(Config = Input)
 class MYTHIC_API UMythicInputComponent : public UEnhancedInputComponent {
     GENERATED_BODY()

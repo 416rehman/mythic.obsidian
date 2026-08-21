@@ -1,19 +1,11 @@
-// Mythic Living World — Appearance + Faction Color Tests
-// Covers the pure, deterministic resolution core delivered in Step 1:
-//   - MythicAppearanceDefaults::GetCodeDefaultOutfitSets / palettes (well-formed, >=1 always-eligible)
-//   - FMythicAppearanceResolver::Resolve (deterministic, varies by hash, role/wealth gating, demographic unpack)
-//   - FMythicAppearanceResolver::WealthTierFromHash (in range, deterministic)
-//   - MythicFactionColor::DeterministicColorForId / GetFactionColor (deterministic, hue-separated, override-aware)
-// Run via: Session Frontend → Automation → Mythic.LivingWorld.Appearance / Mythic.LivingWorld.FactionColor
 
 #include "Misc/AutomationTest.h"
 #include "World/LivingWorld/Appearance/AppearanceTypes.h"
 #include "World/LivingWorld/Factions/FactionColor.h"
 #include "World/LivingWorld/Factions/FactionDatabase.h"
-#include "World/LivingWorld/MythicTags_LivingWorld.h" // native NPC.Role.* tags
+#include "World/LivingWorld/MythicTags_LivingWorld.h"
 
 namespace {
-    // Pack demographic flags the same way FMythicNPCGenerator does: [3b age @5][1b gender @4].
     uint8 PackDemographics(uint8 AgeBracket, bool bFemale) {
         return static_cast<uint8>(((AgeBracket & 0x7u) << 5) | ((bFemale ? 1u : 0u) << 4));
     }
@@ -21,16 +13,13 @@ namespace {
     FMythicAppearance ResolveWith(uint32 NameHash, uint8 Demo, const FGameplayTag& Role, uint8 WealthTier,
                                   TConstArrayView<FMythicOutfitSet> Sets) {
         return FMythicAppearanceResolver::Resolve(
-            NameHash, Demo, Role, /*FactionIndex*/ 3, WealthTier,
+            NameHash, Demo, Role, 3, WealthTier,
             FColor::Red, FColor::Blue, Sets,
             MythicAppearanceDefaults::GetCodeDefaultSkinTonePalette(),
             MythicAppearanceDefaults::GetCodeDefaultHairTonePalette());
     }
-} // namespace
+}
 
-// ─────────────────────────────────────────────────────────────
-// Code defaults are well-formed
-// ─────────────────────────────────────────────────────────────
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicAppearanceDefaultsWellFormedTest,
@@ -57,9 +46,6 @@ bool FMythicAppearanceDefaultsWellFormedTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Resolve — deterministic, in-range, varies by hash
-// ─────────────────────────────────────────────────────────────
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicAppearanceResolveDeterministicTest,
@@ -70,12 +56,10 @@ bool FMythicAppearanceResolveDeterministicTest::RunTest(const FString& Parameter
     TConstArrayView<FMythicOutfitSet> Sets = MythicAppearanceDefaults::GetCodeDefaultOutfitSets();
     const uint8 Demo = PackDemographics(2, false);
 
-    // Determinism: same inputs => byte-identical descriptor.
     const FMythicAppearance A = ResolveWith(0xABCDEF01u, Demo, FGameplayTag(), 1, Sets);
     const FMythicAppearance B = ResolveWith(0xABCDEF01u, Demo, FGameplayTag(), 1, Sets);
     TestTrue(TEXT("Resolve is deterministic for identical inputs"), A == B);
 
-    // Variation: different hashes produce different looks across a sweep (not all identical).
     bool bSawDifference = false;
     for (uint32 i = 1; i < 64 && !bSawDifference; ++i) {
         const uint32 Hash = i * 2654435761u;
@@ -86,18 +70,13 @@ bool FMythicAppearanceResolveDeterministicTest::RunTest(const FString& Parameter
     }
     TestTrue(TEXT("Resolve varies across different name hashes"), bSawDifference);
 
-    // Colors are copied straight through.
     TestEqual(TEXT("Primary color copied from faction primary"), A.PrimaryColor, FColor::Red);
     TestEqual(TEXT("Secondary color copied from faction secondary"), A.SecondaryColor, FColor::Blue);
 
-    // Chosen outfit set index is valid.
     TestTrue(TEXT("OutfitSetId indexes the candidate set list"), Sets.IsValidIndex(A.OutfitSetId));
     return true;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Resolve — demographic unpack
-// ─────────────────────────────────────────────────────────────
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicAppearanceDemographicUnpackTest,
@@ -120,9 +99,6 @@ bool FMythicAppearanceDemographicUnpackTest::RunTest(const FString& Parameters) 
     return true;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Resolve — role + wealth gating selects the right set
-// ─────────────────────────────────────────────────────────────
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicAppearanceGatingTest,
@@ -130,7 +106,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicAppearanceGatingTest::RunTest(const FString& Parameters) {
-    // Build a controlled candidate list: a poor-only set (idx 0) and a rich-only set (idx 1), both any-role.
     TArray<FMythicOutfitSet> Sets;
     {
         FMythicOutfitSet& Poor = Sets.AddDefaulted_GetRef();
@@ -146,18 +121,15 @@ bool FMythicAppearanceGatingTest::RunTest(const FString& Parameters) {
         Rich.BodyTypeCount = 1;
     }
 
-    // Wealth tier 0 can only choose the poor set (idx 0) across a hash sweep.
     for (uint32 i = 1; i < 64; ++i) {
-        const FMythicAppearance R = ResolveWith(i * 2654435761u, 0, FGameplayTag(), /*WealthTier*/ 0, Sets);
+        const FMythicAppearance R = ResolveWith(i * 2654435761u, 0, FGameplayTag(), 0, Sets);
         TestEqual(TEXT("Wealth 0 always lands on the poor set"), (int32)R.OutfitSetId, 0);
     }
-    // Wealth tier 3 can only choose the rich set (idx 1).
     for (uint32 i = 1; i < 64; ++i) {
-        const FMythicAppearance R = ResolveWith(i * 2654435761u, 0, FGameplayTag(), /*WealthTier*/ 3, Sets);
+        const FMythicAppearance R = ResolveWith(i * 2654435761u, 0, FGameplayTag(), 3, Sets);
         TestEqual(TEXT("Wealth 3 always lands on the rich set"), (int32)R.OutfitSetId, 1);
     }
 
-    // Role gating: a role-restricted set is skipped when the NPC's role does not match.
     {
         TArray<FMythicOutfitSet> RoleSets;
         FMythicOutfitSet& AnyRole = RoleSets.AddDefaulted_GetRef();
@@ -170,10 +142,9 @@ bool FMythicAppearanceGatingTest::RunTest(const FString& Parameters) {
         GuardOnly.RoleTag = TAG_NPC_ROLE_GUARD;
         GuardOnly.MinWealthTier = 0;
         GuardOnly.MaxWealthTier = 3;
-        GuardOnly.RelativeWeight = 1000.0f; // would dominate IF eligible
+        GuardOnly.RelativeWeight = 1000.0f;
         GuardOnly.BodyTypeCount = 1;
 
-        // A civilian (role mismatch) can never get the guard-only set even though it has huge weight.
         for (uint32 i = 1; i < 64; ++i) {
             const FMythicAppearance R = ResolveWith(i * 2654435761u, 0, TAG_NPC_ROLE_CIVILIAN, 1, RoleSets);
             TestEqual(TEXT("Non-guard never selects the guard-only set"), (int32)R.OutfitSetId, 0);
@@ -183,9 +154,6 @@ bool FMythicAppearanceGatingTest::RunTest(const FString& Parameters) {
     return true;
 }
 
-// ─────────────────────────────────────────────────────────────
-// WealthTierFromHash — in range, deterministic
-// ─────────────────────────────────────────────────────────────
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicAppearanceWealthTierTest,
@@ -207,9 +175,6 @@ bool FMythicAppearanceWealthTierTest::RunTest(const FString& Parameters) {
     return true;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Faction color — deterministic, hue-separated, override-aware
-// ─────────────────────────────────────────────────────────────
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicFactionColorTest,
@@ -217,7 +182,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicFactionColorTest::RunTest(const FString& Parameters) {
-    // Deterministic per index.
     for (int32 i = 0; i < 32; ++i) {
         const uint8 Idx = static_cast<uint8>(i);
         TestEqual(TEXT("DeterministicColorForId is stable"),
@@ -225,7 +189,6 @@ bool FMythicFactionColorTest::RunTest(const FString& Parameters) {
                   MythicFactionColor::DeterministicColorForId(Idx));
     }
 
-    // Adjacent indices land on distinguishable colors (golden-ratio hue separation).
     bool bAdjacentDiffer = true;
     for (int32 i = 0; i < 16; ++i) {
         const FColor A = MythicFactionColor::DeterministicColorForId(static_cast<uint8>(i));
@@ -237,11 +200,9 @@ bool FMythicFactionColorTest::RunTest(const FString& Parameters) {
     }
     TestTrue(TEXT("Adjacent faction indices have distinct colors"), bAdjacentDiffer);
 
-    // Colors are opaque.
     TestEqual(TEXT("Deterministic faction color is opaque"),
               (int32)MythicFactionColor::DeterministicColorForId(7).A, 255);
 
-    // GetFactionColor: no override => deterministic-from-id path.
     {
         FMythicFactionData Data;
         Data.bOverrideFactionColor = false;
@@ -249,7 +210,6 @@ bool FMythicFactionColorTest::RunTest(const FString& Parameters) {
                   MythicFactionColor::GetFactionColor(Data, 5),
                   MythicFactionColor::DeterministicColorForId(5));
     }
-    // GetFactionColor: override => authored color, regardless of index.
     {
         FMythicFactionData Data;
         Data.bOverrideFactionColor = true;

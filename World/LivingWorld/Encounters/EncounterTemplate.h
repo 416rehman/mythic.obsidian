@@ -1,5 +1,3 @@
-// Mythic Living World — Encounter Template
-// Data-driven encounter definitions for the Encounter Director.
 
 #pragma once
 
@@ -8,41 +6,26 @@
 #include "Mass/EntityHandle.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "World/LivingWorld/Factions/FactionDatabase.h"
+#include "World/LivingWorld/Territory/MythicDanger.h"
 #include "EncounterTemplate.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogMythEncounter, Log, All);
 
-// ─────────────────────────────────────────────────────────────
-// Encounter State
-// ─────────────────────────────────────────────────────────────
 
 UENUM(BlueprintType)
 enum class EMythicEncounterState : uint8 {
-    /** Waiting for conditions to be met */
     Pending UMETA(DisplayName = "Pending"),
 
-    /** Spawning/setting up encounter entities */
     Spawning UMETA(DisplayName = "Spawning"),
 
-    /** Encounter is active and running */
     Active UMETA(DisplayName = "Active"),
 
-    /** Encounter is winding down / cleanup */
     Completing UMETA(DisplayName = "Completing"),
 
-    /** Encounter finished, awaiting removal */
     Completed UMETA(DisplayName = "Completed")
 };
 
-// ─────────────────────────────────────────────────────────────
-// Encounter Template — Data-driven definition
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Defines the prerequisites and parameters for an encounter type.
- * Stored in data assets. The Encounter Director evaluates templates against
- * current world state to decide which encounters to spawn.
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicEncounterTemplate {
     GENERATED_BODY()
@@ -99,47 +82,62 @@ struct MYTHIC_API FMythicEncounterTemplate {
     /** Max duration before the encounter auto-completes (game time seconds, 0 = infinite) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0"))
     float MaxDurationSeconds = 600.0f;
+
+    // ── Reputation-Driven Ambient Encounters (INERT-BY-DEFAULT) ──
+    /**
+     * OPT-IN reputation band this encounter keys off (Reputation.Band.Feared / Reputation.Band.Renowned). When EMPTY
+     * (the default), the template ignores party reputation ENTIRELY and behaves byte-identically to today. When set, the
+     * EncounterDirector gates + scales this template by whether the co-op party's reputation matches the band: a
+     * Feared-band template (bounty-seekers / glory-challengers) fires only for an infamous or hunted party; a
+     * Renowned-band template (rivals / help-seekers) fires only for a celebrated party. A party that doesn't match the
+     * band gates the template OUT that evaluation (it doesn't spawn). See FMythicReputationEncounterMath.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (Categories = "Reputation.Band"))
+    FGameplayTag RequiredReputationBand;
+
+    /**
+     * How hard the party's reputation amplifies this template's spawn probability + pack size once RequiredReputationBand
+     * matches. 1.0 (the default) means: at full band intensity the effective weight/pack roughly doubles; at the band
+     * floor it is barely raised. 0 = matched-but-no-amplification (pure gate). Only read when RequiredReputationBand is
+     * set, so the default leaves opted-out templates untouched. Clamped to >= 0 in the math (amplify-only).
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0"))
+    float ReputationWeightScale = 1.0f;
+
+    // ── Cargo-heat ambush bias (WAVE O / O5, INERT-BY-DEFAULT) ──
+    /**
+     * OPT-IN: mark this template as an AMBUSH so it is biased by nearby CARGO HEAT — the risk a player manufactures by
+     * hauling valuable goods through dangerous country. When true, the template's spawn probability is multiplied by
+     * (1 + max cargo heat near the candidate cell). Heat is 0 below danger tier 2 and 0 without valuable cargo, so the
+     * multiplier is exactly 1.0 for anyone not running loaded caravans through bad country — a light traveller is never
+     * punished. FALSE (the default) leaves the template completely untouched.
+     *
+     * This is the "greed manufactures combat content" arrow: profit and danger are the same dial.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+    bool bCargoHeatAmbush = false;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Active Encounter — Runtime instance
-// ─────────────────────────────────────────────────────────────
 
-/**
- * A live encounter in the world. Created by the Encounter Director
- * from an FMythicEncounterTemplate when prerequisites are met.
- *
- * ~64 bytes per active encounter (with template tag inline).
- */
 struct FMythicActiveEncounter {
-    /** Unique ID for this encounter instance */
     uint32 EncounterId = 0;
 
-    /** The template this was spawned from */
     FGameplayTag TemplateTag;
 
-    /** Current state */
     EMythicEncounterState State = EMythicEncounterState::Pending;
 
-    /** Cell where the encounter is centered */
     FMythicCellCoord Cell;
 
-    /** Faction that is driving this encounter (e.g., the patrol faction) */
     FMythicFactionId OriginFaction;
 
-    /** World time when this encounter was activated */
     double ActivationTime = 0.0;
 
-    /** Max duration from template */
     float MaxDurationSeconds = 600.0f;
 
-    /** Number of entities spawned for this encounter */
     int32 EntityCount = 0;
 
-    /** MASS entity handles spawned for this encounter — used for cleanup on completion */
     TArray<FMassEntityHandle> SpawnedEntities;
 
-    /** Whether this encounter has timed out */
     bool HasTimedOut(double CurrentWorldTime) const {
         if (MaxDurationSeconds <= 0.0f) {
             return false;
@@ -148,22 +146,9 @@ struct FMythicActiveEncounter {
     }
 };
 
-// ─────────────────────────────────────────────────────────────
-// Code-default encounter templates (no authored asset required)
-// ─────────────────────────────────────────────────────────────
 
 namespace MythicEncounterDefaults {
-/**
- * Fill Out with a built-in, all-zero-prerequisite encounter template set (Patrol / BanditAmbush / Wildlife / Raid).
- * The EncounterDirector uses this as a FALLBACK when no EncounterTemplateDatabase asset is assigned (or the assigned
- * asset yields zero templates) — so the encounter system is FUNCTIONAL out of the box with no designer authoring.
- *
- * These are deliberately generic CODE DEFAULTS: every member embodies as the generic EmbodiedNPCClass (the humanoid
- * gate path), NOT a bandit/wolf-specific mesh. KIND-per-encounter visuals (a wolf pack that actually looks like wolves)
- * is a downstream content slice; an authored database always WINS over these defaults (the director prefers the asset
- * and only falls back when it's absent/empty). All prerequisites are zeroed so they spawn on any map/faction state.
- *
- * Pure (writes only to Out from compile-time constants) → deterministic + unit-testable.
- */
 MYTHIC_API void BuildDefaultTemplates(TArray<FMythicEncounterTemplate>& Out);
-} // namespace MythicEncounterDefaults
+
+MYTHIC_API int32 DangerScaledEntityCount(int32 BaseCount, EMythicDangerTier Tier, int32 MaxEntityCount = 20);
+}

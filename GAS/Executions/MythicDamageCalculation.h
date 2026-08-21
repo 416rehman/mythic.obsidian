@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -6,9 +5,6 @@
 #include "GameplayEffectExecutionCalculation.h"
 #include "MythicDamageCalculation.generated.h"
 
-/**
- * 
- */
 UCLASS()
 class MYTHIC_API UMythicDamageCalculation : public UGameplayEffectExecutionCalculation {
     GENERATED_BODY()

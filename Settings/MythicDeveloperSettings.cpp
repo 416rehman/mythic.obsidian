@@ -5,8 +5,6 @@
 UMythicDeveloperSettings::UMythicDeveloperSettings() {}
 
 UMythicAbilityTagRelationshipMapping *UMythicDeveloperSettings::GetAbilityTagRelationshipMapping() const {
-    // Get() returns the already-loaded asset, or nullptr if not loaded yet
-    // The async preloading happens in MythicAsyncLoadingSubsystem::Initialize()
     return DefaultAbilityTagRelationshipMapping.Get();
 }
 
@@ -17,7 +15,28 @@ void UMythicDeveloperSettings::GetStartupAssetPaths(TArray<FSoftObjectPath> &Out
     if (!DefaultItemInputAbility.IsNull()) {
         OutPaths.Add(DefaultItemInputAbility.ToSoftObjectPath());
     }
+    if (!DefaultAchievementSet.IsNull()) {
+        OutPaths.Add(DefaultAchievementSet.ToSoftObjectPath());
+    }
+    if (!DefaultUnlockRuleSet.IsNull()) {
+        OutPaths.Add(DefaultUnlockRuleSet.ToSoftObjectPath());
+    }
+    if (!DefaultCodexLibrary.IsNull()) {
+        OutPaths.Add(DefaultCodexLibrary.ToSoftObjectPath());
+    }
+    if (!DefaultRenownTierTable.IsNull()) {
+        OutPaths.Add(DefaultRenownTierTable.ToSoftObjectPath());
+    }
+    if (!DefaultTitleRegistry.IsNull()) {
+        OutPaths.Add(DefaultTitleRegistry.ToSoftObjectPath());
+    }
     if (!LivingWorldSettings.IsNull()) {
         OutPaths.Add(LivingWorldSettings.ToSoftObjectPath());
+    }
+    if (!DefaultMountClass.IsNull()) {
+        OutPaths.Add(DefaultMountClass.ToSoftObjectPath());
+    }
+    if (!RidingProficiency.IsNull()) {
+        OutPaths.Add(RidingProficiency.ToSoftObjectPath());
     }
 }

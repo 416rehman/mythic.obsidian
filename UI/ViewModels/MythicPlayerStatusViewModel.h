@@ -10,20 +10,8 @@
 class UAbilitySystemComponent;
 struct FOnAttributeChangeData;
 
-// Fired when health DECREASES. The view plays its delayed-damage / "chip" animation off this (no C++ tick / interp).
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMythicHealthDamaged, float, Delta, float, NewPercent);
 
-/**
- * Player status ViewModel (MVVM) — health / stamina / shield fractions + status flags for the player HUD.
- *
- * Driven 100% by EVENTS: GAS attribute-change delegates (GetGameplayAttributeValueChangeDelegate) and tag events
- * (RegisterGameplayTagEvent). NO Tick, no polling. The View (a Widget Blueprint) binds to these FieldNotify properties
- * via the UMG ViewModel binding panel and plays its own animations on OnHealthDamaged for the chip/delayed-damage.
- *
- * Usage: the WBP creates this VM (UMG ViewModel "Create Instance") and calls InitializeForASC on construct with the
- * local player's ASC (e.g. PlayerState/Pawn ASC). Unbinds itself on destroy (the player ASC lives on the persistent
- * PlayerState and is reused across pawns, so dangling delegates must be cleaned up).
- */
 UCLASS(BlueprintType)
 class MYTHIC_API UMythicPlayerStatusViewModel : public UMVVMViewModelBase {
     GENERATED_BODY()
@@ -48,6 +36,14 @@ public:
     float ShieldPercent = 0.0f;
 
     // ── Status flags (b-prefixed -> explicit accessor names so the getters/setters drop the 'b') ──
+    /**
+     * The player is in a fight (GAS.State.InCombat). Drives the contextual HUD: the vitals are shown while this is
+     * true and stand down when it clears. Server-applied on any landed hit and replicated, so it is the same answer
+     * the fast-travel and mount-summon blocks use — the HUD cannot disagree with the rules.
+     */
+    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetInCombat, Getter = GetInCombat, meta = (AllowPrivateAccess))
+    bool bInCombat = false;
+
     UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetExhausted, Getter = GetExhausted, meta = (AllowPrivateAccess))
     bool bExhausted = false;
 
@@ -69,13 +65,31 @@ public:
     UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetFrozen, Getter = GetFrozen, meta = (AllowPrivateAccess))
     bool bFrozen = false;
 
-    // Setters (broadcast field-notify) + trivial getters.
     void SetHealthPercent(float V);
     float GetHealthPercent() const { return HealthPercent; }
     void SetStaminaPercent(float V);
     float GetStaminaPercent() const { return StaminaPercent; }
     void SetShieldPercent(float V);
     float GetShieldPercent() const { return ShieldPercent; }
+
+    // Raw values, so the HUD can print "132 / 500" instead of only drawing a fraction. Deliberately plain getters
+    // rather than more FieldNotify fields: they change on exactly the same beat as the percents, so anything already
+    // listening to a percent can read these in the same handler.
+    UFUNCTION(BlueprintPure, Category = "Vitals")
+    float GetCurrentHealth() const { return CurHealth; }
+    UFUNCTION(BlueprintPure, Category = "Vitals")
+    float GetMaxHealth() const { return MaxHealthV; }
+    UFUNCTION(BlueprintPure, Category = "Vitals")
+    float GetCurrentStamina() const { return CurStamina; }
+    UFUNCTION(BlueprintPure, Category = "Vitals")
+    float GetMaxStamina() const { return MaxStaminaV; }
+    UFUNCTION(BlueprintPure, Category = "Vitals")
+    float GetCurrentShield() const { return CurShield; }
+    UFUNCTION(BlueprintPure, Category = "Vitals")
+    float GetMaxShield() const { return MaxShieldV; }
+    void SetInCombat(bool V);
+    bool GetInCombat() const { return bInCombat; }
+
     void SetExhausted(bool V);
     bool GetExhausted() const { return bExhausted; }
     void SetBurning(bool V);
@@ -100,7 +114,6 @@ private:
 
     TWeakObjectPtr<UAbilitySystemComponent> ASC;
 
-    // Cached raw values so a percent can be recomputed when either the current OR the max attribute changes.
     float CurHealth = 0.0f, MaxHealthV = 1.0f;
     float CurStamina = 0.0f, MaxStaminaV = 1.0f;
     float CurShield = 0.0f, MaxShieldV = 1.0f;

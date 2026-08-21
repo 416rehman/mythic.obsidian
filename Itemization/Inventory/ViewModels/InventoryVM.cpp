@@ -1,4 +1,3 @@
-// 
 
 
 #include "InventoryVM.h"
@@ -9,7 +8,6 @@
 #include "Settings/MythicDeveloperSettings.h"
 #include "Engine/Texture2D.h"
 
-// ---------------- UInventoryTabVM -----------------
 void UInventoryTabVM::SetTabName(FText InTabName) {
     if (UE_MVVM_SET_PROPERTY_VALUE(TabName, InTabName)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(TabName);
@@ -83,7 +81,6 @@ void UInventoryTabVM::Initialize(FText InTabName, UTexture2D *InTabIcon, FGamepl
     SetSlots(InSlots);
 }
 
-// ---------------- UInventoryVM -----------------
 void UInventoryVM::SetInventoryTabs(TArray<TObjectPtr<UInventoryTabVM>> InTabs) {
     if (UE_MVVM_SET_PROPERTY_VALUE(InventoryTabs, InTabs)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(InventoryTabs);
@@ -188,7 +185,6 @@ void UInventoryVM::Clear() {
 }
 
 TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythicInventorySlotEntry> &allSlots, TSet<int32> SlotIndices) {
-    // map GroupTag -> TabVM
     TMap<FGameplayTag, TObjectPtr<UInventoryTabVM>> GroupToTabMap;
 
     auto AsArray = SlotIndices.Array();
@@ -200,12 +196,10 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythic
             continue;
         }
 
-        // get or create tab for this group
         TObjectPtr<UInventoryTabVM> *FoundTab = GroupToTabMap.Find(Entry.GroupTag);
         if (FoundTab == nullptr) {
             auto NewTabVM = NewObject<UInventoryTabVM>(this);
 
-            // get group info from Profile if available
             FText GroupName = FText::FromString(Entry.GroupTag.ToString());
             UTexture2D *GroupIcon = nullptr;
             bool bCanTake = true;
@@ -226,7 +220,6 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythic
             FoundTab = GroupToTabMap.Find(Entry.GroupTag);
         }
 
-        // create slot VM and add to tab
         if (FoundTab && *FoundTab) {
             auto NewSlotVM = NewObject<UItemSlotVM>(this);
             NewSlotVM->Initialize(Entry.SlottedItemInstance, this, Entry.SlotDefinition, AbsIndex);
@@ -239,11 +232,9 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythic
         }
     }
 
-    // convert to array and sort by DisplayOrder
     TArray<TObjectPtr<UInventoryTabVM>> TabsArray;
     GroupToTabMap.GenerateValueArray(TabsArray);
 
-    // sort by DisplayOrder from Profile
     if (OwningInventoryComponent && OwningInventoryComponent->InventoryProfile) {
         Algo::SortBy(TabsArray, [this](const UInventoryTabVM *Tab) -> int32 {
             const FInventorySlotGroup *Group = OwningInventoryComponent->InventoryProfile->SlotGroups.Find(Tab->GroupTag);
@@ -295,7 +286,6 @@ void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *I
         }
     }
 
-    // compute aggregates after all slot VMs are built
     RefreshAggregates(InInventoryComponent);
 }
 
@@ -304,7 +294,6 @@ void UInventoryVM::SetTransactionLocked(bool bInLocked) {
         bTransactionLocked = bInLocked;
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bTransactionLocked);
 
-        // handle client-side timeout timer for transaction lock state
         if (bTransactionLocked) {
             if (UMythicInventoryComponent* Comp = GetOwningInventoryComponent()) {
                 if (UWorld* World = Comp->GetWorld()) {
@@ -336,7 +325,6 @@ void UInventoryVM::ClearTransactionLock() {
 }
 
 void UInventoryVM::RefreshSlotFromInventory(UMythicInventoryComponent *Inventory, int32 AbsoluteIndex) {
-    // clear the transaction lock since a slot refresh indicates replication completed
     if (GetTransactionLocked()) {
         SetTransactionLocked(false);
     }
@@ -357,7 +345,6 @@ void UInventoryVM::RefreshSlotFromInventory(UMythicInventoryComponent *Inventory
         return;
     }
 
-    // update slot VM from current inventory data
     if (Entry.SlotDefinition) {
         SlotVM->Initialize(Entry.SlottedItemInstance, this, Entry.SlotDefinition, AbsoluteIndex);
         UE_LOG(Myth, Verbose, TEXT("Slot %d refreshed from inventory."), AbsoluteIndex);
@@ -392,21 +379,17 @@ void UInventoryVM::RefreshAggregates(UMythicInventoryComponent *Inventory) {
 
     const auto &AllSlots = Inventory->GetAllSlots();
 
-    // weight from the inventory component helper
     float ComputedWeight = Inventory->GetTotalCarriedWeight();
     SetTotalWeight(ComputedWeight);
 
-    // max carry weight and encumbrance from developer settings
     const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
     float SoftCap = Settings->EncumbranceSoftCapacity;
     float HardCap = Settings->EncumbranceHardCapacity;
     SetMaxCarryWeight(SoftCap);
     SetEncumbranceTier(MythicEncumbrance::ComputeTier(ComputedWeight, SoftCap, HardCap));
 
-    // currency from the inventory component helper
     SetTotalCurrency(Inventory->GetTotalCurrency());
 
-    // slot counts: only non-equipment slots
     int32 NumUsed = 0;
     int32 NumTotal = 0;
     for (const FMythicInventorySlotEntry &Entry : AllSlots) {
@@ -425,8 +408,6 @@ void UInventoryVM::RefreshAggregates(UMythicInventoryComponent *Inventory) {
     SetTotalSlots(NumTotal);
 }
 
-// ---------------- UInventorySelectionVM -----------------
-// tab
 void UInventorySelectionVM::SetSelectedTabVM(UInventoryTabVM *InSelectedTabVM) {
     if (UE_MVVM_SET_PROPERTY_VALUE(SelectedTabVM, InSelectedTabVM)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedTabVM);
@@ -439,7 +420,6 @@ UInventoryTabVM *UInventorySelectionVM::GetSelectedTabVM() const {
     return SelectedTabVM;
 }
 
-// slot vm
 void UInventorySelectionVM::SetSelectedSlotVM(UItemSlotVM *InSelectedSlotVM) {
     if (UE_MVVM_SET_PROPERTY_VALUE(SelectedSlotVM, InSelectedSlotVM)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(SelectedSlotVM);

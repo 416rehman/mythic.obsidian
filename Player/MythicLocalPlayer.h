@@ -6,9 +6,6 @@
 
 #include "MythicLocalPlayer.generated.h"
 
-/**
- * UMythicLocalPlayer
- */
 UCLASS()
 class MYTHIC_API UMythicLocalPlayer : public UCommonLocalPlayer
 {

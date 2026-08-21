@@ -10,11 +10,6 @@
 class UMythicSaveGame;
 class USaveGame;
 
-/**
- * Centralized Save/Load Subsystem.
- * Orchestrates calls to type-specific serialization helpers.
- */
-// Delegates for UI feedback
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSaveGameActionStarted, const FString&, SlotName);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSaveGameActionFinished, const FString&, SlotName, bool, bSuccess);
@@ -24,7 +19,6 @@ class MYTHIC_API UMythicSaveGameSubsystem : public UGameInstanceSubsystem {
     GENERATED_BODY()
 
 public:
-    // --- Delegates ---
 
     UPROPERTY(BlueprintAssignable, Category = "Save System | Events")
     FOnSaveGameActionStarted OnSaveGameActionStarted;
@@ -32,14 +26,11 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Save System | Events")
     FOnSaveGameActionFinished OnSaveGameActionFinished;
 
-    // --- Canonical save-slot names (single source of truth) ---
-    // Shared by the GameMode autosave write, the GameState world-load, and the MythicCheatManager Myth{Save,Load}
-    // {World,Character} defaults so every path uses one slot identity. (A per-account/EOS-keyed slot is a deferred
-    // follow-up that will replace these debug defaults — see BACKLOG.)
     static constexpr const TCHAR *DebugWorldSlot = TEXT("DebugWorld");
     static constexpr const TCHAR *DebugCharacterSlot = TEXT("DebugCharacter");
 
-    // --- Character Save/Load (Async) ---
+    static FString ResolvePerPlayerCharacterSlot(const FString &StablePlayerId);
+
 
     // Asynchronously saves character data. Validates source actor on GameThread, then writes to disk on background thread.
     UFUNCTION(BlueprintCallable, Category = "Save System")
@@ -51,7 +42,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Save System")
     TArray<FString> GetLocalSaveFiles() const;
 
-    // --- World Save (Async) ---
 
     UFUNCTION(BlueprintCallable, Category = "Save System")
     void SaveWorld(const FString &SlotName);
@@ -59,12 +49,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Save System")
     void LoadWorld(const FString &SlotName);
 
-    // --- Character Data Serialization (for Network Transfer) ---
     static bool SerializeCharacterToStruct(AActor *SourceActor, FSerializedCharacterData &OutData);
     static bool DeserializeCharacterFromStruct(AActor *TargetActor, const FSerializedCharacterData &InData);
     static bool ValidateCharacterData(const FSerializedCharacterData &InData, FString &OutError);
 
-    // --- Character Manifest (Menu System) ---
 
     // Returns list of all available characters from the central manifest.
     UFUNCTION(BlueprintCallable, Category = "Save System | Manifest")
@@ -78,42 +66,27 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Save System | Manifest")
     bool DeleteCharacter(const FString &CharacterID);
 
-    // ─── Debug accessors (Living World gameplay debugger, World State pane) ───
-    // Game-thread reads of the otherwise-private async-op tracking sets. Cheap counts, no mutation.
 
-    /** Number of save-slot writes currently in flight on background threads. */
     int32 GetInFlightSaveCount() const { return InFlightSaveSlots.Num(); }
 
-    /** Number of async loads awaiting their target actor. */
     int32 GetPendingLoadCount() const { return PendingLoadTargets.Num(); }
 
 private:
-    // --- Internal Callbacks ---
 
     void HandleAsyncSaveFinished(const FString &SlotName, const int32 UserIndex, bool bSuccess);
     void HandleAsyncLoadFinished(const FString &SlotName, const int32 UserIndex, USaveGame *LoadedSaveGame);
     void HandleAsyncWorldLoadFinished(const FString &SlotName, const int32 UserIndex, USaveGame *LoadedSaveGame);
 
-    // --- State helpers ---
 
-    // Tracks pending load target actors to ensure valid references when async load finishes
-    // Map<SlotName, WeakPointer<Actor>>
     TMap<FString, TWeakObjectPtr<AActor>> PendingLoadTargets;
 
-    // Slots with a background save write currently in flight. A second save to a slot already in this set is
-    // skipped, so two background threads never write the same .sav file concurrently (torn-save race). Covers
-    // both SaveCharacter and SaveWorld; cleared in HandleAsyncSaveFinished.
     TSet<FString> InFlightSaveSlots;
 
-    // --- Security Utilities ---
 
-    // Sanitizes slot names to prevent path traversal attacks
     static FString SanitizeSlotName(const FString &Input);
 
-    // Computes SHA1 checksum for data integrity
     static FString ComputeChecksum(const TArray<uint8> &Data);
 
-    // Validates checksum against expected value
     static bool ValidateChecksum(const TArray<uint8> &Data, const FString &ExpectedChecksum);
 
     void FindSaveGames(TArray<FString> &OutSaveFiles) const;

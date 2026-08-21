@@ -7,11 +7,6 @@
 
 class UObject;
 
-/**
- * UPhysicalMaterialWithTags
- *
- * A physical material that has gameplay tags associated with it
- */
 UCLASS()
 class UPhysicalMaterialWithTags : public UPhysicalMaterial {
     GENERATED_BODY()

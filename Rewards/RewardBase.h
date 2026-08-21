@@ -9,12 +9,11 @@ class ULootReward;
 class UAbilityReward;
 class UAttributeReward;
 class UXPReward;
-
+class URenownReward;
 USTRUCT(Blueprintable, BlueprintType)
 struct FRewardContext {
     GENERATED_BODY()
 
-    // Constructor for the reward context
     FRewardContext() {}
     FRewardContext(APlayerController *PlayerController) : PlayerController(PlayerController) {}
 
@@ -23,12 +22,6 @@ struct FRewardContext {
     APlayerController *PlayerController = nullptr;
 };
 
-/**
- * This is a base class for all rewards that can be given to the player.
- *
- * Rewards can be anything from items, to experience, to currency, to abilities, etc.
- * This should be subclassed to create specific rewards.
- */
 UCLASS(Abstract)
 class MYTHIC_API URewardBase : public UDataAsset {
     GENERATED_BODY()
@@ -38,18 +31,8 @@ public:
         return false;
     };
 
-    // returns a short human-readable preview of what this reward gives
     virtual FText GetPreviewText() const { return FText::GetEmpty(); }
 
-    /** 
-     * Returns true if this reward can be safely reapplied on character load.
-     * Override in subclasses:
-     * - AttributeReward: true (idempotent, sets attribute values)
-     * - AbilityReward: true (grants ability if not already granted)
-     * - ItemReward: FALSE (items are saved in inventory, would duplicate)
-     * - LootReward: FALSE (already spawned/claimed)
-     * - XPReward: FALSE (would cause progression loops)
-     */
     virtual bool CanReapplyOnLoad() const { return false; }
 };
 
@@ -77,14 +60,11 @@ struct FRewardsToGive {
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rewards")
     TObjectPtr<UAttributeReward> AttributeReward;
 
-    // Default helper to give reward to player. Uses default for each reward's context.
-    // IsPrivateItem: if set, any items dropped will be private to the player
-    // ItemLevel: if not ZERO, any items dropped will be at this level (otherwise, uses player's level)
-    // SpawnLocation: world location to drop items/loot at (e.g. the destroyed resource node). ZeroVector = fall back
-    //   to the player's pawn location (backward-compatible default).
-    // Returns false if any error occured.
+    // Renown Reward (scoped reputation toward a faction/region/global scope — see GAS/Progression/MythicRenownReward.h)
+    UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rewards")
+    TObjectPtr<URenownReward> RenownReward;
+
     bool Give(APlayerController *PlayerController, bool IsPrivateItem = true, int32 ItemLevel = 0, FVector SpawnLocation = FVector::ZeroVector) const;
 
-    // concatenates all non-null reward preview texts with newlines
     FText GetPreviewText() const;
 };

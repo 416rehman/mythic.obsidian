@@ -1,12 +1,34 @@
-// 
 
 #include "MythicAttributeSet_Defense.h"
 
 #include "GameplayEffectExtension.h"
 #include "Net/UnrealNetwork.h"
-#include "GameFramework/Pawn.h" // avatar pawn -> owning player controller
-#include "Player/MythicPlayerController.h" // ClientShowShieldAbsorbed (shield combat feedback RPC)
+#include "GameFramework/Pawn.h"
+#include "Player/MythicPlayerController.h"
 #include "NativeGameplayTags.h"
+#include "GAS/Effects/MythicStatusEffects.h"
+#include "GAS/Effects/MythicCrowdControl.h"
+#include "GAS/MythicAbilitySystemComponent.h"
+#include "GAS/Feedback/MythicTags_FeedbackCues.h"
+#include "AI/MythicTags_AI.h"
+#include "GAS/MythicGameplayEffectContext.h"
+
+namespace {
+    int32 ResolveTargetTierInt(const UAbilitySystemComponent *ASC) {
+        if (!ASC) {
+            return -1;
+        }
+        FGameplayTagContainer Owned;
+        ASC->GetOwnedGameplayTags(Owned);
+        for (const FGameplayTag &T : Owned) {
+            const int32 TierInt = GetAITierInt(T);
+            if (TierInt > 0) {
+                return TierInt;
+            }
+        }
+        return -1;
+    }
+}
 
 UE_DEFINE_GAMEPLAY_TAG(TAG_Status_Type_Burn, "Status.Type.Burn");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Status_Type_Poison, "Status.Type.Poison");
@@ -19,7 +41,6 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_Reaction_ExplosiveToxin, "Reaction.ExplosiveToxin");
 UE_DEFINE_GAMEPLAY_TAG(TAG_Event_ApplyStatus, "Event.ApplyStatus");
 
 UMythicAttributeSet_Defense::UMythicAttributeSet_Defense() {
-    // initialize incoming damage multiplier to standard scale
     InitIncomingDamageMultiplier(1.0f);
 }
 
@@ -27,7 +48,7 @@ void UMythicAttributeSet_Defense::PreAttributeChange(const FGameplayAttribute &A
     Super::PreAttributeChange(Attribute, NewValue);
 
     if (Attribute == GetShieldAttribute()) {
-        ShieldBeforeChange = GetShield(); // cache prechange value to compute exact shield damage absorbed
+        ShieldBeforeChange = GetShield();
         NewValue = FMath::Clamp(NewValue, 0.0f, GetMaxShield());
     }
     else if (Attribute == GetMaxShieldAttribute()) {
@@ -38,13 +59,11 @@ void UMythicAttributeSet_Defense::PreAttributeChange(const FGameplayAttribute &A
         || Attribute == GetPoisonResistanceAttribute() || Attribute == GetSlowResistanceAttribute()
         || Attribute == GetFreezeResistanceAttribute() || Attribute == GetStunResistanceAttribute()
         || Attribute == GetDecreasedDamageFromEnemiesUnderStatusEffectsAttribute()) {
-        // clamp probability and reduction fraction attributes to valid range
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     }
     else if (Attribute == GetBurnBuildupAttribute() || Attribute == GetBleedBuildupAttribute()
         || Attribute == GetPoisonBuildupAttribute() || Attribute == GetSlowBuildupAttribute()
         || Attribute == GetFreezeBuildupAttribute() || Attribute == GetStunBuildupAttribute()) {
-        // clamp buildup so it never goes below 0 (no permanent immunity black holes)
         NewValue = FMath::Max(0.0f, NewValue);
     }
     else if (Attribute == GetArmorAttribute()) {
@@ -63,7 +82,7 @@ void UMythicAttributeSet_Defense::PostGameplayEffectExecute(const FGameplayEffec
     }
     else if (Data.EvaluatedData.Attribute == GetShieldAttribute()) {
         const float Absorbed = ShieldBeforeChange - GetShield();
-        if (Absorbed > 0.0f) { // check if shield decreased indicating damage absorbed
+        if (Absorbed > 0.0f) {
             const UAbilitySystemComponent *ASC = GetOwningAbilitySystemComponent();
             const APawn *Avatar = ASC ? Cast<APawn>(ASC->GetAvatarActor()) : nullptr;
             if (AMythicPlayerController *PC = Avatar ? Cast<AMythicPlayerController>(Avatar->GetController()) : nullptr) {
@@ -72,10 +91,9 @@ void UMythicAttributeSet_Defense::PostGameplayEffectExecute(const FGameplayEffec
             }
         }
     }
-    
-    // Status Effect Buildup Threshold Checks
-    if (Data.EvaluatedData.Attribute == GetBurnBuildupAttribute() || Data.EvaluatedData.Attribute == GetPoisonBuildupAttribute() || 
-        Data.EvaluatedData.Attribute == GetBleedBuildupAttribute() || Data.EvaluatedData.Attribute == GetSlowBuildupAttribute() || 
+
+    if (Data.EvaluatedData.Attribute == GetBurnBuildupAttribute() || Data.EvaluatedData.Attribute == GetPoisonBuildupAttribute() ||
+        Data.EvaluatedData.Attribute == GetBleedBuildupAttribute() || Data.EvaluatedData.Attribute == GetSlowBuildupAttribute() ||
         Data.EvaluatedData.Attribute == GetFreezeBuildupAttribute() || Data.EvaluatedData.Attribute == GetStunBuildupAttribute())
     {
         UAbilitySystemComponent* TargetASC = GetOwningAbilitySystemComponent();
@@ -87,25 +105,67 @@ void UMythicAttributeSet_Defense::PostGameplayEffectExecute(const FGameplayEffec
                 {
                     float CurrentBuildup = BuildupAttr.GetNumericValue(this);
                     float Resistance = ResistAttr.GetNumericValue(this);
-                    float Threshold = 100.0f + (Resistance * 2.0f);
+                    float Threshold = ComputeBuildupThreshold(Resistance);
 
-                    if (CurrentBuildup >= Threshold)
+                    const bool bHardCC = (StatusTag == TAG_Status_Type_Stun || StatusTag == TAG_Status_Type_Freeze);
+
+                    if (bHardCC && TargetASC->HasMatchingGameplayTag(GAS_IMMUNE_HARDCC))
                     {
-                        // Deduct threshold from buildup (rollover)
-                        TargetASC->SetNumericAttributeBase(BuildupAttr, CurrentBuildup - Threshold);
-                        
-                        // Check for Systemic Reaction: Explosive Toxin
+                        if (CurrentBuildup >= Threshold)
+                        {
+                            TargetASC->SetNumericAttributeBase(BuildupAttr, CurrentBuildup - Threshold);
+
+                            if (UMythicAbilitySystemComponent *TargetMythicASC = Cast<UMythicAbilitySystemComponent>(TargetASC)) {
+                                FGameplayCueParameters CueParams;
+                                if (const AActor *TargetActor = TargetASC->GetAvatarActor()) {
+                                    CueParams.Location = TargetActor->GetActorLocation();
+                                }
+                                TargetMythicASC->ExecuteGameplayCueMulticast(TAG_GameplayCue_Combat_Immune, CueParams);
+                            }
+                        }
+                        return;
+                    }
+
+                    float EffectiveThreshold = Threshold;
+                    FMythicCcEscalationConfig CcCfg;
+                    FMythicCcResolution CcRes;
+                    if (bHardCC)
+                    {
+                        CcCfg = FMythicCrowdControlRules::ConfigForTier(ResolveTargetTierInt(TargetASC));
+                        const UWorld *CcWorld = TargetASC->GetWorld();
+                        const float Now = CcWorld ? CcWorld->GetTimeSeconds() : 0.0f;
+                        CcRes = FMythicCrowdControlRules::ResolveCcTrigger(CcHardTrackStates.FindRef(StatusTag), CcCfg, Now);
+                        EffectiveThreshold = Threshold * CcRes.EffectiveThresholdMultiplier;
+                    }
+
+                    if (CurrentBuildup >= EffectiveThreshold)
+                    {
+                        TargetASC->SetNumericAttributeBase(BuildupAttr, CurrentBuildup - EffectiveThreshold);
+
+                        if (bHardCC)
+                        {
+                            CcHardTrackStates.Add(StatusTag, CcRes.NextState);
+                        }
+
                         bool bReactionTriggered = false;
                         if (StatusTag == TAG_Status_Type_Burn && TargetASC->HasMatchingGameplayTag(TAG_Status_State_Poisoned))
                         {
                             bReactionTriggered = true;
                             TargetASC->RemoveActiveEffectsWithGrantedTags(FGameplayTagContainer(TAG_Status_State_Poisoned));
-                            
+
                             FGameplayEventData EventData;
                             EventData.EventTag = TAG_Reaction_ExplosiveToxin;
                             EventData.Instigator = Data.EffectSpec.GetContext().GetInstigator();
                             EventData.Target = TargetASC->GetAvatarActor();
                             TargetASC->HandleGameplayEvent(EventData.EventTag, &EventData);
+
+                            if (UMythicAbilitySystemComponent *ReactAsc = Cast<UMythicAbilitySystemComponent>(TargetASC)) {
+                                FGameplayCueParameters CueParams;
+                                if (const AActor *TargetActor = TargetASC->GetAvatarActor()) {
+                                    CueParams.Location = TargetActor->GetActorLocation();
+                                }
+                                ReactAsc->ExecuteGameplayCueMulticast(TAG_GameplayCue_Combat_Reaction, CueParams);
+                            }
                         }
 
                         if (!bReactionTriggered)
@@ -116,6 +176,48 @@ void UMythicAttributeSet_Defense::PostGameplayEffectExecute(const FGameplayEffec
                             EventData.Target = TargetASC->GetAvatarActor();
                             EventData.EventMagnitude = 1.0f;
                             TargetASC->HandleGameplayEvent(ApplyTag, &EventData);
+
+                            if (TSubclassOf<UGameplayEffect> DebuffGE = FMythicStatusEffectResolver::ResolveDebuffGEForStatus(StatusTag))
+                            {
+                                const FGameplayEffectContextHandle &SourceCtx = Data.EffectSpec.GetContext();
+                                FGameplayEffectContextHandle DebuffCtx = TargetASC->MakeEffectContext();
+                                DebuffCtx.AddInstigator(SourceCtx.GetInstigator(), SourceCtx.GetEffectCauser());
+                                FGameplayEffectSpecHandle DebuffSpec = TargetASC->MakeOutgoingSpec(DebuffGE, 1.0f, DebuffCtx);
+                                if (DebuffSpec.IsValid())
+                                {
+                                    TargetASC->ApplyGameplayEffectSpecToSelf(*DebuffSpec.Data.Get());
+                                }
+                            }
+
+                            FGameplayTag OnsetCue;
+                            if (StatusTag == TAG_Status_Type_Burn) { OnsetCue = TAG_GameplayCue_Status_Burn_Onset; }
+                            else if (StatusTag == TAG_Status_Type_Bleed) { OnsetCue = TAG_GameplayCue_Status_Bleed_Onset; }
+                            else if (StatusTag == TAG_Status_Type_Poison) { OnsetCue = TAG_GameplayCue_Status_Poison_Onset; }
+                            else if (StatusTag == TAG_Status_Type_Slow) { OnsetCue = TAG_GameplayCue_Status_Slow_Onset; }
+                            else if (StatusTag == TAG_Status_Type_Freeze) { OnsetCue = TAG_GameplayCue_Status_Freeze_Onset; }
+                            else if (StatusTag == TAG_Status_Type_Stun) { OnsetCue = TAG_GameplayCue_Status_Stun_Onset; }
+                            if (OnsetCue.IsValid()) {
+                                if (UMythicAbilitySystemComponent *OnsetAsc = Cast<UMythicAbilitySystemComponent>(TargetASC)) {
+                                    FGameplayCueParameters CueParams;
+                                    if (const AActor *TargetActor = TargetASC->GetAvatarActor()) {
+                                        CueParams.Location = TargetActor->GetActorLocation();
+                                    }
+                                    OnsetAsc->ExecuteGameplayCueMulticast(OnsetCue, CueParams);
+                                }
+                            }
+                        }
+
+                        if (bHardCC && CcRes.bGrantImmunity)
+                        {
+                            const FGameplayEffectContextHandle &SrcCtx = Data.EffectSpec.GetContext();
+                            FGameplayEffectContextHandle ImmuneCtx = TargetASC->MakeEffectContext();
+                            ImmuneCtx.AddInstigator(SrcCtx.GetInstigator(), SrcCtx.GetEffectCauser());
+                            FGameplayEffectSpecHandle ImmuneSpec = TargetASC->MakeOutgoingSpec(UMythicGE_CCImmune::StaticClass(), 1.0f, ImmuneCtx);
+                            if (ImmuneSpec.IsValid())
+                            {
+                                ImmuneSpec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_CCIMMUNE_DURATION, CcCfg.ImmuneSeconds);
+                                TargetASC->ApplyGameplayEffectSpecToSelf(*ImmuneSpec.Data.Get());
+                            }
                         }
                     }
                 }
@@ -224,37 +326,44 @@ void UMythicAttributeSet_Defense::OnRep_IncomingDamageMultiplier(const FGameplay
 void UMythicAttributeSet_Defense::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-    // register defensive attributes for network replication
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, Armor, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, DodgeChance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, BurnResistance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, BleedResistance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, PoisonResistance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, SlowResistance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, FreezeResistance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, StunResistance, COND_None, REPNOTIFY_Always);
-    
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, BurnBuildup, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, BleedBuildup, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, PoisonBuildup, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, SlowBuildup, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, FreezeBuildup, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, StunBuildup, COND_None, REPNOTIFY_Always);
-    
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, DecreasedDamageFromEnemiesUnderStatusEffects, COND_None,
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, Armor, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, DodgeChance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, BurnResistance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, BleedResistance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, PoisonResistance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, SlowResistance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, FreezeResistance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, StunResistance, COND_OwnerOnly, REPNOTIFY_Always);
+
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, BurnBuildup, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, BleedBuildup, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, PoisonBuildup, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, SlowBuildup, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, FreezeBuildup, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, StunBuildup, COND_OwnerOnly, REPNOTIFY_Always);
+
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, DecreasedDamageFromEnemiesUnderStatusEffects, COND_OwnerOnly,
                                    REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, HealthRegenRate, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, MaxShield, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, Shield, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, ShieldRegenRate, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, LifePerHit, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, LifePerKill, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, IncomingDamageMultiplier, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, HealthRegenRate, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, MaxShield, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, Shield, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, ShieldRegenRate, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, LifePerHit, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, LifePerKill, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, IncomingDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+}
+
+float UMythicAttributeSet_Defense::ComputeBuildupThreshold(float Resistance) {
+    return 100.0f + FMath::Clamp(Resistance, 0.0f, 1.0f) * 2.0f;
+}
+
+bool UMythicAttributeSet_Defense::BuildupCrossesThreshold(float NewBuildup, float Resistance) {
+    return NewBuildup >= ComputeBuildupThreshold(Resistance);
 }
 
 float UMythicAttributeSet_Defense::ComputeBuildupAfterDecay(float Cur, float DecayPerSecond, float DeltaSeconds) {
     const float Decay = FMath::Max(0.0f, DecayPerSecond) * FMath::Max(0.0f, DeltaSeconds);
-    return FMath::Max(0.0f, Cur - Decay); // never below 0 (a buildup floor)
+    return FMath::Max(0.0f, Cur - Decay);
 }
 
 void UMythicAttributeSet_Defense::DecayAllBuildups(UAbilitySystemComponent *ASC, float DecayPerSecond, float DeltaSeconds) {
@@ -266,8 +375,6 @@ void UMythicAttributeSet_Defense::DecayAllBuildups(UAbilitySystemComponent *ASC,
         return;
     }
 
-    // All six status buildups decay toward 0. Only write an attribute that actually has buildup, so an unafflicted
-    // entity (the common case) costs six reads and zero writes/replication.
     const TPair<FGameplayAttribute, float> Buildups[] = {
         {GetBurnBuildupAttribute(), Def->GetBurnBuildup()},
         {GetBleedBuildupAttribute(), Def->GetBleedBuildup()},
@@ -283,5 +390,20 @@ void UMythicAttributeSet_Defense::DecayAllBuildups(UAbilitySystemComponent *ASC,
                 ASC->SetNumericAttributeBase(B.Key, NewV);
             }
         }
+    }
+}
+
+void UMythicAttributeSet_Defense::ResetCcAndBuildupState() {
+    CcHardTrackStates.Reset();
+
+    if (UAbilitySystemComponent *ASC = GetOwningAbilitySystemComponent()) {
+        ASC->SetNumericAttributeBase(GetBurnBuildupAttribute(), 0.0f);
+        ASC->SetNumericAttributeBase(GetBleedBuildupAttribute(), 0.0f);
+        ASC->SetNumericAttributeBase(GetPoisonBuildupAttribute(), 0.0f);
+        ASC->SetNumericAttributeBase(GetSlowBuildupAttribute(), 0.0f);
+        ASC->SetNumericAttributeBase(GetFreezeBuildupAttribute(), 0.0f);
+        ASC->SetNumericAttributeBase(GetStunBuildupAttribute(), 0.0f);
+
+        ASC->SetNumericAttributeBase(GetShieldAttribute(), 0.0f);
     }
 }

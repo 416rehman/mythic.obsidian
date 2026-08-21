@@ -1,4 +1,6 @@
 #include "MythicCheatManager.h"
+#include "UObject/UObjectIterator.h"
+#include "UI/MythicHUDLayout.h"
 #include "Mythic/Subsystem/SaveSystem/MythicSaveGameSubsystem.h"
 #include "Mythic/World/EnvironmentController/MythicEnvironmentSubsystem.h"
 #include "Mythic/World/EnvironmentController/MythicEnvironmentController.h"
@@ -9,12 +11,14 @@
 #include "Mythic/Itemization/InventoryProviderInterface.h"
 #include "Mythic/System/MythicAssetManager.h"
 #include "Mythic/Player/MythicPlayerState.h"
-#include "Mythic/Player/MythicPlayerController.h" // DeployPlaceable cheat -> ServerDeployPlaceable
-#include "Mythic/GAS/AttributeSets/Shared/MythicLifeComponent.h" // ReviveSelf cheat
-#include "Mythic/Settings/MythicDeveloperSettings.h"             // ToggleCoopDown cheat
+#include "Mythic/Player/MythicPlayerController.h"
+#include "Mythic/GAS/AttributeSets/Shared/MythicLifeComponent.h"
+#include "Mythic/GameModes/GameState/MythicGameState.h"
+#include "Mythic/Settings/MythicDeveloperSettings.h"
 #include "Mythic/Player/Proficiency/ProficiencyComponent.h"
 #include "Mythic/Player/Proficiency/ProficiencyDefinition.h"
 #include "Mythic/GAS/MythicAbilitySystemComponent.h"
+#include "Mythic/GAS/MythicTags_GAS.h"
 #include "Mythic/Mythic.h"
 #include "Mythic/World/LivingWorld/LivingWorldSubsystem.h"
 #include "Mythic/World/LivingWorld/Factions/FactionDatabase.h"
@@ -42,9 +46,6 @@
 #include "MassCommandBuffer.h"
 #include "GameFramework/Pawn.h"
 
-// ============================================================================
-// HELP
-// ============================================================================
 
 void UMythicCheatManager::MythHelp() {
     UE_LOG(Myth, Warning, TEXT(""));
@@ -77,6 +78,8 @@ void UMythicCheatManager::MythHelp() {
     UE_LOG(Myth, Warning, TEXT("--- ATTRIBUTES ---"));
     UE_LOG(Myth, Warning, TEXT("  MythListAttributes                 - List all attributes and values"));
     UE_LOG(Myth, Warning, TEXT("  MythSetAttribute <Name> <Value>    - Set attribute value"));
+    UE_LOG(Myth, Warning, TEXT("  MythStatus <Name> [0|1]            - Toggle a status tag (Burning, Frozen, ...)"));
+    UE_LOG(Myth, Warning, TEXT("  MythClearStatus                    - Clear every status tag"));
     UE_LOG(Myth, Warning, TEXT(""));
     UE_LOG(Myth, Warning, TEXT("--- PROFICIENCIES ---"));
     UE_LOG(Myth, Warning, TEXT("  MythListProficiencies              - List proficiencies and progress"));
@@ -92,9 +95,6 @@ void UMythicCheatManager::MythHelp() {
     UE_LOG(Myth, Warning, TEXT(""));
 }
 
-// ============================================================================
-// SAVE SYSTEM
-// ============================================================================
 
 void UMythicCheatManager::MythSaveCharacter(const FString &SlotName) {
     APlayerController *PC = GetOuterAPlayerController();
@@ -178,9 +178,6 @@ void UMythicCheatManager::MythListSaves() {
     }
 }
 
-// ============================================================================
-// WEATHER
-// ============================================================================
 
 void UMythicCheatManager::MythListWeather() {
     APlayerController *PC = GetOuterAPlayerController();
@@ -223,7 +220,6 @@ void UMythicCheatManager::MythSetWeather(const FString &WeatherTag) {
         return;
     }
 
-    // Inherent runtime-string lookup: the tag NAME is a dev console argument, so no native tag reference is possible.
     FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*WeatherTag), false);
     if (!Tag.IsValid()) {
         UE_LOG(Myth, Error, TEXT(">>> Invalid tag '%s'. Use ListWeather."), *WeatherTag);
@@ -246,7 +242,6 @@ void UMythicCheatManager::MythSetWeatherInstant(const FString &WeatherTag) {
         return;
     }
 
-    // Inherent runtime-string lookup: the tag NAME is a dev console argument, so no native tag reference is possible.
     FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*WeatherTag), false);
     if (!Tag.IsValid()) {
         UE_LOG(Myth, Error, TEXT(">>> Invalid tag '%s'. Use ListWeather."), *WeatherTag);
@@ -257,9 +252,6 @@ void UMythicCheatManager::MythSetWeatherInstant(const FString &WeatherTag) {
     UE_LOG(Myth, Warning, TEXT(">>> Weather set instantly to '%s'"), *WeatherTag);
 }
 
-// ============================================================================
-// TIME OF DAY
-// ============================================================================
 
 void UMythicCheatManager::MythSetTime(float Hour) {
     APlayerController *PC = GetOuterAPlayerController();
@@ -335,9 +327,6 @@ void UMythicCheatManager::MythSetTimeSpeed(float NewFrequency) {
     }
 }
 
-// ============================================================================
-// ITEMS
-// ============================================================================
 
 void UMythicCheatManager::MythListItems() {
     UMythicAssetManager &AssetManager = UMythicAssetManager::Get();
@@ -369,13 +358,17 @@ void UMythicCheatManager::MythGiveItem(const FString &ItemName, int32 Count) {
     AssetManager.GetPrimaryAssetIdList(UMythicAssetManager::ItemDefinitionType, ItemAssetIds);
 
     UItemDefinition *MatchedItem = nullptr;
-    for (const FPrimaryAssetId &AssetId : ItemAssetIds) {
-        if (AssetId.PrimaryAssetName.ToString().Contains(ItemName, ESearchCase::IgnoreCase)) {
-            // TryLoad is acceptable for debug cheat commands
-            FSoftObjectPath ItemPath = AssetManager.GetPrimaryAssetPath(AssetId);
-            MatchedItem = Cast<UItemDefinition>(ItemPath.TryLoad());
-            if (MatchedItem) {
-                break;
+    for (int32 Pass = 0; Pass < 2 && !MatchedItem; ++Pass) {
+        for (const FPrimaryAssetId &AssetId : ItemAssetIds) {
+            const FString Name = AssetId.PrimaryAssetName.ToString();
+            const bool bMatch = (Pass == 0) ? Name.Equals(ItemName, ESearchCase::IgnoreCase)
+                                            : Name.Contains(ItemName, ESearchCase::IgnoreCase);
+            if (bMatch) {
+                FSoftObjectPath ItemPath = AssetManager.GetPrimaryAssetPath(AssetId);
+                MatchedItem = Cast<UItemDefinition>(ItemPath.TryLoad());
+                if (MatchedItem) {
+                    break;
+                }
             }
         }
     }
@@ -433,9 +426,6 @@ void UMythicCheatManager::MythClearInventory() {
     UE_LOG(Myth, Warning, TEXT(">>> Cleared %d items"), TotalCleared);
 }
 
-// ============================================================================
-// ATTRIBUTES
-// ============================================================================
 
 void UMythicCheatManager::MythListAttributes() {
     APlayerController *PC = GetOuterAPlayerController();
@@ -466,7 +456,6 @@ void UMythicCheatManager::MythListAttributes() {
 
         UE_LOG(Myth, Warning, TEXT("  [%s]"), *AttrSet->GetClass()->GetName());
 
-        // Iterate through all properties to find FGameplayAttributeData
         for (TFieldIterator<FProperty> PropIt(AttrSet->GetClass()); PropIt; ++PropIt) {
             FProperty *Property = *PropIt;
             if (FStructProperty *StructProp = CastField<FStructProperty>(Property)) {
@@ -479,6 +468,59 @@ void UMythicCheatManager::MythListAttributes() {
             }
         }
     }
+}
+
+namespace {
+const TMap<FString, FGameplayTag> &Cheat_StatusTags() {
+    static const TMap<FString, FGameplayTag> Map = {
+        {TEXT("burning"), GAS_DEBUFF_BURNING},
+        {TEXT("bleeding"), GAS_DEBUFF_BLEEDING},
+        {TEXT("poisoned"), GAS_DEBUFF_POISONED},
+        {TEXT("stunned"), GAS_DEBUFF_STUNNED},
+        {TEXT("slowed"), GAS_DEBUFF_SLOWED},
+        {TEXT("frozen"), GAS_DEBUFF_FROZEN},
+        {TEXT("weakened"), GAS_DEBUFF_WEAKENED},
+        {TEXT("terrified"), GAS_DEBUFF_TERRIFIED},
+    };
+    return Map;
+}
+
+UMythicAbilitySystemComponent *Cheat_PlayerASC(APlayerController *PC) {
+    AMythicPlayerState *PS = PC ? Cast<AMythicPlayerState>(PC->PlayerState) : nullptr;
+    return PS ? Cast<UMythicAbilitySystemComponent>(PS->GetAbilitySystemComponent()) : nullptr;
+}
+}
+
+void UMythicCheatManager::MythStatus(const FString &StatusName, int32 bOn) {
+    UMythicAbilitySystemComponent *ASC = Cheat_PlayerASC(GetOuterAPlayerController());
+    if (!ASC) {
+        UE_LOG(Myth, Error, TEXT(">>> No ASC"));
+        return;
+    }
+
+    const FGameplayTag *Found = Cheat_StatusTags().Find(StatusName.ToLower());
+    if (!Found) {
+        UE_LOG(Myth, Error, TEXT(">>> Unknown status '%s'. Known:"), *StatusName);
+        for (const TPair<FString, FGameplayTag> &Pair : Cheat_StatusTags()) {
+            UE_LOG(Myth, Warning, TEXT("      %s"), *Pair.Key);
+        }
+        return;
+    }
+
+    ASC->SetLooseGameplayTagCount(*Found, bOn != 0 ? 1 : 0);
+    UE_LOG(Myth, Warning, TEXT(">>> %s %s"), *Found->ToString(), bOn != 0 ? TEXT("ON") : TEXT("OFF"));
+}
+
+void UMythicCheatManager::MythClearStatus() {
+    UMythicAbilitySystemComponent *ASC = Cheat_PlayerASC(GetOuterAPlayerController());
+    if (!ASC) {
+        UE_LOG(Myth, Error, TEXT(">>> No ASC"));
+        return;
+    }
+    for (const TPair<FString, FGameplayTag> &Pair : Cheat_StatusTags()) {
+        ASC->SetLooseGameplayTagCount(Pair.Value, 0);
+    }
+    UE_LOG(Myth, Warning, TEXT(">>> All status tags cleared"));
 }
 
 void UMythicCheatManager::MythSetAttribute(const FString &AttributeName, float Value) {
@@ -499,23 +541,26 @@ void UMythicCheatManager::MythSetAttribute(const FString &AttributeName, float V
         return;
     }
 
-    // Use GetAttributeSets to iterate through all attribute sets
     const TArray<UMythicAttributeSet *> &AttributeSets = ASC->GetAttributeSets();
 
-    for (const UMythicAttributeSet *AttrSet : AttributeSets) {
-        if (!AttrSet) {
-            continue;
-        }
+    for (int32 Pass = 0; Pass < 2; ++Pass) {
+        for (const UMythicAttributeSet *AttrSet : AttributeSets) {
+            if (!AttrSet) {
+                continue;
+            }
 
-        for (TFieldIterator<FProperty> PropIt(AttrSet->GetClass()); PropIt; ++PropIt) {
-            FProperty *Property = *PropIt;
-            if (Property->GetName().Contains(AttributeName, ESearchCase::IgnoreCase)) {
-                if (FStructProperty *StructProp = CastField<FStructProperty>(Property)) {
-                    if (StructProp->Struct == FGameplayAttributeData::StaticStruct()) {
-                        FGameplayAttribute Attribute(Property);
-                        ASC->SetNumericAttributeBase(Attribute, Value);
-                        UE_LOG(Myth, Warning, TEXT(">>> Set %s to %.2f"), *Property->GetName(), Value);
-                        return;
+            for (TFieldIterator<FProperty> PropIt(AttrSet->GetClass()); PropIt; ++PropIt) {
+                FProperty *Property = *PropIt;
+                const bool bMatch = (Pass == 0) ? Property->GetName().Equals(AttributeName, ESearchCase::IgnoreCase)
+                                                : Property->GetName().Contains(AttributeName, ESearchCase::IgnoreCase);
+                if (bMatch) {
+                    if (FStructProperty *StructProp = CastField<FStructProperty>(Property)) {
+                        if (StructProp->Struct == FGameplayAttributeData::StaticStruct()) {
+                            FGameplayAttribute Attribute(Property);
+                            ASC->SetNumericAttributeBase(Attribute, Value);
+                            UE_LOG(Myth, Warning, TEXT(">>> Set %s to %.2f"), *Property->GetName(), Value);
+                            return;
+                        }
                     }
                 }
             }
@@ -525,9 +570,6 @@ void UMythicCheatManager::MythSetAttribute(const FString &AttributeName, float V
     UE_LOG(Myth, Error, TEXT(">>> Attribute '%s' not found. Use ListAttributes."), *AttributeName);
 }
 
-// ============================================================================
-// PROFICIENCIES
-// ============================================================================
 
 void UMythicCheatManager::MythListProficiencies() {
     APlayerController *PC = GetOuterAPlayerController();
@@ -589,7 +631,6 @@ void UMythicCheatManager::MythGiveProficiency(const FString &ProficiencyName, fl
         return;
     }
 
-    // Find matching proficiency
     for (FProficiency &Prof : ProfComp->Proficiencies) {
         FString Name = Prof.Definition ? Prof.Definition->GetName() : TEXT("");
         if (Name.Contains(ProficiencyName, ESearchCase::IgnoreCase)) {
@@ -612,9 +653,6 @@ void UMythicCheatManager::MythGiveProficiency(const FString &ProficiencyName, fl
     UE_LOG(Myth, Error, TEXT(">>> Proficiency '%s' not found. Use ListProficiencies."), *ProficiencyName);
 }
 
-// ============================================================================
-// LIVING WORLD
-// ============================================================================
 
 void UMythicCheatManager::MythLivingWorldStatus() {
     APlayerController *PC = GetOuterAPlayerController();
@@ -630,7 +668,6 @@ void UMythicCheatManager::MythLivingWorldStatus() {
     UE_LOG(Myth, Warning, TEXT("=== LIVING WORLD STATUS ==="));
     UE_LOG(Myth, Warning, TEXT("  System active: %s"), LW->IsSystemActive() ? TEXT("YES") : TEXT("NO"));
 
-    // Causal Fabric
     if (const UMythicCausalFabric *Fabric = LW->GetCausalFabric()) {
         UE_LOG(Myth, Warning, TEXT("  Causal Fabric: initialized (capacity %d)"), Fabric->GetCapacity());
     }
@@ -638,7 +675,6 @@ void UMythicCheatManager::MythLivingWorldStatus() {
         UE_LOG(Myth, Warning, TEXT("  Causal Fabric: NOT initialized"));
     }
 
-    // Faction DB
     if (const UMythicFactionDatabase *FDB = LW->GetFactionDatabase()) {
         UE_LOG(Myth, Warning, TEXT("  Faction DB: %d active / %d max"), FDB->GetActiveFactionCount(), FDB->GetMaxFactions());
     }
@@ -646,7 +682,6 @@ void UMythicCheatManager::MythLivingWorldStatus() {
         UE_LOG(Myth, Warning, TEXT("  Faction DB: NOT initialized"));
     }
 
-    // Territory Grid
     if (const UMythicTerritoryGrid *Grid = LW->GetTerritoryGrid()) {
         UE_LOG(Myth, Warning, TEXT("  Territory Grid: initialized"));
     }
@@ -672,7 +707,6 @@ void UMythicCheatManager::MythLivingWorldFactions() {
     UE_LOG(Myth, Warning, TEXT("=== FACTIONS (%d active / %d max) ==="), FDB->GetActiveFactionCount(), FDB->GetMaxFactions());
 
     FDB->ForEachAliveFaction([](FMythicFactionId Id, const FMythicFactionData &Data) {
-        // Compact behavior flags string
         FString Flags;
         if (Data.bControlsTerritory) {
             Flags += TEXT("T");
@@ -733,7 +767,6 @@ void UMythicCheatManager::MythLivingWorldTerritory() {
     UE_LOG(Myth, Warning, TEXT("  Influence: %.3f"), CellData.Influence);
     UE_LOG(Myth, Warning, TEXT("  Player Owned: %s (Player %d)"), CellData.bPlayerOwned ? TEXT("YES") : TEXT("NO"), CellData.OwningPlayerIndex);
 
-    // Cross-reference faction name if DB is available
     if (CellData.DominantFaction.IsValid()) {
         if (const UMythicFactionDatabase *FDB = LW->GetFactionDatabase()) {
             FMythicFactionData FactionData;
@@ -763,7 +796,6 @@ void UMythicCheatManager::MythLivingWorldPopulation() {
 
     TSharedPtr<FMassEntityManager> EntityManagerPtr = TSharedPtr<FMassEntityManager>(&MassSubsystem->GetMutableEntityManager(), [](FMassEntityManager *) {});
 
-    // Count NPCs (entities with FMythicNPCTag + FMythicIdentityFragment)
     int32 NPCCount = 0;
     {
         FMassEntityQuery NPCQuery(EntityManagerPtr);
@@ -772,7 +804,6 @@ void UMythicCheatManager::MythLivingWorldPopulation() {
         NPCCount = NPCQuery.GetNumMatchingEntities();
     }
 
-    // Count Creatures (entities with FMythicCreatureTag + FMythicCreatureFragment)
     int32 CreatureCount = 0;
     {
         FMassEntityQuery CreatureQuery(EntityManagerPtr);
@@ -781,7 +812,6 @@ void UMythicCheatManager::MythLivingWorldPopulation() {
         CreatureCount = CreatureQuery.GetNumMatchingEntities();
     }
 
-    // Count Hydrated (Tier 1+ entities)
     int32 HydratedCount = 0;
     {
         FMassEntityQuery HydratedQuery(EntityManagerPtr);
@@ -826,8 +856,6 @@ void UMythicCheatManager::MythLivingWorldSettlements() {
     UE_LOG(Myth, Warning, TEXT("=== SETTLEMENTS (%d) ==="), Registry->GetSettlementCount());
 
     for (const int32 Id : SettlementIds) {
-        // Snapshot the settlement under SimulationLock (copy-out) — never hold a live Settlements-map pointer while the
-        // sim thread may rehash/mutate it (matches the population spawner's iter-114 fix).
         FMythicSettlementData Data;
         if (!LW->CopySettlementById(Id, Data)) {
             continue;
@@ -878,8 +906,6 @@ void UMythicCheatManager::MythLivingWorldTransferSettlement(int32 SettlementId, 
         return;
     }
 
-    // Snapshot the settlement under SimulationLock (copy-out) — the unlocked reads below (OldFactionName, DisplayName)
-    // would otherwise hold a live Settlements-map pointer racing the sim thread's conquest/succession writes.
     FMythicSettlementData Data;
     if (!LW->CopySettlementById(SettlementId, Data)) {
         UE_LOG(Myth, Error, TEXT(">>> Settlement ID %d not found. Use MythLivingWorldSettlements."), SettlementId);
@@ -900,8 +926,6 @@ void UMythicCheatManager::MythLivingWorldTransferSettlement(int32 SettlementId, 
         : TEXT("Unknown");
     const FString NewFactionName = NewFactionData.DisplayName.ToString();
 
-    // Route through the subsystem's TransferSettlement, which holds SimulationLock — calling the registry's directly
-    // here (game thread) would race the sim-thread single-writer CausalFabric inside TransferSettlement's event write.
     LW->TransferSettlement(SettlementId, NewFaction);
 
     UE_LOG(Myth, Warning, TEXT(">>> Settlement '%s' (ID=%d) transferred: %s -> %s"),
@@ -928,9 +952,6 @@ void UMythicCheatManager::MythToggleLivingWorldDebug() {
     }
 }
 
-// ============================================================================
-// LIVING WORLD: EVENT PIPELINE (Phase 4)
-// ============================================================================
 
 void UMythicCheatManager::MythLivingWorldSimulateEvent(const FString &ActionTag, const FString &MoralAxis, float MoralValue) {
     APlayerController *PC = GetOuterAPlayerController();
@@ -950,7 +971,6 @@ void UMythicCheatManager::MythLivingWorldSimulateEvent(const FString &ActionTag,
         return;
     }
 
-    // Parse the moral axis from string
     int32 AxisIndex = -1;
     static const FString AxisNames[] = {
         TEXT("Violence"), TEXT("Theft"), TEXT("Deception"), TEXT("Mercy"),
@@ -968,16 +988,14 @@ void UMythicCheatManager::MythLivingWorldSimulateEvent(const FString &ActionTag,
         return;
     }
 
-    // Build the action event
     FMythicActionEvent Event;
     Event.Perpetrator = PC->GetPawn();
-    // Inherent runtime-string lookup: the action tag NAME is a dev console argument, so no native tag reference is possible.
     Event.ActionTag = FGameplayTag::RequestGameplayTag(FName(*ActionTag), false);
     if (!Event.ActionTag.IsValid()) {
         UE_LOG(Myth, Warning, TEXT(">>> Tag '%s' not registered — event will still submit with invalid tag"), *ActionTag);
     }
     Event.MoralVector.AxisValues[AxisIndex] = MoralValue;
-    Event.CategoryFlags = 0x01; // Combat category for testing
+    Event.CategoryFlags = 0x01;
     Event.Significance = FMath::Abs(MoralValue);
 
     ActionSub->SubmitAction(Event);
@@ -1014,7 +1032,6 @@ void UMythicCheatManager::MythLivingWorldPressure() {
 
     TSharedPtr<FMassEntityManager> EntityManagerPtr = TSharedPtr<FMassEntityManager>(&MassSubsystem->GetMutableEntityManager(), [](FMassEntityManager *) {});
 
-    // Query hydrated entities near the player
     FMassEntityQuery PressureQuery(EntityManagerPtr);
     PressureQuery.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
     PressureQuery.AddRequirement<FMythicPsychodynamicFragment>(EMassFragmentAccess::ReadOnly);
@@ -1166,7 +1183,6 @@ void UMythicCheatManager::MythLivingWorldForcePromote() {
 
     TSharedPtr<FMassEntityManager> EntityManagerPtr = TSharedPtr<FMassEntityManager>(&MassSubsystem->GetMutableEntityManager(), [](FMassEntityManager *) {});
 
-    // Find the nearest Tier 0 entity and force-promote it
     FMassEntityQuery AmbientQuery(EntityManagerPtr);
     AmbientQuery.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
     AmbientQuery.AddRequirement<FMythicSignificanceFragment>(EMassFragmentAccess::ReadWrite);
@@ -1190,7 +1206,6 @@ void UMythicCheatManager::MythLivingWorldForcePromote() {
             const FMassEntityHandle Entity = ChunkContext.GetEntity(i);
             FMassEntityManager &EM = MassSubsystem->GetMutableEntityManager();
 
-            // Deferred commands for fragment/tag addition
             TSharedPtr<FMassCommandBuffer> CmdBuffer = MakeShared<FMassCommandBuffer>();
             CmdBuffer->AddTag<FMythicHydratedTag>(Entity);
             CmdBuffer->AddFragment<FMythicPsychodynamicFragment>(Entity);
@@ -1213,9 +1228,6 @@ void UMythicCheatManager::MythLivingWorldForcePromote() {
     }
 }
 
-// ============================================================================
-// LIVING WORLD: PHASE 5 (Cognitive + Social)
-// ============================================================================
 
 void UMythicCheatManager::MythLivingWorldSocialGraph() {
     APlayerController *PC = GetOuterAPlayerController();
@@ -1334,7 +1346,7 @@ void UMythicCheatManager::MythLivingWorldParty() {
         return;
     }
 
-    FString PlayerKey; // local player's canonical party key
+    FString PlayerKey;
     if (const AMythicPlayerState *PS = PC->GetPlayerState<AMythicPlayerState>()) {
         PlayerKey = PS->GetCanonicalPlayerKey();
     }
@@ -1380,8 +1392,6 @@ void UMythicCheatManager::MythDeployPlaceable(int32 SlotIndex) {
         return;
     }
 
-    // Aim from the pawn (no camera wired on the player pawn): origin at the eyes, direction = pawn facing. This is the
-    // same (origin, dir) the future ghost-preview + deploy input will pass to ServerDeployPlaceable.
     FVector AimOrigin;
     FRotator AimRot;
     Pawn->GetActorEyesViewPoint(AimOrigin, AimRot);
@@ -1418,4 +1428,49 @@ void UMythicCheatManager::MythReviveSelf() {
     }
     Life->ServerReviveFromDowned();
     UE_LOG(Myth, Warning, TEXT(">>> ReviveSelf: revived"));
+}
+
+void UMythicCheatManager::MythAdvanceWorldTier() {
+    APlayerController *PC = GetOuterAPlayerController();
+    UWorld *World = PC ? PC->GetWorld() : nullptr;
+    AMythicGameState *GameState = World ? World->GetGameState<AMythicGameState>() : nullptr;
+    if (!GameState) {
+        UE_LOG(Myth, Error, TEXT(">>> AdvanceWorldTier: no MythicGameState"));
+        return;
+    }
+
+    GameState->AdvanceWorldTier();
+    UE_LOG(Myth, Warning, TEXT(">>> AdvanceWorldTier: WorldTier now %d (highest reached %d)"),
+           GameState->WorldTier, GameState->HighestWorldTier);
+}
+
+void UMythicCheatManager::MythObjective(const FString &Text, int32 Have, int32 Need, int32 bDone, const FString &Quest) {
+    AMythicPlayerController *PC = Cast<AMythicPlayerController>(GetOuterAPlayerController());
+    if (!PC) {
+        UE_LOG(Myth, Error, TEXT(">>> MythObjective: no MythicPlayerController"));
+        return;
+    }
+    PC->ClientNotifyObjective(FText::FromString(Text), Have, Need, bDone != 0, 0, FText::FromString(Quest));
+    UE_LOG(Myth, Warning, TEXT(">>> MythObjective: '%s' %d/%d%s (%s)"), *Text, Have, Need, bDone ? TEXT(" done") : TEXT(""), *Quest);
+}
+
+void UMythicCheatManager::MythOpenMenu(const FString &PageId) {
+    AMythicPlayerController *PC = Cast<AMythicPlayerController>(GetOuterAPlayerController());
+    if (!PC) {
+        UE_LOG(Myth, Error, TEXT(">>> MythOpenMenu: no MythicPlayerController"));
+        return;
+    }
+    UMythicHUDLayout *Layout = nullptr;
+    for (TObjectIterator<UMythicHUDLayout> It; It; ++It) {
+        if (IsValid(*It) && !It->HasAnyFlags(RF_ClassDefaultObject) && It->GetOwningPlayer() == PC) {
+            Layout = *It;
+            break;
+        }
+    }
+    if (!Layout) {
+        UE_LOG(Myth, Error, TEXT(">>> MythOpenMenu: no HUD layout for this player"));
+        return;
+    }
+    Layout->OpenMenuOnPage(PageId.IsEmpty() ? NAME_None : FName(*PageId));
+    UE_LOG(Myth, Warning, TEXT(">>> MythOpenMenu: '%s'"), PageId.IsEmpty() ? TEXT("(default)") : *PageId);
 }

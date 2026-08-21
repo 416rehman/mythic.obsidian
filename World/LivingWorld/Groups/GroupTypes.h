@@ -1,43 +1,16 @@
-// Mythic Living World — Group spawn templates (data-driven WHO spawns TOGETHER)
-// A "group template" describes a small cluster of NPCs that spawn together in a settlement cell with intra-group social
-// edges (a noble + his guards, a merchant + his porters, a trio of friends). The GroupSpawnerProcessor (Step 4) draws
-// one eligible template per chance-passing settlement cell, rolls each member spec's count, spawns the members as normal
-// {Identity,Schedule,Significance,FMythicGroupFragment,FMythicNPCTag,FMythicGroupMemberTag} entities sharing one cell
-// (so existing scatter cohesion + the embodiment gate + the shared per-cell cap all apply unchanged), and wires the
-// social graph with the template's IntraRelation edges.
-//
-// This is a strict DATA layer — zero behavior. Members ALWAYS carry the humanoid FMythicNPCTag so they ride the EXISTING
-// significance/embodiment/despawn path; the group fragment + member tag are additive KIND markers only.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Engine/DataAsset.h"
-#include "World/LivingWorld/Social/SocialGraph.h" // EMythicSocialRelation (intra-group edge type)
-// AllowedEconomies is a REFLECTED TArray<EMythicSettlementEconomy> UPROPERTY, so UHT needs the full enum definition (a
-// forward decl is insufficient for a reflected enum-typed array element). The enum lives in MythicSettlement.h.
+#include "World/LivingWorld/Social/SocialGraph.h"
 #include "World/LivingWorld/Settlements/MythicSettlement.h"
 #include "GroupTypes.generated.h"
 
-/**
- * Hard cap on members in a single group template. Caps social-edge fan-out: each member adds a directed edge to every
- * OTHER member, so a group of N produces N×(N-1) directed edges and N-1 OUTGOING edges per member. With MaxGroupMembers
- * = 6 that is at most 5 outgoing edges per member — comfortably under UMythicSocialGraph's MaxEdgesPerEntity (default 8),
- * so no group member's own intra-group edges are ever evicted. Enforced in both authoring (RollMemberCount clamps to it)
- * and the processor (member loop stops at it).
- */
 static constexpr int32 MaxGroupMembers = 6;
 
-// ─────────────────────────────────────────────────────────────
-// Group Member Spec — one role + a count range within a template
-// ─────────────────────────────────────────────────────────────
 
-/**
- * One slot in a group template: a role and how many of it to spawn (rolled deterministically in [MinCount,MaxCount]).
- * Exactly one member spec across a template should be the leader (bIsLeader) — the anchor the social edges orient toward
- * (e.g. guards are Subordinate TO the noble). If none is flagged, the first spawned member is treated as the leader.
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicGroupMemberSpec {
     GENERATED_BODY()
@@ -59,16 +32,7 @@ struct MYTHIC_API FMythicGroupMemberSpec {
     bool bIsLeader = false;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Group Template — a full clustered spawn recipe
-// ─────────────────────────────────────────────────────────────
 
-/**
- * A clustered-spawn recipe: a set of member specs, the social relation that binds them, and the sim gates that decide
- * whether a faction/settlement can field it. The GroupSpawnerProcessor weighted-picks one eligible template per
- * chance-passing settlement cell. Total rolled member count is capped at MaxGroupMembers so the social-edge fan-out
- * stays under the social graph's per-entity edge cap.
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicGroupTemplate {
     GENERATED_BODY()
@@ -116,14 +80,7 @@ struct MYTHIC_API FMythicGroupTemplate {
     float RelativeWeight = 1.0f;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Group Template Database — designer-authored data asset
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Designer-authored catalog of group templates. Referenced from DA_LivingWorldSettings → GroupTemplateDatabase. When
- * unset, the group spawner falls back to MythicGroupDefaults::BuildDefaultTemplates() so the system runs unauthored.
- */
 UCLASS(BlueprintType)
 class MYTHIC_API UMythicGroupTemplateDatabase : public UDataAsset {
     GENERATED_BODY()
@@ -133,8 +90,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Groups")
     TArray<FMythicGroupTemplate> Templates;
 
-    /** Find a template by its group tag (exact match). Returns nullptr if not present. Mirrors
-     *  UMythicArchetypeCatalog::FindByRole. */
     const FMythicGroupTemplate *FindByTag(const FGameplayTag &GroupTag) const {
         for (const FMythicGroupTemplate &T : Templates) {
             if (T.GroupTag.MatchesTagExact(GroupTag)) {
@@ -145,17 +100,7 @@ public:
     }
 };
 
-// ─────────────────────────────────────────────────────────────
-// Code-default group templates
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Built-in group templates so clustered spawning runs with ZERO authored data: a Noble + 2 Guards retinue (guards
- * Subordinate to the noble), a Merchant + 2-3 Civilian porters barter party (Associate), and a 3-Civilian friend trio
- * (Friend). All <= MaxGroupMembers members. Pure + unit-testable. Used whenever
- * UMythicLivingWorldSettings::GroupTemplateDatabase is unset.
- */
 namespace MythicGroupDefaults {
-    /** Fill Out with the built-in group templates (clears Out first). Safe to call from any thread (no shared state). */
     MYTHIC_API void BuildDefaultTemplates(TArray<FMythicGroupTemplate> &Out);
 }

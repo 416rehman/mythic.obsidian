@@ -9,15 +9,22 @@
 #include "GameModes/MythicCheatManager.h"
 #include "GameModes/GameState/MythicGameState.h"
 #include "GAS/MythicAbilitySystemComponent.h"
-#include "GAS/MythicTags_GAS.h" // GAS_EVENT_ITEM_ACQUIRED (collect-objective event)
+#include "GAS/MythicTags_GAS.h"
 #include "Interfaces/OnlineIdentityInterface.h"
 
+#include "EngineUtils.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Conversion/MythicConversionStation.h"
 #include "Itemization/Conversion/ConversionStationComponent.h"
+#include "Itemization/MythicTags_Conversion.h"
 #include "Itemization/Storage/MythicStorageContainer.h"
+#include "World/Death/MythicCorpse.h"
+#include "World/Ownership/MythicOwnership.h"
+#include "World/Trading/MythicPlayerStall.h"
 #include "Itemization/Vendor/MythicVendor.h"
-#include "Itemization/Inventory/MythicTrade.h" // EMythicTradeResult + IsFailureWorthShowing/DescribeResult for the callout
+#include "Itemization/Inventory/MythicTrade.h"
+#include "Itemization/Inventory/MythicLootFilter.h"
+#include "Itemization/MythicTags_Inventory.h"
 #include "Proficiency/ProficiencyComponent.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
@@ -26,54 +33,90 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Proficiencies.h"
 #include "Proficiency/ProficiencyDefinition.h"
 #include "Objectives/ObjectiveTracker.h"
-#include "Objectives/MythicObjectiveEvents.h" // ShouldEmitObjectiveEvent gate for the talk-to-NPC emit
+#include "Objectives/MythicObjectiveEvents.h"
 #include "AI/NPCs/MythicNPCCharacter.h"
-#include "AI/Cognition/CognitiveBrainComponent.h" // NPC->CognitiveBrain->GetSourceEntity() for recruit
-#include "AI/Party/PartySubsystem.h" // server-authoritative party recruit
-#include "UI/MythicFeedbackSubsystem.h" // unified feedback subsystem — combat numbers, screen toasts/banners, world callouts
+#include "AI/Cognition/CognitiveBrainComponent.h"
+#include "AI/Party/PartySubsystem.h"
+#include "UI/MythicDamageNumberSubsystem.h"
 #include "Itemization/Inventory/ItemDefinition.h"
+#include "Itemization/Inventory/Fragments/Passive/YieldQualityFragment.h"
+#include "Itemization/Inventory/MythicCurrency.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
-#include "Player/MythicGift.h"                      // co-op gift pure decision gates
-#include "Settings/MythicDeveloperSettings.h"       // GiftRange / GiftOfferTimeoutSeconds
+#include "Player/MythicGift.h"
+#include "Settings/MythicDeveloperSettings.h"
+#include "Player/FastTravel/MythicFastTravelRules.h"
+#include "Itemization/Inventory/MythicEncumbrance.h"
 #include "Itemization/Inventory/Fragments/Passive/AffixesFragment.h"
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
-#include "Itemization/Inventory/Fragments/Passive/PlaceableFragment.h" // placeable deploy: rules + decisions
-#include "Engine/AssetManager.h"     // async-load the deployed class (no sync load on a gameplay action)
+#include "Itemization/Inventory/Fragments/Passive/PlaceableFragment.h"
+#include "Engine/AssetManager.h"
 #include "Engine/GameInstance.h"
 #include "Engine/StreamableManager.h"
-#include "Interaction/IMythicInteractable.h"          // generic server interaction routing
-#include "Interaction/MythicInteractionComponent.h"   // reach re-validation reuses the authored InteractionRange
+#include "Interaction/IMythicInteractable.h"
+#include "Interaction/MythicInteractionComponent.h"
 #include "World/EnvironmentController/MythicEnvironmentHazardComponent.h"
 #include "World/LivingWorld/Chronicle/MythicChronicleRelayComponent.h"
-#include "World/LivingWorld/LivingWorldSubsystem.h"   // zone-entry: settlement-at-cell snapshot
-#include "World/LivingWorld/Territory/TerritoryGrid.h" // WorldToCell
-#include "World/LivingWorld/Settlements/MythicSettlement.h" // FMythicSettlementData (DisplayName + SettlementId)
+#include "World/LivingWorld/LivingWorldSubsystem.h"
+#include "World/POI/MythicPOIDiscoverySubsystem.h"
+#include "World/LivingWorld/Factions/FactionDatabase.h"
+#include "World/LivingWorld/Acquaintance/MythicAcquaintanceComponent.h"
+#include "World/LivingWorld/Territory/TerritoryGrid.h"
+#include "World/LivingWorld/Settlements/MythicSettlement.h"
+#include "World/LivingWorld/Events/ActionEventSubsystem.h"
+#include "World/LivingWorld/Events/ActionEventTypes.h"
+#include "World/LivingWorld/Morality/MoralSignature.h"
+#include "World/LivingWorld/MythicTags_LivingWorld.h"
+#include "Player/MythicFactionStandingComponent.h"
+
+namespace {
+FName MythicRarityTagName(EItemRarity Rarity) {
+    switch (Rarity) {
+    case EItemRarity::Rare:      return FName(TEXT("Itemization.Rarity.Rare"));
+    case EItemRarity::Epic:      return FName(TEXT("Itemization.Rarity.Epic"));
+    case EItemRarity::Legendary: return FName(TEXT("Itemization.Rarity.Legendary"));
+    case EItemRarity::Mythic:    return FName(TEXT("Itemization.Rarity.Mythic"));
+    case EItemRarity::Common:
+    default:                     return FName(TEXT("Itemization.Rarity.Common"));
+    }
+}
+
+void MythicStampItemIdentity(FGameplayEventData &Payload, const UItemDefinition *ItemDef) {
+    if (!ItemDef) {
+        return;
+    }
+    if (ItemDef->ItemType.IsValid()) {
+        Payload.TargetTags.AddTag(ItemDef->ItemType);
+    }
+    Payload.TargetTags.AddTag(FGameplayTag::RequestGameplayTag(MythicRarityTagName(ItemDef->Rarity)));
+    if (const UYieldQualityFragment *Q =
+            UItemDefinition::GetFragment<UYieldQualityFragment>(const_cast<UItemDefinition *>(ItemDef))) {
+        if (const FGameplayTag QT = Q->GetQualityTag(); QT.IsValid()) {
+            Payload.TargetTags.AddTag(QT);
+        }
+    }
+}
+}
+
 
 AMythicPlayerController::AMythicPlayerController() {
     bShowMouseCursor = true;
     DefaultMouseCursor = EMouseCursor::Default;
     bReplicateUsingRegisteredSubObjectList = true;
 
-    // Set the CheatManager class
     CheatClass = UMythicCheatManager::StaticClass();
 
-    // Create the ProficiencyComponent
     ProficiencyComponent = CreateDefaultSubobject<UProficiencyComponent>(TEXT("ProficiencyComponent"));
     ProficiencyComponent->SetIsReplicated(true);
 
-    // Create the Inventory Components
     InventoryComponent = CreateDefaultSubobject<UMythicInventoryComponent>(TEXT("InventoryComponent"));
     InventoryComponent->SetIsReplicated(true);
 
-    // Create the Objective/Quest Tracker (replicates owner-only; binds to GAS kill events server-side).
     ObjectiveTracker = CreateDefaultSubobject<UObjectiveTracker>(TEXT("ObjectiveTracker"));
     ObjectiveTracker->SetIsReplicated(true);
 
-    // Environmental hazard component (server-side; applies weather/season/time GEs to the player's ASC).
     EnvironmentHazard = CreateDefaultSubobject<UMythicEnvironmentHazardComponent>(TEXT("EnvironmentHazard"));
 
-    // World Chronicle relay (replicates the server-built world-news feed to the owning client; owner-only).
     ChronicleRelay = CreateDefaultSubobject<UMythicChronicleRelayComponent>(TEXT("ChronicleRelay"));
 }
 
@@ -100,7 +143,6 @@ UMythicInventoryComponent *AMythicPlayerController::GetInventoryForItemType(cons
 void AMythicPlayerController::OnPossess(APawn *InPawn) {
     Super::OnPossess(InPawn);
 
-    // register player in the registry subsystem
     if (AMythicPlayerState *PS = GetPlayerState<AMythicPlayerState>()) {
         if (UMythicPlayerRegistrySubsystem *Registry = GetWorld() ? GetWorld()->GetSubsystem<UMythicPlayerRegistrySubsystem>() : nullptr) {
             Registry->RegisterPlayer(PS->GetCanonicalPlayerKey(), PS, this);
@@ -113,7 +155,6 @@ void AMythicPlayerController::OnPossess(APawn *InPawn) {
 }
 
 void AMythicPlayerController::OnUnPossess() {
-    // unregister player from the registry subsystem
     if (UMythicPlayerRegistrySubsystem *Registry = GetWorld() ? GetWorld()->GetSubsystem<UMythicPlayerRegistrySubsystem>() : nullptr) {
         Registry->UnregisterObject(this);
     }
@@ -124,27 +165,18 @@ void AMythicPlayerController::OnUnPossess() {
 void AMythicPlayerController::OnRep_PlayerState() {
     Super::OnRep_PlayerState();
 
-    // Request Destructibles State
-    // if (this->IsLocalPlayerController()) {
-    //     Server_RequestDestructiblesState();
-    // }
 
     OnPossessedOnClient();
 }
 
 void AMythicPlayerController::BeginPlay() {
-    // Call the base class
     Super::BeginPlay();
 
-    // Server-side zone-entry poll: fire "Welcome to <settlement>" when the player crosses into a new settlement. A
-    // position-based check has no delegate to bind, so a light repeating timer is the right mechanism (mirrors the
-    // LifeComponent regen timer). The pawn may not be possessed yet — CheckZoneEntry no-ops until it is.
     if (HasAuthority() && GetWorld() && ZoneCheckInterval > 0.0f) {
         GetWorld()->GetTimerManager().SetTimer(ZoneCheckTimerHandle, this, &AMythicPlayerController::CheckZoneEntry,
                                                ZoneCheckInterval, true);
     }
 
-    // EOS Login
     if (auto LocalPlayer = this->GetLocalPlayer()) {
         auto LocalIndex = LocalPlayer->GetLocalPlayerIndex();
         this->Login(LocalIndex);
@@ -152,12 +184,8 @@ void AMythicPlayerController::BeginPlay() {
 }
 
 void AMythicPlayerController::Login(int32 LocalUserNum) {
-    // TODO: Could call an event dispatcher here to notify the UI that connection to Online Services is being established.
     UE_LOG(Myth, Log, TEXT("EOS: Connecting to Online Services"));
 
-    // Get the OSS identity interface. Online::GetSubsystem returns null when no OSS is configured (a PIE/cooked config
-    // without the EOS module, or offline mode), and GetIdentityInterface() can return an invalid ptr — either is an
-    // immediate crash on the unguarded deref. Guard them, matching this file's existing defensive-null-check convention.
     IOnlineSubsystem *OSS = Online::GetSubsystem(GetWorld());
     if (!OSS) {
         UE_LOG(Myth, Error, TEXT("EOS: No Online Subsystem available — skipping login"));
@@ -169,85 +197,47 @@ void AMythicPlayerController::Login(int32 LocalUserNum) {
         return;
     }
 
-    // If logged in, don't try to login again.
-    // This can happen if your player travels to a dedicated server or different maps as BeginPlay() will be called each time.
-    // FUniqueNetIdPtr NetId = Identity->GetUniquePlayerId(LocalUserNum);
-    // if (NetId != nullptr && Identity->GetLoginStatus(LocalUserNum) == ELoginStatus::LoggedIn) {
-    //     return;
-    // }
 
-    // EOS stuff now.
-    // BIND the CB_LoginResponse to the OnLoginCompleteDelegate on the Identity interface, so when we try logging in we can handle the response.
     LoginDelegateHandle = Identity->
         AddOnLoginCompleteDelegate_Handle(LocalUserNum, FOnLoginCompleteDelegate::CreateUObject(this, &ThisClass::CB_LoginResponse));
 
-    // Print the name of the OSS we are using.
     UE_LOG(Myth, Log, TEXT("EOS: Using Online Subsystem: %s"), *OSS->GetSubsystemName().ToString());
 
-    // Grab command line arguments. Presence of these indicates, using previously saved credentials to auto-login.
-    // Even though, this parameter is not used here explicity, the AutoLogin function will use it internally.
     FString AuthType;
     FParse::Value(FCommandLine::Get(), TEXT("AUTH_TYPE="), AuthType);
 
-    // CALL the autologin method if the game was started with AUTH_TYPE and AUTH_TOKEN parameters.
     if (!AuthType.IsEmpty()) {
-        // AutoLogin is async, return value indicates if the call was started. Actual result is in the delegate.
         if (!Identity->AutoLogin(LocalUserNum)) {
-            // If we failed to start the login call, remove the delegate.
             UE_LOG(Myth, Error, TEXT("EOS: Failed to start AutoLogin"));
 
-            // Tell the identity interface to stop calling our delegate.
             Identity->ClearOnLoginCompleteDelegate_Handle(LocalUserNum, LoginDelegateHandle);
 
-            // Reset the delegate handle.
             LoginDelegateHandle.Reset();
         }
     }
-    // CALL the login method to initiate the login process if the game was not started with AUTH_TYPE and AUTH_TOKEN parameters.
     else {
-        /* 
-        Fallback if the CLI parameters are empty.Useful for PIE.
-        The type here could be developer if using the DevAuthTool, ExchangeCode if the game is launched via the Epic Games Launcher, etc...
-        */
-
-        // Type, Id, Token
-        // "AccountPortal" will use the built-in onboarding flow provided by the SDK.
         FOnlineAccountCredentials Credentials("AccountPortal", "", "");
 
         UE_LOG(Myth, Log, TEXT("EOS: Logging in to Online service"));
 
-        // Login is async, return value indicates if the call was started. Actual result is in the delegate.
         if (!Identity->Login(LocalUserNum, Credentials)) {
-            // If we failed to start the login call, remove the delegate.
             UE_LOG(Myth, Error, TEXT("EOS: Failed to start Login"));
 
-            // Tell the identity interface to stop calling our delegate.
             Identity->ClearOnLoginCompleteDelegate_Handle(LocalUserNum, LoginDelegateHandle);
 
-            // Reset the delegate handle.
             LoginDelegateHandle.Reset();
         }
     }
 }
 
 void AMythicPlayerController::CB_LoginResponse(int32 LocalUserNum, bool bWasSuccessful, const FUniqueNetId &UserId, const FString &Error) {
-    /*
-This function handles the callback from logging in. You should not proceed with any EOS features until this function is called.
-This function will remove the delegate that was bound in the Login() function.
-*/
-
-    // TODO: Could call an event dispatcher here to notify the UI that connection to Online Services failed or succeeded.
     if (bWasSuccessful) {
         UE_LOG(Myth, Log, TEXT("EOS: Login successful - %s"), *UserId.ToString());
     }
     else {
-        // If online only, do not allow the player to continue.
-        // Otherwise, you can display a message to the user and allow them to continue in offline mode.
         UE_LOG(Myth, Error, TEXT("EOS: Login failed: %s"), *Error);
     }
 
-    // Clear the delegate handle. Guard the subsystem/identity derefs (see Login) — a null OSS / invalid Identity here
-    // would crash the login-completion callback in a no-OSS/offline configuration.
     IOnlineSubsystem *OSS = Online::GetSubsystem(GetWorld());
     if (!OSS) {
         UE_LOG(Myth, Error, TEXT("EOS: No Online Subsystem available — cannot clear login delegate"));
@@ -318,7 +308,6 @@ FPlayerStatsSummary AMythicPlayerController::GetPlayerStats() const {
         return Stats;
     }
 
-    // offense
     if (const UMythicAttributeSet_Offense *OffSet = ASC->GetSet<UMythicAttributeSet_Offense>()) {
         Stats.Power = OffSet->GetPower();
         Stats.DamagePerHit = OffSet->GetDamagePerHit();
@@ -327,7 +316,6 @@ FPlayerStatsSummary AMythicPlayerController::GetPlayerStats() const {
         Stats.CritDamage = OffSet->GetCriticalHitDamage();
     }
 
-    // defense
     if (const UMythicAttributeSet_Defense *DefSet = ASC->GetSet<UMythicAttributeSet_Defense>()) {
         Stats.Armor = DefSet->GetArmor();
         Stats.DodgeChance = DefSet->GetDodgeChance();
@@ -336,12 +324,10 @@ FPlayerStatsSummary AMythicPlayerController::GetPlayerStats() const {
         Stats.HealthRegenRate = DefSet->GetHealthRegenRate();
     }
 
-    // life
     if (const UMythicAttributeSet_Life *LifeSet = ASC->GetSet<UMythicAttributeSet_Life>()) {
         Stats.MaxHealth = LifeSet->GetMaxHealth();
     }
 
-    // utility
     if (const UMythicAttributeSet_Utility *UtilSet = ASC->GetSet<UMythicAttributeSet_Utility>()) {
         Stats.MaxStamina = UtilSet->GetMaxStamina();
         Stats.StaminaRegenRate = UtilSet->GetStaminaRegenRate();
@@ -355,7 +341,6 @@ FPlayerStatsSummary AMythicPlayerController::GetPlayerStats() const {
     return Stats;
 }
 
-// ---- Conversion station RPCs ----
 
 bool AMythicPlayerController::ServerOpenConversionStation_Validate(AMythicConversionStation *Station) { return Station != nullptr; }
 
@@ -405,11 +390,9 @@ void AMythicPlayerController::ServerConversionSetAutoRepeat_Implementation(AMyth
     }
 }
 
-// ---- Storage container RPCs ----
 
 bool AMythicPlayerController::ServerMoveItemBetweenInventories_Validate(UMythicInventoryComponent *Source, int32 SourceSlot, UMythicInventoryComponent *Target,
                                                                         int32 TargetSlot) {
-    // Source must be a concrete slot; Target may be INDEX_NONE (any-slot).
     return Source != nullptr && Target != nullptr && SourceSlot >= 0 && TargetSlot >= -1;
 }
 
@@ -417,13 +400,14 @@ bool AMythicPlayerController::CanPlayerAccessInventory(UMythicInventoryComponent
     if (!Inventory) {
         return false;
     }
-    // One of the player's own inventories is always allowed.
     if (GetAllInventoryComponents().Contains(Inventory)) {
         return true;
     }
-    // Otherwise it must belong to a storage container the player currently has open AND is in range of.
     if (AMythicStorageContainer *Container = Cast<AMythicStorageContainer>(Inventory->GetOwner())) {
         return Container->Server_IsOpener(this) && Container->IsActorInRange(GetPawn());
+    }
+    if (AMythicCorpse *Corpse = Cast<AMythicCorpse>(Inventory->GetOwner())) {
+        return Corpse->Server_IsOpener(this) && Corpse->IsActorInRange(GetPawn());
     }
     return false;
 }
@@ -434,22 +418,35 @@ void AMythicPlayerController::ServerMoveItemBetweenInventories_Implementation(UM
         return;
     }
 
-    // The player may act on an inventory only if it is one of their own OR an open, in-range container (prevents
-    // touching a third party's items or acting out of range).
     if (!CanPlayerAccessInventory(Source) || !CanPlayerAccessInventory(Target)) {
         return;
     }
 
-    // Player-initiated take must respect the source slot's bCanPlayerTake (SendItem only checks the target's
-    // bCanPlayerPut).
     if (!Source->CanPlayerTakeFromSlot(SourceSlot)) {
         return;
     }
 
     Source->SendItem(SourceSlot, Target, TargetSlot);
+
+    if (const AActor *SourceOwnerActor = Source->GetOwner()) {
+        if (const UMythicOwnershipComponent *Ownership = SourceOwnerActor->FindComponentByClass<UMythicOwnershipComponent>()) {
+            if (Ownership->IsOwned() && GetAllInventoryComponents().Contains(Target)) {
+                MythicTheftCrime::TrySubmitTheft(GetPawn(), const_cast<AActor *>(SourceOwnerActor), Ownership->GetOwnership());
+            }
+        }
+    }
 }
 
-// ---- Vendor RPCs ----
+int32 AMythicPlayerController::GetCarriedCurrency() const {
+    int32 Total = 0;
+    for (UMythicInventoryComponent *Inv : GetAllInventoryComponents()) {
+        if (Inv) {
+            Total += Inv->GetTotalCurrency();
+        }
+    }
+    return Total;
+}
+
 
 bool AMythicPlayerController::ServerVendorBuy_Validate(AMythicVendor *Vendor, int32 StockSlotIndex, int32 Quantity) {
     return Vendor != nullptr && StockSlotIndex >= 0 && Quantity > 0;
@@ -459,16 +456,14 @@ void AMythicPlayerController::ServerVendorBuy_Implementation(AMythicVendor *Vend
     if (!HasAuthority() || !Vendor) {
         return;
     }
-    // Same access gate as a container item-move: the player must have THIS vendor open AND be in range. A vendor IS a
-    // storage container, so CanPlayerAccessInventory's container branch authorizes its stock inventory unchanged.
     if (!CanPlayerAccessInventory(Vendor->GetContainerInventory())) {
         return;
     }
     const FMythicTradePlan Plan = Vendor->Server_ExecuteBuy(this, StockSlotIndex, Quantity);
-    // A successful / partial buy already shows the "+N <Item>" pickup callout; only surface a hard reject.
     if (MythicTrade::IsFailureWorthShowing(Plan.Result)) {
         ClientNotifyTradeResult(Plan.Result);
     }
+    RecordVendorAcquaintance(Vendor, Plan);
 }
 
 bool AMythicPlayerController::ServerVendorSell_Validate(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex,
@@ -481,8 +476,6 @@ void AMythicPlayerController::ServerVendorSell_Implementation(AMythicVendor *Ven
     if (!HasAuthority() || !Vendor || !PlayerInventory) {
         return;
     }
-    // The vendor must be open + in range (can't sell across the map), AND the source must be one of the player's own
-    // inventories (you can only sell YOUR items, never reach into a third party's bags).
     if (!CanPlayerAccessInventory(Vendor->GetContainerInventory())) {
         return;
     }
@@ -490,10 +483,50 @@ void AMythicPlayerController::ServerVendorSell_Implementation(AMythicVendor *Ven
         return;
     }
     const FMythicTradePlan Plan = Vendor->Server_ExecuteSell(this, PlayerInventory, PlayerSlotIndex, Quantity);
-    // A successful sale already shows the "+N <Currency>" callout; only surface a hard reject.
     if (MythicTrade::IsFailureWorthShowing(Plan.Result)) {
         ClientNotifyTradeResult(Plan.Result);
     }
+    RecordVendorAcquaintance(Vendor, Plan);
+}
+
+bool AMythicPlayerController::ServerStallBuy_Validate(AMythicPlayerStall *Stall, int32 StallSlotIndex, int32 Quantity) {
+    return Stall != nullptr && StallSlotIndex >= 0 && Quantity > 0;
+}
+
+void AMythicPlayerController::ServerStallBuy_Implementation(AMythicPlayerStall *Stall, int32 StallSlotIndex, int32 Quantity) {
+    if (!HasAuthority() || !Stall) {
+        return;
+    }
+    if (!CanPlayerAccessInventory(Stall->GetContainerInventory())) {
+        return;
+    }
+    const FMythicTradePlan Plan = Stall->Server_ExecuteStallPurchase(this, StallSlotIndex, Quantity);
+    if (MythicTrade::IsFailureWorthShowing(Plan.Result)) {
+        ClientNotifyTradeResult(Plan.Result);
+    }
+}
+
+void AMythicPlayerController::RecordVendorAcquaintance(const AMythicVendor *Vendor, const FMythicTradePlan &Plan) {
+    if (!HasAuthority() || !Vendor || Plan.Quantity <= 0) {
+        return;
+    }
+    AMythicPlayerState *PS = GetPlayerState<AMythicPlayerState>();
+    UMythicAcquaintanceComponent *Acquaintance = PS ? PS->GetAcquaintanceComponent() : nullptr;
+    if (!Acquaintance) {
+        return;
+    }
+
+    FGameplayTag VendorFactionTag;
+    if (const UMythicLivingWorldSubsystem *LW = GetGameInstance() ? GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>() : nullptr) {
+        if (const UMythicFactionDatabase *FactionDB = LW->GetFactionDatabase()) {
+            FMythicFactionData FactionData;
+            if (FactionDB->GetFaction(Vendor->GetVendorFaction(), FactionData)) {
+                VendorFactionTag = FactionData.FactionTag;
+            }
+        }
+    }
+
+    Acquaintance->ServerRecordInteraction(GetTypeHash(Vendor->GetFName()), VendorFactionTag, EMythicNpcInteraction::Traded);
 }
 
 bool AMythicPlayerController::ServerVendorRepair_Validate(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex) {
@@ -513,8 +546,6 @@ void AMythicPlayerController::ServerVendorRepair_Implementation(AMythicVendor *V
     }
     const FMythicTradePlan Plan = Vendor->Server_ExecuteRepair(this, PlayerInventory, PlayerSlotIndex);
     if (Plan.Result == EMythicTradeResult::Success) {
-        // Success feedback: float "<Item> repaired" over the player. The durability fragment defers its Repaired beat to
-        // the repair initiator (ServerRepair can't resolve the owner for a detached instance), so the initiator fires it.
         if (UMythicItemInstance *Item = PlayerInventory->GetItem(PlayerSlotIndex)) {
             if (const UItemDefinition *Def = Item->GetItemDefinition()) {
                 ClientNotifyItemDurability(Def->Name, EMythicItemDurabilityBeat::Repaired);
@@ -535,13 +566,12 @@ void AMythicPlayerController::ServerVendorRepairAll_Implementation(AMythicVendor
         return;
     }
     if (!CanPlayerAccessInventory(Vendor->GetContainerInventory())) {
-        return; // vendor not open to this player / out of range
+        return;
     }
     if (!GetAllInventoryComponents().Contains(PlayerInventory)) {
-        return; // the target inventory must be one of the requester's OWN
+        return;
     }
     const FMythicTradePlan Plan = Vendor->Server_ExecuteRepairAll(this, PlayerInventory);
-    // Whole-batch feedback (not per item): a generic "items repaired" durability beat on Success, else the failure reason.
     if (Plan.Result == EMythicTradeResult::Success) {
         ClientNotifyItemDurability(FText::GetEmpty(), EMythicItemDurabilityBeat::Repaired);
     }
@@ -550,7 +580,82 @@ void AMythicPlayerController::ServerVendorRepairAll_Implementation(AMythicVendor
     }
 }
 
-// ─────────────────────────────── Co-op item gift ───────────────────────────────
+bool AMythicPlayerController::ServerBuyback_Validate(AMythicVendor *Vendor, int32 BuybackIndex) {
+    return Vendor != nullptr && BuybackIndex >= 0;
+}
+
+void AMythicPlayerController::ServerBuyback_Implementation(AMythicVendor *Vendor, int32 BuybackIndex) {
+    if (!HasAuthority() || !Vendor) {
+        return;
+    }
+    if (!CanPlayerAccessInventory(Vendor->GetContainerInventory())) {
+        return;
+    }
+    const FMythicTradePlan Plan = Vendor->Server_ExecuteBuyback(this, BuybackIndex);
+    if (MythicTrade::IsFailureWorthShowing(Plan.Result)) {
+        ClientNotifyTradeResult(Plan.Result);
+    }
+}
+
+
+bool AMythicPlayerController::ServerSetItemJunk_Validate(UMythicItemInstance *Item, bool bJunk) {
+    return Item != nullptr;
+}
+
+void AMythicPlayerController::ServerSetItemJunk_Implementation(UMythicItemInstance *Item, bool bJunk) {
+    if (!HasAuthority() || !IsValid(Item)) {
+        return;
+    }
+    if (!GetAllInventoryComponents().Contains(Item->GetInventoryComponent())) {
+        return;
+    }
+    Item->ServerSetMarkedJunk(bJunk);
+}
+
+bool AMythicPlayerController::ServerSellAllJunk_Validate(AMythicVendor *Vendor) {
+    return Vendor != nullptr;
+}
+
+void AMythicPlayerController::ServerSellAllJunk_Implementation(AMythicVendor *Vendor) {
+    if (!HasAuthority() || !Vendor) {
+        return;
+    }
+    if (!CanPlayerAccessInventory(Vendor->GetContainerInventory())) {
+        return;
+    }
+
+    for (UMythicInventoryComponent *Inv : GetAllInventoryComponents()) {
+        if (!Inv) {
+            continue;
+        }
+        const int32 NumSlots = Inv->GetNumSlots();
+        for (int32 SlotIdx = 0; SlotIdx < NumSlots; ++SlotIdx) {
+            FMythicInventorySlotEntry Entry;
+            if (!Inv->GetSlotEntry(SlotIdx, Entry)) {
+                continue;
+            }
+            UMythicItemInstance *Item = Entry.SlottedItemInstance;
+            if (!IsValid(Item)) {
+                continue;
+            }
+            const UItemDefinition *Def = Item->GetItemDefinition();
+            if (!Def) {
+                continue;
+            }
+            const bool bIsCurrency = Def->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY);
+            const bool bCanTake = Inv->CanPlayerTakeFromSlot(SlotIdx);
+            const bool bJunk = MythicLootFilter::IsJunk(Item->IsMarkedJunk(),
+                                                        static_cast<int32>(Def->Rarity.GetValue()),
+                                                        MythicLootFilter::DefaultMaxJunkRarity,
+                                                        Def->Value, bIsCurrency, Entry.bEquipmentSlot, bCanTake);
+            if (!bJunk) {
+                continue;
+            }
+            Vendor->Server_ExecuteSell(this, Inv, SlotIdx, Item->GetStacks());
+        }
+    }
+}
+
 
 bool AMythicPlayerController::IsWithinGiftRange(const AMythicPlayerController *Other) const {
     const APawn *MyPawn = GetPawn();
@@ -571,42 +676,42 @@ void AMythicPlayerController::ClearPendingGift() {
     PendingGiftSourceInv = nullptr;
     PendingGiftItem = nullptr;
     PendingGiftSourceSlot = INDEX_NONE;
+    PendingGiftQuantity = 0;
 }
 
 void AMythicPlayerController::OnPendingGiftExpired() {
-    ClearPendingGift(); // a stale offer just lapses — nothing was moved, so the item stays with the giver
+    ClearPendingGift();
 }
 
-bool AMythicPlayerController::ServerOfferGift_Validate(AMythicPlayerController *Recipient, UMythicInventoryComponent *SourceInv, int32 SourceSlotIndex) {
+bool AMythicPlayerController::ServerOfferGift_Validate(AMythicPlayerController *Recipient, UMythicInventoryComponent *SourceInv, int32 SourceSlotIndex, int32 Quantity) {
     return Recipient != nullptr && SourceInv != nullptr && SourceSlotIndex >= 0;
 }
 
-void AMythicPlayerController::ServerOfferGift_Implementation(AMythicPlayerController *Recipient, UMythicInventoryComponent *SourceInv, int32 SourceSlotIndex) {
-    // Runs on the GIVER's PC (this == giver). Re-validate server-side; never trust the client-named recipient / inventory.
+void AMythicPlayerController::ServerOfferGift_Implementation(AMythicPlayerController *Recipient, UMythicInventoryComponent *SourceInv, int32 SourceSlotIndex, int32 Quantity) {
     if (!HasAuthority() || !Recipient || !SourceInv) {
         return;
     }
     if (!GetAllInventoryComponents().Contains(SourceInv)) {
-        return; // the source must be one of the GIVER's own inventories
+        return;
     }
     UMythicItemInstance *Item = SourceInv->GetItem(SourceSlotIndex);
     const bool bTakeable = (Item != nullptr) && SourceInv->CanPlayerTakeFromSlot(SourceSlotIndex);
-    if (!MythicGift::CanOfferGift(/*bRecipientValid*/ true, /*bDifferentPlayers*/ Recipient != this,
+    if (!MythicGift::CanOfferGift( true, Recipient != this,
                                   IsWithinGiftRange(Recipient), bTakeable)) {
         return;
     }
 
-    // Park the offer on the RECIPIENT (superseding any prior one) + prompt them; arm the timeout on the recipient.
     Recipient->ClearPendingGift();
     Recipient->PendingGiftGiver = this;
     Recipient->PendingGiftSourceInv = SourceInv;
     Recipient->PendingGiftItem = Item;
     Recipient->PendingGiftSourceSlot = SourceSlotIndex;
+    Recipient->PendingGiftQuantity = Quantity;
     const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
     const float Timeout = Settings ? Settings->GiftOfferTimeoutSeconds : 20.0f;
     if (UWorld *W = GetWorld(); W && Timeout > 0.0f) {
         W->GetTimerManager().SetTimer(Recipient->PendingGiftTimerHandle, Recipient,
-                                      &AMythicPlayerController::OnPendingGiftExpired, Timeout, /*bLoop=*/false);
+                                      &AMythicPlayerController::OnPendingGiftExpired, Timeout,false);
     }
 
     FText ItemName;
@@ -617,19 +722,10 @@ void AMythicPlayerController::ServerOfferGift_Implementation(AMythicPlayerContro
 }
 
 void AMythicPlayerController::ClientReceiveGiftOffer_Implementation(AMythicPlayerController *Giver, const FText &ItemName) {
-    // RECIPIENT client: surface the offer (a float beat so it's never silent) + hand it to the BP prompt widget.
-    if (const APawn *AvatarPawn = GetPawn()) {
-        if (UWorld *World = AvatarPawn->GetWorld()) {
-            if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-                Feedback->AddScreenToast(FText::FromString(TEXT("Gift offered")), FLinearColor(0.6f, 0.85f, 1.0f), nullptr, 2.0f);
-            }
-        }
-    }
-    OnGiftOffered(Giver, ItemName); // BP shows Accept/Decline → calls ServerRespondGift
+    OnGiftOffered(Giver, ItemName);
 }
 
 void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
-    // Runs on the RECIPIENT's PC (this == recipient). Re-validate the whole offer at accept (gotcha (d)).
     if (!HasAuthority()) {
         return;
     }
@@ -640,10 +736,8 @@ void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
 
     const bool bGiverValid = (Giver != nullptr) && (SourceInv != nullptr) && (OfferedItem != nullptr);
     const bool bInRange = bGiverValid && IsWithinGiftRange(Giver);
-    // The EXACT offered instance must still occupy the offered slot — guards the giver moving / using / swapping it.
     const bool bItemStillThere = bGiverValid && (SourceInv->GetItem(SourceSlot) == OfferedItem);
 
-    // Capture the item name BEFORE any move — a fully-transferred instance is destroyed, so it can't be read afterward.
     FText ItemName;
     if (OfferedItem) {
         if (const UItemDefinition *Def = OfferedItem->GetItemDefinition()) {
@@ -652,7 +746,6 @@ void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
     }
 
     if (!MythicGift::CanCompleteGift(HasPendingGift(), bAccept, bGiverValid, bInRange, bItemStillThere)) {
-        // Don't leave it silent: a decline tells the GIVER; an accept that lapsed (item moved / out of range) tells the recipient.
         if (HasPendingGift()) {
             if (!bAccept && Giver) {
                 Giver->ClientNotifyGiftResult(NSLOCTEXT("Gift", "Declined", "Gift declined"), FLinearColor(0.7f, 0.7f, 0.7f));
@@ -661,11 +754,10 @@ void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
                 ClientNotifyGiftResult(NSLOCTEXT("Gift", "Unavailable", "Gift no longer available"), FLinearColor(0.7f, 0.7f, 0.7f));
             }
         }
-        ClearPendingGift(); // item stays with the giver
+        ClearPendingGift();
         return;
     }
 
-    // Route into the recipient's inventory for the item's type; atomic + loss-safe (the move puts it back on no/partial room).
     UMythicInventoryComponent *DestInv = nullptr;
     if (const UItemDefinition *Def = OfferedItem->GetItemDefinition()) {
         DestInv = GetInventoryForItemType(Def->ItemType);
@@ -675,20 +767,39 @@ void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
     if (DestInv) {
         const UItemDefinition *OfferedDef = OfferedItem->GetItemDefinition();
         const int32 StacksBefore = OfferedItem->GetStacks();
-        SourceInv->ServerQuickMoveToInventory(SourceSlot, DestInv); // whole-stack; partial-qty gift is a logged follow-up
-        // Detect the outcome from what (if anything) remains in the giver's source slot — by DEFINITION, since the offered
-        // instance may have been destroyed on a full move (never deref the stale pointer here).
-        int32 RemainingInGiver = 0;
-        if (UMythicItemInstance *StillThere = SourceInv->GetItem(SourceSlot)) {
-            if (StillThere->GetItemDefinition() == OfferedDef) {
-                RemainingInGiver = StillThere->GetStacks();
+        const int32 GiftQty = MythicGift::ComputeGiftQuantity(PendingGiftQuantity, StacksBefore);
+
+        if (GiftQty >= StacksBefore) {
+            SourceInv->ServerQuickMoveToInventory(SourceSlot, DestInv);
+            int32 RemainingInGiver = 0;
+            if (UMythicItemInstance *StillThere = SourceInv->GetItem(SourceSlot)) {
+                if (StillThere->GetItemDefinition() == OfferedDef) {
+                    RemainingInGiver = StillThere->GetStacks();
+                }
+            }
+            Moved = FMath::Max(0, StacksBefore - RemainingInGiver);
+            Result = MythicGift::ClassifyGiftMove(StacksBefore, Moved);
+        }
+        else {
+            const int32 SplitSlot = SourceInv->SplitStackToFreeSlot(SourceSlot, GiftQty);
+            if (SplitSlot == INDEX_NONE) {
+                Result = EMythicGiftResult::NoRoom;
+                Moved = 0;
+            }
+            else {
+                SourceInv->ServerQuickMoveToInventory(SplitSlot, DestInv);
+                int32 RemainingInSplit = 0;
+                if (UMythicItemInstance *StillThere = SourceInv->GetItem(SplitSlot)) {
+                    if (StillThere->GetItemDefinition() == OfferedDef) {
+                        RemainingInSplit = StillThere->GetStacks();
+                    }
+                }
+                Moved = FMath::Max(0, GiftQty - RemainingInSplit);
+                Result = MythicGift::ClassifyGiftMove(GiftQty, Moved);
             }
         }
-        Moved = FMath::Max(0, StacksBefore - RemainingInGiver);
-        Result = MythicGift::ClassifyGiftMove(StacksBefore, Moved);
     }
 
-    // Outcome beats — the recipient (this) sees what they got; the giver sees how it landed.
     if (Result == EMythicGiftResult::Success || Result == EMythicGiftResult::Partial) {
         ClientNotifyGiftResult(FText::Format(NSLOCTEXT("Gift", "Received", "Received {0} x{1}"), ItemName, FText::AsNumber(Moved)),
                                FLinearColor(0.45f, 0.9f, 0.45f));
@@ -701,7 +812,7 @@ void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
         case EMythicGiftResult::Partial:
             Giver->ClientNotifyGiftResult(NSLOCTEXT("Gift", "Partial", "Gift partly given (no room for all)"), FLinearColor(0.95f, 0.8f, 0.3f));
             break;
-        default: // NoRoom
+        default:
             Giver->ClientNotifyGiftResult(NSLOCTEXT("Gift", "NoRoom", "Recipient has no room"), FLinearColor(1.0f, 0.5f, 0.3f));
             break;
         }
@@ -710,13 +821,6 @@ void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
 }
 
 void AMythicPlayerController::ClientNotifyGiftResult_Implementation(const FText &Message, FLinearColor Color) {
-    if (const APawn *AvatarPawn = GetPawn()) {
-        if (UWorld *World = AvatarPawn->GetWorld()) {
-            if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-                Feedback->AddScreenToast(Message, Color, nullptr, 2.0f);
-            }
-        }
-    }
 }
 
 bool AMythicPlayerController::ServerDeployPlaceable_Validate(UMythicInventoryComponent *Inventory, int32 SlotIndex,
@@ -735,28 +839,23 @@ void AMythicPlayerController::ServerDeployPlaceable_Implementation(UMythicInvent
         return;
     }
 
-    // Gate inputs for the (tested) deploy decision.
     const bool bAuthorized = CanPlayerAccessInventory(Inventory);
     UMythicItemInstance *Item = Inventory->GetItem(SlotIndex);
     const UPlaceableFragment *Placeable = Item ? Item->GetFragment<UPlaceableFragment>() : nullptr;
     const bool bHasPlaceableItem = (Item != nullptr) && (Placeable != nullptr) && Inventory->CanPlayerTakeFromSlot(SlotIndex);
     const bool bHasDeployedClass = (Placeable != nullptr) && !Placeable->DeployedActorClass.IsNull();
 
-    // Authoritative trace from the supplied aim — only meaningful when we actually have a placeable (its reach /
-    // rules drive it); otherwise PlanDeploy rejects on the slot/content gate first, so the placement value is unused.
     EPlaceablePlacementResult Placement = EPlaceablePlacementResult::NoSurface;
     FVector CandidatePoint = FVector::ZeroVector;
     if (Placeable) {
         const FVector Dir = AimDirection.GetSafeNormal();
         const FVector TraceEnd = AimOrigin + Dir * Placeable->MaxPlacementReach;
 
-        FCollisionQueryParams TraceParams(FName(TEXT("MythicDeployPlaceable")), /*bTraceComplex*/ false, MyPawn);
+        FCollisionQueryParams TraceParams(FName(TEXT("MythicDeployPlaceable")), false, MyPawn);
         FHitResult Hit;
         const bool bHit = World->LineTraceSingleByChannel(Hit, AimOrigin, TraceEnd, ECC_Visibility, TraceParams);
         CandidatePoint = bHit ? Hit.ImpactPoint : TraceEnd;
 
-        // Clearance: reject if a pawn already occupies the spot (don't deploy inside a player / creature). Geometry
-        // clearance against static walls is a logged refinement, not done here.
         const bool bBlocked = World->OverlapAnyTestByChannel(CandidatePoint, FQuat::Identity, ECC_Pawn,
                                                              FCollisionShape::MakeSphere(Placeable->RequiredClearanceRadius), TraceParams);
 
@@ -767,8 +866,6 @@ void AMythicPlayerController::ServerDeployPlaceable_Implementation(UMythicInvent
 
     const EPlaceableDeployResult Decision = UPlaceableFragment::PlanDeploy(bAuthorized, bHasPlaceableItem, bHasDeployedClass, Placement);
     if (Decision != EPlaceableDeployResult::Deployed) {
-        // Tell the player WHY the build failed (was previously silent). DescribeDeployFailure returns empty for outcomes
-        // that shouldn't surface a toast (a UI-impossible empty slot / the NoDeployedClass content error) — skip those.
         const FText Reason = UPlaceableFragment::DescribeDeployFailure(Decision, Placement);
         if (!Reason.IsEmpty()) {
             ClientNotifyDeployRejected(Reason);
@@ -776,15 +873,12 @@ void AMythicPlayerController::ServerDeployPlaceable_Implementation(UMythicInvent
         return;
     }
 
-    // Deploy upright, facing away from the player, at the validated point.
     FMythicPendingDeploy Pending;
     Pending.Inventory = Inventory;
     Pending.Item = Item;
     Pending.SlotIndex = SlotIndex;
     Pending.SpawnTransform = FTransform(FRotator(0.0f, MyPawn->GetActorRotation().Yaw, 0.0f), CandidatePoint);
 
-    // Spawn from a soft class without a synchronous load (banned on a gameplay action). If it is already resident,
-    // finish immediately; otherwise async-load then finish (re-validating across the gap).
     if (UClass *Resident = Placeable->DeployedActorClass.Get()) {
         FinishDeployPlaceable(Resident, Pending);
         return;
@@ -807,20 +901,14 @@ void AMythicPlayerController::FinishDeployPlaceable(UClass *DeployedClass, const
     UMythicInventoryComponent *Inventory = Pending.Inventory.Get();
     UMythicItemInstance *Item = Pending.Item.Get();
     if (!World || !Inventory || !Item) {
-        return; // the inventory / item went away during the async gap — abort without consuming.
+        return;
     }
 
-    // Re-validate across the (possibly async) load gap: the slot must still hold THIS item, still be takeable, and
-    // the player must still have access (e.g. didn't walk away from a container).
     if (Inventory->GetItem(Pending.SlotIndex) != Item || !Inventory->CanPlayerTakeFromSlot(Pending.SlotIndex) ||
         !CanPlayerAccessInventory(Inventory)) {
         return;
     }
 
-    // Per-player placeable cap (only when one is set — at the unlimited default 0 we skip ALL tracking so the path is
-    // truly zero-cost + byte-identical). Prune entries whose actor is gone (destroyed by combat/decay/another player),
-    // then reject if at the cap. Don't spawn or consume — the item stays in the slot. Re-checked HERE (the authoritative
-    // spawn point) so concurrently-queued deploys can't exceed the cap across the async load gap.
     const bool bCapped = MaxDeployedPlaceables > 0;
     if (bCapped) {
         DeployedPlaceables.RemoveAll([](const TWeakObjectPtr<AActor> &P) { return !P.IsValid(); });
@@ -830,8 +918,6 @@ void AMythicPlayerController::FinishDeployPlaceable(UClass *DeployedClass, const
         }
     }
 
-    // Deferred spawn so the actor is fully initialized before BeginPlay; consume the item ONLY after a real spawn
-    // (so a failed deploy never eats the item).
     AActor *Deployed = World->SpawnActorDeferred<AActor>(DeployedClass, Pending.SpawnTransform, this, GetPawn(),
                                                          ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
     if (!Deployed) {
@@ -840,20 +926,16 @@ void AMythicPlayerController::FinishDeployPlaceable(UClass *DeployedClass, const
     Deployed->FinishSpawning(Pending.SpawnTransform);
     Item->ConsumeItem(1);
 
-    // Track the live placeable so it counts against this player's cap until destroyed (then lazily pruned above). Only
-    // when capped — see above.
     if (bCapped) {
         DeployedPlaceables.Add(Deployed);
     }
 }
 
 bool AMythicPlayerController::CanDeployMore(int32 CurrentValidCount, int32 MaxAllowed) {
-    // A non-positive cap means unlimited; otherwise the player must currently hold fewer than the cap.
     return MaxAllowed <= 0 || CurrentValidCount < MaxAllowed;
 }
 
 void AMythicPlayerController::ClientNotifyDeployRejected_Implementation(const FText &Reason) {
-    // Client-local: hand the reason to BP for display (toast / deny SFX). No-op if BP didn't bind it.
     OnDeployRejected(Reason);
 }
 
@@ -869,9 +951,6 @@ void AMythicPlayerController::ServerInteractPrimary_Implementation(AActor *Inter
         return;
     }
 
-    // Anti-exploit: re-validate reach server-side (a client could forge this RPC for any actor). Reuse the
-    // interaction component's authored range (single source — no duplicated constant) with latency slack; fall back
-    // to a sane default if no interaction component is present.
     if (const APawn *MyPawn = GetPawn()) {
         float ReachSq = FMath::Square(400.0f);
         const UMythicInteractionComponent *Interaction = FindComponentByClass<UMythicInteractionComponent>();
@@ -882,11 +961,10 @@ void AMythicPlayerController::ServerInteractPrimary_Implementation(AActor *Inter
             ReachSq = FMath::Square(Interaction->InteractionRange * 1.5f);
         }
         if (FVector::DistSquared(MyPawn->GetActorLocation(), Interactable->GetActorLocation()) > ReachSq) {
-            return; // beyond plausible interaction range
+            return;
         }
     }
 
-    // Re-run the interaction SERVER-side; the interactable's OnPrimaryInteract sees HasAuthority() and acts.
     IMythicInteractable::Execute_OnPrimaryInteract(Interactable, this);
 }
 
@@ -895,10 +973,6 @@ bool AMythicPlayerController::ServerRequestNpcDialogue_Validate(AMythicNPCCharac
 }
 
 void AMythicPlayerController::OfferNpcQuestIfAny(AMythicNPCCharacter *NPC) {
-    // Quest-giver: if this NPC offers a quest, assign it server-side (ServerAddObjective is idempotent, so re-interacting
-    // is harmless). SERVER-VALIDATE proximity (the interaction scanner only enforces range client-side) so a modded
-    // client can't bulk-enroll across the map. SINGLE SOURCE (Rule 3): called from BOTH the dialogue AND recruit paths
-    // — a recruitable quest-giver must still hand out its quest (the recruit verb otherwise bypasses this).
     if (!IsValid(NPC) || NPC->GetWorld() != GetWorld()) {
         return;
     }
@@ -917,8 +991,6 @@ void AMythicPlayerController::OfferNpcQuestIfAny(AMythicNPCCharacter *NPC) {
             Result == EObjectiveOfferResult::AlreadyCompleted ||
             Result == EObjectiveOfferResult::OutOfRange ||
             Result == EObjectiveOfferResult::PrerequisitesNotMet) {
-            // Assigned / OutOfRange / PrerequisitesNotMet are "assignment" beats (assigned / can't here / locked behind a
-            // prior step); AlreadyActive / AlreadyCompleted are "duplicate" beats.
             const EObjectiveNotifyCategory Category = (Result == EObjectiveOfferResult::Assigned
                                                        || Result == EObjectiveOfferResult::OutOfRange
                                                        || Result == EObjectiveOfferResult::PrerequisitesNotMet)
@@ -936,22 +1008,13 @@ void AMythicPlayerController::ServerRequestNpcDialogue_Implementation(AMythicNPC
     }
 
     OfferNpcQuestIfAny(NPC);
-    // "Talk to X" objective trigger: SERVER-range-gated (the interaction scanner only enforces range client-side, so a
-    // modded client could otherwise complete a remote talk objective — mirrors the quest-offer / social / recruit /
-    // barter paths). No-op unless this NPC carries a QuestNpcTag. Repeatable — a talk objective is count-1, so re-talking
-    // a completed one is a harmless tracker no-op. The cosmetic dialogue line below stays ungated (a client-local bark).
     if (NPC->IsActorInTradeRange(GetPawn())) {
         NotifyTalkedToNPC(NPC->GetQuestNpcTag());
-        // Turn-in / deliver: hand over items for any active delivery objective whose receiver is THIS NPC. Same
-        // server-range gate as the talk trigger (a modded client must not turn in from across the map). The tracker
-        // consumes from the player inventory + advances server-authoritatively.
         if (ObjectiveTracker && InventoryComponent) {
             ObjectiveTracker->ServerTurnInDeliveriesTo(NPC->GetQuestNpcTag(), InventoryComponent);
         }
     }
 
-    // Pick the line on the server, where the NPC's brain dialogue context (Faction/Role/pressure) is real, then
-    // deliver it back to this requesting client for display.
     const FText Line = NPC->SelectDialogueFor(this);
     ClientReceiveNpcDialogue(NPC, Line);
 }
@@ -962,10 +1025,8 @@ void AMythicPlayerController::ClientReceiveNpcDialogue_Implementation(AMythicNPC
     }
 }
 
-// ---- Social verbs ----
 
 bool AMythicPlayerController::ServerPerformSocialVerb_Validate(AMythicNPCCharacter *NPC, EMythicSocialVerb Verb) {
-    // Mirror ServerRequestNpcDialogue_Validate: cheap non-null gate; the real (range/auth) checks run in _Implementation.
     return NPC != nullptr;
 }
 
@@ -973,30 +1034,21 @@ void AMythicPlayerController::ServerPerformSocialVerb_Implementation(AMythicNPCC
     if (!HasAuthority() || !IsValid(NPC)) {
         return;
     }
-    // Same proximity gate the dialogue/recruit/barter verbs use — the interaction scanner only enforces range
-    // client-side, so a modded client could otherwise provoke NPCs across the map.
     if (!NPC->IsActorInTradeRange(GetPawn())) {
         return;
     }
-    // Bound the enum (a hand-crafted packet could carry COUNT/garbage).
     if (Verb >= EMythicSocialVerb::COUNT) {
         return;
     }
 
-    // Resolve + apply server-side (the brain personality + standing are authoritative). ApplySocialReaction performs
-    // all sim mutation (standing/aggro/guard alert) only — the UI surfacing is the client RPC below.
     const FMythicSocialReactionResult Result = NPC->ResolveSocialVerb(Verb, this);
     NPC->ApplySocialReaction(Result, Verb, this);
 
-    // Round-trip the reaction to the requesting client for its bark/face/anim (mirrors ClientReceiveNpcDialogue;
-    // runs locally on a listen-host too, so it is the single UI surfacing path for all net modes).
     ClientReceiveSocialReaction(NPC, Verb, Result.Reaction, UMythicSocialVerbLibrary::DefaultBarkFor(Verb, Result.Reaction));
 }
 
 void AMythicPlayerController::ClientReceiveSocialReaction_Implementation(AMythicNPCCharacter *NPC, EMythicSocialVerb Verb, EMythicSocialReaction Reaction, const FText &Line) {
     if (IsValid(NPC)) {
-        // Surface the reaction on the requesting client (runs locally on a listen-host too — the single UI path,
-        // mirroring ClientReceiveNpcDialogue → FireBark).
         NPC->FireReaction(Verb, Reaction, Line, this);
     }
 }
@@ -1009,8 +1061,6 @@ void AMythicPlayerController::ServerRecruitNpc_Implementation(AMythicNPCCharacte
     if (!HasAuthority() || !IsValid(NPC)) {
         return;
     }
-    // SERVER-VALIDATE proximity + eligibility — the interaction scanner only enforces range client-side, so a modded
-    // client could otherwise recruit across the map. Same single-source range predicate the dialogue/barter RPCs use.
     if (!NPC->IsActorInTradeRange(GetPawn()) || !NPC->IsRecruitable()) {
         return;
     }
@@ -1018,17 +1068,11 @@ void AMythicPlayerController::ServerRecruitNpc_Implementation(AMythicNPCCharacte
     if (!Party) {
         return;
     }
-    // Parity with the dialogue path: a recruitable quest-giver still hands out its quest (the recruit verb otherwise
-    // bypasses ServerRequestNpcDialogue's enrollment). Idempotent, so offering on every recruit interaction is safe.
     OfferNpcQuestIfAny(NPC);
-    // Already a companion → the primary verb falls through to a normal dialogue bark (so you can talk to a member).
     if (Party->IsInParty(NPC)) {
         ClientReceiveNpcDialogue(NPC, NPC->SelectDialogueFor(this));
         return;
     }
-    // The party/loyalty model tracks companions by their MASS source entity, so only a Tier2+ cognitive NPC that owns
-    // one can be recruited. A recruitable NPC with no brain/entity is a designer misconfiguration — log it (rather than
-    // show the player a misleading "party full") and bail.
     if (!NPC->CognitiveBrain) {
         UE_LOG(Myth, Warning, TEXT("ServerRecruitNpc: '%s' is recruitable but has no cognitive brain — cannot be a companion."), *GetNameSafe(NPC));
         return;
@@ -1038,268 +1082,132 @@ void AMythicPlayerController::ServerRecruitNpc_Implementation(AMythicNPCCharacte
         UE_LOG(Myth, Warning, TEXT("ServerRecruitNpc: '%s' has no valid MASS source entity — cannot be a companion."), *GetNameSafe(NPC));
         return;
     }
-    // Key the party by the RECRUITER's canonical key (both membership + follow): the companion follows THIS player's
-    // pawn via the registry (co-op-correct), and the party persists under the cross-session key.
     FString RecruiterKey;
     if (const AMythicPlayerState *RecruiterPS = GetPlayerState<AMythicPlayerState>()) {
         RecruiterKey = RecruiterPS->GetCanonicalPlayerKey();
     }
-    // bOk false here means ONLY "party full" (the dup/null cases are handled above), so the client message is accurate.
     const bool bOk = Party->AddCompanion(RecruiterKey, NPC, Src);
     ClientReceiveRecruitResult(NPC, bOk);
 }
 
 void AMythicPlayerController::ClientReceiveRecruitResult_Implementation(AMythicNPCCharacter *NPC, bool bSucceeded) {
-    if (!IsValid(NPC)) {
+}
+
+bool AMythicPlayerController::ServerIssueCompanionOrder_Validate(AMythicNPCCharacter *Companion, EMythicCompanionOrder Order, AActor *OrderTarget) {
+    return true;
+}
+
+void AMythicPlayerController::ServerIssueCompanionOrder_Implementation(AMythicNPCCharacter *Companion, EMythicCompanionOrder Order, AActor *OrderTarget) {
+    UMythicPartySubsystem *Party = GetWorld() ? GetWorld()->GetSubsystem<UMythicPartySubsystem>() : nullptr;
+    if (!Party) {
         return;
     }
-    UWorld *World = NPC->GetWorld();
-    if (!World) {
+    FString PlayerKey;
+    if (const AMythicPlayerState *PS = GetPlayerState<AMythicPlayerState>()) {
+        PlayerKey = PS->GetCanonicalPlayerKey();
+    }
+    if (PlayerKey.IsEmpty()) {
         return;
     }
-    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-        if (bSucceeded) {
-            Feedback->AddScreenToast(FText::FromString(TEXT("Joined your party!")), FLinearColor(0.1f, 0.9f, 0.3f), nullptr, 3.0f);
-        }
-        else {
-            Feedback->AddScreenToast(FText::FromString(TEXT("Party is full")), FLinearColor(0.8f, 0.8f, 0.8f), nullptr, 3.0f);
-        }
-    }
+    Party->IssueCompanionOrder(PlayerKey, Companion, Order, OrderTarget);
 }
 
 void AMythicPlayerController::ClientShowGatherProgress_Implementation(FVector Location, int32 HitsRemaining) {
-    UWorld *World = GetWorld();
-    if (!World) {
-        return;
-    }
-    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-        const FVector Loc = Location + FVector(0.0f, 0.0f, 50.0f); // float just above the node
-        Feedback->AddWorldCallout(Loc, FText::FromString(FString::Printf(TEXT("%d left"), HitsRemaining)),
-                                  FLinearColor(0.85f, 0.7f, 0.4f), nullptr, 1.0f); // tan, brief — world-anchored, spatial
-    }
 }
 
 void AMythicPlayerController::ClientShowGatherDepleted_Implementation(FVector Location) {
-    UWorld *World = GetWorld();
-    if (!World) {
-        return;
-    }
-    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-        const FVector Loc = Location + FVector(0.0f, 0.0f, 50.0f);
-        Feedback->AddWorldCallout(Loc, FText::FromString(TEXT("Depleted!")), FLinearColor(0.6f, 0.85f, 0.4f), nullptr, 1.5f);
-    }
 }
 
 void AMythicPlayerController::ClientNotifyProficiencyLevel_Implementation(const FText &ProfName, int32 NewLevel, const FText &MilestoneName) {
-    const APawn *AvatarPawn = GetPawn();
-    if (!AvatarPawn) {
-        return;
-    }
-    UWorld *World = AvatarPawn->GetWorld();
-    if (!World) {
-        return;
-    }
-    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-        // A level-up is a major beat -> hero banner. Milestone unlock (if any) rides as the subtitle.
-        const FText Title = FText::FromString(FString::Printf(TEXT("%s  Lv %d"), *ProfName.ToString(), NewLevel));
-        const FText Subtitle = MilestoneName.IsEmpty()
-                                   ? FText::FromString(TEXT("Proficiency increased"))
-                                   : FText::FromString(FString::Printf(TEXT("%s unlocked!"), *MilestoneName.ToString()));
-        Feedback->AddScreenBanner(Title, Subtitle, FLinearColor(1.0f, 0.85f, 0.1f), nullptr, 2.5f); // gold
-    }
+    FMythicHudNotice Notice;
+    Notice.Kind = EMythicNoticeKind::Progression;
+    Notice.Text = FText::Format(NSLOCTEXT("Mythic", "ProfLevelUp", "{0}  Lv {1}"), ProfName, FText::AsNumber(NewLevel));
+    Notice.Detail = MilestoneName.IsEmpty()
+                        ? FText::GetEmpty()
+                        : FText::Format(NSLOCTEXT("Mythic", "MilestoneUnlocked", "{0} unlocked"), MilestoneName);
+    RaiseHudNotice(Notice);
 }
 
 void AMythicPlayerController::ClientNotifyCompanionDeparted_Implementation(const FText &Name, FVector Location) {
-    UWorld *World = GetWorld();
-    if (!World) {
-        return;
-    }
-    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-        const FString Who = Name.IsEmpty() ? TEXT("A companion") : Name.ToString();
-        Feedback->AddScreenToast(FText::FromString(FString::Printf(TEXT("%s has left your party"), *Who)),
-                                 FLinearColor(0.7f, 0.7f, 0.75f), nullptr, 3.0f); // grey, lingers
-    }
 }
 
 void AMythicPlayerController::ClientNotifyCompanionBetrayed_Implementation(const FText &Name, FVector Location) {
-    UWorld *World = GetWorld();
-    if (!World) {
-        return;
-    }
-    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-        const FString Who = Name.IsEmpty() ? TEXT("A companion") : Name.ToString();
-        Feedback->AddScreenToast(FText::FromString(FString::Printf(TEXT("%s turns on you!"), *Who)),
-                                 FLinearColor(0.9f, 0.1f, 0.1f), nullptr, 3.5f); // red, lingers
-    }
 }
 
-void AMythicPlayerController::ClientNotifyObjective_Implementation(const FText &DisplayText, int32 Current, int32 Required, bool bCompleted, int32 StackIndex) {
-    const APawn *AvatarPawn = GetPawn();
-    if (!AvatarPawn) {
-        return;
-    }
-    UWorld *World = AvatarPawn->GetWorld();
-    if (!World) {
-        return;
-    }
-    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-        if (bCompleted) {
-            // Objective complete is a major beat -> hero banner (title + the objective name as subtitle).
-            Feedback->AddScreenBanner(FText::FromString(TEXT("Objective Complete")), DisplayText,
-                                      FLinearColor(1.0f, 0.85f, 0.1f), nullptr, 3.0f); // gold
-        }
-        else {
-            // Progress is a minor beat -> toast.
-            Feedback->AddScreenToast(FText::FromString(FString::Printf(TEXT("%s  %d/%d"), *DisplayText.ToString(), Current, Required)),
-                                     FLinearColor(0.9f, 0.9f, 0.95f), nullptr, 1.5f); // white, brief
-        }
-    }
+void AMythicPlayerController::ClientNotifyObjective_Implementation(const FText &DisplayText, int32 Current, int32 Required, bool bCompleted, int32 StackIndex,
+                                                                   const FText &QuestTitle) {
+    FMythicHudNotice Notice;
+    Notice.Kind = EMythicNoticeKind::Objective;
+    Notice.Text = DisplayText;
+    Notice.Detail = QuestTitle;
+    Notice.Accent = FLinearColor(0.86f, 0.81f, 0.70f);
+    Notice.StackKey = FName(*DisplayText.ToString());
+    Notice.Count = Current;
+    Notice.Total = Required;
+    Notice.bTerminal = bCompleted;
+    RaiseHudNotice(Notice);
 }
 
 void AMythicPlayerController::ClientNotifyObjectiveResult_Implementation(const FText &DisplayText, EObjectiveNotifyCategory Category,
                                                                          EObjectiveOfferResult OfferResult, int32 Current, int32 Required,
                                                                          bool bRewardSucceeded, bool bRewardDroppedNearby, int32 StackIndex) {
-    const APawn *AvatarPawn = GetPawn();
-    if (!AvatarPawn) {
-        return;
-    }
-    UWorld *World = AvatarPawn->GetWorld();
-    if (!World) {
-        return;
-    }
-    UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>();
-    if (!Feedback) {
-        return;
-    }
+}
 
-    const FText Message = UObjectiveTracker::BuildObjectiveNotificationText(DisplayText, Category, OfferResult,
-                                                                            Current, Required, bRewardSucceeded,
-                                                                            bRewardDroppedNearby);
-    FLinearColor Color(0.9f, 0.9f, 0.95f);
-    float Duration = 2.0f;
-    bool bMajor = false;
-    if (Category == EObjectiveNotifyCategory::Completed) {
-        Color = FLinearColor(1.0f, 0.85f, 0.1f);
-        Duration = 3.0f;
-        bMajor = true; // a genuine completion is a hero-banner beat
-    }
-    else if (Category == EObjectiveNotifyCategory::Assignment) {
-        // The Assignment bucket carries BOTH a real new assignment AND the rejection outcomes (out-of-range / locked /
-        // unavailable). Only a genuine assignment merits the celebratory hero banner; the rejections are minor
-        // informational beats and must NOT read as a celebration of a non-event.
-        if (OfferResult == EObjectiveOfferResult::Assigned) {
-            Color = FLinearColor(1.0f, 0.85f, 0.1f); // gold
-            Duration = 3.0f;
-            bMajor = true;
-        }
-        else {
-            Color = FLinearColor(0.8f, 0.8f, 0.85f); // calm grey — "can't here / locked"
-            Duration = 2.0f;
-        }
-    }
-    else if (Category == EObjectiveNotifyCategory::RewardResult) {
-        Color = bRewardSucceeded ? FLinearColor(0.4f, 0.9f, 0.45f) : FLinearColor(0.9f, 0.2f, 0.15f);
-        Duration = 2.5f;
-    }
-
-    if (bMajor) {
-        Feedback->AddScreenBanner(Message, FText::GetEmpty(), Color, nullptr, Duration);
-    }
-    else {
-        Feedback->AddScreenToast(Message, Color, nullptr, Duration);
-    }
+void AMythicPlayerController::RaiseHudNotice(const FMythicHudNotice &Notice) {
+    OnHudNotice.Broadcast(Notice);
 }
 
 void AMythicPlayerController::ClientNotifyLootPickup_Implementation(const FText &ItemName, int32 Quantity, FLinearColor RarityColor) {
-    const APawn *AvatarPawn = GetPawn();
-    if (!AvatarPawn) {
-        return;
-    }
-    UWorld *World = AvatarPawn->GetWorld();
-    if (!World) {
-        return;
-    }
-    // Loot is NOT combat — a minor non-combat beat -> screen toast (the unified subsystem's non-WBP Canvas path).
-    // Shows "+N ItemName" in the item's rarity color.
-    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-        const FText Text = (Quantity > 1)
-            ? FText::FromString(FString::Printf(TEXT("+%d %s"), Quantity, *ItemName.ToString()))
-            : ItemName;
-        Feedback->AddScreenToast(Text, RarityColor, /*Icon*/ nullptr, 2.0f);
-    }
+    FMythicHudNotice Notice;
+    Notice.Kind = EMythicNoticeKind::Loot;
+    Notice.Text = FText::Format(NSLOCTEXT("Mythic", "LootPickup", "+{0}"), ItemName);
+    Notice.Accent = RarityColor;
+    Notice.Count = FMath::Max(1, Quantity);
+    Notice.StackKey = FName(*ItemName.ToString());
+    RaiseHudNotice(Notice);
+}
+
+void AMythicPlayerController::ClientNotifyRewardCelebration_Implementation(UItemDefinition *ItemDef, int32 Quantity) {
+    OnRewardCelebration(ItemDef, Quantity);
 }
 
 void AMythicPlayerController::ClientNotifyTradeResult_Implementation(EMythicTradeResult Result) {
-    const APawn *AvatarPawn = GetPawn();
-    if (!AvatarPawn) {
-        return;
-    }
-    UWorld *World = AvatarPawn->GetWorld();
-    if (!World) {
-        return;
-    }
-    const FText Message = MythicTrade::DescribeResult(Result);
-    if (Message.IsEmpty()) {
-        return; // nothing player-facing (a success/partial/invalid result reaches here only defensively)
-    }
-    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-        // Denial red — distinct from the gold/rarity pickup tints so a failed trade reads as a failure at a glance.
-        Feedback->AddScreenToast(Message, FLinearColor(0.9f, 0.2f, 0.2f), nullptr, 2.0f);
-    }
+    FMythicHudNotice Notice;
+    Notice.Kind = EMythicNoticeKind::Warning;
+    Notice.Text = MythicTrade::DescribeResult(Result);
+    Notice.Accent = FLinearColor(0.78f, 0.35f, 0.30f);
+    RaiseHudNotice(Notice);
 }
 
 void AMythicPlayerController::ClientNotifyEnvironmentHazard_Implementation(const FText &HazardName, bool bOnset) {
-    const APawn *AvatarPawn = GetPawn();
-    if (!AvatarPawn) {
-        return;
-    }
-    UWorld *World = AvatarPawn->GetWorld();
-    if (!World) {
-        return;
-    }
-    UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>();
-    if (!Feedback) {
-        return;
-    }
-    const FVector Location = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 110.0f);
-    if (bOnset) {
-        Feedback->AddWorldCallout(Location, HazardName, FLinearColor(1.0f, 0.55f, 0.15f), nullptr, 2.5f); // amber — a hazard takes hold
-    }
-    else {
-        Feedback->AddWorldCallout(Location, FText::FromString(FString::Printf(TEXT("%s subsides"), *HazardName.ToString())),
-                                  FLinearColor(0.7f, 0.8f, 0.85f), nullptr, 2.0f); // cool grey — it passes
-    }
+    FMythicHudNotice Notice;
+    Notice.Kind = EMythicNoticeKind::Warning;
+    Notice.Text = bOnset ? HazardName : FText::Format(NSLOCTEXT("Mythic", "HazardEnded", "{0} passed"), HazardName);
+    Notice.Accent = bOnset ? FLinearColor(0.85f, 0.55f, 0.22f) : FLinearColor(0.60f, 0.66f, 0.60f);
+    Notice.StackKey = FName(*HazardName.ToString());
+    Notice.bTerminal = !bOnset;
+    RaiseHudNotice(Notice);
 }
 
 void AMythicPlayerController::ClientNotifyItemDurability_Implementation(const FText &ItemName, EMythicItemDurabilityBeat Beat) {
-    const APawn *AvatarPawn = GetPawn();
-    if (!AvatarPawn) {
-        return;
-    }
-    UWorld *World = AvatarPawn->GetWorld();
-    if (!World) {
-        return;
-    }
-    UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>();
-    if (!Feedback) {
-        return;
-    }
-    const FString Item = ItemName.IsEmpty() ? TEXT("Item") : ItemName.ToString();
+    FMythicHudNotice Notice;
+    Notice.Kind = EMythicNoticeKind::Warning;
     switch (Beat) {
         case EMythicItemDurabilityBeat::Broken:
-            Feedback->AddScreenToast(FText::FromString(FString::Printf(TEXT("%s broke!"), *Item)),
-                                     FLinearColor(0.9f, 0.1f, 0.1f), nullptr, 3.0f); // red, lingers — the dramatic beat
+            Notice.Text = FText::Format(NSLOCTEXT("Mythic", "ItemBroke", "{0} broke"), ItemName);
+            Notice.Accent = FLinearColor(0.80f, 0.28f, 0.24f);
             break;
         case EMythicItemDurabilityBeat::Repaired:
-            Feedback->AddScreenToast(FText::FromString(FString::Printf(TEXT("%s repaired"), *Item)),
-                                     FLinearColor(0.1f, 0.9f, 0.3f), nullptr, 2.0f); // green (matches the recruit beat)
+            Notice.Text = FText::Format(NSLOCTEXT("Mythic", "ItemRepaired", "{0} repaired"), ItemName);
+            Notice.Accent = FLinearColor(0.45f, 0.72f, 0.42f);
             break;
-        case EMythicItemDurabilityBeat::LowWarning:
         default:
-            Feedback->AddScreenToast(FText::FromString(FString::Printf(TEXT("%s durability low"), *Item)),
-                                     FLinearColor(1.0f, 0.6f, 0.1f), nullptr, 2.0f); // amber warning
+            Notice.Text = FText::Format(NSLOCTEXT("Mythic", "ItemWorn", "{0} is nearly broken"), ItemName);
+            Notice.Accent = FLinearColor(0.85f, 0.70f, 0.30f);
             break;
     }
+    Notice.StackKey = FName(*ItemName.ToString());
+    RaiseHudNotice(Notice);
 }
 
 void AMythicPlayerController::NotifyItemAcquired(const UItemDefinition *ItemDef, int32 Quantity) {
@@ -1308,19 +1216,14 @@ void AMythicPlayerController::NotifyItemAcquired(const UItemDefinition *ItemDef,
     }
     UAbilitySystemComponent *ASC = GetAbilitySystemComponent();
     if (!ASC || !ASC->IsOwnerActorAuthoritative()) {
-        return; // server-authoritative: the ObjectiveTracker binds + the event fires on authority only
+        return;
     }
-    // Push the acquisition through the GAS event bus the ObjectiveTracker already listens on. Magnitude carries the
-    // quantity (for bCountByEventMagnitude objectives); TargetTags carries the item's own ItemType (for the objective
-    // payload-tag filter) — no fabricated taxonomy, just the item's existing type.
     FGameplayEventData Payload;
     Payload.EventTag = GAS_EVENT_ITEM_ACQUIRED;
     Payload.Instigator = GetPawn();
     Payload.Target = ASC->GetAvatarActor();
     Payload.OptionalObject = ItemDef;
-    if (ItemDef->ItemType.IsValid()) {
-        Payload.TargetTags.AddTag(ItemDef->ItemType);
-    }
+    MythicStampItemIdentity(Payload, ItemDef);
     Payload.EventMagnitude = static_cast<float>(Quantity);
     ASC->HandleGameplayEvent(GAS_EVENT_ITEM_ACQUIRED, &Payload);
 }
@@ -1330,16 +1233,14 @@ void AMythicPlayerController::NotifyItemUsed(const UItemDefinition *ItemDef, int
     const bool bServerAuth = ASC && ASC->IsOwnerActorAuthoritative();
     const bool bValidPayload = ItemDef && ItemDef->ItemType.IsValid();
     if (!MythicObjectiveEvents::ShouldEmitObjectiveEvent(bServerAuth, bValidPayload) || Quantity <= 0) {
-        return; // not server-authoritative, or the item has no type tag to match a "use N <type>" objective
+        return;
     }
-    // Same GAS event bus the ObjectiveTracker listens on (mirrors NotifyItemAcquired). TargetTags carries the item's
-    // ItemType for the payload-tag filter; magnitude carries the quantity used.
     FGameplayEventData Payload;
     Payload.EventTag = GAS_EVENT_ITEM_USED;
     Payload.Instigator = GetPawn();
     Payload.Target = ASC->GetAvatarActor();
     Payload.OptionalObject = ItemDef;
-    Payload.TargetTags.AddTag(ItemDef->ItemType);
+    MythicStampItemIdentity(Payload, ItemDef);
     Payload.EventMagnitude = static_cast<float>(Quantity);
     ASC->HandleGameplayEvent(GAS_EVENT_ITEM_USED, &Payload);
 }
@@ -1349,16 +1250,14 @@ void AMythicPlayerController::NotifyItemEquipped(const UItemDefinition *ItemDef)
     const bool bServerAuth = ASC && ASC->IsOwnerActorAuthoritative();
     const bool bValidPayload = ItemDef && ItemDef->ItemType.IsValid();
     if (!MythicObjectiveEvents::ShouldEmitObjectiveEvent(bServerAuth, bValidPayload)) {
-        return; // not server-authoritative, or the item has no type tag to match an "equip N <type>" objective
+        return;
     }
-    // Same GAS event bus the ObjectiveTracker listens on (mirrors NotifyItemUsed). The caller (attack fragment) gates this
-    // on a per-item SaveGame marker so it fires once per genuine equip (not on save-restore re-activation).
     FGameplayEventData Payload;
     Payload.EventTag = GAS_EVENT_ITEM_EQUIPPED;
     Payload.Instigator = GetPawn();
     Payload.Target = ASC->GetAvatarActor();
     Payload.OptionalObject = ItemDef;
-    Payload.TargetTags.AddTag(ItemDef->ItemType);
+    MythicStampItemIdentity(Payload, ItemDef);
     Payload.EventMagnitude = 1.0f;
     ASC->HandleGameplayEvent(GAS_EVENT_ITEM_EQUIPPED, &Payload);
 }
@@ -1367,10 +1266,8 @@ void AMythicPlayerController::NotifyTalkedToNPC(const FGameplayTag &NpcTag) {
     UAbilitySystemComponent *ASC = GetAbilitySystemComponent();
     const bool bServerAuth = ASC && ASC->IsOwnerActorAuthoritative();
     if (!MythicObjectiveEvents::ShouldEmitObjectiveEvent(bServerAuth, NpcTag.IsValid())) {
-        return; // not server-authoritative, or this NPC isn't a talk-objective target
+        return;
     }
-    // Same GAS event bus the ObjectiveTracker listens on (mirrors NotifyItemAcquired); TargetTags carries the NPC's
-    // identity tag for the objective's RequiredPayloadTag filter.
     FGameplayEventData Payload;
     Payload.EventTag = GAS_EVENT_TALKED_TO_NPC;
     Payload.Instigator = GetPawn();
@@ -1389,13 +1286,13 @@ void AMythicPlayerController::ClientShowShieldAbsorbed_Implementation(int32 Abso
     if (!World) {
         return;
     }
-    if (UMythicFeedbackSubsystem *DamageNumbers = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
+    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
         const FVector Location = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 70.0f);
         DamageNumbers->AddCombatText(Location, FString::Printf(TEXT("%d"), Absorbed),
-                                             FLinearColor(0.4f, 0.7f, 1.0f), 1.0f); // light blue = absorbed by shield
+                                             FLinearColor(0.4f, 0.7f, 1.0f), 1.0f);
         if (bBroke) {
             DamageNumbers->AddCombatText(Location + FVector(0.0f, 0.0f, 40.0f), TEXT("Shield Broken!"),
-                                                 FLinearColor(0.6f, 0.9f, 1.0f), 1.5f); // bright cyan, the dramatic beat
+                                                 FLinearColor(0.6f, 0.9f, 1.0f), 1.5f);
         }
     }
 }
@@ -1409,7 +1306,7 @@ void AMythicPlayerController::ClientShowDodge_Implementation() {
     if (!World) {
         return;
     }
-    if (UMythicFeedbackSubsystem *DamageNumbers = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
+    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
         DamageNumbers->AddDodgeNumber(AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 90.0f));
     }
 }
@@ -1423,60 +1320,192 @@ void AMythicPlayerController::ClientNotifyExhausted_Implementation(bool bExhaust
     if (!World) {
         return;
     }
-    if (UMythicFeedbackSubsystem *DamageNumbers = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
+    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
         const FVector Loc = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 90.0f);
         if (bExhausted) {
-            DamageNumbers->AddCombatText(Loc, TEXT("Winded!"), FLinearColor(1.0f, 0.55f, 0.1f), 1.2f); // orange warning
+            DamageNumbers->AddCombatText(Loc, TEXT("Winded!"), FLinearColor(1.0f, 0.55f, 0.1f), 1.2f);
         }
         else {
-            DamageNumbers->AddCombatText(Loc, TEXT("Recovered"), FLinearColor(0.45f, 0.9f, 0.45f), 1.0f); // green relief
+            DamageNumbers->AddCombatText(Loc, TEXT("Recovered"), FLinearColor(0.45f, 0.9f, 0.45f), 1.0f);
         }
     }
 }
 
 void AMythicPlayerController::CheckZoneEntry() {
-    // Server-authoritative poll (the timer is only armed on authority). Map the pawn's cell -> governing settlement and,
-    // on a change of the stable runtime SettlementId, announce it to the owning client.
     if (!HasAuthority()) {
         return;
     }
-    const APawn *AvatarPawn = GetPawn();
+    APawn *AvatarPawn = GetPawn();
     if (!AvatarPawn) {
-        return; // not possessed yet
+        return;
     }
     UMythicLivingWorldSubsystem *LW = GetGameInstance() ? GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>() : nullptr;
     const UMythicTerritoryGrid *Grid = LW ? LW->GetTerritoryGrid() : nullptr;
     if (!Grid) {
-        return; // living world not up (e.g. a menu map)
+        return;
     }
     const FMythicCellCoord Cell = Grid->WorldToCell(AvatarPawn->GetActorLocation());
+
     FMythicSettlementData Data;
-    // CopySettlementAtCell is the SimulationLock-guarded snapshot wrapper — safe from this game-thread timer (never hold
-    // the raw registry pointer). Returns false in the wilderness (no settlement covers the cell).
     const int32 NewSettlementId = LW->CopySettlementAtCell(Cell, Data) ? Data.SettlementId : INDEX_NONE;
-    if (NewSettlementId == LastSettlementId) {
-        return; // still in the same settlement (or still in open wilderness)
+    if (NewSettlementId != LastSettlementId) {
+        LastSettlementId = NewSettlementId;
+        if (NewSettlementId != INDEX_NONE) {
+            DiscoveredSettlements.Add(NewSettlementId);
+            ClientNotifyZoneEntry(Data.DisplayName);
+        }
     }
-    LastSettlementId = NewSettlementId;
-    if (NewSettlementId != INDEX_NONE) {
-        ClientNotifyZoneEntry(Data.DisplayName); // crossed into a settlement
+
+    const FMythicFactionId DomFaction = Grid->GetDominantFaction(Cell);
+    if (DomFaction.Index != LastTerritoryFactionIndex) {
+        LastTerritoryFactionIndex = DomFaction.Index;
+
+        AMythicPlayerState *PS = GetPlayerState<AMythicPlayerState>();
+        UMythicFactionStandingComponent *Standing = PS ? PS->GetFactionStanding() : nullptr;
+        const bool bUnwelcome = DomFaction.IsValid() && Standing
+            && Standing->TierForStanding(Standing->GetStanding(DomFaction)) == EMythicStandingTier::Hostile;
+        if (bUnwelcome) {
+            if (UMythicActionEventSubsystem *ActionSub = GetWorld() ? GetWorld()->GetSubsystem<UMythicActionEventSubsystem>() : nullptr) {
+                FMythicActionEvent Trespass;
+                Trespass.Perpetrator = AvatarPawn;
+                Trespass.VictimFactionOverride = DomFaction;
+                Trespass.OverrideCell = Cell;
+                Trespass.ActionTag = TAG_LIVINGWORLD_ACTION_PROPERTY_TRESPASS;
+                Trespass.CategoryFlags = EMythicEventCategory::Social;
+                Trespass.Significance = 0.3f;
+                Trespass.MoralVector = FMythicMoralSignature::MakeTrespassActionMoralVector();
+                if (PS) {
+                    Trespass.PerpPlayerKey = PS->GetCanonicalPlayerKey();
+                }
+                ActionSub->SubmitAction(Trespass);
+            }
+        }
     }
-    // else: crossed into wilderness — intentionally silent (a "leaving <X>" beat would need the prior name cached).
 }
 
-void AMythicPlayerController::ClientNotifyZoneEntry_Implementation(const FText &SettlementName) {
-    const APawn *AvatarPawn = GetPawn();
+bool AMythicPlayerController::CanFastTravel(const TSet<int32> &Discovered, int32 SettlementId, bool bBlocked) {
+    return SettlementId != INDEX_NONE && !bBlocked && Discovered.Contains(SettlementId);
+}
+
+bool AMythicPlayerController::ServerFastTravel_Validate(int32 SettlementId) {
+    return true;
+}
+
+void AMythicPlayerController::ServerFastTravel_Implementation(int32 SettlementId) {
+    if (!HasAuthority()) {
+        return;
+    }
+    APawn *AvatarPawn = GetPawn();
     if (!AvatarPawn) {
         return;
     }
-    UWorld *World = AvatarPawn->GetWorld();
-    if (!World) {
+
+    bool bBlocked = false;
+    if (const UAbilitySystemComponent *ASC = GetAbilitySystemComponent()) {
+        bBlocked = ASC->HasMatchingGameplayTag(GAS_STATE_INCOMBAT);
+    }
+    const bool bOverloaded = IsOverloadedForFastTravel();
+
+    const bool bBetweenOk =
+        MythicFastTravel::CanFastTravelBetween(DiscoveredSettlements, LastSettlementId, SettlementId, bBlocked);
+    if (!MythicFastTravel::CanFastTravelWithCargo(bBetweenOk, bOverloaded)) {
         return;
     }
-    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-        // Entering a settlement is a major beat -> hero banner (place name big, "Now entering" beneath).
-        Feedback->AddScreenBanner(SettlementName, FText::FromString(TEXT("Now entering")), FLinearColor(1.0f, 0.85f, 0.1f), nullptr, 3.5f); // gold
+
+    UMythicLivingWorldSubsystem *LW = GetGameInstance() ? GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>() : nullptr;
+    if (!LW) {
+        return;
     }
+
+    FVector Anchor = FVector::ZeroVector;
+    bool bResolved = false;
+    if (const AMythicSettlement *Settlement = LW->GetSettlementActorSafe(SettlementId)) {
+        Anchor = Settlement->GetActorLocation();
+        bResolved = true;
+    }
+    else {
+        FMythicSettlementData Data;
+        if (LW->CopySettlementById(SettlementId, Data)) {
+            if (const UMythicTerritoryGrid *Grid = LW->GetTerritoryGrid()) {
+                Anchor = Grid->CellToWorld(Data.CenterCell);
+                Anchor.Z = AvatarPawn->GetActorLocation().Z;
+                bResolved = true;
+            }
+        }
+    }
+    if (!bResolved) {
+        return;
+    }
+
+    Anchor.Z += 100.0f;
+    AvatarPawn->TeleportTo(Anchor, AvatarPawn->GetActorRotation());
+}
+
+bool AMythicPlayerController::IsOverloadedForFastTravel() const {
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    if (!Settings || !Settings->bEncumbranceEnabled) {
+        return false;
+    }
+    float TotalWeight = 0.0f;
+    for (const UMythicInventoryComponent *Inv : GetAllInventoryComponents()) {
+        if (Inv) {
+            TotalWeight += Inv->GetTotalCarriedWeight();
+        }
+    }
+    return MythicEncumbrance::ComputeTier(TotalWeight, Settings->EncumbranceSoftCapacity, Settings->EncumbranceHardCapacity)
+        == EMythicEncumbranceTier::Overloaded;
+}
+
+bool AMythicPlayerController::ServerFastTravelToPOI_Validate(int32 POIId) {
+    return true;
+}
+
+void AMythicPlayerController::ServerFastTravelToPOI_Implementation(int32 POIId) {
+    if (!HasAuthority()) {
+        return;
+    }
+    APawn *AvatarPawn = GetPawn();
+    if (!AvatarPawn) {
+        return;
+    }
+    UGameInstance *GI = GetGameInstance();
+    UMythicPOIDiscoverySubsystem *POI = GI ? GI->GetSubsystem<UMythicPOIDiscoverySubsystem>() : nullptr;
+    if (!POI) {
+        return;
+    }
+
+    if (const UAbilitySystemComponent *ASC = GetAbilitySystemComponent()) {
+        if (ASC->HasMatchingGameplayTag(GAS_STATE_INCOMBAT)) {
+            ClientNotifyFastTravelRefused(NSLOCTEXT("Mythic", "TravelInCombat", "Not while you are being hunted."));
+            return;
+        }
+    }
+    if (IsOverloadedForFastTravel()) {
+        ClientNotifyFastTravelRefused(NSLOCTEXT("Mythic", "TravelOverloaded", "Too heavily laden to travel. Drop something, or walk."));
+        return;
+    }
+    if (!POI->IsPOIUnlocked(POIId)) {
+        ClientNotifyFastTravelRefused(NSLOCTEXT("Mythic", "TravelUnknownDest", "You have not found that place yet."));
+        return;
+    }
+    if (POI->ResolveCurrentPOI(AvatarPawn->GetActorLocation()) == INDEX_NONE) {
+        ClientNotifyFastTravelRefused(NSLOCTEXT("Mythic", "TravelNotAtNode", "You can only depart from a landmark you have found."));
+        return;
+    }
+
+    POI->ServerFastTravelToPOI(AvatarPawn, POIId);
+}
+
+void AMythicPlayerController::ClientNotifyFastTravelRefused_Implementation(const FText &Reason) {
+    FMythicHudNotice Notice;
+    Notice.Kind = EMythicNoticeKind::Warning;
+    Notice.Text = Reason;
+    Notice.Accent = FLinearColor(0.85f, 0.70f, 0.30f);
+    Notice.StackKey = FName(TEXT("FastTravelRefused"));
+    RaiseHudNotice(Notice);
+}
+
+void AMythicPlayerController::ClientNotifyZoneEntry_Implementation(const FText &SettlementName) {
 }
 
 void AMythicPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason) {
@@ -1509,17 +1538,11 @@ void AMythicPlayerController::ServerExecuteBarterOffer_Implementation(AMythicNPC
     if (!PlayerInv) {
         return;
     }
-    // Atomic: confirm the FULL cost is present before removing anything (no partial charge).
     if (PlayerInv->GetItemCount(CostDef) < Offer.CostQty) {
         return;
     }
     PlayerInv->ServerRemoveItemByDefinition(CostDef, Offer.CostQty);
 
-    // Mint the reward into the player's inventory. CreateAndGive places it and, if it doesn't fit, ALREADY
-    // world-drops the overflow internally — returning the spawned world item. A non-null return therefore means
-    // "overflow handled", NOT "failed", so we must NOT branch on it to mint again (doing so double-minted the
-    // reward on every successful barter — the dupe the economy-arc review caught). Mirror UItemReward::Give: call
-    // once, never fall back to CreateAndSpawn.
     if (UMythicLootManagerSubsystem *Loot = GetGameInstance()
         ? GetGameInstance()->GetSubsystem<UMythicLootManagerSubsystem>()
         : nullptr) {
@@ -1535,16 +1558,72 @@ void AMythicPlayerController::ServerRerollItemAffixes_Implementation(UMythicItem
     if (!HasAuthority() || !IsValid(Item)) {
         return;
     }
-    // Ownership: the item must live in one of THIS player's own inventories (same model as ServerMoveItem), so a
-    // player cannot reroll a third party's gear.
     if (!GetAllInventoryComponents().Contains(Item->GetInventoryComponent())) {
         return;
     }
-    if (const UAffixesFragment *Affixes = Item->GetFragment<UAffixesFragment>()) {
-        // GetFragment returns const, but the fragment is genuinely mutable (OnItemActivated etc. mutate it too); the
-        // reroll re-checks authority internally.
-        const_cast<UAffixesFragment *>(Affixes)->RerollUnlockedAffixes(Item->GetItemLevel());
+    const UAffixesFragment *Affixes = Item->GetFragment<UAffixesFragment>();
+    if (!Affixes) {
+        return;
     }
+
+    {
+        bool bNearForge = false;
+        const APawn *MyPawn = GetPawn();
+        UWorld *World = GetWorld();
+        if (MyPawn && World) {
+            const FVector MyLoc = MyPawn->GetActorLocation();
+            for (TActorIterator<AMythicConversionStation> It(World); It && !bNearForge; ++It) {
+                AMythicConversionStation *Station = *It;
+                const UConversionStationComponent *Conv = Station ? Station->GetConversionComponent() : nullptr;
+                if (!Conv || !Conv->GetStationTags().HasTag(ITEMIZATION_STATION_FORGE)) {
+                    continue;
+                }
+                const float DistSq = FVector::DistSquared(MyLoc, Station->GetActorLocation());
+                if (IsWithinStationRange(DistSq, Conv->GetServerUseRangeSq())) {
+                    bNearForge = true;
+                }
+            }
+        }
+        if (!bNearForge) {
+            ClientNotifyTradeResult(EMythicTradeResult::RequiresStation);
+            return;
+        }
+    }
+
+    int32 RerollCost = 0;
+    if (const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>()) {
+        const int32 RarityIndex = Item->GetItemDefinition() ? static_cast<int32>(Item->GetItemDefinition()->Rarity.GetValue()) : 0;
+        RerollCost = MythicCurrency::ComputeRerollCost(Item->GetItemLevel(), RarityIndex, Settings->RerollBaseCost,
+                                                       Settings->RerollCostPerLevelFraction, Settings->RerollCostPerRarityFraction);
+    }
+
+    if (RerollCost > 0) {
+        int32 Wallet = 0;
+        for (const UMythicInventoryComponent *Inv : GetAllInventoryComponents()) {
+            if (Inv) {
+                Wallet += Inv->GetTotalCurrency();
+            }
+        }
+        if (!MythicCurrency::CanAfford(Wallet, RerollCost)) {
+            ClientNotifyTradeResult(EMythicTradeResult::InsufficientFunds);
+            return;
+        }
+        int32 Remaining = RerollCost;
+        for (UMythicInventoryComponent *Inv : GetAllInventoryComponents()) {
+            if (Remaining <= 0) {
+                break;
+            }
+            if (Inv) {
+                Remaining -= Inv->SpendCurrency(Remaining);
+            }
+        }
+    }
+
+    const_cast<UAffixesFragment *>(Affixes)->RerollUnlockedAffixes(Item->GetItemLevel());
+}
+
+bool AMythicPlayerController::IsWithinStationRange(float DistSq, float RangeSq) {
+    return RangeSq > 0.0f && DistSq <= RangeSq;
 }
 
 bool AMythicPlayerController::ServerSetItemAffixLocked_Validate(UMythicItemInstance *Item, int32 AffixIndex, bool bLocked) {
@@ -1564,7 +1643,6 @@ void AMythicPlayerController::ServerSetItemAffixLocked_Implementation(UMythicIte
 }
 
 void AMythicPlayerController::SetupInputComponent() {
-    // set up gameplay key bindings
     Super::SetupInputComponent();
 }
 

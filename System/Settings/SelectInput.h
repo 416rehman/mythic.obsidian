@@ -19,9 +19,7 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, FieldNotify, Setter, Getter)
     uint8 IncomingOptionIndex;
 
-    // Default state, current state, and incoming state that should be applied, it can be optional.
 public:
-    // Constructor
     UMythicSelectInput(FText InLabel, FText InDescription, TArray<FOptionAndDescription> InOptions);
 
     virtual void Apply() override;

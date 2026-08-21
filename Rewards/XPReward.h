@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -20,9 +19,6 @@ struct FXPRewardContext : public FRewardContext {
     int32 Level = 0;
 };
 
-/**
- * Gives static amount of XP to the player.
- */
 UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API UXPReward : public URewardBase {
     GENERATED_BODY()
@@ -43,7 +39,6 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track | Balancing")
     float OverlevelXPBonus = 0.5f;
 
-    // Gives the reward to the player
     virtual bool Give(FRewardContext &Context) const override;
 
     // Helper function to get the context for the reward
@@ -55,7 +50,6 @@ public:
         return Reward->Give(Context);
     }
 
-    // Algorithm for scaling XP based on level
     static float CalculateXP(UAbilitySystemComponent *AbilitySystemComponent, UProficiencyDefinition *Proficiency, int32 TargetLvl, float OverlevelBonus,
                              float PercentageOfActionXPtoGive);
 

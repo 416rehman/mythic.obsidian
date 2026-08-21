@@ -1,4 +1,3 @@
-// 
 
 #include "ItemTooltipVM.h"
 
@@ -7,6 +6,7 @@
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
 #include "Itemization/Inventory/Fragments/Passive/AffixesFragment.h"
 #include "Itemization/Inventory/Fragments/Passive/TalentFragment.h"
+#include "UI/ViewModels/MythicEffectDescriber.h"
 #include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h"
 #include "Itemization/Inventory/Fragments/FragmentTypes.h"
 
@@ -106,6 +106,22 @@ void UItemTooltipVM::SetDamageRange(FText InDamageRange) {
 
 FText UItemTooltipVM::GetDamageRange() const { return DamageRange; }
 
+void UItemTooltipVM::SetDamageMin(float InDamageMin) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(DamageMin, InDamageMin)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(DamageMin);
+    }
+}
+
+float UItemTooltipVM::GetDamageMin() const { return DamageMin; }
+
+void UItemTooltipVM::SetDamageMax(float InDamageMax) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(DamageMax, InDamageMax)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(DamageMax);
+    }
+}
+
+float UItemTooltipVM::GetDamageMax() const { return DamageMax; }
+
 void UItemTooltipVM::SetAttackSpeed(float InAttackSpeed) {
     if (UE_MVVM_SET_PROPERTY_VALUE(AttackSpeed, InAttackSpeed)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(AttackSpeed);
@@ -154,16 +170,18 @@ void UItemTooltipVM::SetRequiredEquipTag(FGameplayTag InRequiredEquipTag) {
 
 FGameplayTag UItemTooltipVM::GetRequiredEquipTag() const { return RequiredEquipTag; }
 
-// helper to collect affix display data from rolled affix arrays
 static void CollectAffixDisplayData(const TArray<FRolledAffix> &RolledAffixes, TArray<FAffixDisplayData> &OutAffixes) {
     for (const FRolledAffix &Rolled : RolledAffixes) {
         FAffixDisplayData Entry;
-        Entry.AttributeName = Rolled.Attribute.IsValid()
-            ? FText::FromString(Rolled.Attribute.GetName())
-            : FText::FromString(TEXT("Unknown"));
         Entry.Value = Rolled.Value;
         Entry.bIsPercentage = Rolled.Definition.bIsPercentage;
         Entry.bLowerIsBetter = Rolled.Definition.bLowerIsBetter;
+
+        const FMythicEffectLine Line =
+            MythicEffectDescriber::DescribeRolledModifier(Rolled.Attribute, Rolled.Value, Rolled.Definition);
+        Entry.AttributeName = Line.Label.IsEmpty() ? FText::FromString(TEXT("Unknown")) : Line.Label;
+        Entry.RichText = Line.RichText;
+
         OutAffixes.Add(Entry);
     }
 }
@@ -180,7 +198,6 @@ UItemTooltipVM *UItemTooltipVM::CreateFromItemInstance(UObject *Outer, UMythicIt
 
     UItemTooltipVM *VM = NewObject<UItemTooltipVM>(Outer);
 
-    // identity
     VM->SetName(Def->Name);
     VM->SetDescription(Def->Description);
     VM->SetRarity(Def->Rarity);
@@ -193,7 +210,6 @@ UItemTooltipVM *UItemTooltipVM::CreateFromItemInstance(UObject *Outer, UMythicIt
     VM->SetStackMax(Def->StackSizeMax);
     VM->SetRequiredEquipTag(Def->RequiredEquipTag);
 
-    // affixes from AffixesFragment
     const UAffixesFragment *AffixFrag = Item->GetFragment<UAffixesFragment>();
     if (AffixFrag) {
         TArray<FAffixDisplayData> AffixData;
@@ -202,7 +218,6 @@ UItemTooltipVM *UItemTooltipVM::CreateFromItemInstance(UObject *Outer, UMythicIt
         VM->SetAffixes(AffixData);
     }
 
-    // talents from TalentFragment
     const UTalentFragment *TalentFrag = Item->GetFragment<UTalentFragment>();
     if (TalentFrag) {
         TArray<FTalentDisplayData> TalentData;
@@ -224,7 +239,6 @@ UItemTooltipVM *UItemTooltipVM::CreateFromItemInstance(UObject *Outer, UMythicIt
         VM->SetTalents(TalentData);
     }
 
-    // durability from DurabilityFragment
     const UDurabilityFragment *DurFrag = Item->GetFragment<UDurabilityFragment>();
     if (DurFrag) {
         float CurDur = static_cast<float>(DurFrag->GetCurrentDurability());
@@ -234,7 +248,6 @@ UItemTooltipVM *UItemTooltipVM::CreateFromItemInstance(UObject *Outer, UMythicIt
         VM->SetDurabilityPercent(MaxDur > 0.0f ? CurDur / MaxDur : 0.0f);
     }
 
-    // attack from AttackFragment
     const UAttackFragment *AtkFrag = Item->GetFragment<UAttackFragment>();
     if (AtkFrag) {
         const FRolledAttributeSpec &DmgSpec = AtkFrag->AttackRuntimeReplicatedData.RolledDamageSpec;
@@ -242,8 +255,9 @@ UItemTooltipVM *UItemTooltipVM::CreateFromItemInstance(UObject *Outer, UMythicIt
         float MaxDmg = DmgSpec.Definition.GetScaledMax(Item->GetItemLevel());
         VM->SetDamageRange(FText::FromString(FString::Printf(TEXT("%d-%d"),
             FMath::RoundToInt32(MinDmg), FMath::RoundToInt32(MaxDmg))));
+        VM->SetDamageMin(MinDmg);
+        VM->SetDamageMax(MaxDmg);
 
-        // attack speed from montage play length if available
         UAnimMontage *Montage = AtkFrag->AttackConfig.AttackMontage;
         if (Montage) {
             float Duration = Montage->GetPlayLength();

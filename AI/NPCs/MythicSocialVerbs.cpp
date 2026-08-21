@@ -1,35 +1,27 @@
-// Mythic Living World — Social Interaction Verbs (pure reaction mapping)
 
 #include "MythicSocialVerbs.h"
-#include "Mass/Fragments/MythicMassFragments.h" // FMythicPersonalityFragment + EMythicVentChannel
+#include "Mass/Fragments/MythicMassFragments.h"
 
 #define LOCTEXT_NAMESPACE "MythicSocial"
 
-// ─────────────────────────────────────────────────────────────
-// Tunable thresholds (LOCKED v1). File-scope so the mapping is one source of truth and tweakable without a header
-// recompile. Magnitudes are POSITIVE constants; ResolveReaction applies the sign (negative for hostile verbs).
-// Anger-threshold ordering is EXPLICIT: Bully (0.45) < Threaten (0.50) < Provoke (0.55) — Bully angers an NPC at a
-// LOWER Fight weight (it is the more humiliating act), Provoke requires the most aggressive personality to bite.
-// ─────────────────────────────────────────────────────────────
 namespace {
-    constexpr float ComplimentGain = 5.0f;  // standing gained by a well-received compliment
-    constexpr float ProvokeDelta = 10.0f;   // |standing| lost from a provoke
-    constexpr float BullyDelta = 20.0f;     // |standing| lost from a bully (worst reputation hit)
-    constexpr float ThreatenDelta = 15.0f;  // |standing| lost from a threat
+    constexpr float ComplimentGain = 5.0f;
+    constexpr float ProvokeDelta = 10.0f;
+    constexpr float BullyDelta = 20.0f;
+    constexpr float ThreatenDelta = 15.0f;
 
-    constexpr float ProvokeAngerThreshold = 0.55f;  // Fight weight at/above which Provoke angers
-    constexpr float BullyAngerThreshold = 0.45f;    // Bully angers easier (lower bar)
-    constexpr float ThreatenAngerThreshold = 0.50f; // Threaten sits between the two
+    constexpr float ProvokeAngerThreshold = 0.55f;
+    constexpr float BullyAngerThreshold = 0.45f;
+    constexpr float ThreatenAngerThreshold = 0.50f;
 
-    constexpr float CowerThreshold = 0.55f; // (Flee or Submit) weight at/above which the NPC is Intimidated
-    constexpr float GuardThreshold = 0.50f; // Enforce weight at/above which a hostile verb escalates to CallGuards
+    constexpr float CowerThreshold = 0.55f;
+    constexpr float GuardThreshold = 0.50f;
 
-    // Safe read of a vent channel weight (guards against any future COUNT drift).
     FORCEINLINE float Vent(const FMythicPersonalityFragment &P, EMythicVentChannel Ch) {
         const int32 Idx = static_cast<int32>(Ch);
         return (Idx >= 0 && Idx < static_cast<int32>(EMythicVentChannel::COUNT)) ? P.VentWeights[Idx] : 0.0f;
     }
-} // namespace
+}
 
 FMythicSocialReactionResult UMythicSocialVerbLibrary::ResolveReaction(
     EMythicSocialVerb V,
@@ -37,7 +29,6 @@ FMythicSocialReactionResult UMythicSocialVerbLibrary::ResolveReaction(
     float Standing,
     float HostileThreshold,
     float FriendlyThreshold) {
-
     FMythicSocialReactionResult Out;
 
     const float Fight = Vent(P, EMythicVentChannel::Fight);
@@ -45,19 +36,15 @@ FMythicSocialReactionResult UMythicSocialVerbLibrary::ResolveReaction(
     const float Submit = Vent(P, EMythicVentChannel::Submit);
     const float Enforce = Vent(P, EMythicVentChannel::Enforce);
 
-    // The NPC cowers when it is much more a fleer/submitter than a fighter.
     const bool bCowardly = (FMath::Max(Flee, Submit) >= CowerThreshold) && (Fight < CowerThreshold);
-    // The NPC calls for help when it is an enforcer (and not itself a brawler that would rather swing).
     const bool bEnforcer = (Enforce >= GuardThreshold) && (Enforce >= Fight);
 
     switch (V) {
     case EMythicSocialVerb::Greet:
     case EMythicSocialVerb::Compliment: {
-        // Friendly verbs read the standing band. Below Hostile → Cold (rebuffed, no reward). Above Friendly → Warm.
-        // In between → Warm for a compliment (it actively flatters), Neutral for a bare greeting.
         if (Standing <= HostileThreshold) {
             Out.Reaction = EMythicSocialReaction::Cold;
-            Out.StandingDelta = 0.0f; // a hostile NPC isn't won over by small talk
+            Out.StandingDelta = 0.0f;
         }
         else if (Standing >= FriendlyThreshold) {
             Out.Reaction = EMythicSocialReaction::Warm;
@@ -66,7 +53,6 @@ FMythicSocialReactionResult UMythicSocialVerbLibrary::ResolveReaction(
         else {
             Out.Reaction = (V == EMythicSocialVerb::Compliment) ? EMythicSocialReaction::Warm
                                                                 : EMythicSocialReaction::Neutral;
-            // A compliment only earns standing when it lands (not Cold) — modeled above; Greet never moves standing.
             Out.StandingDelta = (V == EMythicSocialVerb::Compliment) ? ComplimentGain : 0.0f;
         }
         break;
@@ -75,7 +61,6 @@ FMythicSocialReactionResult UMythicSocialVerbLibrary::ResolveReaction(
     case EMythicSocialVerb::Provoke:
     case EMythicSocialVerb::Bully:
     case EMythicSocialVerb::Threaten: {
-        // Hostile verbs always cost standing (the player was rude); magnitude is per-verb, sign is negative.
         float Magnitude = ProvokeDelta;
         float AngerThreshold = ProvokeAngerThreshold;
         if (V == EMythicSocialVerb::Bully) {
@@ -88,9 +73,6 @@ FMythicSocialReactionResult UMythicSocialVerbLibrary::ResolveReaction(
         }
         Out.StandingDelta = -Magnitude;
 
-        // Reaction precedence: an aggressive NPC bites (Angered); else an enforcer alerts guards (CallGuards); else a
-        // coward backs down (Intimidated); else it merely sulks (Cold). Angered/CallGuards both stem from a refusal
-        // to be pushed around, but only the brawler turns it into a personal fight.
         if (Fight >= AngerThreshold) {
             Out.Reaction = EMythicSocialReaction::Angered;
             Out.bSetHostile = true;
@@ -117,8 +99,6 @@ FMythicSocialReactionResult UMythicSocialVerbLibrary::ResolveReaction(
 }
 
 FText UMythicSocialVerbLibrary::DefaultBarkFor(EMythicSocialVerb V, EMythicSocialReaction Reaction) {
-    // HONEST ART BOUNDARY: placeholder English. Real lines come from authored bark/dialogue tables flavored by the
-    // NPC's personality + role. Switch on reaction first (it carries the most signal), fall back per verb.
     switch (Reaction) {
     case EMythicSocialReaction::Warm:
         return LOCTEXT("Bark_Warm", "Well met, friend.");

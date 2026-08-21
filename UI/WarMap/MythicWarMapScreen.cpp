@@ -1,6 +1,3 @@
-// Mythic Living World — Strategic War-Map UI Screen (implementation)
-// Client-only CommonUI screen. Binds the per-local-player war-map subsystem and pumps texture + legend + markers into
-// BlueprintImplementableEvents. Open/close go through the CommonUI primary game layout (push/pull by class).
 
 #include "MythicWarMapScreen.h"
 
@@ -14,11 +11,8 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(MythicWarMapScreen)
 
-// ─────────────────────────────────────────────────────────────
-// Open / close
-// ─────────────────────────────────────────────────────────────
 
-UMythicWarMapScreen* UMythicWarMapScreen::OpenWarMap(const UObject* /*ContextObject*/, APlayerController* OwningPlayer,
+UMythicWarMapScreen* UMythicWarMapScreen::OpenWarMap(const UObject*, APlayerController* OwningPlayer,
                                                      FGameplayTag LayerTag, TSubclassOf<UMythicWarMapScreen> ScreenClass) {
     if (!OwningPlayer) {
         UE_LOG(Myth, Warning, TEXT("OpenWarMap: null OwningPlayer"));
@@ -42,20 +36,17 @@ UMythicWarMapScreen* UMythicWarMapScreen::OpenWarMap(const UObject* /*ContextObj
     return Layout->PushWidgetToLayerStack<UMythicWarMapScreen>(LayerTag, ScreenClass.Get());
 }
 
-void UMythicWarMapScreen::CloseWarMap(const UObject* /*ContextObject*/, APlayerController* OwningPlayer,
+void UMythicWarMapScreen::CloseWarMap(const UObject*, APlayerController* OwningPlayer,
                                       UMythicWarMapScreen* Screen) {
     if (!Screen) {
         return;
     }
-    // Prefer the owning player's layout; fall back to the screen's own owning player so a WBP close button works even
-    // if the caller passed a stale controller.
     APlayerController* PC = OwningPlayer ? OwningPlayer : Screen->GetOwningPlayer();
     UPrimaryGameLayout* Layout = PC ? UPrimaryGameLayout::GetPrimaryGameLayout(PC) : nullptr;
     if (Layout) {
         Layout->FindAndRemoveWidgetFromLayer(Screen);
         return;
     }
-    // No layout reachable — deactivate directly so we at least tear down activation/binding.
     Screen->DeactivateWidget();
 }
 
@@ -63,9 +54,6 @@ void UMythicWarMapScreen::CloseSelf() {
     CloseWarMap(this, GetOwningPlayer(), this);
 }
 
-// ─────────────────────────────────────────────────────────────
-// Subsystem resolution
-// ─────────────────────────────────────────────────────────────
 
 UMythicWarMapSubsystem* UMythicWarMapScreen::ResolveSubsystem() const {
     if (const ULocalPlayer* LP = GetOwningLocalPlayer()) {
@@ -85,9 +73,6 @@ UTexture2D* UMythicWarMapScreen::GetWarMapTexture() const {
     return nullptr;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Activation lifecycle
-// ─────────────────────────────────────────────────────────────
 
 void UMythicWarMapScreen::NativeOnActivated() {
     Super::NativeOnActivated();
@@ -99,12 +84,8 @@ void UMythicWarMapScreen::NativeOnActivated() {
             BoundSubsystem = Sub;
             bBound = true;
         }
-        // Trigger a rebuild; RefreshNow broadcasts OnWarMapChanged -> HandleWarMapChanged -> PumpToBlueprint, so the WBP
-        // receives the texture + data exactly once even on first open.
         Sub->RefreshNow();
     } else {
-        // Subsystem not reachable yet (early activation). The WBP can call RefreshFromSubsystem later, and once a proxy
-        // change arrives the next activation will bind. Nothing to pump now.
         UE_LOG(Myth, Verbose, TEXT("WarMapScreen activated before subsystem available"));
     }
 }
@@ -120,9 +101,6 @@ void UMythicWarMapScreen::NativeOnDeactivated() {
     Super::NativeOnDeactivated();
 }
 
-// ─────────────────────────────────────────────────────────────
-// Data pump
-// ─────────────────────────────────────────────────────────────
 
 void UMythicWarMapScreen::HandleWarMapChanged() {
     PumpToBlueprint();
@@ -133,13 +111,12 @@ void UMythicWarMapScreen::RefreshFromSubsystem() {
     if (!Sub) {
         return;
     }
-    // Bind on demand if a prior activation happened before the subsystem existed.
     if (!bBound) {
         Sub->OnWarMapChanged.AddDynamic(this, &UMythicWarMapScreen::HandleWarMapChanged);
         BoundSubsystem = Sub;
         bBound = true;
     }
-    Sub->RefreshNow(); // broadcasts -> HandleWarMapChanged -> PumpToBlueprint
+    Sub->RefreshNow();
 }
 
 void UMythicWarMapScreen::PumpToBlueprint() {
@@ -159,4 +136,12 @@ void UMythicWarMapScreen::PumpToBlueprint() {
     const FMythicWarMapMarker PlayerMarker = Sub->GetPlayerMarker();
 
     OnWarMapDataRefreshed(Legend, Markers, PlayerMarker);
+}
+
+void UMythicWarMapScreen::OnWarMapTextureReady_Implementation(UTexture2D* Texture) {
+}
+
+void UMythicWarMapScreen::OnWarMapDataRefreshed_Implementation(const TArray<FMythicWarMapLegendEntry>& Legend,
+                                                               const TArray<FMythicWarMapMarker>& Markers,
+                                                               const FMythicWarMapMarker& PlayerMarker) {
 }

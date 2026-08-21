@@ -12,7 +12,7 @@
 
 class AMythicCharacter;
 class UGameplayEffect;
-// OnBeginFalling Delegate
+class UMythicInputConfig;
 DECLARE_DYNAMIC_MULTICAST_SPARSE_DELEGATE_TwoParams(FOnMovementModeChangeSignature, AMythicCharacter, OnMythicMovementModeChange, EMovementMode,
                                                     PrevMovementMode,
                                                     uint8, PreviousCustomMode);
@@ -36,26 +36,45 @@ public:
     UPROPERTY(BlueprintAssignable)
     FOnMovementModeChangeSignature OnMythicMovementModeChange;
 
-    // Implement IAbilitySystemInterface
     virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override { return nullptr; };
 
-    // Implement IMythicRegistryInterface
     virtual UAbilitySystemComponent* GetCachedASC() const override;
     virtual UMythicInventoryComponent* GetCachedInventory() const override;
     virtual UMythicLifeComponent* GetCachedLife() const override;
 
-    //~ Fall damage — locomotion-driven self-damage on a hard landing. Server-authoritative; applied via the same
-    //~ configurable-GE path as environmental hazards (the computed damage is passed as the spec level). Default OFF
-    //~ (gameplay-affecting → zero regression until a designer enables it AND assigns FallDamageEffect).
     virtual void Landed(const FHitResult &Hit) override;
 
-    // Pure: damage from a landing impact speed (cm/s, absolute). 0 at/below SafeSpeed; (Impact-Safe)*DamagePerSpeed
-    // above, capped at MaxDamage (MaxDamage <= 0 = uncapped). Static so the curve is unit-testable headlessly.
     static float ComputeFallDamage(float ImpactSpeed, float SafeSpeed, float DamagePerSpeed, float MaxDamage);
 
     // LookAt Actor. Used by AnimBP to set the head of this character to look at the specified actor.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Blueprintable)
     AActor *LookAtActor;
+
+    // ─── Stealth → Living-World witness perception (Feature L3) ───
+    // Server-authoritative sneak intent. A character that is sneaking OR crouched is perceived from a shorter range by
+    // the Living-World witness pipeline (UMythicActionEventSubsystem::SubmitAction reads GetStealthPerceptionScale and
+    // rides it into the action event). bIsCrouched is ACharacter's own replicated pose flag; bIsSneaking is an explicit
+    // stealth intent independent of the crouch pose (e.g. a slow walk). Toggle via the server RPC; getters are pure.
+    UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Mythic|Stealth")
+    void ServerSetSneaking(bool bNewSneaking);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Stealth")
+    bool IsSneaking() const { return bIsSneaking; }
+
+    // True while stealthed (explicitly sneaking OR crouched). Drives the witness perception scale.
+    UFUNCTION(BlueprintPure, Category = "Mythic|Stealth")
+    bool IsStealthed() const { return bIsSneaking || bIsCrouched; }
+
+    float GetStealthPerceptionScale() const { return IsStealthed() ? StealthPerceptionScale : 1.0f; }
+
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
+
+    /**
+     * The input config this pawn binds its abilities through. The HUD needs it to show the right key on a slot:
+     * the config already maps input tag -> InputAction, so nothing has to hardcode a key or an asset path.
+     */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Input")
+    const UMythicInputConfig *GetInputConfig() const { return InputConfig; }
 
 protected:
     virtual void SetupPlayerInputComponent(UInputComponent *PlayerInputComponent) override;
@@ -65,6 +84,14 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Input")
     TObjectPtr<class UMythicInputConfig> InputConfig;
+
+    // Replicated sneak intent (server-authoritative; toggled via ServerSetSneaking). See the stealth API above.
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Mythic|Stealth")
+    bool bIsSneaking = false;
+
+    // Perception range multiplier applied while stealthed (crouched or sneaking). (0,1]; lower = harder to perceive.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Stealth", meta = (ClampMin = "0.01", ClampMax = "1.0"))
+    float StealthPerceptionScale = 0.4f;
 
     // Fall-damage tuning (per character class). Disabled by default — gameplay-affecting.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Fall Damage")
@@ -97,7 +124,6 @@ public:
     void RemoveLocalEquipmentMesh(EInventorySlotType Slot);
 
 protected:
-    // cached references for o1 retrieval
     UPROPERTY()
     UAbilitySystemComponent* CachedASC;
 
@@ -106,7 +132,6 @@ protected:
 
     UPROPERTY()
     UMythicLifeComponent* CachedLife;
-    // tracks client-side spawned skeletal mesh components for active equipment slots
     UPROPERTY(Transient)
     TMap<EInventorySlotType, TObjectPtr<USkeletalMeshComponent>> EquippedVisualMeshes;
 };

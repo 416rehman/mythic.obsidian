@@ -1,16 +1,11 @@
-// Mythic Living World — Group spawn template code defaults
 
 #include "World/LivingWorld/Groups/GroupTypes.h"
-#include "World/LivingWorld/MythicTags_LivingWorld.h" // NPC.Role.* + NPC.Group.* native tags
+#include "World/LivingWorld/MythicTags_LivingWorld.h"
 
 namespace MythicGroupDefaults {
     void BuildDefaultTemplates(TArray<FMythicGroupTemplate> &Out) {
         Out.Reset();
 
-        // ─── Retinue: a Noble + 2 Guards (Subordinate guards → leader noble) ───
-        // Gated to a wealthy, populous, militarized faction (a lord with a personal guard) so it only appears where it
-        // makes sense. The noble is the leader; guards are Subordinate to it (edges orient toward the noble). This is
-        // the path that lets a Noble — which is bAllowedAlone=false in the archetype catalog — actually appear.
         {
             FMythicGroupTemplate &T = Out.AddDefaulted_GetRef();
             T.GroupTag = TAG_NPC_GROUP_RETINUE;
@@ -37,9 +32,6 @@ namespace MythicGroupDefaults {
             T.Members.Add(Guards);
         }
 
-        // ─── Barter party: a Merchant + 2-3 Civilian porters (Associate) ───
-        // Gated to a faction with a little wealth + population. Merchant is the leader; porters are professional
-        // Associates. Total 3-4 members.
         {
             FMythicGroupTemplate &T = Out.AddDefaulted_GetRef();
             T.GroupTag = TAG_NPC_GROUP_BARTER;
@@ -66,9 +58,6 @@ namespace MythicGroupDefaults {
             T.Members.Add(Porters);
         }
 
-        // ─── Friend trio: 3 Civilians out together (Friend) ───
-        // Always eligible (no faction gates) so even a poor settlement gets some social colour. The first spawned member
-        // is the de-facto leader (no explicit leader flag — the processor falls back to member 0).
         {
             FMythicGroupTemplate &T = Out.AddDefaulted_GetRef();
             T.GroupTag = TAG_NPC_GROUP_SOCIAL;
@@ -88,4 +77,4 @@ namespace MythicGroupDefaults {
             T.Members.Add(Friends);
         }
     }
-} // namespace MythicGroupDefaults
+}

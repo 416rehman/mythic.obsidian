@@ -1,4 +1,4 @@
-﻿// 
+﻿
 
 #pragma once
 
@@ -58,13 +58,6 @@ struct FConsumableActionBuildData {
     GENERATED_BODY()
 };
 
-/** OnAction does one or more of the following:
- * Grant Ability (Optionally activate it)
- * Remove Ability
- * Trigger Gameplay Event
- * Assign Tags
- * Remove Tags
-* */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
 class MYTHIC_API UConsumableActionFragment : public UActionableItemFragment {
     GENERATED_BODY()
@@ -107,26 +100,18 @@ public:
     virtual void ExecuteGenericAction(UMythicItemInstance *ItemInstance) override;
 
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
-    //~
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {
         Super::GetLifetimeReplicatedProps(OutLifetimeProps);
         REP_FRAGMENT_DATA(ConsumableAction)
     }
 
-    //~ HandleAction only works on the server
     UFUNCTION(Server, Reliable)
     void ServerHandleAction(UMythicItemInstance *ItemInstance);
 
-    //~ GiveAbility only works on the server
     bool HandleGrantAbility(UMythicAbilitySystemComponent *ASC, UMythicItemInstance *ItemInstance);
-    //~
 
-    //~ RemoveAbility only works on the server
     void HandleInHandRemoveAbility(UMythicAbilitySystemComponent *ASC);
-    //~
 
-    //~ HandleTags only works on the server
     void HandleTags(UMythicItemInstance *ItemInstance);
-    //~
 };

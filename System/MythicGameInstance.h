@@ -31,6 +31,5 @@ protected:
     void OnLevelLoaded(UWorld *World, const ULevelStreaming *LevelStreaming, ULevel *Level, ELevelStreamingState OldState, ELevelStreamingState NewState);
 
 private:
-    /** Callback when loading screen class is loaded asynchronously */
     void OnLoadingScreenClassLoaded(TSubclassOf<UUserWidget> LoadedClass);
 };

@@ -60,26 +60,19 @@ void UAsyncTaskCooldownChanged::OnActiveGameplayEffectAddedCallback(UAbilitySyst
         if (AssetTags.HasTagExact(CooldownTag) || GrantedTags.HasTagExact(CooldownTag)) {
             float TimeRemaining = 0.0f;
             float Duration = 0.0f;
-            // Query the cooldown tag that ACTUALLY matched (not GrantedTags[0]): a cooldown identified via an asset tag,
-            // or a GE that grants no/other tags, would otherwise build an empty/wrong tag and report a 0/wrong duration.
             FGameplayTagContainer CooldownTagContainer(CooldownTag);
             GetCooldownRemainingForTag(CooldownTagContainer, TimeRemaining, Duration);
 
             if (ASC->GetOwnerRole() == ROLE_Authority) {
-                // Player is Server
                 OnCooldownBegin.Broadcast(CooldownTag, TimeRemaining, Duration);
             }
             else if (!UseServerCooldown && SpecApplied.GetContext().GetAbilityInstance_NotReplicated()) {
-                // Client using predicted cooldown
                 OnCooldownBegin.Broadcast(CooldownTag, TimeRemaining, Duration);
             }
             else if (UseServerCooldown && SpecApplied.GetContext().GetAbilityInstance_NotReplicated() == nullptr) {
-                // Client using Server's cooldown. This is Server's corrective cooldown GE.
                 OnCooldownBegin.Broadcast(CooldownTag, TimeRemaining, Duration);
             }
             else if (UseServerCooldown && SpecApplied.GetContext().GetAbilityInstance_NotReplicated()) {
-                // Client using Server's cooldown but this is predicted cooldown GE.
-                // This can be useful to gray out abilities until Server's cooldown comes in.
                 OnCooldownBegin.Broadcast(CooldownTag, -1.0f, -1.0f);
             }
         }

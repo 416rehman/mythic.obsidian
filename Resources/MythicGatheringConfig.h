@@ -21,15 +21,4 @@ struct FGatheringProficiencyConfig {
     // maps resource type tags to proficiency definitions
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     TMap<FGameplayTag, TObjectPtr<UProficiencyDefinition>> ResourceToProficiency;
-
-    // Proficiency XP granted to the gatherer (in the resource's mapped proficiency) per harvested node. 0 = no XP
-    // (conservative default — gathering trains a skill only once a designer opts in). Without this, the gathering
-    // proficiencies that drive BonusDamagePerLevel + BonusYieldChancePerLevel can never climb from gathering.
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0.0"))
-    float XpPerHarvest = 0.0f;
-
-    // Anti-grind: once the gatherer's level in the mapped proficiency is at or above this, a harvest grants no more XP
-    // (mirrors the crafting anti-grind cap). 0 = no cap (always grants while XpPerHarvest > 0).
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (ClampMin = "0"))
-    int32 XpNoGainAtOrAboveLevel = 0;
 };

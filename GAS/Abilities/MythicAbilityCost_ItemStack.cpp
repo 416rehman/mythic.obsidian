@@ -18,7 +18,6 @@ bool UMythicAbilityCost_ItemTagStack::CheckCost(const UMythicGameplayAbility *Ab
         return false;
     }
 
-    // Cast source object to item instance
     auto ItemInstance = Cast<UMythicItemInstance>(Ability->GetCurrentSourceObject());
     if (!ItemInstance) {
         return false;
@@ -30,7 +29,6 @@ bool UMythicAbilityCost_ItemTagStack::CheckCost(const UMythicGameplayAbility *Ab
     const int32 NumStacks = FMath::TruncToInt(NumStacksReal);
     const bool bCanApplyCost = ItemInstance->GetStacks() >= NumStacks;
 
-    // Inform other abilities why this cost cannot be applied
     if (!bCanApplyCost && OptionalRelevantTags && FailureTag.IsValid()) {
         OptionalRelevantTags->AddTag(FailureTag);
     }

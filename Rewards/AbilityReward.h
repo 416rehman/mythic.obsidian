@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -7,9 +6,6 @@
 #include "Abilities/GameplayAbility.h"
 #include "AbilityReward.generated.h"
 
-/**
- * This reward gives and or activates an ability.
- */
 UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API UAbilityReward : public URewardBase {
     GENERATED_BODY()
@@ -23,12 +19,10 @@ public:
     UPROPERTY(EditAnywhere, Blueprintable)
     bool Activate = true;
 
-    // Gives/activates an ability
     virtual bool Give(FRewardContext &Context) const override;
 
     virtual FText GetPreviewText() const override;
 
-    // Ability rewards can be safely reapplied - won't duplicate abilities
     virtual bool CanReapplyOnLoad() const override { return true; }
 
     // Helper function to get the context for the reward

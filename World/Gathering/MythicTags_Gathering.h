@@ -1,0 +1,8 @@
+#pragma once
+#include "NativeGameplayTags.h"
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Itemization_Quality);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Itemization_Quality_Ragged);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Itemization_Quality_Common);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Itemization_Quality_Fine);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Itemization_Quality_Pristine);

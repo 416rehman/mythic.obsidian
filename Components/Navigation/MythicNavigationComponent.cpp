@@ -1,4 +1,4 @@
-﻿// 
+﻿
 
 
 #include "MythicNavigationComponent.h"
@@ -7,7 +7,6 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
-// #include "InteractableComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "Components/CapsuleComponent.h"
@@ -19,10 +18,7 @@
 #include "Mythic/Mythic.h"
 
 
-// Sets default values for this component's properties
 UMythicNavigationComponent::UMythicNavigationComponent() {
-    // Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
-    // off to improve performance if you don't need them.
     PrimaryComponentTick.bCanEverTick = false;
 
     this->ShortPressThreshold = 0.3f;
@@ -30,19 +26,16 @@ UMythicNavigationComponent::UMythicNavigationComponent() {
     this->bUseObstacleAvoidance = true;
 }
 
-// Called when the game starts
 void UMythicNavigationComponent::BeginPlay() {
     Super::BeginPlay();
     OwnerController = Cast<APlayerController>(GetOwner());
 
     if (OwnerController) {
-        //Add Input Mapping Context
         if (UEnhancedInputLocalPlayerSubsystem *Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(OwnerController->GetLocalPlayer())) {
             SetupMappingContext(Subsystem);
             SetupBinds();
         }
 
-        // bind to on-posses event of the controller
         OwnerController->OnPossessedPawnChanged.AddDynamic(this, &UMythicNavigationComponent::OnPossessedPawnChanged);
         CacheAndPrepareCharacter(OwnerController->GetPawn());
     }
@@ -57,9 +50,6 @@ void UMythicNavigationComponent::OnPossessedPawnChanged(APawn *OldPawn, APawn *N
 }
 
 void UMythicNavigationComponent::EndPlay(const EEndPlayReason::Type EndPlayReason) {
-    // Tear down everything this component bound, so a destroyed nav component leaves no stale binds on surviving pawn
-    // components or the controller (AddDynamic is additive — see CachePlayer* — and the input binds live on the
-    // controller's persistent InputComponent).
     if (CachedPlayerInteractionSphere) {
         CachedPlayerInteractionSphere->OnComponentBeginOverlap.RemoveDynamic(this, &UMythicNavigationComponent::OnInteractionOverlapped);
     }
@@ -91,9 +81,6 @@ void UMythicNavigationComponent::CacheAndPrepareCharacter(APawn *owningPawn) {
 }
 
 void UMythicNavigationComponent::CachePlayerInteractionSphere() {
-    // Unbind the previously-cached sphere before re-caching — OnPossessedPawnChanged re-runs this on every possession
-    // and AddDynamic is additive (no dedup), so re-possessing a surviving/pooled pawn would otherwise accumulate
-    // duplicate OnInteractionOverlapped binds (handler fires N times per overlap).
     if (this->CachedPlayerInteractionSphere) {
         this->CachedPlayerInteractionSphere->OnComponentBeginOverlap.RemoveDynamic(this, &UMythicNavigationComponent::OnInteractionOverlapped);
     }
@@ -105,7 +92,7 @@ void UMythicNavigationComponent::CachePlayerInteractionSphere() {
 
     if (this->CachedPlayerInteractionSphere) {
         this->CachedPlayerInteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &UMythicNavigationComponent::OnInteractionOverlapped);
-        RefreshInteractionEvents(); // disable interaction events until the player starts moving
+        RefreshInteractionEvents();
     }
     else {
         UE_LOG(Myth, Warning,
@@ -116,7 +103,6 @@ void UMythicNavigationComponent::CachePlayerInteractionSphere() {
 }
 
 void UMythicNavigationComponent::CachePlayerObstacleCapsule() {
-    // Unbind the previously-cached capsule before re-caching (additive AddDynamic — see CachePlayerInteractionSphere).
     if (this->CachedPlayerObstacleCapsule) {
         this->CachedPlayerObstacleCapsule->OnComponentBeginOverlap.RemoveDynamic(this, &UMythicNavigationComponent::OnObstacleOverlapped);
     }
@@ -139,46 +125,32 @@ void UMythicNavigationComponent::CachePlayerObstacleCapsule() {
 }
 
 void UMythicNavigationComponent::AddNavigationCapsuleToChar() {
-    // Remove the old capsule component
     if (this->CachedPlayerObstacleCapsule) {
         this->CachedPlayerObstacleCapsule->DestroyComponent();
     }
 
-    // Add a new capsule component
     this->CachedPlayerObstacleCapsule = NewObject<UCapsuleComponent>(CachedPlayerCharacter);
     this->CachedPlayerObstacleCapsule->ComponentTags.Add("NavigationCapsule");
     this->CachedPlayerObstacleCapsule->SetupAttachment(CachedPlayerCharacter->GetMesh());
 
-    // Set the capsule component properties
     this->CachedPlayerObstacleCapsule->SetCapsuleHalfHeight(this->ObstacleAvoidanceDistance);
     this->CachedPlayerObstacleCapsule->SetCapsuleRadius(40.f);
 
-    // Position the capsule component
     this->CachedPlayerObstacleCapsule->SetRelativeRotation(FRotator(0.0f, 0.0f, 90.0f));
     this->CachedPlayerObstacleCapsule->SetRelativeLocation(FVector(0, this->ObstacleAvoidanceDistance, 50.0f));
 
-    // Set the collision profile
     this->CachedPlayerObstacleCapsule->SetCollisionProfileName("OverlapAll");
     this->CachedPlayerObstacleCapsule->SetGenerateOverlapEvents(true);
     this->CachedPlayerObstacleCapsule->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
     this->CachedPlayerObstacleCapsule->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
     this->CachedPlayerObstacleCapsule->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Overlap);
 
-    // Bind
     this->CachedPlayerObstacleCapsule->OnComponentBeginOverlap.AddDynamic(this, &UMythicNavigationComponent::OnObstacleOverlapped);
 
-    // Register the component
     this->CachedPlayerObstacleCapsule->RegisterComponent();
 }
 
 bool UMythicNavigationComponent::HandleInteraction(AActor *overlappedActor) {
-    // // Interact with the first interactable component found on the overlapped actor (First component = highest priority)
-    // auto InteractionComponent = overlappedActor->FindComponentByClass<UInteractableComponent>();
-    // if (InteractionComponent) {			
-    // 	this->OwnerController->StopMovement();
-    // 	InteractionComponent->Interact(this->CachedPlayerCharacter, this->OwnerController);
-    // 	return true;
-    // }
     return false;
 }
 
@@ -191,7 +163,6 @@ void UMythicNavigationComponent::OnInteractionOverlapped(UPrimitiveComponent *Pr
             UE_LOG(Myth, Warning, TEXT("Interaction Handled"));
         }
         else {
-            // Attack handling here
         }
     }
 }
@@ -211,20 +182,12 @@ void UMythicNavigationComponent::SetupMappingContext(UEnhancedInputLocalPlayerSu
 }
 
 void UMythicNavigationComponent::SetupBinds() {
-    // Set up action bindings
     if (UEnhancedInputComponent *EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(OwnerController->InputComponent)) {
-
-        // Remove the bindings a previous SetupBinds added before re-binding. SetNavigationType can call this at runtime
-        // to toggle modes; BindAction is additive with NO dedup, so without this the old mode's handlers stay registered
-        // (and re-selecting the same mode double-registers → one input fires the handler twice). We remove only the
-        // handles WE tracked, so other systems' binds on the shared controller InputComponent are untouched (unlike
-        // ClearActionBindings()). Mirrors UMythicInputComponent::RemoveBinds.
         for (uint32 Handle : BindHandles) {
             EnhancedInputComponent->RemoveBindingByHandle(Handle);
         }
         BindHandles.Reset();
 
-        // Add new binds (tracking each handle so the next SetupBinds can remove them)
         switch (NavigationType) {
         case ENavigationType::Controlled:
             BindHandles.Add(EnhancedInputComponent->BindAction(MoveForwardAction, ETriggerEvent::Started, this,
@@ -239,7 +202,6 @@ void UMythicNavigationComponent::SetupBinds() {
             break;
 
         default:
-            // Setup mouse input events
             BindHandles.Add(EnhancedInputComponent->BindAction(SetDestinationClickAction, ETriggerEvent::Started, this,
                                                                &UMythicNavigationComponent::OnInputStarted).GetHandle());
             BindHandles.Add(EnhancedInputComponent->BindAction(SetDestinationClickAction, ETriggerEvent::Triggered, this,
@@ -249,7 +211,6 @@ void UMythicNavigationComponent::SetupBinds() {
             BindHandles.Add(EnhancedInputComponent->BindAction(SetDestinationClickAction, ETriggerEvent::Canceled, this,
                                                                &UMythicNavigationComponent::OnSetDestinationReleased).GetHandle());
 
-            // Setup touch input events
             BindHandles.Add(EnhancedInputComponent->BindAction(SetDestinationTouchAction, ETriggerEvent::Started, this,
                                                                &UMythicNavigationComponent::OnInputStarted).GetHandle());
             BindHandles.Add(EnhancedInputComponent->BindAction(SetDestinationTouchAction, ETriggerEvent::Triggered, this,
@@ -269,12 +230,9 @@ void UMythicNavigationComponent::OnObstacleOverlapped(UPrimitiveComponent *Primi
     if (NavigationType != ENavigationType::DestinationBased) {
         return;
     }
-    // if the actor is not the character
     if (Actor != CachedPlayerCharacter) {
         UE_LOG(Myth, Warning, TEXT("Obstacle %s"), *Actor->GetName());
-        // We stop the movement
         this->OwnerController->StopMovement();
-        // Use AI to move around the obstacle
         UAIBlueprintHelperLibrary::SimpleMoveToLocation(this->OwnerController, this->CachedDestination);
 
         this->AvoidingObstacleSince = GetWorld()->GetTimeSeconds();
@@ -297,7 +255,6 @@ void UMythicNavigationComponent::OnInputStarted() {
 
     this->HandleMoveToDestinationActor();
 
-    // Obstacle Avoidance
     if (this->bUseObstacleAvoidance) {
         this->AvoidingObstacleSince = 0.0f;
         if (this->CachedPlayerObstacleCapsule) {
@@ -307,7 +264,6 @@ void UMythicNavigationComponent::OnInputStarted() {
 }
 
 void UMythicNavigationComponent::CacheLocationUnderCursor() {
-    // We look for the location in the world where the player has pressed the input
     FHitResult Hit;
     bool bHitSuccessful = false;
     if (this->bIsTouch) {
@@ -318,33 +274,26 @@ void UMythicNavigationComponent::CacheLocationUnderCursor() {
         bHitSuccessful = this->OwnerController->GetHitResultUnderCursor(ECollisionChannel::ECC_Visibility, true, Hit);
     }
 
-    // If we hit a surface, cache the location
     if (bHitSuccessful) {
         this->CachedDestination = Hit.Location;
     }
 }
 
 void UMythicNavigationComponent::OnSetDestinationTriggered() {
-    // We flag that the input is being pressed
     this->FollowTime += GetWorld()->GetDeltaSeconds();
 
-    // If target actor is set, we don't need to do anything, as the inputStarted already handled the movement
     if (this->targetActor) {
         UE_LOG(Myth, Warning, TEXT("Skipping Set Destination Triggered. Target Actor: %s"), *this->targetActor->GetName());
         return;
     }
 
-    // Obstacle Avoidance
     if (this->bUseObstacleAvoidance) {
-        // If currently avoiding an obstacle
         if (this->AvoidingObstacleSince > 0.f) {
-            // If we have been avoiding for more than 0.5 seconds
             if (this->GetWorld()->TimeSeconds - this->AvoidingObstacleSince > 0.50f) {
                 UE_LOG(Myth, Warning, TEXT("Resetting Avoiding Obstacle Since"));
                 this->AvoidingObstacleSince = 0.0f;
                 this->OwnerController->StopMovement();
             }
-            // If we have been avoiding for less than 0.5 seconds we do nothing
             else {
                 UE_LOG(Myth, Warning, TEXT("Avoiding Obstacle"));
                 return;
@@ -354,7 +303,6 @@ void UMythicNavigationComponent::OnSetDestinationTriggered() {
 
     CacheLocationUnderCursor();
 
-    // Move towards mouse pointer or touch
     APawn *ControlledPawn = this->OwnerController->GetPawn();
     if (ControlledPawn != nullptr) {
         FVector WorldDirection = (CachedDestination - ControlledPawn->GetActorLocation()).GetSafeNormal();
@@ -365,18 +313,15 @@ void UMythicNavigationComponent::OnSetDestinationTriggered() {
 void UMythicNavigationComponent::OnSetDestinationReleased() {
     if (this->FollowTime <= ShortPressThreshold && this->targetActor == nullptr) {
         CacheLocationUnderCursor();
-        // We move there and spawn some particles
         UAIBlueprintHelperLibrary::SimpleMoveToLocation(this->OwnerController, CachedDestination);
         UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, FXCursor, CachedDestination, FRotator::ZeroRotator,
                                                        FVector(1.f, 1.f, 1.f), true, true, ENCPoolMethod::None, true);
     }
-    // If it was a long press
     else {
         if (this->bStopOnRelease && this->targetActor == nullptr) {
             this->OwnerController->StopMovement();
         }
 
-        // Obstacle Avoidance
         if (this->bUseObstacleAvoidance) {
             if (this->CachedPlayerObstacleCapsule) {
                 this->CachedPlayerObstacleCapsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -388,9 +333,7 @@ void UMythicNavigationComponent::OnSetDestinationReleased() {
 }
 
 void UMythicNavigationComponent::OnTouchTriggered() {
-    // If it was a short press
     if (this->FollowTime <= this->ShortPressThreshold) {
-        // We move there and spawn some particles
         UAIBlueprintHelperLibrary::SimpleMoveToLocation(this->OwnerController, this->CachedDestination);
         UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, this->FXCursor, this->CachedDestination,
                                                        FRotator::ZeroRotator, FVector(1.f, 1.f, 1.f), true, true,
@@ -406,7 +349,6 @@ void UMythicNavigationComponent::OnTouchReleased() {
 }
 
 bool UMythicNavigationComponent::HandleMoveToDestinationActor() {
-
     this->targetActor = nullptr;
     bool success = false;
 
@@ -415,14 +357,11 @@ bool UMythicNavigationComponent::HandleMoveToDestinationActor() {
     if (bHitSuccessful && Hit.GetActor() != CachedPlayerCharacter && Hit.GetActor()->FindComponentByClass<UDestinationComponent>()) {
         this->targetActor = Hit.GetActor();
 
-        // We set the destination
         this->CachedDestination = Hit.ImpactPoint;
-        // We move the character to the destination
         UAIBlueprintHelperLibrary::SimpleMoveToLocation(this->OwnerController, this->CachedDestination);
         UE_LOG(Myth, Warning, TEXT("Target Actor: %s"), *this->targetActor->GetName());
         success = true;
     }
-    // Refresh interaction events
     this->RefreshInteractionEvents();
     return success;
 }
@@ -431,18 +370,16 @@ void UMythicNavigationComponent::OnControlledInputStarted() {}
 
 void UMythicNavigationComponent::OnMoveForwardTriggered(const FInputActionValue &Value) {
     if (CachedPlayerCharacter && OwnerController->PlayerCameraManager) {
-        // Since the camera is pointing down, figure out the final forward vector
         auto forward = UKismetMathLibrary::ProjectVectorOnToPlane(OwnerController->PlayerCameraManager->GetActorForwardVector(), FVector::UpVector);
         forward = forward.GetSafeNormal();
-        // guarded normalize — a straight-down camera gives a 0-length projection; /Length() would feed NaN to AddMovementInput
         CachedPlayerCharacter->AddMovementInput(forward, Value.Get<float>(), false);
     }
 }
 
 void UMythicNavigationComponent::OnMoveRightTriggered(const FInputActionValue &Value) {
-    if (CachedPlayerCharacter && OwnerController->PlayerCameraManager) { // guard PlayerCameraManager like OnMoveForwardTriggered
+    if (CachedPlayerCharacter && OwnerController->PlayerCameraManager) {
         auto right = UKismetMathLibrary::ProjectVectorOnToPlane(OwnerController->PlayerCameraManager->GetActorRightVector(), FVector::UpVector);
-        right = right.GetSafeNormal(); // guarded normalize (see OnMoveForwardTriggered) — never feed NaN to AddMovementInput
+        right = right.GetSafeNormal();
         CachedPlayerCharacter->AddMovementInput(right, Value.Get<float>(), false);
     }
 }

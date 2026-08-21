@@ -15,11 +15,6 @@ class USceneComponent;
 class UCommonActivatableWidget;
 class UCommonGenericInputActionDataTable;
 
-/**
- * A configurable conversion station actor. Becomes a crafting bench / furnace / fireplace / alchemy table /
- * smelter / etc. purely via data: its UConversionStationComponent config, its inventory profile, and a set
- * of UConversionRecipe assets. Replaces the legacy ACraftingStation.
- */
 UCLASS()
 class MYTHIC_API AMythicConversionStation : public AActor, public IMythicInteractable, public IInventoryProviderInterface {
     GENERATED_BODY()
@@ -27,15 +22,12 @@ class MYTHIC_API AMythicConversionStation : public AActor, public IMythicInterac
 public:
     AMythicConversionStation();
     void SetupLocalViewModel();
-    
-    //~ BeginPlay
+
     virtual void BeginPlay() override;
 
-    //~ IInventoryProviderInterface
     virtual TArray<UMythicInventoryComponent *> GetAllInventoryComponents() const override;
     virtual UAbilitySystemComponent *GetSchematicsASC() const override;
 
-    //~ IMythicInteractable
     virtual void OnPrimaryInteract_Implementation(AActor *Interactor) override;
     virtual void OnSecondaryInteract_Implementation(AActor *Interactor) override;
     virtual USceneComponent *GetWidgetAttachmentComponent_Implementation() const override;
@@ -77,6 +69,5 @@ protected:
     UFUNCTION(BlueprintImplementableEvent, Category = "Conversion")
     void OnStationOpened(APlayerController *Interactor);
 
-    // Resolves the owning controller from an interactor that may be a pawn or a controller.
     static class AController *ResolveController(AActor *Interactor);
 };

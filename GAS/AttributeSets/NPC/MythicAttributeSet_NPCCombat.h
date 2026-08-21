@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -7,9 +6,6 @@
 #include "GAS/AttributeSets/MythicAttributeSet.h"
 #include "MythicAttributeSet_NPCCombat.generated.h"
 
-/**
- * NPC Combat Attribute Set
- */
 UCLASS()
 class MYTHIC_API UMythicAttributeSet_NPCCombat : public UMythicAttributeSet {
     GENERATED_BODY()

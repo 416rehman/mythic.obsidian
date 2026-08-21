@@ -9,8 +9,6 @@
 
 class UCommonGenericInputActionDataTable;
 
-// A player pawn is interactable ONLY while downed (co-op): a teammate focuses it ("Revive") and interacts to revive
-// it. The interactable methods no-op / return false when the pawn is alive, so a healthy player offers no prompt.
 UCLASS(Blueprintable)
 class AMythicCharacter_Player : public AMythicCharacter, public IMythicInteractable {
     GENERATED_BODY()
@@ -31,7 +29,6 @@ public:
 
     virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty> &OutLifetimeProps) const override;
 
-    //~ IMythicInteractable — a downed player can be revived by a teammate (the only interaction it offers).
     virtual void OnPrimaryInteract_Implementation(AActor *Interactor) override;
     virtual void OnSecondaryInteract_Implementation(AActor *Interactor) override;
     virtual USceneComponent *GetWidgetAttachmentComponent_Implementation() const override;

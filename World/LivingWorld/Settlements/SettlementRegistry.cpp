@@ -1,4 +1,3 @@
-// Mythic Living World — Settlement Registry Implementation
 
 #include "World/LivingWorld/Settlements/SettlementRegistry.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
@@ -17,10 +16,6 @@ int32 UMythicSettlementRegistry::RegisterSettlement(AMythicSettlement *Settlemen
     FMythicSettlementData Data = Settlement->GetSettlementData();
     Data.SettlementId = AssignedId;
 
-    // Restore a persisted governance override (territory conquest survives reload), keyed by the stable designer-set
-    // SettlementTag. One-shot — consumed so a later re-registration can't revert a post-load conquest. Applied BEFORE
-    // the faction index + territory seed below read GoverningFaction. An UNSET SettlementTag can't persist its
-    // governance (and collapses with any other untagged settlement on save) — warn so it's caught in content.
     const FName SettlementKey = Data.SettlementTag.GetTagName();
     if (SettlementKey.IsNone()) {
         UE_LOG(LogMythSettlement, Warning,
@@ -35,12 +30,8 @@ int32 UMythicSettlementRegistry::RegisterSettlement(AMythicSettlement *Settlemen
     Settlements.Add(AssignedId, MoveTemp(Data));
     SettlementActors.Add(AssignedId, Settlement);
 
-    // Update indices
     const FMythicSettlementData &StoredData = Settlements[AssignedId];
     for (const FMythicCellCoord &Cell : StoredData.RasterizedCells) {
-        // First-claim wins: if two settlements' rasterized cells OVERLAP, don't clobber the existing owner (TMap::Add
-        // overwrites). Combined with the ownership-guarded Remove in UnregisterSettlement, this gives each shared cell a
-        // stable, deterministic owner instead of last-writer-wins + survivor-wipe corruption of the reverse lookup.
         if (!CellToSettlement.Contains(Cell)) {
             CellToSettlement.Add(Cell, AssignedId);
         }
@@ -59,7 +50,6 @@ void UMythicSettlementRegistry::UnregisterSettlement(AMythicSettlement *Settleme
         return;
     }
 
-    // Find the settlement ID for this actor
     int32 FoundId = INDEX_NONE;
     for (const auto &Pair : SettlementActors) {
         if (Pair.Value.Get() == Settlement) {
@@ -74,16 +64,12 @@ void UMythicSettlementRegistry::UnregisterSettlement(AMythicSettlement *Settleme
 
     const FMythicSettlementData *Data = Settlements.Find(FoundId);
     if (Data) {
-        // Remove cell indices — but ONLY the cells THIS settlement actually owns. With overlapping settlements an
-        // unconditional Remove would delete a still-valid survivor's mapping (the cell still lies inside another
-        // settlement), leaving GetSettlementAtCell returning null for a cell that is genuinely covered.
         for (const FMythicCellCoord &Cell : Data->RasterizedCells) {
             if (CellToSettlement.FindRef(Cell) == FoundId) {
                 CellToSettlement.Remove(Cell);
             }
         }
 
-        // Remove from faction list
         TArray<int32> *FactionList = FactionSettlements.Find(Data->GoverningFaction);
         if (FactionList) {
             FactionList->Remove(FoundId);
@@ -145,7 +131,6 @@ void UMythicSettlementRegistry::HandleNPCDeath(uint32 DeadEntityId, double Death
 
         for (FMythicShopSlot &Shop : Data.Shops) {
             if (Shop.OwnerEntityId == DeadEntityId && !Shop.bPlayerOwned) {
-                // Vacate the shop
                 Shop.OwnerEntityId = 0;
                 Shop.VacatedTime = DeathTime;
 
@@ -161,13 +146,8 @@ void UMythicSettlementRegistry::TickShopSuccession(double CurrentWorldTime, doub
         FMythicSettlementData &Data = Pair.Value;
 
         for (FMythicShopSlot &Shop : Data.Shops) {
-            // Check if shop is vacant, not player-owned, and succession timer has elapsed
             if (Shop.OwnerEntityId == 0 && !Shop.bPlayerOwned && Shop.VacatedTime > 0.0) {
                 if (CurrentWorldTime - Shop.VacatedTime >= SuccessionDelay) {
-
-                    // The actual generation of a new NPC is handled by the population spawner,
-                    // but we clear the vacated time to signal it's ready for a new owner to claim.
-                    // When a new NPC with matching role tag spawns in this cell, they claim the slot.
                     Shop.VacatedTime = 0.0;
 
                     UE_LOG(LogMythSettlement, Log, TEXT("Shop '%s' in '%s' ready for succession (delay %.1fs elapsed)."),
@@ -179,17 +159,15 @@ void UMythicSettlementRegistry::TickShopSuccession(double CurrentWorldTime, doub
 }
 
 bool UMythicSettlementRegistry::CanClaimShop(const FMythicShopSlot &Shop, const FGameplayTag &ClaimantRole) {
-    // Unowned, not player-held, and not waiting out a succession delay (VacatedTime cleared to 0 == ready / never owned).
     if (Shop.OwnerEntityId != 0 || Shop.bPlayerOwned || Shop.VacatedTime != 0.0) {
         return false;
     }
-    // The slot must specify a role and the claimant must satisfy it (its tag is the required role or a more-specific child).
     return Shop.RequiredRole.IsValid() && ClaimantRole.IsValid() && ClaimantRole.MatchesTag(Shop.RequiredRole);
 }
 
 int32 UMythicSettlementRegistry::ClaimVacantShop(int32 SettlementId, int32 ClaimantEntityId, const FGameplayTag &ClaimantRole) {
     if (ClaimantEntityId == 0) {
-        return INDEX_NONE; // 0 is the "vacant" sentinel — a real claimant must have a non-zero entity id
+        return INDEX_NONE;
     }
     FMythicSettlementData *Data = Settlements.Find(SettlementId);
     if (!Data) {
@@ -226,24 +204,20 @@ void UMythicSettlementRegistry::TransferSettlement(
         return;
     }
 
-    // Update faction settlement lists
     TArray<int32> *OldFactionList = FactionSettlements.Find(OldFaction);
     if (OldFactionList) {
         OldFactionList->Remove(SettlementId);
     }
     FactionSettlements.FindOrAdd(NewFaction).Add(SettlementId);
 
-    // Update settlement data
     Data->GoverningFaction = NewFaction;
 
-    // Re-seed territory cells to new faction
     if (TerritoryGrid) {
         for (const FMythicCellCoord &Cell : Data->RasterizedCells) {
             TerritoryGrid->SetCellInfluence(Cell, NewFaction, 1.0f);
         }
     }
 
-    // Update faction ControlledCellCount
     if (FactionDB) {
         const int32 CellDelta = Data->RasterizedCells.Num();
 
@@ -258,18 +232,16 @@ void UMythicSettlementRegistry::TransferSettlement(
         }
     }
 
-    // Update settlement actor if it still exists
     if (AMythicSettlement *Actor = GetSettlementActor(SettlementId)) {
         Actor->TransferToFaction(NewFaction);
     }
 
-    // Log a causal fabric event
     if (CausalFabric && Data->RasterizedCells.Num() > 0) {
         FMythicWorldEvent Event;
         Event.EventTag = TAG_LIVINGWORLD_EVENT_TERRITORY_SETTLEMENT_TRANSFER;
         Event.PrimaryFaction = NewFaction;
         Event.SecondaryFaction = OldFaction;
-        Event.Cell = Data->RasterizedCells[0]; // Settlement center (first cell is a reasonable pick)
+        Event.Cell = Data->RasterizedCells[0];
         Event.Significance = Data->bIsCapital ? 1.0f : 0.7f;
         Event.CategoryFlags = EMythicEventCategory::Territory;
         CausalFabric->AppendEvent(Event);
@@ -285,8 +257,6 @@ void UMythicSettlementRegistry::TickConquest(UMythicTerritoryGrid *TerritoryGrid
         return;
     }
 
-    // Collect conquests FIRST — TransferSettlement mutates Settlements + the grid, so we must not call it while
-    // iterating Settlements + reading GetDominantFaction.
     TArray<TPair<int32, FMythicFactionId>> Conquests;
     for (const TPair<int32, FMythicSettlementData> &Pair : Settlements) {
         const FMythicSettlementData &Data = Pair.Value;
@@ -295,7 +265,6 @@ void UMythicSettlementRegistry::TickConquest(UMythicTerritoryGrid *TerritoryGrid
             continue;
         }
 
-        // Tally which faction dominates each of this settlement's cells (emergent territory-influence state).
         TMap<FMythicFactionId, int32> FactionCellCounts;
         for (const FMythicCellCoord &Cell : Data.RasterizedCells) {
             const FMythicFactionId Dom = TerritoryGrid->GetDominantFaction(Cell);
@@ -304,7 +273,6 @@ void UMythicSettlementRegistry::TickConquest(UMythicTerritoryGrid *TerritoryGrid
             }
         }
 
-        // The single faction controlling the most cells.
         FMythicFactionId TopFaction;
         int32 TopCount = 0;
         for (const TPair<FMythicFactionId, int32> &FC : FactionCellCounts) {
@@ -314,7 +282,6 @@ void UMythicSettlementRegistry::TickConquest(UMythicTerritoryGrid *TerritoryGrid
             }
         }
 
-        // Conquered if a DIFFERENT valid faction holds a clear majority (> threshold) of the settlement's cells.
         if (TopFaction.IsValid() && TopFaction != Data.GoverningFaction
             && static_cast<float>(TopCount) / static_cast<float>(CellCount) > ConquestThreshold) {
             Conquests.Add(TPair<int32, FMythicFactionId>(Pair.Key, TopFaction));
@@ -334,7 +301,6 @@ void UMythicSettlementRegistry::SeedTerritoryFromSettlements(UMythicTerritoryGri
         return;
     }
 
-    // Track cells seeded per faction for ControlledCellCount update
     TMap<FMythicFactionId, int32> FactionCellCounts;
     int32 TotalCellsSeeded = 0;
 
@@ -352,7 +318,6 @@ void UMythicSettlementRegistry::SeedTerritoryFromSettlements(UMythicTerritoryGri
         }
     }
 
-    // Update faction ControlledCellCount from seeding results
     for (const auto &Pair : FactionCellCounts) {
         FMythicFactionData *FactionData = FactionDB->GetFactionMutable(Pair.Key);
         if (FactionData) {
@@ -365,11 +330,10 @@ void UMythicSettlementRegistry::SeedTerritoryFromSettlements(UMythicTerritoryGri
 }
 
 void UMythicSettlementRegistry::Serialize(FArchive &Ar) {
-    int32 Version = 2; // v2: keyed by SettlementTag FName (v1's CenterCell key was always (0,0) — never assigned)
+    int32 Version = 2;
     Ar << Version;
 
     if (Ar.IsSaving()) {
-        // Persist the mutable GoverningFaction of every registered settlement, keyed by the stable SettlementTag.
         int32 Count = Settlements.Num();
         Ar << Count;
         for (TPair<int32, FMythicSettlementData> &Pair : Settlements) {
@@ -380,14 +344,9 @@ void UMythicSettlementRegistry::Serialize(FArchive &Ar) {
         }
     }
     else {
-        // Load the overrides; RegisterSettlement applies them one-shot as settlements register (handles the case
-        // where settlement actors register AFTER LoadLivingWorld). Settlements already registered are patched here.
         LoadedGoverningFactionOverrides.Reset();
         int32 Count = 0;
         Ar << Count;
-        // Bound the stream-controlled Count before the loop: a garbage Count would otherwise spin a multi-billion-
-        // iteration loop (reading past the stream + growing the override map) → hang/OOM. 1,000,000 is far above any
-        // real settlement count; mirrors the other serialize guards.
         if (Count < 0 || Count > 1000000) {
             Ar.SetError();
             return;
@@ -407,12 +366,12 @@ void UMythicSettlementRegistry::Serialize(FArchive &Ar) {
             const FName Key = Pair.Value.SettlementTag.GetTagName();
             if (const uint8 *SavedFaction = LoadedGoverningFactionOverrides.Find(Key)) {
                 Pair.Value.GoverningFaction.Index = *SavedFaction;
-                LoadedGoverningFactionOverrides.Remove(Key); // consume one-shot
+                LoadedGoverningFactionOverrides.Remove(Key);
                 bPatchedAny = true;
             }
         }
         if (bPatchedAny) {
-            RebuildIndices(); // re-derive FactionSettlements after GoverningFaction changes
+            RebuildIndices();
         }
     }
 }
@@ -421,10 +380,6 @@ void UMythicSettlementRegistry::RebuildIndices() {
     CellToSettlement.Reset();
     FactionSettlements.Reset();
 
-    // Iterate in SettlementId (registration) order so the CellToSettlement first-claim-wins below resolves a cell
-    // contested by two settlements the SAME way RegisterSettlement did at registration (SettlementRegistry.cpp:44).
-    // A raw last-writer-wins Add (TMap iteration order is unspecified) would silently flip a contested cell's owner
-    // on every rebuild, desyncing CellToSettlement from how the cell was originally claimed.
     TArray<int32> OrderedIds;
     Settlements.GetKeys(OrderedIds);
     OrderedIds.Sort();
@@ -433,7 +388,7 @@ void UMythicSettlementRegistry::RebuildIndices() {
         const FMythicSettlementData &Data = Settlements[SettlementId];
 
         for (const FMythicCellCoord &Cell : Data.RasterizedCells) {
-            if (!CellToSettlement.Contains(Cell)) { // first-claim-wins, matching RegisterSettlement
+            if (!CellToSettlement.Contains(Cell)) {
                 CellToSettlement.Add(Cell, SettlementId);
             }
         }

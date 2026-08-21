@@ -1,7 +1,5 @@
 #include "MythicTags_GAS.h"
 
-/** States */
-// State tags are applied to entities to indicate their current state, such as dead, in combat, etc.
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DEAD, "GAS.State.Dead", "The entity is dead");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DYING, "GAS.State.Dying", "The entity is dying");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DOWNED, "GAS.State.Downed", "Co-op down state: incapacitated but revivable (bleeds out if not revived)");
@@ -9,8 +7,6 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_INCOMBAT, "GAS.State.InCombat", "The en
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_SPRINTING, "GAS.State.Sprinting", "The entity is sprinting");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_EXHAUSTED, "GAS.State.Exhausted", "Winded: out of stamina from sprinting — the sprint speed bonus is suppressed until stamina recovers");
 
-/** Debuffs */
-// Debuff tags are applied to entities to indicate that they are suffering from a negative effect, such as bleeding, burning, etc.
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF, "GAS.Debuff", "Parent category for all debuffs");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF_BLEEDING, "GAS.Debuff.Bleeding", "The entity is bleeding and taking damage over time");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF_BURNING, "GAS.Debuff.Burning", "The entity is burning and taking damage over time");
@@ -21,8 +17,6 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF_WEAKENED, "GAS.Debuff.Weakened", "The 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF_FROZEN, "GAS.Debuff.Frozen", "The entity is frozen and cannot act");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF_TERRIFIED, "GAS.Debuff.Terrified", "The entity is terrified and receives increased damage");
 
-/** Buffs */
-// Buff tags are applied to entities to indicate that they are benefiting from a positive effect, such as healing, increased damage, etc.
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_HEALING, "GAS.Buff.Healing", "The entity is healing and gaining health over time");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_RAGE, "GAS.Buff.Rage", "The entity is enraged and deals increased damage");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_HASTE, "GAS.Buff.Haste", "The entity is hasted and moves at an increased speed");
@@ -30,29 +24,24 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_FORTIFY, "GAS.Buff.Fortify", "The entity
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_ENLIGHTEN, "GAS.Buff.Enlighten", "The entity is enlightened and gains increased proficiency XP");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_INVINCIBLE, "GAS.Buff.Invincible", "The entity is invincible and cannot be damaged");
 
-/// Gameplay Buffs
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_GAMEPLAY_CONDUIT_OF_LIGHTNING, "GAS.Buff.Gameplay.ConduitOfLightning",
                                "The entity is a conduit of lightning and deals increased damage");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_BUFF_GAMEPLAY_GAMBIT, "GAS.Buff.Gameplay.Gambit", "Every 10 second, a random buff is applied to the entity");
 
-/** GAS Abilities */
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_ABILITY_HEAL, "GAS.Ability.Heal", "The entity heals another entity");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_ABILITY_TYPE_SKILL, "GAS.Ability.Type.Skill", "Marks an outgoing hit as delivered by a skill");
 
-/** SetByCaller */
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(SETBYCALLER_GENERIC, "SetByCaller.Generic", "Generic SetByCaller tag to use when no other tag is appropriate");
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(SETBYCALLER_DAMAGE, "SetByCaller.Damage", "Used by effects that deal damage");
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(SETBYCALLER_HEAL, "SetByCaller.Heal", "Used by effects that heal");
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(SETBYCALLER_DURATION, "SetByCaller.Duration", "When an effect has a duration, this tag is used to set the duration");
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(SETBYCALLER_COOLDOWN, "SetByCaller.Cooldown", "Cooldown SetByCaller tag");
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(SETBYCALLER_COST, "SetByCaller.Cost", "Cost SetByCaller tag");
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(SETBYCALLER_RANGE, "SetByCaller.Range", "Distance, Radius, or generic Area of Effect");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_GENERIC, "SetByCaller.Generic", "Generic SetByCaller tag to use when no other tag is appropriate");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_DAMAGE, "SetByCaller.Damage", "Used by effects that deal damage");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_HEAL, "SetByCaller.Heal", "Used by effects that heal");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_DURATION, "SetByCaller.Duration", "When an effect has a duration, this tag is used to set the duration");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_COOLDOWN, "SetByCaller.Cooldown", "Cooldown SetByCaller tag");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_COST, "SetByCaller.Cost", "Cost SetByCaller tag");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_RANGE, "SetByCaller.Range", "Distance, Radius, or generic Area of Effect");
 
-/** GAS Pipeline Tags */
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_PIPELINE_DEATH_HANDLED, "GAS.Pipeline.Death.Handled",
                                "Indicates that death has been handled and further death processing should be skipped");
 
-/** GAS Events */
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_HITBOX, "GAS.Event.Hitbox", "Event called when owner's animation's hitbox overlaps with another entity");
 
@@ -74,6 +63,11 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_HEAL_RECEIVED, "GAS.Event.Heal.Received
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ATTACK_BEGIN, "GAS.Event.Attack.Begin", "Event called when owner's attack begins");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ATTACK_END, "GAS.Event.Attack.End", "Event called when owner's attack ends");
 
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_SKILL_BEGIN, "GAS.Event.Skill.Begin",
+                               "A skill began. InstigatorTags carry the ability's own tags, Skill.* among them.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_SKILL_END, "GAS.Event.Skill.End",
+                               "A skill finished. InstigatorTags carry the ability's own tags, Skill.* among them.");
+
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_DESTRUCTIBLE, "GAS.Event.Dmg.Destructible", "Event called when the owner's attack hits a destructible object");
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ITEM_ACQUIRED, "GAS.Event.Item.Acquired",
@@ -87,15 +81,19 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ITEM_USED, "GAS.Event.Item.Used",
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ITEM_EQUIPPED, "GAS.Event.Item.Equipped",
                                "Fired server-side on a player's ASC on the first genuine weapon equip (per-item SaveGame marker suppresses save-restore re-fires). TargetTags carries the item's ItemType. Drives 'equip N <type>' objectives.");
 
-/** GameplayCues */
 UE_DEFINE_GAMEPLAY_TAG(GAMEPLAYCUE_ABILITY_HEAL_ACTIVATED, "GameplayCue.Ability.Heal.Activated");
 UE_DEFINE_GAMEPLAY_TAG(GAMEPLAYCUE_ABILITY_HEAL_RECEIVED, "GameplayCue.Ability.Heal.Received");
 UE_DEFINE_GAMEPLAY_TAG(GAMEPLAYCUE_ABILITY_LEVELUP, "GameplayCue.Ability.LevelUp");
 
-// Internal Notifies - format NOTIFY_<SYSTEM>_<ACTION>_<RESULT>_<REASON>
 UE_DEFINE_GAMEPLAY_TAG(NOTIFY_ABILITY_ACTIVATION_FAILED_COST, "Notify.Ability.Activation.Failed.Cost");
 UE_DEFINE_GAMEPLAY_TAG(NOTIFY_ABILITY_ACTIVATION_FAILED_ISDEAD, "Notify.Ability.Activation.Failed.IsDead");
 
-/** Input */
-// Input tags control ability input processing behavior
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_INPUT_BLOCKED, "GAS.Input.Blocked", "When present on ASC, all ability input is blocked and cleared");
+
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_KIND_CREATURE, "AI.Kind.Creature",
+                               "Huntable creature — its corpse is skinnable for hides/meat/trophies (Hunting F2). Owner adds this loose tag to the creature ASC on combat init.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(AI_KIND_HUMANOID, "AI.Kind.Humanoid",
+                               "Humanoid — its corpse is NOT skinnable (the default when a dying pawn owns no AI.Kind tag).");
+
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_PROFICIENCY_GAINED, "GAS.Event.Proficiency.Gained",
+                               "Any proficiency track gained XP. The single non-combat hook: fires for gathering, crafting, farming, fishing, hunting, trading and building alike. InstigatorTags carry the track's TrackTag.");

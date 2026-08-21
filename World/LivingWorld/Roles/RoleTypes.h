@@ -1,5 +1,3 @@
-// Mythic Living World — Specialized Role Types
-// All roles are data configurations on existing systems — zero new code per role.
 
 #pragma once
 
@@ -9,11 +7,6 @@
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "RoleTypes.generated.h"
 
-/**
- * Defines a specialized NPC role configuration.
- * Roles are data-driven overlays on the existing pressure/venting/dialogue pipeline.
- * The doc mandates: "All data configurations — zero new systems per role."
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicRoleDefinition {
     GENERATED_BODY()
@@ -64,7 +57,6 @@ struct MYTHIC_API FMythicRoleDefinition {
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Dialogue", meta = (Categories = "Dialogue"))
     FGameplayTagContainer DialogueTags;
 
-    // ─── Spy-Specific ────────────────────────────────────
 
     /**
      * If true, this role is an undercover agent with dual faction identity.
@@ -81,7 +73,6 @@ struct MYTHIC_API FMythicRoleDefinition {
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spy", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float SpyDiscoveryChance = 0.05f;
 
-    // ─── Merchant-Specific ───────────────────────────────
 
     /**
      * If true, this role has a trade inventory generated from faction economy cache.
@@ -97,7 +88,6 @@ struct MYTHIC_API FMythicRoleDefinition {
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Merchant", meta = (Categories = "Inventory"))
     FGameplayTag InventoryTemplateTag;
 
-    // ─── Leadership/Rally ────────────────────────────────
 
     /**
      * If true, this role can use the Rally vent to reduce nearby entities' Threat pressure.
@@ -114,11 +104,6 @@ struct MYTHIC_API FMythicRoleDefinition {
     float RallyEffectiveness = 0.3f;
 };
 
-/**
- * Designer-authored database of role definitions.
- * Referenced from DA_LivingWorldSettings → RoleDatabase.
- * Roles are data-driven — adding a new role is adding a new entry, not new code.
- */
 UCLASS(BlueprintType)
 class MYTHIC_API UMythicRoleDatabase : public UDataAsset {
     GENERATED_BODY()
@@ -128,7 +113,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Roles")
     TArray<FMythicRoleDefinition> Roles;
 
-    /** Find a role definition by tag. Returns nullptr if not found. */
     const FMythicRoleDefinition* FindRole(const FGameplayTag& RoleTag) const {
         for (const FMythicRoleDefinition& Role : Roles) {
             if (Role.RoleTag.MatchesTagExact(RoleTag)) {

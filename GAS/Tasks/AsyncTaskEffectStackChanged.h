@@ -9,15 +9,11 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnGameplayEffectStackChanged, FGameplayTag, EffectGameplayTag, FActiveGameplayEffectHandle, Handle, int32, NewStackCount, int32, OldStackCount);
 
-/**
- * Blueprint node to automatically register a listener for changes to a GameplayEffect's stack count based on an Asset or Granted tag on the Effect.
- * Useful to use in UI.
- */
 UCLASS(BlueprintType, meta = (ExposedAsyncProxy = AsyncTask))
 class MYTHIC_API UAsyncTaskEffectStackChanged : public UBlueprintAsyncActionBase
 {
     GENERATED_BODY()
-	
+
     UPROPERTY(BlueprintAssignable)
     FOnGameplayEffectStackChanged OnGameplayEffectStackChange;
 

@@ -16,10 +16,8 @@ void UMythicAbilitySystemComponent::GetAdditionalActivationTagRequirements(const
 void UMythicAbilitySystemComponent::BeginPlay() {
     Super::BeginPlay();
 
-    // Apply default tag relationship mapping from developer settings if not already set
     if (!AbilityTagRelationshipMapping) {
         if (const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>()) {
-            // LoadAsync handles null and already-loaded cases automatically
             UMythicAssetManager::LoadAsync(this, Settings->DefaultAbilityTagRelationshipMapping,
                                            [this](UMythicAbilityTagRelationshipMapping *Mapping) {
                                                if (Mapping && !AbilityTagRelationshipMapping) {
@@ -87,9 +85,6 @@ void UMythicAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bG
     static TArray<FGameplayAbilitySpecHandle> AbilitiesToActivate;
     AbilitiesToActivate.Reset();
 
-    //
-    // Process all abilities that activate when the input is held.
-    //
     for (const FGameplayAbilitySpecHandle &SpecHandle : InputHeldSpecHandles) {
         if (const FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(SpecHandle)) {
             if (AbilitySpec->Ability && !AbilitySpec->IsActive()) {
@@ -108,16 +103,12 @@ void UMythicAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bG
         }
     }
 
-    //
-    // Process all abilities that had their input pressed this frame.
-    //
     for (const FGameplayAbilitySpecHandle &SpecHandle : InputPressedSpecHandles) {
         if (FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(SpecHandle)) {
             if (AbilitySpec->Ability) {
                 AbilitySpec->InputPressed = true;
 
                 if (AbilitySpec->IsActive()) {
-                    // Ability is active so pass along the input event.
                     UE_LOG(Myth, Log, TEXT("  -> Pressed ability %s is already ACTIVE, forwarding input"), *GetNameSafe(AbilitySpec->Ability));
                     AbilitySpecInputPressed(*AbilitySpec);
                 }
@@ -141,11 +132,6 @@ void UMythicAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bG
         }
     }
 
-    //
-    // Try to activate all the abilities that are from presses and holds.
-    // We do it all at once so that held inputs don't activate the ability
-    // and then also send a input event to the ability because of the press.
-    //
     for (const FGameplayAbilitySpecHandle &AbilitySpecHandle : AbilitiesToActivate) {
         if (FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(AbilitySpecHandle)) {
             UE_LOG(Myth, Log, TEXT("  -> Attempting to activate ability %s"), *GetNameSafe(AbilitySpec->Ability));
@@ -154,25 +140,18 @@ void UMythicAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bG
         UE_LOG(Myth, Log, TEXT("  -> TryActivateAbility result: %s"), bSuccess ? TEXT("SUCCESS") : TEXT("FAILED"));
     }
 
-    //
-    // Process all abilities that had their input released this frame.
-    //
     for (const FGameplayAbilitySpecHandle &SpecHandle : InputReleasedSpecHandles) {
         if (FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(SpecHandle)) {
             if (AbilitySpec->Ability) {
                 AbilitySpec->InputPressed = false;
 
                 if (AbilitySpec->IsActive()) {
-                    // Ability is active so pass along the input event.
                     AbilitySpecInputReleased(*AbilitySpec);
                 }
             }
         }
     }
 
-    //
-    // Clear the cached ability handles.
-    //
     InputPressedSpecHandles.Reset();
     InputReleasedSpecHandles.Reset();
 }
@@ -192,14 +171,12 @@ void UMythicAbilitySystemComponent::ExecuteGameplayCueMulticast(FGameplayTag Cue
         return;
     }
 
-    // Server sends multicast to all clients
     if (GetOwnerRole() == ROLE_Authority) {
         Multicast_ExecuteGameplayCue(CueTag, CueParams);
     }
 }
 
 void UMythicAbilitySystemComponent::Multicast_ExecuteGameplayCue_Implementation(FGameplayTag CueTag, FGameplayCueParameters CueParams) {
-    // Execute the cue locally on all clients
     ExecuteGameplayCue(CueTag, CueParams);
 }
 
@@ -208,13 +185,11 @@ bool UMythicAbilitySystemComponent::IsActivationGroupBlocked(EMythicAbilityActiv
 
     switch (Group) {
     case EMythicAbilityActivationGroup::Independent:
-        // Independent abilities are never blocked.
         bBlocked = false;
         break;
 
     case EMythicAbilityActivationGroup::Exclusive_Replaceable:
     case EMythicAbilityActivationGroup::Exclusive_Blocking:
-        // Exclusive abilities can activate if nothing is blocking.
         bBlocked = (ActivationGroupCounts[static_cast<uint8>(EMythicAbilityActivationGroup::Exclusive_Blocking)] > 0);
         break;
 
@@ -236,7 +211,6 @@ void UMythicAbilitySystemComponent::AddAbilityToActivationGroup(EMythicAbilityAc
 
     switch (Group) {
     case EMythicAbilityActivationGroup::Independent:
-        // Independent abilities do not cancel any other abilities.
         break;
 
     case EMythicAbilityActivationGroup::Exclusive_Replaceable:
@@ -290,7 +264,6 @@ void UMythicAbilitySystemComponent::CancelAbilitiesByFunc(TShouldCancelAbilityFu
                    TEXT("CancelAbilitiesByFunc: All Abilities should be Instanced (NonInstanced is being deprecated due to usability issues)."));
         PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
-        // Cancel all the spawned instances.
         TArray<UGameplayAbility *> Instances = AbilitySpec.GetAbilityInstances();
         for (UGameplayAbility *AbilityInstance : Instances) {
             UMythicGameplayAbility *MythicAbilityInstance = CastChecked<UMythicGameplayAbility>(AbilityInstance);

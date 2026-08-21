@@ -1,4 +1,3 @@
-// Mythic — client-local placement mode implementation
 
 #include "Itemization/Placeable/MythicPlacementModeComponent.h"
 
@@ -9,27 +8,22 @@
 #include "Engine/World.h"
 
 UMythicPlacementModeComponent::UMythicPlacementModeComponent() {
-    // Default no-tick; enable the per-frame preview ONLY while a placement session is active (toggle, don't poll).
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.bStartWithTickEnabled = false;
-    SetIsReplicatedByDefault(false); // preview/UI is client-local; the deploy round-trips via the server RPC
+    SetIsReplicatedByDefault(false);
 }
 
 EMythicPlacementAction UMythicPlacementModeComponent::DecidePlacementAction(const bool bCancelRequested, const bool bSourceItemPresent,
                                                                             const bool bConfirmRequested, const bool bPlacementValid) {
-    // Cancel always exits.
     if (bCancelRequested) {
         return EMythicPlacementAction::Exit;
     }
-    // The source item being gone (last of the stack just deployed, or moved away) exits.
     if (!bSourceItemPresent) {
         return EMythicPlacementAction::Exit;
     }
-    // A confirm on a legal spot deploys (the caller stays in mode for the next from the stack).
     if (bConfirmRequested && bPlacementValid) {
         return EMythicPlacementAction::Deploy;
     }
-    // Otherwise just keep the ghost current.
     return EMythicPlacementAction::UpdateGhost;
 }
 
@@ -53,8 +47,6 @@ bool UMythicPlacementModeComponent::ResolveAimRay(FVector &OutOrigin, FVector &O
     if (!P) {
         return false;
     }
-    // No camera is wired on the player pawn, so aim from the pawn's eyes along its facing (matches the DeployPlaceable
-    // cheat + what the server re-traces). A camera, once added, is the single place to upgrade this.
     FRotator Rot;
     P->GetActorEyesViewPoint(OutOrigin, Rot);
     OutDir = Rot.Vector();
@@ -64,7 +56,7 @@ bool UMythicPlacementModeComponent::ResolveAimRay(FVector &OutOrigin, FVector &O
 bool UMythicPlacementModeComponent::EnterPlacementMode(UMythicInventoryComponent *Inventory, int32 SlotIndex) {
     OwnerPC = Cast<AMythicPlayerController>(GetOwner());
     if (!OwnerPC || !OwnerPC->IsLocalController()) {
-        return false; // placement mode is a client-local interaction
+        return false;
     }
     if (!Inventory || SlotIndex < 0) {
         return false;
@@ -72,7 +64,7 @@ bool UMythicPlacementModeComponent::EnterPlacementMode(UMythicInventoryComponent
 
     ActiveInventory = Inventory;
     ActiveSlot = SlotIndex;
-    if (!IsSourcePlaceablePresent()) { // the slot holds no placeable — nothing to place
+    if (!IsSourcePlaceablePresent()) {
         ActiveInventory = nullptr;
         ActiveSlot = INDEX_NONE;
         return false;
@@ -81,7 +73,6 @@ bool UMythicPlacementModeComponent::EnterPlacementMode(UMythicInventoryComponent
     CurrentYaw = 0.0f;
     bPlacing = true;
 
-    // Spawn the optional designer ghost (client-local, collision off so it never blocks its own placement trace).
     if (UWorld *World = GetWorld(); World && GhostActorClass && !GhostActor) {
         FActorSpawnParameters Params;
         Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -103,7 +94,7 @@ void UMythicPlacementModeComponent::TickComponent(float DeltaTime, ELevelTick Ti
         return;
     }
     UpdatePreview();
-    Step(/*bConfirmRequested*/ false, /*bCancelRequested*/ false); // auto-exits if the source item is gone
+    Step( false, false);
 }
 
 void UMythicPlacementModeComponent::UpdatePreview() {
@@ -117,19 +108,18 @@ void UMythicPlacementModeComponent::UpdatePreview() {
 
     const FVector TraceEnd = Origin + Dir * Placeable->MaxPlacementReach;
 
-    FCollisionQueryParams Params(FName(TEXT("MythicPlacementPreview")), /*bTraceComplex*/ false);
+    FCollisionQueryParams Params(FName(TEXT("MythicPlacementPreview")), false);
     if (OwnerPC) {
         Params.AddIgnoredActor(OwnerPC->GetPawn());
     }
     if (GhostActor) {
-        Params.AddIgnoredActor(GhostActor); // the ghost must not block its own placement
+        Params.AddIgnoredActor(GhostActor);
     }
 
     FHitResult Hit;
     const bool bHit = World->LineTraceSingleByChannel(Hit, Origin, TraceEnd, ECC_Visibility, Params);
     CurrentCandidatePoint = bHit ? Hit.ImpactPoint : TraceEnd;
 
-    // Pawn-clearance only (matches the server's deploy check); geometry clearance is a logged refinement.
     const bool bBlocked = World->OverlapAnyTestByChannel(CurrentCandidatePoint, FQuat::Identity, ECC_Pawn,
                                                          FCollisionShape::MakeSphere(Placeable->RequiredClearanceRadius), Params);
 
@@ -143,12 +133,12 @@ void UMythicPlacementModeComponent::UpdatePreview() {
 }
 
 void UMythicPlacementModeComponent::ConfirmPlacement() {
-    UpdatePreview(); // refresh so the validity check + the aim sent to the server are the same frame
-    Step(/*bConfirmRequested*/ true, /*bCancelRequested*/ false);
+    UpdatePreview();
+    Step( true, false);
 }
 
 void UMythicPlacementModeComponent::CancelPlacement() {
-    Step(/*bConfirmRequested*/ false, /*bCancelRequested*/ true);
+    Step( false, true);
 }
 
 void UMythicPlacementModeComponent::RotatePlacement(float DeltaYawDegrees) {
@@ -172,15 +162,13 @@ void UMythicPlacementModeComponent::Step(const bool bConfirmRequested, const boo
     case EMythicPlacementAction::Deploy: {
         FVector Origin, Dir;
         if (OwnerPC && ResolveAimRay(Origin, Dir)) {
-            // Server re-validates + re-traces authoritatively; we send our aim ray. STAY in mode afterwards — the
-            // next tick re-checks the stack (and exits when it empties).
             OwnerPC->ServerDeployPlaceable(ActiveInventory, ActiveSlot, Origin, Dir);
         }
         break;
     }
     case EMythicPlacementAction::UpdateGhost:
     default:
-        break; // UpdatePreview already refreshed the ghost
+        break;
     }
 }
 

@@ -3,14 +3,14 @@
 namespace MythicCurrency {
     bool CanAfford(int32 Balance, int32 Price) {
         if (Price <= 0) {
-            return true; // free / refund — always affordable
+            return true;
         }
         return Balance >= Price;
     }
 
     int32 ComputeBalanceAfterSpend(int32 Balance, int32 Price) {
         if (Price <= 0 || !CanAfford(Balance, Price)) {
-            return Balance; // no-op: nothing to pay, or can't afford it (caller must check CanAfford first)
+            return Balance;
         }
         return Balance - Price;
     }
@@ -27,8 +27,6 @@ namespace MythicCurrency {
         if (UnitValue <= 0 || Quantity <= 0) {
             return 0;
         }
-        // Per-unit ceil keeps a bulk buy == that many single buys (linear in Quantity), so a player can't shave coins
-        // by buying one at a time vs. in bulk.
         const float Mult = FMath::Max(0.0f, PriceMultiplier);
         const int32 UnitPrice = FMath::Max(0, FMath::CeilToInt(static_cast<float>(UnitValue) * Mult));
         return UnitPrice * Quantity;
@@ -40,9 +38,20 @@ namespace MythicCurrency {
         }
         const int32 Missing = FMath::Clamp(MaxDurability - CurrentDurability, 0, MaxDurability);
         if (Missing <= 0) {
-            return 0; // already at full durability — nothing to charge for
+            return 0;
         }
         const float Frac = static_cast<float>(Missing) / static_cast<float>(MaxDurability);
         return FMath::Max(0, FMath::CeilToInt(static_cast<float>(ItemValue) * Frac * FMath::Max(0.0f, RepairCostFraction)));
+    }
+
+    int32 ComputeRerollCost(int32 ItemLevel, int32 RarityIndex, int32 BaseCost, float LevelFraction, float RarityFraction) {
+        if (BaseCost <= 0) {
+            return 0;
+        }
+        const int32 Lvl = FMath::Max(0, ItemLevel);
+        const int32 Rarity = FMath::Max(0, RarityIndex);
+        const float LevelScale = 1.0f + static_cast<float>(Lvl) * FMath::Max(0.0f, LevelFraction);
+        const float RarityScale = 1.0f + static_cast<float>(Rarity) * FMath::Max(0.0f, RarityFraction);
+        return FMath::Max(0, FMath::CeilToInt(static_cast<float>(BaseCost) * LevelScale * RarityScale));
     }
 }

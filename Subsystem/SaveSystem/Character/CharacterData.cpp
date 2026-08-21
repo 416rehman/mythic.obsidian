@@ -5,15 +5,24 @@
 #include "Mythic/Itemization/Inventory/MythicInventoryComponent.h"
 #include "Mythic/Player/Proficiency/ProficiencyComponent.h"
 #include "Mythic/Player/MythicPlayerController.h"
+#include "Mythic/Player/MythicFactionStandingComponent.h"
+#include "Mythic/Narrative/MythicNarrativeStateComponent.h"
+#include "Mythic/Narrative/MythicQuestJournalComponent.h"
+#include "Progression/MythicStatLedgerComponent.h"
+#include "Progression/MythicAchievementComponent.h"
+#include "Progression/MythicUnlockComponent.h"
+#include "Knowledge/MythicCodexComponent.h"
+#include "Mythic/GAS/Progression/MythicRenownComponent.h"
+#include "Mythic/GAS/Mounts/MythicMountRosterComponent.h"
+#include "Mythic/World/LivingWorld/Acquaintance/MythicAcquaintanceComponent.h"
+#include "Mythic/World/LivingWorld/Chronicle/MythicDossierComponent.h"
+#include "Mythic/World/Trading/MythicTradeContractComponent.h"
+#include "Mythic/World/LivingWorld/LivingWorldTypes.h"
 #include "Mythic/Objectives/ObjectiveTracker.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 
 namespace {
-    // Character data is split across two actors: the PlayerState holds the character name, while the
-    // ProficiencyComponent + inventory provider live on the PlayerController. Callers may pass either, so
-    // resolve both siblings here. (Previously callers passed only the PlayerState, which silently dropped
-    // proficiencies because FindComponentByClass found no ProficiencyComponent on it.)
     void ResolveCharacterActors(AActor *InActor, APlayerState *&OutPS, APlayerController *&OutPC) {
         OutPS = Cast<APlayerState>(InActor);
         OutPC = Cast<APlayerController>(InActor);
@@ -35,16 +44,13 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
     APlayerState *PS = nullptr;
     APlayerController *PC = nullptr;
     ResolveCharacterActors(SourceActor, PS, PC);
-    AActor *ProfHost = PC ? static_cast<AActor *>(PC) : SourceActor; // proficiencies + inventory live on the PC
+    AActor *ProfHost = PC ? static_cast<AActor *>(PC) : SourceActor;
     AActor *InvHost = PC ? static_cast<AActor *>(PC) : SourceActor;
 
-    // Character Name
     if (PS) {
         OutData.CharacterName = PS->GetPlayerName();
     }
 
-    // Pawn world transform (position + rotation), so a reload restores where the player was. Only captured when a
-    // pawn is currently possessed; otherwise bHasSavedTransform stays false and load won't reposition.
     if (PC) {
         if (const APawn *Pawn = PC->GetPawn()) {
             OutData.SavedTransform = Pawn->GetActorTransform();
@@ -63,7 +69,6 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
         Tracker = ProfHost->FindComponentByClass<UObjectiveTracker>();
     }
 
-    // Proficiencies (save first - they track claimed levels)
     if (ProfComp) {
         UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Found ProficiencyComponent, serializing %d proficiencies..."),
                ProfComp->Proficiencies.Num());
@@ -74,13 +79,99 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
         UE_LOG(MythSaveLoad, Warning, TEXT("SerializedCharacterData::Serialize: No ProficiencyComponent found!"));
     }
 
-    // Objectives/quests (live on the PC alongside the proficiency component) — definition path + progress.
     if (Tracker) {
         Tracker->SaveObjectives(OutData.Objectives);
         UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d objectives"), OutData.Objectives.Num());
     }
 
-    // Inventory - use IInventoryProviderInterface
+    if (const AMythicPlayerState *MythPS = Cast<AMythicPlayerState>(PS)) {
+        if (const UMythicFactionStandingComponent *Faction = MythPS->GetFactionStanding()) {
+            for (const FMythicFactionStandingEntry &Entry : Faction->GetStandings()) {
+                if (FSerializedFactionStandingHelper::ShouldPersist(Entry.Faction.Index, Entry.Value)) {
+                    FSerializedFactionStandingData &Out = OutData.FactionStandings.AddDefaulted_GetRef();
+                    Out.FactionIndex = Entry.Faction.Index;
+                    Out.Value = Entry.Value;
+                }
+            }
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d faction standings"),
+                   OutData.FactionStandings.Num());
+        }
+
+        if (const UMythicNarrativeStateComponent *Narrative = MythPS->GetNarrativeState()) {
+            OutData.StoryTags = Narrative->GetOwnedTags().GetGameplayTagArray();
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d story tags"),
+                   OutData.StoryTags.Num());
+        }
+
+        if (const UMythicStatLedgerComponent *Ledger = MythPS->GetStatLedgerComponent()) {
+            OutData.StatCounters = Ledger->GetCharacterCounters();
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d stat counters"),
+                   OutData.StatCounters.Num());
+        }
+
+        if (const UMythicAchievementComponent *Achievements = MythPS->GetAchievementComponent()) {
+            OutData.UnlockedAchievements = Achievements->GetUnlockedAchievements();
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d unlocked achievements"),
+                   OutData.UnlockedAchievements.Num());
+        }
+
+        if (const UMythicUnlockComponent *Unlocks = MythPS->GetUnlockComponent()) {
+            OutData.GrantedUnlockTags = Unlocks->GetGrantedUnlockTags();
+            OutData.AppliedUnlockRules = Unlocks->GetAppliedUnlockRules();
+            OutData.ActiveTitle = Unlocks->GetActiveTitleTag();
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d unlock tags (%d applied rules)"),
+                   OutData.GrantedUnlockTags.Num(), OutData.AppliedUnlockRules.Num());
+        }
+
+        if (const UMythicCodexComponent *CodexComp = MythPS->GetCodexComponent()) {
+            OutData.CodexBestiary = CodexComp->GetAllBestiaryRecords();
+            OutData.CodexTerms = CodexComp->GetDiscoveredTerms().GetGameplayTagArray();
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d bestiary records, %d codex terms"),
+                   OutData.CodexBestiary.Num(), OutData.CodexTerms.Num());
+        }
+
+        if (const UMythicRenownComponent *RenownComp = MythPS->GetRenownComponent()) {
+            OutData.RenownEntries = RenownComp->GetRenownEntries();
+            OutData.GlobalRenown = RenownComp->GetGlobalRenown();
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d renown scopes (global %.1f)"),
+                   OutData.RenownEntries.Num(), OutData.GlobalRenown);
+        }
+
+        if (const UMythicMountRosterComponent *Mounts = MythPS->GetMountRosterComponent()) {
+            OutData.MountRoster = Mounts->GetRoster();
+            OutData.ActiveMountId = Mounts->GetActiveMountId();
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d mounts (active %s)"),
+                   OutData.MountRoster.Num(), *OutData.ActiveMountId.ToString(EGuidFormats::Short));
+        }
+
+        if (const UMythicAcquaintanceComponent *Acquaintance = MythPS->GetAcquaintanceComponent()) {
+            OutData.NpcRelations = Acquaintance->GetRelations();
+        }
+        if (const UMythicDossierComponent *DossierComp = MythPS->GetDossierComponent()) {
+            OutData.NpcDossiers = DossierComp->GetDossiers();
+        }
+        if (OutData.NpcRelations.Num() > 0 || OutData.NpcDossiers.Num() > 0) {
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d NPC relations, %d dossiers"),
+                   OutData.NpcRelations.Num(), OutData.NpcDossiers.Num());
+        }
+
+        if (const UMythicTradeContractComponent *Trade = MythPS->GetTradeContractComponent()) {
+            OutData.TradeContracts = Trade->GetContracts();
+            if (OutData.TradeContracts.Num() > 0) {
+                UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d trade contracts"),
+                       OutData.TradeContracts.Num());
+            }
+        }
+
+        if (const UMythicQuestJournalComponent *Journal = MythPS->GetQuestJournal()) {
+            Journal->GetSerializableJournal(OutData.QuestJournal, OutData.ActiveStorylines, OutData.CompletedStorylines);
+            if (OutData.QuestJournal.Num() > 0 || OutData.ActiveStorylines.Num() > 0 || OutData.CompletedStorylines.Num() > 0) {
+                UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d journal quests, %d active / %d completed storylines"),
+                       OutData.QuestJournal.Num(), OutData.ActiveStorylines.Num(), OutData.CompletedStorylines.Num());
+            }
+        }
+    }
+
     if (IInventoryProviderInterface *InvProvider = Cast<IInventoryProviderInterface>(InvHost)) {
         TArray<UMythicInventoryComponent *> InventoryComponents = InvProvider->GetAllInventoryComponents();
         UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Found %d inventory components"), InventoryComponents.Num());
@@ -98,11 +189,7 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
         UE_LOG(MythSaveLoad, Warning, TEXT("SerializedCharacterData::Serialize: SourceActor does not implement IInventoryProviderInterface!"));
     }
 
-    // Note: Attributes are NOT saved - they are derived from proficiencies + items on load
 
-    // Stamp the format version this save was actually written with. Was never set → every save recorded 0 (the default),
-    // so FixupData spuriously "migrated 0→1" on every load (running migration logic against current-format data) and the
-    // version guards were permanently inert.
     OutData.DataVersion = static_cast<int32>(CurrentCharacterSaveVersion);
 
     UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized character '%s'"), *OutData.CharacterName);
@@ -115,10 +202,6 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
         return false;
     }
 
-    // Load is server-authoritative — the restored name/proficiencies/inventory/transform replicate to the owning
-    // client. Gate the WHOLE apply on authority (not just the transform sub-block), so the client-reachable cheat
-    // path (MythLoadCharacter) can't half-apply state locally and desync. PlayerState/PlayerController both report
-    // authority on the server, so this works even when no pawn is currently possessed.
     if (!TargetActor->HasAuthority()) {
         UE_LOG(MythSaveLoad, Warning, TEXT("SerializedCharacterData::Deserialize: ignored on non-authority actor [%s]"),
                *GetNameSafe(TargetActor));
@@ -131,18 +214,13 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
     AActor *ProfHost = PC ? static_cast<AActor *>(PC) : TargetActor;
     AActor *InvHost = PC ? static_cast<AActor *>(PC) : TargetActor;
 
-    // Character Name
     if (PS) {
         PS->SetPlayerName(InData.CharacterName);
     }
 
-    // Pawn world transform: move the (already-possessed) pawn back to where it was saved. Server-authoritative —
-    // the move replicates to the owning client; TeleportPhysics avoids interpolation smearing across the jump.
-    // Skipped for saves without a stored transform (bHasSavedTransform=false) so they keep the spawn position.
     if (InData.bHasSavedTransform && PC) {
         if (APawn *Pawn = PC->GetPawn()) {
-            // Whole-function authority gate above already guarantees the server here.
-            Pawn->SetActorTransform(InData.SavedTransform, /*bSweep=*/false, /*OutHit=*/nullptr, ETeleportType::TeleportPhysics);
+            Pawn->SetActorTransform(InData.SavedTransform,false,nullptr, ETeleportType::TeleportPhysics);
         }
     }
 
@@ -157,22 +235,117 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
         Tracker = ProfHost->FindComponentByClass<UObjectiveTracker>();
     }
 
-    // Proficiencies. Deserialize only STAGES CurrentXP into FProficiency::SavedXP; the ASC write happens in
-    // UProficiencyComponent::ApplyLoadedProficiencies. On load-on-join the component's BeginPlay has already run
-    // (async load completes later), so we must re-apply here or the loaded XP never reaches the ASC. Idempotent.
     if (ProfComp) {
         FSerializedProficiencyHelper::Deserialize(ProfComp, InData.Proficiencies);
         ProfComp->ApplyLoadedProficiencies();
         UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d proficiencies"), ProfComp->Proficiencies.Num());
     }
 
-    // Objectives/quests — restore the tracked set (server-authoritative; re-subscribes incomplete objectives so they
-    // keep advancing, and replicates the restored list to the owning client). Tolerant of an empty array (old saves).
     if (Tracker) {
         Tracker->RestoreObjectives(InData.Objectives);
     }
 
-    // Inventory (items will apply their stats when equipped)
+    if (AMythicPlayerState *MythPS = Cast<AMythicPlayerState>(PS)) {
+        UMythicAchievementComponent *AchievementsToRestore = MythPS->GetAchievementComponent();
+        UMythicUnlockComponent *UnlocksToRestore = MythPS->GetUnlockComponent();
+        if (AchievementsToRestore) {
+            AchievementsToRestore->SetRestoring(true);
+        }
+        if (UnlocksToRestore) {
+            UnlocksToRestore->SetRestoring(true);
+        }
+
+        if (UMythicFactionStandingComponent *Faction = MythPS->GetFactionStanding()) {
+            for (const FSerializedFactionStandingData &Data : InData.FactionStandings) {
+                FMythicFactionId Id;
+                Id.Index = Data.FactionIndex;
+                Faction->SetStanding(Id, Data.Value);
+            }
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d faction standings"),
+                   InData.FactionStandings.Num());
+        }
+
+        if (UMythicNarrativeStateComponent *Narrative = MythPS->GetNarrativeState()) {
+            for (const FGameplayTag &Tag : InData.StoryTags) {
+                Narrative->ServerSetStoryTag(Tag);
+            }
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d story tags"),
+                   InData.StoryTags.Num());
+        }
+
+        if (UMythicStatLedgerComponent *Ledger = MythPS->GetStatLedgerComponent()) {
+            Ledger->RestoreCharacterCounters(InData.StatCounters);
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d stat counters"),
+                   InData.StatCounters.Num());
+        }
+
+        if (UMythicCodexComponent *CodexComp = MythPS->GetCodexComponent()) {
+            CodexComp->RestoreCodex(InData.CodexBestiary, InData.CodexTerms);
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d bestiary records, %d codex terms"),
+                   InData.CodexBestiary.Num(), InData.CodexTerms.Num());
+        }
+
+        if (UMythicRenownComponent *RenownComp = MythPS->GetRenownComponent()) {
+            RenownComp->RestoreRenown(InData.RenownEntries, InData.GlobalRenown);
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d renown scopes (global %.1f)"),
+                   InData.RenownEntries.Num(), InData.GlobalRenown);
+        }
+
+        if (UMythicMountRosterComponent *Mounts = MythPS->GetMountRosterComponent()) {
+            Mounts->RestoreRoster(InData.MountRoster, InData.ActiveMountId);
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d mounts"),
+                   InData.MountRoster.Num());
+        }
+
+        if (UMythicAcquaintanceComponent *Acquaintance = MythPS->GetAcquaintanceComponent()) {
+            Acquaintance->RestoreRelations(InData.NpcRelations);
+        }
+        if (UMythicDossierComponent *DossierComp = MythPS->GetDossierComponent()) {
+            DossierComp->RestoreDossiers(InData.NpcDossiers);
+        }
+        if (InData.NpcRelations.Num() > 0 || InData.NpcDossiers.Num() > 0) {
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d NPC relations, %d dossiers"),
+                   InData.NpcRelations.Num(), InData.NpcDossiers.Num());
+        }
+
+        if (UMythicTradeContractComponent *Trade = MythPS->GetTradeContractComponent()) {
+            Trade->RestoreContracts(InData.TradeContracts);
+            if (InData.TradeContracts.Num() > 0) {
+                UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d trade contracts"),
+                       InData.TradeContracts.Num());
+            }
+        }
+
+        if (UMythicQuestJournalComponent *Journal = MythPS->GetQuestJournal()) {
+            Journal->RestoreQuests(InData.QuestJournal, InData.ActiveStorylines, InData.CompletedStorylines);
+            if (InData.QuestJournal.Num() > 0 || InData.ActiveStorylines.Num() > 0 || InData.CompletedStorylines.Num() > 0) {
+                UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d journal quests, %d active / %d completed storylines"),
+                       InData.QuestJournal.Num(), InData.ActiveStorylines.Num(), InData.CompletedStorylines.Num());
+            }
+        }
+
+        if (AchievementsToRestore) {
+            AchievementsToRestore->RestoreUnlockedAchievements(InData.UnlockedAchievements);
+            AchievementsToRestore->SetRestoring(false);
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d unlocked achievements"),
+                   InData.UnlockedAchievements.Num());
+        }
+        if (UnlocksToRestore) {
+            UnlocksToRestore->RestoreUnlockState(InData.GrantedUnlockTags, InData.AppliedUnlockRules, InData.ActiveTitle);
+            UnlocksToRestore->SetRestoring(false);
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d unlock tags (%d applied rules)"),
+                   InData.GrantedUnlockTags.Num(), InData.AppliedUnlockRules.Num());
+        }
+    }
+
+    UMythicStatLedgerComponent *LedgerToGuard = nullptr;
+    if (AMythicPlayerState *LedgerPS = Cast<AMythicPlayerState>(PS)) {
+        LedgerToGuard = LedgerPS->GetStatLedgerComponent();
+    }
+    if (LedgerToGuard) {
+        LedgerToGuard->SetRestoring(true);
+    }
+
     if (IInventoryProviderInterface *InvProvider = Cast<IInventoryProviderInterface>(InvHost)) {
         TArray<UMythicInventoryComponent *> InventoryComponents = InvProvider->GetAllInventoryComponents();
         for (int32 i = 0; i < InventoryComponents.Num() && i < InData.Inventories.Num(); ++i) {
@@ -182,7 +355,11 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
         }
     }
 
-    // Note: Attributes are derived - proficiencies reapply rewards, items apply stats when equipped
+    if (LedgerToGuard) {
+        LedgerToGuard->SetRestoring(false);
+        LedgerToGuard->ResyncCurrencyBaseline();
+    }
+
 
     UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Applied character '%s'"), *InData.CharacterName);
     return true;

@@ -3,7 +3,7 @@
 #include "MythicGameplayCue_DamageNumber.h"
 
 #include "Engine/World.h"
-#include "UI/MythicFeedbackSubsystem.h"
+#include "UI/MythicDamageNumberSubsystem.h"
 
 UMythicGameplayCue_DamageNumber::UMythicGameplayCue_DamageNumber() {}
 
@@ -17,19 +17,17 @@ bool UMythicGameplayCue_DamageNumber::OnExecute_Implementation(AActor *Target, c
         return false;
     }
 
-    UMythicFeedbackSubsystem *DamageNumberSubsystem = World->GetSubsystem<UMythicFeedbackSubsystem>();
+    UMythicDamageNumberSubsystem *DamageNumberSubsystem = World->GetSubsystem<UMythicDamageNumberSubsystem>();
     if (!DamageNumberSubsystem) {
         return false;
     }
 
-    // Determine spawn location - prefer hit result, fall back to target location
     FVector SpawnLocation = Target->GetActorLocation();
     if (Parameters.EffectContext.GetHitResult()) {
         SpawnLocation = Parameters.EffectContext.GetHitResult()->ImpactPoint;
     }
     SpawnLocation += WorldOffset;
 
-    // Add the damage number to the pool
     DamageNumberSubsystem->AddDamageNumber(
         SpawnLocation,
         Parameters.RawMagnitude,

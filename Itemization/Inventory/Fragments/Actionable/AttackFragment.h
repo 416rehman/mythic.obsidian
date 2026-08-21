@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -12,10 +11,6 @@
 
 class UMythicAbilitySystemComponent;
 
-// Result of deciding what an OnItemActivated pass must (re)do. The two actions are INDEPENDENT: the rolled damage
-// attribute is (re)applied only if not already applied, and the attack ability is granted only if not already live.
-// They were previously conflated under a single early-return on bDamageApplied, which wrongly skipped the ability
-// grant whenever damage was already applied (e.g. a re-activation after a first grant that failed).
 struct FAttackActivationPlan {
     bool bApplyDamage = false;
     bool bGrantAbility = false;
@@ -50,15 +45,6 @@ struct FAttackRuntimeReplicatedData {
     UPROPERTY()
     FGameplayAbilitySpecHandle AbilityHandle = FGameplayAbilitySpecHandle();
 
-    // Persisted via the DEFAULT tagged-property SaveGame path: this is a top-level UPROPERTY(SaveGame) on a struct with NO
-    // custom serializer, so UMythicItemInstance::Serialize walks it under ArIsSaveGame and it genuinely restores TRUE. That
-    // is what makes save-restore of an already-equipped weapon NOT re-fire the equip OBJECTIVE event: OnItemActivated re-runs
-    // on load, sees the restored marker==true, and skips the emit (no over-count). Set true on the first genuine equip emit;
-    // cleared in OnItemDeactivated so a real re-equip emits again. Decouples the emit from the (restore-confounded) ability
-    // grant transition.
-    // WARNING: this does NOT mirror sibling bIsApplied. bIsApplied lives in FRolledAttributeSpec, whose CUSTOM serializer
-    // (FragmentTypes.cpp) force-resets it to false on load — it is deliberately NOT persisted. Do NOT "align" this marker
-    // with that pattern or co-locate it inside a custom-serialized struct: it MUST persist, or the iter-22 over-count returns.
     UPROPERTY(SaveGame)
     bool bEquipEventEmitted = false;
 };
@@ -88,9 +74,6 @@ struct FAttackBuildData {
     FRollDefinition DamageRollDefinition = FRollDefinition();
 };
 
-/**
- * 
- */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
 class MYTHIC_API UAttackFragment : public UActionableItemFragment {
     GENERATED_BODY()
@@ -123,7 +106,6 @@ public:
     UPROPERTY(BlueprintReadOnly)
     FAttackRuntimeServerOnlyData AttackRuntimeServerOnlyData = FAttackRuntimeServerOnlyData();
 
-    // Overrides
 #if WITH_EDITOR
     virtual bool IsValidFragment(FText &OutErrorMessage) const override;
 #endif
@@ -133,21 +115,13 @@ public:
     virtual void OnItemDeactivated(UMythicItemInstance *ItemInstance) override;
 
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
-    //~ Overrides
 
-    // Pure decision for OnItemActivated: each action is independently idempotent (apply damage iff not yet applied,
-    // grant ability iff no live handle). Static + side-effect-free so the activation logic is unit-testable headlessly.
     static FAttackActivationPlan PlanAttackActivation(bool bDamageApplied, bool bAbilityHandleValid) {
         return FAttackActivationPlan{!bDamageApplied, !bAbilityHandleValid};
     }
 
-    // Replication
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {
         Super::GetLifetimeReplicatedProps(OutLifetimeProps);
         REP_FRAGMENT_DATA(Attack)
-
-        // DOREPLIFETIME_CONDITION(UAttackFragment, AttackBeginEventTag, COND_InitialOrOwner);
-        // DOREPLIFETIME_CONDITION(UAttackFragment, AttackEndEventTag, COND_InitialOrOwner);
-        // DOREPLIFETIME_CONDITION(UAttackFragment, AttackMontage, COND_InitialOrOwner);
     }
 };

@@ -4,9 +4,6 @@
 #include "GameFramework/SaveGame.h"
 #include "MythicSaveGameManifest.generated.h"
 
-/**
- * Metadata for a character slot, allowing UI to display info without loading the full save.
- */
 USTRUCT(BlueprintType)
 struct FMythicCharacterMetadata {
     GENERATED_BODY()
@@ -36,10 +33,6 @@ struct FMythicCharacterMetadata {
         : LastPlayed(FDateTime::MinValue()) {}
 };
 
-/**
- * Lightweight SaveGame object that only stores the list of characters.
- * Saved to a fixed slot "MythicCharacterManifest".
- */
 UCLASS()
 class MYTHIC_API UMythicSaveGameManifest : public USaveGame {
     GENERATED_BODY()

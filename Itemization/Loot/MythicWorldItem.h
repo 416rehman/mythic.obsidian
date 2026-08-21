@@ -1,4 +1,4 @@
-﻿// 
+﻿
 
 #pragma once
 
@@ -9,21 +9,23 @@
 #include "MythicWorldItem.generated.h"
 
 
-// This is a world representation of an item. Call SetItemInstance after spawning to set the item instance.
 UCLASS(Blueprintable, BlueprintType)
 class MYTHIC_API AMythicWorldItem : public AActor, public IMythicSaveableActor {
     GENERATED_BODY()
 
 protected:
-    // Called when the game starts or when spawned
     virtual void BeginPlay() override;
 
-    // Called when the item is going to be destroyed
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     // For all. If this is set, the item will only be relevant to the owner, and hidden from other players.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item", ReplicatedUsing=OnRep_TargetRecipient)
     AController *TargetRecipient;
+
+    // Walk-over auto-pickup of stackable loot (see ShouldAutoPickup). Designers can disable per-BP/per-instance
+    // for drops that must stay deliberate (e.g. quest hand-ins).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item")
+    bool bAutoPickup = true;
 
 public:
     AMythicWorldItem();
@@ -37,7 +39,6 @@ public:
     UStaticMeshComponent *StaticMesh;
 
 
-    // get lifetime replicated props
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {
         Super::GetLifetimeReplicatedProps(OutLifetimeProps);
         DOREPLIFETIME(AMythicWorldItem, ItemInstance);
@@ -58,9 +59,6 @@ public:
 
     AController *GetTargetRecipient() const { return TargetRecipient; }
 
-    /// ----------------
-    /// EVENTS
-    /// ----------------
 
     /// this event is called when the item instance is updated
     UFUNCTION(BlueprintImplementableEvent, Category = "Item")
@@ -72,7 +70,12 @@ public:
     UFUNCTION()
     void EmulateDropPhysics(const FVector &location, float radius);
 
-    // --- IMythicSaveableActor ---
+    static bool ShouldAutoPickup(int32 StackSizeMax) { return StackSizeMax > 1; }
+
+    UFUNCTION()
+    void OnPickupOverlap(UPrimitiveComponent *OverlappedComponent, AActor *OtherActor, UPrimitiveComponent *OtherComp, int32 OtherBodyIndex,
+                         bool bFromSweep, const FHitResult &SweepResult);
+
     virtual void SerializeCustomData(TArray<uint8> &OutCustomData) override;
     virtual void DeserializeCustomData(const TArray<uint8> &InCustomData) override;
 };

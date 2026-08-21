@@ -1,4 +1,3 @@
-// 
 
 
 #include "MythicResourceManagerComponent.h"
@@ -12,17 +11,18 @@
 #include "Player/Proficiency/ProficiencyDefinition.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
-#include "GAS/Executions/MythicCombatRoll.h" // boundary-correct probability gate for the bonus-yield roll
+#include "TimerManager.h"
+#include "GAS/Executions/MythicCombatRoll.h"
+#include "World/Gathering/MythicGatherRules.h"
+#include "World/LivingWorld/Pressure/MythicRegionalPressureSubsystem.h"
+#include "Itemization/InventoryProviderInterface.h"
+#include "Itemization/Inventory/MythicInventoryComponent.h"
+#include "Itemization/Inventory/MythicItemInstance.h"
 #if ENABLE_DRAW_DEBUG
 #include "DrawDebugHelpers.h"
 #include "HAL/IConsoleManager.h"
 #endif
 
-// Called on clients before resources are removed on the server - cosmetic only
-// To get here:
-// 1. The server has a timer that checks for batch respawn (ProcessBatchRespawn)
-// 2. Inside ProcessBatchRespawn, if any resources are due to respawn, they are removed from the DestroyedResources array
-// 3. This triggers PreReplicatedRemove on clients, which calls HandleResourceRespawn
 void FTrackedDestructibleDataArray::PreReplicatedRemove(const TArrayView<int32> &RemovedIndices, int32 FinalSize) {
     UE_LOG(Myth, Log, TEXT("FTrackedDestructibleData::PreReplicatedRemove: Removed %d items"), RemovedIndices.Num());
 
@@ -30,7 +30,6 @@ void FTrackedDestructibleDataArray::PreReplicatedRemove(const TArrayView<int32> 
         return;
     }
 
-    // For each removed instance
     auto itemsToSync = TArray<FTrackedDestructibleData>();
     for (auto index : RemovedIndices) {
         if (Items.IsValidIndex(index)) {
@@ -41,7 +40,6 @@ void FTrackedDestructibleDataArray::PreReplicatedRemove(const TArrayView<int32> 
     UMythicResourceManagerComponent::HandleResourceRespawn(itemsToSync);
 }
 
-// Called on clients after a destroyed resource is added to the array on the server - cosmetic only
 void FTrackedDestructibleDataArray::PostReplicatedAdd(const TArrayView<int32> &AddedIndices, int32 FinalSize) {
     UE_LOG(Myth, Log, TEXT("FTrackedDestructibleData::PostReplicatedAdd: Added %d items"), AddedIndices.Num());
 
@@ -49,7 +47,6 @@ void FTrackedDestructibleDataArray::PostReplicatedAdd(const TArrayView<int32> &A
         return;
     }
 
-    // For each removed instance 
     auto itemsToSync = TArray<FTrackedDestructibleData>();
     for (auto index : AddedIndices) {
         if (Items.IsValidIndex(index)) {
@@ -60,7 +57,6 @@ void FTrackedDestructibleDataArray::PostReplicatedAdd(const TArrayView<int32> &A
     UMythicResourceManagerComponent::HandleResourceDestruction(itemsToSync);
 }
 
-// Called on clients after the destroyed resources array has changed - Cosmetic only
 void FTrackedDestructibleDataArray::PostReplicatedChange(const TArrayView<int32> &ChangedIndices, int32 FinalSize) {
     UE_LOG(Myth, Log, TEXT("FTrackedDestructibleData::PostReplicatedChange: Changed %d items"), ChangedIndices.Num());
 
@@ -68,7 +64,6 @@ void FTrackedDestructibleDataArray::PostReplicatedChange(const TArrayView<int32>
         return;
     }
 
-    // For each updated instance
     auto itemsToSync = TArray<FTrackedDestructibleData>();
     for (auto index : ChangedIndices) {
         if (Items.IsValidIndex(index)) {
@@ -88,11 +83,18 @@ void UMythicResourceManagerComponent::ProcessBatchRespawn() {
     }
 
     float CurrentTime = GetWorld()->GetTimeSeconds();
+
+    UMythicRegionalPressureSubsystem *Pressure =
+        GetWorld() ? GetWorld()->GetSubsystem<UMythicRegionalPressureSubsystem>() : nullptr;
+
     auto indicesToRemove = TArray<int32>();
     auto DestroyedItems = *DestroyedResources.GetItems();
     for (int32 i = 0; i < DestroyedItems.Num(); i++) {
         auto &item = DestroyedItems[i];
         if (ShouldRespawnDestructible(item.HitsTillDestruction, item.RespawnTime, CurrentTime)) {
+            if (Pressure && Pressure->IsHarvestRespawnGated(item.Transform.GetLocation())) {
+                continue;
+            }
             indicesToRemove.Add(i);
         }
     }
@@ -111,37 +113,54 @@ void UMythicResourceManagerComponent::ProcessBatchRespawn() {
 void UMythicResourceManagerComponent::OnRep_DestroyedResources() {
     UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent::OnRep_DestroyedResources"));
 
-    // Synchronize state - On first connect, we need a delay to give time to the world to load
     if (GetWorld()) {
         UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent::OnRep_DestroyedResources: Handling resource destruction after delay"));
         auto Items = DestroyedResources.GetItems();
         HandleResourceDestruction(*Items);
     }
     else {
-        // World is null. The previous code "retried next frame" via GetWorld()->GetTimerManager() — but GetWorld() is
-        // exactly the null pointer this branch tests for, so that was a guaranteed null-deref CRASH in the one case the
-        // branch exists to handle (and the raw [this] timer lambda would have been a use-after-free too). A registered
-        // component receiving an OnRep is normally already in a world, so this branch is effectively unreachable; but if
-        // it ever is reached we must not crash. The replicated DestroyedResources state persists, so a later OnRep (with
-        // a valid world) re-syncs it.
         UE_LOG(Myth, Warning,
                TEXT("UMythicResourceManagerComponent::OnRep_DestroyedResources: World is null; deferring resource sync to the next replication update."));
     }
 }
 
-// Sets default values for this component's properties
 UMythicResourceManagerComponent::UMythicResourceManagerComponent() {
-    // Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
-    // off to improve performance if you don't need them.
-    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = false;
 
     SetIsReplicatedByDefault(true);
 }
 
-// Authority Only - Transform is only used for restoring purposes
+namespace {
+FGameplayTagContainer GetEquippedToolProbe(APlayerController *PlayerController) {
+    FGameplayTagContainer Probe;
+    const IInventoryProviderInterface *Provider = Cast<IInventoryProviderInterface>(PlayerController);
+    if (!Provider) {
+        return Probe;
+    }
+    static const FGameplayTag EquipmentGroup = FGameplayTag::RequestGameplayTag(TEXT("Inventory.Group.Equipment"));
+
+    FGameplayTagContainer Single;
+    for (UMythicInventoryComponent *Inventory : Provider->GetAllInventoryComponents()) {
+        if (!Inventory) {
+            continue;
+        }
+        for (const FMythicInventorySlotEntry &Slot : Inventory->GetAllSlots()) {
+            if (!Slot.GroupTag.MatchesTag(EquipmentGroup)) {
+                continue;
+            }
+            if (UMythicItemInstance *Item = Slot.SlottedItemInstance) {
+                Single.Reset();
+                Item->GetTypeProbe(Single);
+                Probe.AppendTags(Single);
+            }
+        }
+    }
+    return Probe;
+}
+}
+
 void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, int32 DamageAmount, APlayerController *PlayerController,
                                                           UMythicResourceISM *ResourceISM, int32 index) {
-    // Early return for non-authority
     if (!GetOwner()->HasAuthority()) {
         UE_LOG(Myth, Error, TEXT("UMythicResourceManagerComponent::AddOrUpdateResource called on non-authority"));
         return;
@@ -149,6 +168,12 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
 
     if (DamageAmount <= 0) {
         UE_LOG(Myth, Warning, TEXT("UMythicResourceManagerComponent::AddOrUpdateResource: DamageAmount is <= 0, ignoring"));
+        return;
+    }
+
+    if (ResourceISM && !FMythicGatherRules::CanGather(GetEquippedToolProbe(PlayerController), ResourceISM->RequiredToolTag)) {
+        UE_LOG(Myth, Verbose, TEXT("AddOrUpdateResource: gather refused — %s requires tool %s"),
+               *GetNameSafe(ResourceISM), *ResourceISM->RequiredToolTag.ToString());
         return;
     }
 
@@ -164,7 +189,6 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
     }
 #endif
 
-    // apply proficiency damage bonus before routing to damage helpers
     int32 ScaledDamage = DamageAmount;
     if (ResourceISM && ResourceISM->ResourceType.IsValid()) {
         int32 ProfLevel = GetGathererProficiencyLevel(PlayerController, ResourceISM->ResourceType);
@@ -174,10 +198,8 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
         }
     }
 
-    // Try to find existing resource
     FTrackedDestructibleData *ExistingResource = TrackedResources.FindByPredicate([&](const FTrackedDestructibleData &TrackedResource) {
         return TrackedResource.ResourceISM == ResourceISM && TrackedResource.InstanceId == ResourceISM->InstanceIndexToId(index).Id;
-        // return TrackedResource.ResourceISMCClass == ISMClass && TrackedResource.Transform.GetLocation().Equals(Transform.GetLocation(), 1.0f);
     });
 
     int32 HitsRemaining;
@@ -188,9 +210,6 @@ void UMythicResourceManagerComponent::AddOrUpdateResource(FTransform Transform, 
         HitsRemaining = AddNewResource(Transform, ScaledDamage, PlayerController, ResourceISM, index);
     }
 
-    // Player-facing gather feedback — SINGLE source for ALL branches (existing hit, new-tracked, one-shot destroy), so
-    // the FIRST swing and one-shot kills are no longer silently skipped. "N left" floats per hit (Unreliable — a
-    // droppable cosmetic); "Depleted!" is the terminal callout (Reliable). HitsRemaining < 0 = error/already-destroyed.
     if (HitsRemaining >= 0) {
         if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PlayerController)) {
             if (HitsRemaining > 0) {
@@ -216,15 +235,12 @@ void UMythicResourceManagerComponent::LoadDestroyedResource(UMythicResourceISM *
     NewDestructible.ResourceISM = ResourceISM;
     NewDestructible.InstanceId = InstanceId;
     NewDestructible.Transform = Transform;
-    // The saved value is remaining seconds until respawn (clock-independent). Rebuild the absolute deadline
-    // against the CURRENT world clock so respawn timing survives a session / world-time reset.
     {
         const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
         NewDestructible.RespawnTime = Now + FMath::Max(0.0, RemainingSeconds);
     }
-    NewDestructible.HitsTillDestruction = 0; // It's destroyed
+    NewDestructible.HitsTillDestruction = 0;
 
-    // Check if already in list?
     bool bExists = DestroyedResources.GetItems()->ContainsByPredicate([&](const FTrackedDestructibleData &Existing) {
         return Existing.ResourceISM == ResourceISM && Existing.InstanceId == InstanceId;
     });
@@ -232,7 +248,6 @@ void UMythicResourceManagerComponent::LoadDestroyedResource(UMythicResourceISM *
     if (!bExists) {
         DestroyedResources.AddItem(NewDestructible);
 
-        // Also ensure it is visually destroyed immediately on Server
         ResourceISM->DestroyResource(InstanceId);
     }
 }
@@ -240,18 +255,14 @@ void UMythicResourceManagerComponent::LoadDestroyedResource(UMythicResourceISM *
 int32 UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount, APlayerController *PlayerController) {
     int32 PreviousHits = Resource.HitsTillDestruction;
     Resource.HitsTillDestruction = FMath::Max(0, Resource.HitsTillDestruction - DamageAmount);
-    // Capture BEFORE the RemoveAll below — destroying the resource dangles the `Resource` reference (it lives in the
-    // array RemoveAll mutates), so reading HitsTillDestruction afterward would be a use-after-free.
     const int32 HitsRemaining = Resource.HitsTillDestruction;
 
     UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent::ApplyDamageToResource: Applied %d damage, HitsTillDestruction: %d -> %d"),
            DamageAmount, PreviousHits, Resource.HitsTillDestruction);
 
-    // Check if resource is now destroyed
     if (Resource.HitsTillDestruction <= 0 && PreviousHits > 0) {
         UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent::ApplyDamageToResource: Resource destroyed!"));
 
-        // Remove from tracked resources
         auto NumRemoved = TrackedResources.RemoveAll([&](const FTrackedDestructibleData &TrackedResource) {
             return TrackedResource == Resource;
         });
@@ -261,7 +272,6 @@ int32 UMythicResourceManagerComponent::ApplyDamageToResource(FTrackedDestructibl
             return HitsRemaining;
         }
 
-        // Create destroyed resource with respawn time
         AddToDestroyedResources(Resource, PlayerController);
     }
     return HitsRemaining;
@@ -273,16 +283,13 @@ int32 UMythicResourceManagerComponent::AddNewResource(FTransform Transform, int3
     NewResource.ResourceISM = ResourceISM;
     NewResource.Transform = Transform;
 
-    // auto World = this->GetWorld();
 
-    // auto ISMComponent = NewResource.GetISMComponent(World);
     auto ISMComponent = NewResource.ResourceISM;
     if (!ISMComponent) {
         UE_LOG(Myth, Error, TEXT("UMythicResourceManagerComponent::AddNewResource: Could not find ISM component for class %s"), *ISMComponent->GetName());
         return -1;
     }
 
-    // Get max health for this destructible type
     int32 MaxHealth = ISMComponent->CalculateHealthFromTransform(Transform);
     if (MaxHealth <= 0) {
         UE_LOG(Myth, Error, TEXT("UMythicResourceManagerComponent::AddNewResource: Calculated MaxHealth is <= 0 for ISM %s at location %s"),
@@ -296,16 +303,14 @@ int32 UMythicResourceManagerComponent::AddNewResource(FTransform Transform, int3
     UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent::AddNewResource: New resource with MaxHealth %d, taking %d damage, HitsTillDestruction: %d"),
            MaxHealth, DamageAmount, NewResource.HitsTillDestruction);
 
-    // Check if already destroyed
     auto AlreadyDestroyed = DestroyedResources.GetItems()->FindByPredicate([&NewResource](const FTrackedDestructibleData &DestroyedResource) {
         return DestroyedResource == NewResource;
     });
     if (AlreadyDestroyed) {
         UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent::AddNewResource: Resource already destroyed, ignoring"));
-        return -1; // nothing to surface — it was already gone
+        return -1;
     }
 
-    // If the health is <= 0, no need to add to tracked resources and we can just add to destroyed resources
     if (NewResource.HitsTillDestruction <= 0) {
         AddToDestroyedResources(NewResource, PlayerController);
     }
@@ -313,83 +318,67 @@ int32 UMythicResourceManagerComponent::AddNewResource(FTransform Transform, int3
         TrackedResources.Add(NewResource);
         UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent::AddNewResource: Added to tracked resources"));
     }
-    return NewResource.HitsTillDestruction; // 0 → "Depleted!" (one-shot), >0 → "N left" (first swing)
+    return NewResource.HitsTillDestruction;
 }
 
-// Authority only - Make sure the resource is removed from tracked resources
 void UMythicResourceManagerComponent::AddToDestroyedResources(FTrackedDestructibleData DestroyedResource, APlayerController *PlayerController) {
-    // Set respawn time
-    DestroyedResource.RespawnTime = GetWorld()->GetTimeSeconds() + DefaultRespawnDelay;
+    const FVector NodeLocation = DestroyedResource.Transform.GetLocation();
+    const int32 ResourceTier = DestroyedResource.ResourceISM ? DestroyedResource.ResourceISM->ResourceTier : 0;
 
-    // Add to destroyed resources
+    UMythicRegionalPressureSubsystem *Pressure =
+        GetWorld() ? GetWorld()->GetSubsystem<UMythicRegionalPressureSubsystem>() : nullptr;
+    if (Pressure) {
+        Pressure->ServerRegisterHarvest(NodeLocation);
+    }
+
+    float RespawnDelay = FMythicGatherRules::ScaledRespawnDelay(DefaultRespawnDelay, ResourceTier);
+    if (Pressure) {
+        RespawnDelay = Pressure->ScaledHarvestRespawnDelay(NodeLocation, RespawnDelay, ResourceTier);
+    }
+    DestroyedResource.RespawnTime = GetWorld()->GetTimeSeconds() + RespawnDelay;
+
     DestroyedResources.AddItem(DestroyedResource);
 
     UE_LOG(Myth, Log,
            TEXT("UMythicResourceManagerComponent::AddToDestroyedResources: Resource %d added to destroyed resources, will respawn in %.1f seconds"),
-           DestroyedResource.InstanceId, DefaultRespawnDelay);
+           DestroyedResource.InstanceId, RespawnDelay);
 
-    // give rewards at the destroyed node's world location
-    DestroyedResource.ResourceISM->OnKillRewards.Give(PlayerController, false, 0, DestroyedResource.Transform.GetLocation());
+    DestroyedResource.ResourceISM->OnKillRewards.Give(PlayerController, false, 0, NodeLocation);
 
-    // proficiency bonus yield: roll a chance to double the reward
+    {
+        const float RawYieldMult = Pressure ? Pressure->QueryHarvestYieldMultiplier(NodeLocation, ResourceTier)
+                                            : FMythicGatherRules::TierYieldMultiplier(ResourceTier);
+        const int32 YieldMult = FMath::Max(1, FMath::RoundToInt(RawYieldMult));
+        for (int32 i = 1; i < YieldMult; ++i) {
+            DestroyedResource.ResourceISM->OnKillRewards.Give(PlayerController, false, 0, NodeLocation);
+        }
+    }
+
     if (DestroyedResource.ResourceISM->ResourceType.IsValid()) {
         const FGameplayTag &ResourceType = DestroyedResource.ResourceISM->ResourceType;
         int32 ProfLevel = GetGathererProficiencyLevel(PlayerController, ResourceType);
         if (ProfLevel > 0) {
             float BonusChance = static_cast<float>(ProfLevel) * GatheringConfig.BonusYieldChancePerLevel;
-            // Boundary-correct gate: a BonusChance that reaches >= 1.0 (high gatherer proficiency) ALWAYS procs — the old
-            // raw `FRand() < BonusChance` dropped the guaranteed bonus when FRand() returned exactly 1.0.
             if (MythicCombat::RollSucceeds(BonusChance, FMath::FRand())) {
                 DestroyedResource.ResourceISM->OnKillRewards.Give(PlayerController, false, 0, DestroyedResource.Transform.GetLocation());
                 UE_LOG(Myth, Log, TEXT("UMythicResourceManagerComponent: bonus yield triggered (level %d, chance %.2f)"), ProfLevel, BonusChance);
             }
         }
-
-        // Award gathering proficiency XP for this harvest (closes the gather→improve→gather-better loop: gathering raises
-        // the proficiency that drives BonusDamagePerLevel + BonusYieldChancePerLevel). Granted even at level 0 (so a
-        // novice can climb from nothing); the anti-grind cap uses the gatherer's CURRENT level. Server-side; reuses the
-        // shared GrantProficiencyXP primitive + the resource→proficiency map.
-        const float GatherXp = ComputeGatherXpReward(GatheringConfig.XpPerHarvest, ProfLevel, GatheringConfig.XpNoGainAtOrAboveLevel);
-        if (GatherXp > 0.0f) {
-            if (const TObjectPtr<UProficiencyDefinition> *FoundDef = GatheringConfig.ResourceToProficiency.Find(ResourceType)) {
-                if (UProficiencyDefinition *ProfDef = *FoundDef) {
-                    if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PlayerController)) {
-                        if (UProficiencyComponent *Prof = const_cast<UProficiencyComponent *>(MythicPC->GetProficiencyComponent())) {
-                            Prof->GrantProficiencyXP(ProfDef, GatherXp);
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
-float UMythicResourceManagerComponent::ComputeGatherXpReward(float BaseXpPerHarvest, int32 GathererLevel, int32 NoGainAtOrAboveLevel) {
-    if (BaseXpPerHarvest <= 0.0f) {
-        return 0.0f;
-    }
-    // Anti-grind: a node stops paying out once the gatherer reaches/passes NoGainAtOrAboveLevel (mirrors crafting). 0 = no cap.
-    if (NoGainAtOrAboveLevel > 0 && GathererLevel >= NoGainAtOrAboveLevel) {
-        return 0.0f;
-    }
-    return BaseXpPerHarvest;
-}
-
-// Called when the game starts
 void UMythicResourceManagerComponent::BeginPlay() {
     Super::BeginPlay();
 
-    // Set owner of DestroyedResources for replication callbacks
     DestroyedResources.OwnerComponent = this;
 
-    // Only server runs the batch respawn system
     if (GetOwner()->HasAuthority()) {
         GetWorld()->GetTimerManager().SetTimer(
             BatchRespawnTimerHandle,
             this,
             &UMythicResourceManagerComponent::ProcessBatchRespawn,
             BatchRespawnInterval,
-            true // Repeat every 10 minutes
+            true
             );
 
         UE_LOG(Myth, Log, TEXT("Batch respawn system started - checking every %.1f seconds"), BatchRespawnInterval);
@@ -406,25 +395,20 @@ TArray<FTrackedDestructibleData> UMythicResourceManagerComponent::GetTrackedDest
 }
 
 bool UMythicResourceManagerComponent::ShouldRespawnDestructible(int32 HitsTillDestruction, float RespawnTime, float CurrentTime) {
-    // Destroyed (no hits left), a real respawn time was assigned (> 0 rejects uninitialized entries), delay elapsed.
     return HitsTillDestruction <= 0 && RespawnTime > 0.0f && CurrentTime >= RespawnTime;
 }
 
-// This is only called OnRep of the MythicResourceManagerComponent's DestroyedResources array to catch up state on clients
 void UMythicResourceManagerComponent::HandleResourceDestruction(const TArray<FTrackedDestructibleData> &DestroyedResources) {
     UE_LOG(Myth, Log, TEXT("HandleResourceDestruction: Syncing destruction of %d resources"), DestroyedResources.Num());
 
-    // All ISM Components that need to be dirtied once after processing
     TSet<UMythicResourceISM *> ISMsToDirty;
 
     auto length = DestroyedResources.Num();
     for (int i = 0; i < length; i++) {
         auto Resource = DestroyedResources[i];
 
-        // auto ResourceComponent = Resource.GetISMComponent(World);
         auto ResourceComponent = Resource.ResourceISM;
         if (!ResourceComponent) {
-            // TODO - Should we have a retry queue so when the ISM's owning actor is loaded we can retry?
             UE_LOG(Myth, Error, TEXT("HandleResourceDestruction: ResourceISMC is null or not loaded"));
             continue;
         }
@@ -432,14 +416,11 @@ void UMythicResourceManagerComponent::HandleResourceDestruction(const TArray<FTr
         UE_LOG(Myth, Log, TEXT("HandleResourceDestruction: Syncing resource on ISM %s, InstanceId %d"), *ResourceComponent->GetName(),
                Resource.InstanceId);
 
-        // Destroy / Hide resource
         ResourceComponent->DestroyResource(Resource.InstanceId);
 
-        // Track ISM to dirty once after batch to reduce render updates
         ISMsToDirty.Add(ResourceComponent);
     }
 
-    // Dirty render state once per ISM after processing all instances
     for (UMythicResourceISM *ISM : ISMsToDirty) {
         if (ISM) {
             ISM->MarkRenderStateDirty();
@@ -447,7 +428,6 @@ void UMythicResourceManagerComponent::HandleResourceDestruction(const TArray<FTr
     }
 }
 
-// This is only called on PreReplicateRemove of the MythicResourceManagerComponent's DestroyedResources array to respawn resources as they are removed
 void UMythicResourceManagerComponent::HandleResourceRespawn(const TArray<FTrackedDestructibleData> &RespawnedResources) {
     UE_LOG(Myth, Log, TEXT("HandleResourceRespawn: Syncing respawn of %d resources"), RespawnedResources.Num());
 
@@ -464,8 +444,7 @@ void UMythicResourceManagerComponent::HandleResourceRespawn(const TArray<FTracke
         UE_LOG(Myth, Log, TEXT("HandleResourceRespawn: Syncing resource on ISM %s, InstanceId %d"), *ResourceComponent->GetName(),
                Resource.InstanceId);
 
-        // Restore / Unhide resource
-        bool ShouldUpdateRender = i == length - 1; // Only update on the last one to save performance
+        bool ShouldUpdateRender = i == length - 1;
         ResourceComponent->RestoreResource(Resource.InstanceId, Resource.Transform, ShouldUpdateRender);
     }
 }
@@ -475,14 +454,12 @@ int32 UMythicResourceManagerComponent::GetGathererProficiencyLevel(APlayerContro
         return 0;
     }
 
-    // look up which proficiency definition maps to this resource type
     const TObjectPtr<UProficiencyDefinition> *FoundDef = GatheringConfig.ResourceToProficiency.Find(ResourceType);
     if (!FoundDef || !*FoundDef) {
         return 0;
     }
     UProficiencyDefinition *ProfDef = *FoundDef;
 
-    // find the proficiency component on the player controller
     UProficiencyComponent *ProfComp = nullptr;
     if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PlayerController)) {
         ProfComp = const_cast<UProficiencyComponent*>(MythicPC->GetProficiencyComponent());
@@ -491,7 +468,6 @@ int32 UMythicResourceManagerComponent::GetGathererProficiencyLevel(APlayerContro
         return 0;
     }
 
-    // find the matching proficiency entry and resolve its current level from the ASC
     for (const FProficiency &Prof : ProfComp->Proficiencies) {
         if (Prof.Definition == ProfDef) {
             UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(PlayerController);

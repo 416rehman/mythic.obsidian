@@ -26,9 +26,6 @@ bool UMythicAbilityCost_InventoryItem::CheckCost(const UMythicGameplayAbility *A
             const float NumItemsToConsumeReal = Quantity.GetValueAtLevel(AbilityLevel);
             const int32 NumItemsToConsume = FMath::TruncToInt(NumItemsToConsumeReal);
 
-            // Affordability is the SUM across all the player's inventories — matching ApplyCost (which pays summed) and
-            // CraftingComponent::VerifyRequirements. The old per-inventory test wrongly blocked a cost the player could
-            // actually pay when the items were split across multiple inventory components.
             int32 TotalAvailable = 0;
             for (auto &InventoryComponent : Inventories) {
                 TotalAvailable += InventoryComponent->GetItemCount(ItemDefinition);
@@ -39,8 +36,6 @@ bool UMythicAbilityCost_InventoryItem::CheckCost(const UMythicGameplayAbility *A
         }
     }
 
-    // Inform other systems why activation was blocked (e.g. an "out of item" UI cue), matching the Stamina/ItemStack
-    // sibling costs + the documented base contract — previously this cost gave the player zero out-of-item feedback.
     if (OptionalRelevantTags && FailureTag.IsValid()) {
         OptionalRelevantTags->AddTag(FailureTag);
     }

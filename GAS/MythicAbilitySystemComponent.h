@@ -10,12 +10,9 @@ class MYTHIC_API UMythicAbilitySystemComponent : public UAbilitySystemComponent 
     GENERATED_BODY()
 
 public:
-    // If set, this table is used to look up tag relationships for activate and cancel
     UPROPERTY()
     TObjectPtr<UMythicAbilityTagRelationshipMapping> AbilityTagRelationshipMapping;
 
-    /** Looks at ability tags and gathers additional required and blocking tags */
-    // For MythicAbilityTagRelationshipMapping
     void GetAdditionalActivationTagRequirements(const FGameplayTagContainer &AbilityTags, FGameplayTagContainer &OutActivationRequired,
                                                 FGameplayTagContainer &OutActivationBlocked) const;
 
@@ -27,7 +24,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = MythicAbilitySystemComponent)
     const TArray<UMythicAttributeSet *> &GetAttributeSets() const;
 
-    // Number of abilities running in each activation group.
     int32 ActivationGroupCounts[static_cast<uint8>(EMythicAbilityActivationGroup::MAX)];
 
     using TShouldCancelAbilityFunc = TFunctionRef<bool(const UMythicGameplayAbility *MythicAbility, FGameplayAbilitySpecHandle Handle)>;
@@ -38,13 +34,9 @@ public:
     void CancelActivationGroupAbilities(EMythicAbilityActivationGroup Group, UMythicGameplayAbility *IgnoreMythicAbility, bool bReplicateCancelAbility);
     void CancelAbilitiesByFunc(TShouldCancelAbilityFunc ShouldCancelFunc, bool bReplicateCancelAbility);
 
-    /** Gets the ability target data associated with the given ability handle and activation info */
     void GetAbilityTargetData(const FGameplayAbilitySpecHandle AbilityHandle, FGameplayAbilityActivationInfo ActivationInfo,
                               FGameplayAbilityTargetDataHandle &OutTargetDataHandle);
 
-    /*
-     * Input Processing (Lyra-style)
-     */
     void AbilityInputTagPressed(const FGameplayTag &InputTag);
     void AbilityInputTagReleased(const FGameplayTag &InputTag);
     void ProcessAbilityInput(float DeltaTime, bool bGamePaused);
@@ -55,17 +47,13 @@ public:
     void ExecuteGameplayCueMulticast(FGameplayTag CueTag, const FGameplayCueParameters &CueParams);
 
 protected:
-    // NetMulticast RPC to execute a cue on all clients
     UFUNCTION(NetMulticast, Unreliable)
     void Multicast_ExecuteGameplayCue(FGameplayTag CueTag, FGameplayCueParameters CueParams);
 
 protected:
-    // Handles for abilities that had their input pressed this frame.
     TArray<FGameplayAbilitySpecHandle> InputPressedSpecHandles;
 
-    // Handles for abilities that had their input released this frame.
     TArray<FGameplayAbilitySpecHandle> InputReleasedSpecHandles;
 
-    // Handles for abilities that have their input held.
     TArray<FGameplayAbilitySpecHandle> InputHeldSpecHandles;
 };

@@ -1,4 +1,3 @@
-// 
 
 
 #include "MythicEnvironmentController.h"
@@ -15,12 +14,11 @@
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 #include "System/MythicAssetManager.h"
 #include "Engine/GameInstance.h"
-#include "World/LivingWorld/LivingWorldSubsystem.h"        // SubmitWorldEvent (thread-safe game->sim queue)
-#include "World/LivingWorld/CausalFabric/CausalFabric.h"   // FMythicWorldEvent + EMythicEventCategory
-#include "World/MythicTags_World.h"                         // World.Event.Season.* chronicle tags
+#include "World/LivingWorld/LivingWorldSubsystem.h"
+#include "World/LivingWorld/CausalFabric/CausalFabric.h"
+#include "World/MythicTags_World.h"
 
 namespace {
-    // Map a calendar season to its World Chronicle EventTag (the chronicle distills it to "Season <X>").
     FGameplayTag SeasonToEventTag(ESeason Season) {
         switch (Season) {
         case Spring:
@@ -37,7 +35,6 @@ namespace {
     }
 }
 
-// Sets default values
 AMythicEnvironmentController::AMythicEnvironmentController() : FogComponent(nullptr), SkyAtmosphereComponent(nullptr),
                                                                NightLightIntensity(0),
                                                                DaytimeDirectionalLight(nullptr),
@@ -47,12 +44,10 @@ AMythicEnvironmentController::AMythicEnvironmentController() : FogComponent(null
                                                                GuaranteedTargetWeather(nullptr), WeatherTransition(),
                                                                CurrentWeather(),
                                                                CachedFogHeightFalloff(0), CachedFogDensity(0) {
-    // Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-    PrimaryActorTick.bCanEverTick = true;
-    this->TimeUpdateFrequency = 0.01f;
+    PrimaryActorTick.bCanEverTick = false;
+    this->TimeUpdateFrequency = 0.05f;
     this->WeatherUpdateFrequency = 1.0f;
 
-    // replicate to all clients
     bReplicates = true;
     bAlwaysRelevant = true;
 }
@@ -60,44 +55,34 @@ AMythicEnvironmentController::AMythicEnvironmentController() : FogComponent(null
 void AMythicEnvironmentController::OnConstruction(const FTransform &Transform) {
     Super::OnConstruction(Transform);
 
-    // Update the sun and moon
     UpdateLighting();
 
-    // Update the time of day
     TimeTick();
 
-    // Update the weather
     if (this->WeatherTypes.Num() > 0 && WeatherMPC) {
         WeatherTick();
     }
 }
 
 void AMythicEnvironmentController::SerializeCustomData(TArray<uint8> &OutCustomData) {
-
     FMemoryWriter MemWriter(OutCustomData);
     FObjectAndNameAsStringProxyArchive Ar(MemWriter, true);
-    // Use standard serialization to bypass SaveGame filtering on nested Engine structs
     FWeatherCycleInfo::StaticStruct()->SerializeItem(Ar, &WeatherTransition, nullptr);
 }
 
 void AMythicEnvironmentController::DeserializeCustomData(const TArray<uint8> &InCustomData) {
-
-    // Load the custom data buffer
     if (InCustomData.Num() > 0) {
         FMemoryReader MemReader(InCustomData);
         FObjectAndNameAsStringProxyArchive Ar(MemReader, true);
 
-        // This overwrites the WeatherTransition that was loaded (imperfectly) by the standard serializer
         FWeatherCycleInfo::StaticStruct()->SerializeItem(Ar, &WeatherTransition, nullptr);
     }
 
-    // Restore visuals post-load
     if (CurrentWeather) {
         ApplyWeatherVisuals(CurrentWeather);
     }
 }
 
-// Maps the current time of day to sun's yaw rotation (0 = 18:00, 90 = 00:00, 180 = 06:00, 270 = 12:00)
 void AMythicEnvironmentController::BeginPlay() {
     Super::BeginPlay();
 
@@ -115,10 +100,8 @@ void AMythicEnvironmentController::BeginPlay() {
         UE_LOG(Myth_Environment, Error, TEXT("SkyAtmosphere is not set"));
     }
 
-    // Start a timer to update the time of day based on the morning, afternoon, evening, and night lengths
     GetWorldTimerManager().SetTimer(this->TimeOfDayTimerHandle, this, &AMythicEnvironmentController::TimeTick,
                                     this->TimeUpdateFrequency, true);
-    // Start a timer to update the weather cycle
     if (this->WeatherTypes.Num() > 0 && WeatherMPC) {
         GetWorldTimerManager().SetTimer(this->WeatherTimerHandle, this, &AMythicEnvironmentController::WeatherTick,
                                         this->WeatherUpdateFrequency, true);
@@ -130,20 +113,16 @@ void AMythicEnvironmentController::BeginPlay() {
 
     UpdateLighting();
 
-    // Apply the current weather visuals immediately (Handles Save/Load case where data exists but MPC is reset)
     if (CurrentWeather) {
         ApplyWeatherVisuals(CurrentWeather);
     }
 
-    // if server, initialize the weather cycle. CycleWeather will sync the weather cycle to all clients
     if (GetLocalRole() == ROLE_Authority) {
         if (this->WeatherTypes.Num() > 0 && WeatherMPC && !CurrentWeather) {
-            // Only cycle if we don't already have weather (e.g. New Game)
             CycleWeather();
         }
     }
 
-    // Register self with the EnvironmentSubsystem
     if (auto EnvironmentSubsystem = GetGameInstance()->GetSubsystem<UMythicEnvironmentSubsystem>()) {
         EnvironmentSubsystem->SetEnvironmentController(this);
     }
@@ -153,13 +132,9 @@ void AMythicEnvironmentController::BeginPlay() {
 }
 
 float AMythicEnvironmentController::GetSunPositionForCurrentTime() const {
-    // Modulo in double BEFORE narrowing: GetTotalMilliseconds() accumulates ALL elapsed game time, so casting the full
-    // value to int32 overflowed after ~24.85 game-days (the sun yaw then froze and the day/night cycle stuck on any
-    // long-lived save). Fmod keeps it in the 0..86,399,999 range; the float cast avoids a narrowing warning.
     const float todaysSeconds = static_cast<float>(FMath::Fmod(this->Time.GetTotalMilliseconds(), 86400000.0));
 
     UE::Math::TVector2<float> timeRange(0, 86400000);
-    // 359.9f + 90.0f
     UE::Math::TVector2<float> sunRange(90.0f, 449.9f);
     float sunPos = FMath::GetMappedRangeValueClamped(timeRange, sunRange, todaysSeconds);
 
@@ -168,13 +143,11 @@ float AMythicEnvironmentController::GetSunPositionForCurrentTime() const {
 
 
 bool AMythicEnvironmentController::isCurrentWeatherExpired() const {
-    // if current weather exists, and it has exceeded its lifetime, transition to the next weather.
     if (!this->CurrentWeather) {
         UE_LOG(Myth_Environment, Warning, TEXT("No current weather"));
         return true;
     }
 
-    // Check if the current weather has exceeded its lifetime
     const auto CurrentWeatherLifetime = this->WeatherTransition.TransitionLength;
     const auto TimeSinceWeatherChange = this->Time - this->WeatherChangedAt;
 
@@ -191,48 +164,37 @@ UWeatherType *AMythicEnvironmentController::GetWeatherTypeByTag(FGameplayTag Tag
     return nullptr;
 }
 
-// Get next weather type to reach the target weather.
-// Processes the pre and post weather types to determine the next weather type to transition to, to eventually reach the target weather
 UWeatherType *AMythicEnvironmentController::GetNextWeatherTypeToReachTargetWeather(UWeatherType *FromWeather, UWeatherType *TargetWeather) {
     if (!FromWeather || !TargetWeather) {
         return nullptr;
     }
 
-    // Check if the target weather is already reachable from the current weather
     if (FromWeather->CanTransitionTo(*TargetWeather)) {
         return TargetWeather;
     }
 
-    // Create a set to store visited weather types to prevent cycles
     TSet<FGameplayTag> Visited;
     Visited.Add(FromWeather->Tag);
 
-    // Create a queue for BFS (Breadth-First Search) to find the shortest path to the target weather
     TQueue<UWeatherType *> Queue;
     Queue.Enqueue(FromWeather);
 
-    // Store the path to reach each weather type
     TMap<UWeatherType *, UWeatherType *> PredecessorMap;
 
     while (!Queue.IsEmpty()) {
         UWeatherType *current_weather;
         Queue.Dequeue(current_weather);
 
-        // Check all possible transitions from the current weather
         for (auto Weather : WeatherTypes) {
-            // If we've already visited this weather type, skip it
             if (Visited.Contains(Weather->Tag)) {
                 continue;
             }
 
-            // Check if the current weather can transition to this weather type
             if (current_weather->CanTransitionTo(*Weather)) {
-                // If this weather type is the target, we found the path
                 if (Weather->Tag == TargetWeather->Tag) {
                     PredecessorMap.Add(Weather, current_weather);
                     UWeatherType *NextWeather = Weather;
 
-                    // Traverse back to find the first step towards the target weather
                     while (PredecessorMap.Contains(NextWeather) && PredecessorMap[NextWeather] != FromWeather) {
                         NextWeather = PredecessorMap[NextWeather];
                     }
@@ -240,7 +202,6 @@ UWeatherType *AMythicEnvironmentController::GetNextWeatherTypeToReachTargetWeath
                     return NextWeather;
                 }
 
-                // Otherwise, enqueue the weather type and mark it as visited
                 Queue.Enqueue(Weather);
                 Visited.Add(Weather->Tag);
                 PredecessorMap.Add(Weather, current_weather);
@@ -248,74 +209,54 @@ UWeatherType *AMythicEnvironmentController::GetNextWeatherTypeToReachTargetWeath
         }
     }
 
-    // If we exit the loop without finding a path, return nullptr
     return nullptr;
 }
 
-// Receives a DateTime and overrides the current time of day
 void AMythicEnvironmentController::SetTime(const FDateTime &DateTime) {
     checkf(GetLocalRole() == ROLE_Authority, TEXT("Only the server can set the time"));
 
-    // Set the new hour, minute, second, and total days
     auto NewHour = DateTime.GetHour();
     auto NewMinute = DateTime.GetMinute();
     auto NewSeconds = DateTime.GetSecond();
-    // Reconstruct the LINEAR game-day count that AsDateTime() maps FROM — it is the exact inverse of the calendar
-    // helpers (GetYear = Days/360+1, GetMonthOfYear = Days%360/30 with raw 0 SHOWN as 12, GetDayOfMonth = Days%30 with
-    // raw 0 SHOWN as 30). The old `GetDayOfYear() * GetYear()` was dimensionally meaningless and corrupted the date (a
-    // no-op SetTime jumped the world hundreds of days and fired spurious calendar delegates). Un-remap the 12/30 display
-    // values back to raw 0 before summing. (A day clamped by AsDateTime for a short real month is inherently lossy — a
-    // pre-existing property of the FDateTime round-trip — but the linear reconstruction is otherwise exact.)
     const int32 TargetYear = DateTime.GetYear();
-    const int32 ShownMonth = DateTime.GetMonth(); // 1..12 (12 == raw month 0)
-    const int32 ShownDay = DateTime.GetDay(); // 1..30 (30 == raw day 0)
+    const int32 ShownMonth = DateTime.GetMonth();
+    const int32 ShownDay = DateTime.GetDay();
     const int32 RawMonth = (ShownMonth == 12) ? 0 : ShownMonth;
     const int32 RawDay = (ShownDay == 30) ? 0 : ShownDay;
     const int32 NewDays = (TargetYear - 1) * 360 + RawMonth * 30 + RawDay;
 
     auto NewTime = FTimespan(NewDays, NewHour, NewMinute, NewSeconds);
 
-    // Multicast the new time to all clients
     this->MulticastSyncGameWorldTimer(NewTime, this->Time);
     this->Time = NewTime;
 }
 
-// AddTime -> SetTime -> MulticastSyncGameWorldTimer
 void AMythicEnvironmentController::AddTime(const FTimespan &ByTime) {
-    // Server only
     checkf(GetLocalRole() == ROLE_Authority, TEXT("Only the server can add time"));
 
-    // Add the time to the current time of day
     auto currentDateTime = this->GetDateTime();
     auto newDateTime = currentDateTime + ByTime;
 
-    // Set the new time
     this->SetTime(newDateTime);
 }
 
 void AMythicEnvironmentController::SetTimeUpdateFrequency(float Frequency) {
-    // Server only
     checkf(GetLocalRole() == ROLE_Authority, TEXT("Only the server can set the time update frequency"));
 
-    // Reset the timer with the new frequency
     this->TimeUpdateFrequency = Frequency;
     GetWorldTimerManager().SetTimer(this->TimeOfDayTimerHandle, this, &AMythicEnvironmentController::TimeTick,
                                     this->TimeUpdateFrequency, true);
 }
 
 void AMythicEnvironmentController::PauseTime() const {
-    // Server only
     checkf(GetLocalRole() == ROLE_Authority, TEXT("Only the server can pause time"));
 
-    // Pause the time of day timer
     GetWorldTimerManager().PauseTimer(this->TimeOfDayTimerHandle);
 }
 
 void AMythicEnvironmentController::ResumeTime() const {
-    // Server only
     checkf(GetLocalRole() == ROLE_Authority, TEXT("Only the server can resume time"));
 
-    // Resume the time of day timer
     GetWorldTimerManager().UnPauseTimer(this->TimeOfDayTimerHandle);
 }
 
@@ -329,34 +270,28 @@ void AMythicEnvironmentController::UpdateLighting() const {
         if (NighttimeDirectionalLight) {
             NighttimeDirectionalLight->SetActorRotation(FRotator(-30, yaw, 0));
 
-            // Dim the moonlight if its between 6:00 and 18:00
             auto Nightlight = NighttimeDirectionalLight->GetLightComponent();
-            if (Time.GetHours() >= 7 && Time.GetHours() <= 16 && Nightlight->Intensity >
-                0.001) {
-                Nightlight->SetIntensity(Nightlight->Intensity - (NightLightIntensity * 0.01f));
-            }
-            // Otherwise brighten the moonlight to its original intensity
-            else if (Nightlight->Intensity < NightLightIntensity) {
-                Nightlight->SetIntensity(Nightlight->Intensity + (NightLightIntensity * 0.01f));
+            const float Step = NightLightIntensity * 0.01f;
+            const bool bDaytime = Time.GetHours() >= 7 && Time.GetHours() <= 16;
+            const float Target = bDaytime ? 0.0f : NightLightIntensity;
+            if (!FMath::IsNearlyEqual(Nightlight->Intensity, Target, KINDA_SMALL_NUMBER)) {
+                const float Next = bDaytime ? Nightlight->Intensity - Step : Nightlight->Intensity + Step;
+                Nightlight->SetIntensity(FMath::Clamp(Next, 0.0f, NightLightIntensity));
             }
         }
     }
 }
 
 void AMythicEnvironmentController::MulticastSyncWindTarget_Implementation(const FLinearColor &WindTargetPosition) {
-    // Set the wind target position
     if (WeatherMPC) {
         UKismetMaterialLibrary::SetVectorParameterValue(this, WeatherMPC, this->WindTargetParameterName, WindTargetPosition);
     }
 }
 
-// Called when the game starts or when spawned
 void AMythicEnvironmentController::MulticastSyncGameWorldTimer_Implementation(const FTimespan &NewTimespan, const FTimespan &OldTimespan) {
     this->Time = NewTimespan;
-    UE_LOG(Myth_Environment, Warning, TEXT("Time of day synced to %s"), *this->Time.ToString());
+    UE_LOG(Myth_Environment, Log, TEXT("Time of day synced to %s"), *this->Time.ToString());
 
-    /// Broadcast Time Events ---------------------------------------------------------------
-    // Broadcast Hour and DayTime Change
     auto NewHour = this->Time.GetHours();
     auto PrevHour = OldTimespan.GetHours();
     if (PrevHour != NewHour) {
@@ -364,14 +299,12 @@ void AMythicEnvironmentController::MulticastSyncGameWorldTimer_Implementation(co
         this->DayTimeChangeDelegate.Broadcast(HourAsDayTime(PrevHour), HourAsDayTime(NewHour));
     }
 
-    // Broadcast Day Change
     auto NewDay = GetDayOfMonth(this->Time);
     auto PrevDay = GetDayOfMonth(OldTimespan);
     if (PrevDay != NewDay) {
         this->DayChangeDelegate.Broadcast(PrevDay, NewDay);
     }
 
-    // Broadcast Month Change along with the Season
     auto NewMonth = GetMonthOfYear(this->Time);
     auto PrevMonth = GetMonthOfYear(OldTimespan);
     if (PrevMonth != NewMonth) {
@@ -379,20 +312,15 @@ void AMythicEnvironmentController::MulticastSyncGameWorldTimer_Implementation(co
         auto newSeason = MonthAsSeason(NewMonth);
         this->MonthChangeDelegate.Broadcast(PrevMonth, NewMonth, oldSeason, newSeason);
 
-        // A calendar SEASON turn ("Winter descends") is a significant world beat — post it to the World Chronicle.
-        // HasAuthority-gated: this is a MULTICAST RPC body (runs on the server AND every client), so without the gate
-        // each client would ALSO submit. Routed through the living world's thread-safe SubmitWorldEvent queue — NOT the
-        // sim-thread-only CausalFabric. Mirrors the weather beat. No-op when the living world is absent (test map).
         if (oldSeason != newSeason && HasAuthority() && SeasonNewsSignificance > 0.0f) {
             if (const UGameInstance *GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr) {
                 if (UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
                     const FGameplayTag SeasonTag = SeasonToEventTag(newSeason);
                     if (SeasonTag.IsValid()) {
                         FMythicWorldEvent SeasonEvent;
-                        SeasonEvent.EventTag = SeasonTag; // chronicle distills "Season <X>"
-                        SeasonEvent.CategoryFlags = EMythicEventCategory::Environment; // in the chronicle MacroMask
+                        SeasonEvent.EventTag = SeasonTag;
+                        SeasonEvent.CategoryFlags = EMythicEventCategory::Environment;
                         SeasonEvent.Significance = SeasonNewsSignificance;
-                        // Cell left default (seasons are global); no faction; WorldTime stamped by AppendEvent.
                         LWS->SubmitWorldEvent(SeasonEvent);
                     }
                 }
@@ -400,7 +328,6 @@ void AMythicEnvironmentController::MulticastSyncGameWorldTimer_Implementation(co
         }
     }
 
-    // Broadcast Year Change
     auto NewYear = GetYear(this->Time);
     auto PrevYear = GetYear(OldTimespan);
     if (PrevYear != NewYear) {
@@ -408,7 +335,6 @@ void AMythicEnvironmentController::MulticastSyncGameWorldTimer_Implementation(co
     }
 }
 
-// The brain of the time system
 void AMythicEnvironmentController::TimeTick() {
     const auto PreviousTime = this->Time;
     const auto PreviousHour = PreviousTime.GetHours();
@@ -426,13 +352,10 @@ void AMythicEnvironmentController::TimeTick() {
 
     UpdateLighting();
 
-    // SERVER-ONLY: Every hour, sync the time of day for all clients
     const auto NewHour = Time.GetHours();
     if (PreviousHour != NewHour && GetLocalRole() == ROLE_Authority) {
-        // Server -> Multicast -> Broadcast events on clients and server
         this->MulticastSyncGameWorldTimer(Time, PreviousTime);
 
-        // Change the sky atmosphere absorption at midnight
         if (NewHour == 0) {
             if (SkyAtmosphereComponent) {
                 FLinearColor Absorption = FLinearColor(FMath::RandRange(0.0f, 1.0f), FMath::RandRange(0.0f, 1.0f),
@@ -452,37 +375,26 @@ void AMythicEnvironmentController::MulticastSyncSkyAtmosphereAbsorption_Implemen
     }
 }
 
-// The brain of the weather system
 void AMythicEnvironmentController::WeatherTick() {
-    // If there is a weather transition in progress, update the weather transition
-    // Check if the soft pointer is valid or points to something
     if (!this->WeatherTransition.TransitionToWeather.IsNull()) {
         UWeatherType *TargetWeather = this->WeatherTransition.TransitionToWeather.Get();
         if (TargetWeather) {
-            UE_LOG(Myth_Environment, Warning, TEXT("Weather transition in progress to %s"), *TargetWeather->GetName());
+            UE_LOG(Myth_Environment, Verbose, TEXT("Weather transition in progress to %s"), *TargetWeather->GetName());
             HandleWeatherTransition();
         }
     }
-    // SERVER-ONLY: Weather is cycled only through the server - which then modifies the weather cycle and syncs it to all clients
     else if (GetLocalRole() == ROLE_Authority && isCurrentWeatherExpired()) {
-        UE_LOG(Myth_Environment, Warning, TEXT("No weather transition in progress"));
+        UE_LOG(Myth_Environment, Log, TEXT("Weather expired; cycling to the next one"));
         CycleWeather();
     }
 }
 
 void AMythicEnvironmentController::HandleWeatherTransition() {
-    // Transition start time should be in the past
-
-    // Lerp the weather attributes based on the TransitionStartedAt timespan and the TransitionDurationInMins.
-    // CLAMPED to [0,1]: the FMath::Lerp calls below are unclamped, so an over-duration tick (every transition's last
-    // tick, since ticks are discrete) would otherwise overshoot the target values; a 0/negative duration would yield
-    // inf/NaN material params. ComputeWeatherTransitionProgress folds both guards into one tested decision.
     const float TransitionProgress = ComputeWeatherTransitionProgress(
         this->WeatherTransition.bSetInstantly,
         (this->Time - this->TransitionStartedAt).GetTotalMinutes(),
         TransitionDurationInMins);
 
-    // Lerp the scalar attributes
     for (int i = 0; i < TransitionFromScalarValues.Num(); i++) {
         auto MPC_Value = TransitionFromScalarValues[i];
         auto TargetValue = this->WeatherTransition.TransitionToScalarValues[i];
@@ -491,7 +403,6 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
         UKismetMaterialLibrary::SetScalarParameterValue(this, WeatherMPC, TransitionFromScalarValues[i].ParameterName, LerpValue);
     }
 
-    // Lerp the vector attributes
     for (int i = 0; i < TransitionFromVectorValues.Num(); i++) {
         auto MPC_Value = TransitionFromVectorValues[i];
         auto TargetValue = this->WeatherTransition.TransitionToVectorValues[i];
@@ -500,20 +411,14 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
         UKismetMaterialLibrary::SetVectorParameterValue(this, WeatherMPC, TransitionFromVectorValues[i].ParameterName, LerpValue);
     }
 
-    // Lerp the fog density
     if (FogComponent) {
         auto LerpFogDensity = FMath::Lerp(this->CachedFogDensity, this->WeatherTransition.FogDensity, TransitionProgress);
         FogComponent->SetFogDensity(LerpFogDensity);
 
-        // Lerp the fog height falloff
         auto LerpFogHeightFalloff = FMath::Lerp(this->CachedFogHeightFalloff, this->WeatherTransition.FogHeightFalloff, TransitionProgress);
         FogComponent->SetFogHeightFalloff(LerpFogHeightFalloff);
     }
 
-    // If the transition is complete, finalize the weather. AUTHORITY-ONLY: CurrentWeather + WeatherTransition are
-    // server-replicated authoritative state; clients must NOT author them or they double-fire WeatherChangeDelegate
-    // (once here, then again from OnRep_CurrentWeather). Clients keep lerping visuals above and converge via OnRep — the
-    // progress is clamped to the target at >=1 (ComputeWeatherTransitionProgress), and OnRep_WeatherTransition clears the transition to stop the tick loop.
     UWeatherType *TargetWeather = this->WeatherTransition.TransitionToWeather.Get();
     if (GetLocalRole() == ROLE_Authority && (TransitionProgress >= 1.0f || TargetWeather == this->CurrentWeather || Time < TransitionStartedAt)) {
         auto NewWeatherTag = TargetWeather ? TargetWeather->Tag : FGameplayTag();
@@ -523,29 +428,20 @@ void AMythicEnvironmentController::HandleWeatherTransition() {
         this->WeatherTransition.TransitionToWeather = nullptr;
         this->WeatherChangedAt = Time;
         if (this->CurrentWeather == this->GuaranteedTargetWeather) {
-            // We have reached our target weather type. Emit the event
             this->GuaranteedTargetWeather = nullptr;
             this->TargetWeatherReachedDelegate.Broadcast(this->CurrentWeather->Tag);
         }
 
-        // Broadcast the weather change event. Declared order is (PreviousWeather, NewWeather) — pass Old then New.
         this->WeatherChangeDelegate.Broadcast(OldWeatherTag, NewWeatherTag);
         UE_LOG(Myth_Environment, Warning, TEXT("EnvironmentController: Transition complete. New weather: %s"), *this->CurrentWeather->GetName());
 
-        // Designer-flagged significant weather posts a player-facing World Chronicle beat. This whole block is
-        // ROLE_Authority-gated (clients converge via OnRep_CurrentWeather), so it submits EXACTLY once; the chronicle
-        // replicates the beat to each client. Routed through the living world's THREAD-SAFE SubmitWorldEvent queue —
-        // NOT CausalFabric->AppendEvent, which is a lock-free single-writer drained by the sim thread (a direct
-        // game-thread append would race its ring/index mutation). No-op when the living world isn't present (e.g. a
-        // weather-only test map). Mirrors AMythicEncounterDirector's event submission.
         if (this->CurrentWeather && this->CurrentWeather->bGeneratesWorldNews && NewWeatherTag.IsValid()) {
             if (const UGameInstance *GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr) {
                 if (UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
                     FMythicWorldEvent WeatherEvent;
-                    WeatherEvent.EventTag = NewWeatherTag; // chronicle distills the leaf ("Weather <X>")
-                    WeatherEvent.CategoryFlags = EMythicEventCategory::Environment; // in the chronicle MacroMask
+                    WeatherEvent.EventTag = NewWeatherTag;
+                    WeatherEvent.CategoryFlags = EMythicEventCategory::Environment;
                     WeatherEvent.Significance = this->CurrentWeather->WorldNewsSignificance;
-                    // Cell left default (weather is global, not cell-local); no faction; WorldTime stamped by AppendEvent.
                     LWS->SubmitWorldEvent(WeatherEvent);
                 }
             }
@@ -563,8 +459,6 @@ void AMythicEnvironmentController::GetLifetimeReplicatedProps(TArray<FLifetimePr
 }
 
 void AMythicEnvironmentController::OnRep_Time() {
-    // Initial sync of time for client
-    // We can also trigger an immediate lighting update
     UpdateLighting();
     UE_LOG(Myth_Environment, Log, TEXT("OnRep_Time: Time synced to %s"), *Time.ToString());
 }
@@ -574,52 +468,36 @@ void AMythicEnvironmentController::OnRep_CurrentWeather(UWeatherType *PreviousWe
            PreviousWeather ? *PreviousWeather->GetName() : TEXT("None"),
            CurrentWeather ? *CurrentWeather->GetName() : TEXT("None"));
 
-    // Ensure visuals are up to date
     if (CurrentWeather) {
         ApplyWeatherVisuals(CurrentWeather);
     }
 
-    // Broadcast change
     FGameplayTag OldTag = PreviousWeather ? PreviousWeather->Tag : FGameplayTag::EmptyTag;
     FGameplayTag NewTag = CurrentWeather ? CurrentWeather->Tag : FGameplayTag::EmptyTag;
-    // Declared order is (PreviousWeather, NewWeather) — pass Old then New (was reversed).
     this->WeatherChangeDelegate.Broadcast(OldTag, NewTag);
 }
 
-// Apply authoritative visuals from the WeatherTransition struct (which holds server-synced instance values)
 void AMythicEnvironmentController::ApplyWeatherVisuals(const UWeatherType *Weather) {
     if (!Weather || !WeatherMPC) {
         return;
     }
 
-    // Instead of re-rolling random values from the Weather Asset (which causes desync),
-    // CHECK FOR DATA VALIDITY
-    // If we have authoritative data in the transition struct, use it.
-    // This persist even after the transition is finished (as we only clear the pointer, not the arrays).
     const bool bHasAuthoritativeData = WeatherTransition.TransitionToScalarValues.Num() > 0;
 
-    // Restore local helper state from valid transition data
     if (WeatherTransition.StartTime.GetTicks() > 0) {
         this->TransitionStartedAt = WeatherTransition.StartTime;
     }
 
-    // we apply the specific values stored in WeatherTransition.
-    // These values are calculated by the Server, Replicated, and Saved.
 
-    // Apply Scalar Values
     if (bHasAuthoritativeData) {
         for (const auto &Param : WeatherTransition.TransitionToScalarValues) {
-            // Only apply if this parameter belongs to the current weather type context usually,
-            // but applying all cached values is safer to ensure state matches server.
             UKismetMaterialLibrary::SetScalarParameterValue(this, WeatherMPC, Param.ParameterName, Param.DefaultValue);
         }
 
-        // Apply Vector Values
         for (const auto &Param : WeatherTransition.TransitionToVectorValues) {
             UKismetMaterialLibrary::SetVectorParameterValue(this, WeatherMPC, Param.ParameterName, Param.DefaultValue);
         }
 
-        // Apply Fog
         if (FogComponent) {
             FogComponent->SetFogDensity(WeatherTransition.FogDensity);
             FogComponent->SetFogHeightFalloff(WeatherTransition.FogHeightFalloff);
@@ -628,25 +506,18 @@ void AMythicEnvironmentController::ApplyWeatherVisuals(const UWeatherType *Weath
 }
 
 void AMythicEnvironmentController::OnRep_WeatherTransition() {
-    // Async load the weather type if not already loaded
     UMythicAssetManager::LoadAsync(this, WeatherTransition.TransitionToWeather,
                                    [this](UWeatherType *TargetWeather) {
                                        UE_LOG(Myth_Environment, Log, TEXT("OnRep_WeatherTransition: Transition to %s"),
                                               TargetWeather ? *TargetWeather->GetName() : TEXT("None"));
 
-                                       // A null target means the server CLEARED the transition on completion (set
-                                       // TransitionToWeather=nullptr), NOT that a new transition began. Running the
-                                       // start-transition setup — and especially firing the "transition started"
-                                       // delegate with an empty ToTag — would be a spurious client event. Bail.
                                        if (!TargetWeather) {
                                            return;
                                        }
 
-                                       // Cache "From" values to interpolate from current visual state
                                        TransitionFromScalarValues.Empty();
                                        TransitionFromVectorValues.Empty();
 
-                                       // Iterate over TargetWeather attributes to cache starting values from MPC
                                        if (TargetWeather) {
                                            for (const auto &ScalarAttr : TargetWeather->ScalarAttributes) {
                                                FCollectionScalarParameter Val;
@@ -668,14 +539,10 @@ void AMythicEnvironmentController::OnRep_WeatherTransition() {
                                            this->CachedFogDensity = FogComponent->FogDensity;
                                        }
 
-                                       // Set the transition locally
                                        this->TransitionStartedAt = WeatherTransition.StartTime;
 
-                                       // Trigger delegate
                                        FGameplayTag FromTag = CurrentWeather ? CurrentWeather->Tag : FGameplayTag::EmptyTag;
                                        FGameplayTag ToTag = TargetWeather ? TargetWeather->Tag : FGameplayTag::EmptyTag;
-                                       // Declared signature is (FromWeather, ToWeather, TransitionLength) — pass From then
-                                       // To. These were swapped, so every client saw the from/to weathers reversed.
                                        this->WeatherTransitionDelegate.Broadcast(FromTag, ToTag, WeatherTransition.TransitionLength);
                                    });
 }
@@ -683,22 +550,17 @@ void AMythicEnvironmentController::OnRep_WeatherTransition() {
 void AMythicEnvironmentController::CycleWeather() {
     checkf(GetLocalRole() == ROLE_Authority, TEXT("Only the server can cycle weather"));
 
-    // If GuaranteedTargetWeather is set, get the next weather type to reach the target weather
     UWeatherType *SelectedWeather;
     if (this->GuaranteedTargetWeather) {
         if (auto NextWeather = this->GetNextWeatherTypeToReachTargetWeather(this->CurrentWeather, this->GuaranteedTargetWeather)) {
             SelectedWeather = NextWeather;
         }
         else {
-            // No gradual transition possible, set the target weather as the next weather
             SelectedWeather = this->GuaranteedTargetWeather;
             this->GuaranteedTargetWeather = nullptr;
         }
     }
     else {
-        // Otherwise get a random weather type. Guard the empty-config case: an unconfigured WeatherTypes would make
-        // FMath::RandRange(0, -1) return 0 and WeatherTypes[0] index an EMPTY array — a hard server crash. Fall through
-        // to the null-SelectedWeather handler below (logs + returns, keeping the current weather) instead of crashing.
         SelectedWeather = WeatherTypes.Num() > 0 ? WeatherTypes[FMath::RandRange(0, WeatherTypes.Num() - 1)] : nullptr;
     }
 
@@ -707,40 +569,26 @@ void AMythicEnvironmentController::CycleWeather() {
         return;
     }
 
-    // if we can't transition to the selected weather type
     if (this->CurrentWeather && !this->CurrentWeather->CanTransitionTo(*SelectedWeather)) {
-        // If the current month is not in the season of the selected weather, try to find another weather type before giving up
         if (!SelectedWeather->MonthRange.Contains(GetMonthOfYear(this->Time))) {
             this->CycleWeather();
             return;
         }
 
-        // Extend the current weather lifetime
         return;
     }
 
-    // Create the new weather cycle with the StartTime set to current Time
     this->WeatherTransition = FWeatherCycleInfo(SelectedWeather, this->Time);
 
-    // On Server, manually call OnRep to trigger local events/caching
     OnRep_WeatherTransition();
 }
 
 void AMythicEnvironmentController::SetWeatherTransition(const FWeatherCycleInfo &NewWeatherCycle) {
-    // This function was previously used by Multicast, now mainly internal or for instant sets
-    // We can deprecate it or redirect.
-    // For now, let's just ensure it updates the struct
     this->WeatherTransition = NewWeatherCycle;
     OnRep_WeatherTransition();
 }
 
-// REMOVED MulticastSyncWeather_Implementation as it is replaced by OnRep_WeatherTransition
-// Keeping empty shell if header still declares it, or removing if I removed from header. 
-// I commented out in header, so I should remove here.
 
-// ...
-
-// WEATHER
 void AMythicEnvironmentController::SetGuaranteedTargetWeather(FGameplayTag TargetWeather) {
     checkf(GetLocalRole() == ROLE_Authority, TEXT("Only the server can set the target weather"));
 
@@ -760,8 +608,6 @@ void AMythicEnvironmentController::ResumeWeather() const {
 }
 
 bool AMythicEnvironmentController::IsWeatherPaused() const {
-    // FTimerHandle::IsValid() is true whenever a timer was ever registered (running OR paused), so the old inline
-    // version wrongly reported "paused" during normal weather cycling. Query the timer's real paused state instead.
     return GetWorld()->GetTimerManager().IsTimerPaused(this->WeatherTimerHandle);
 }
 

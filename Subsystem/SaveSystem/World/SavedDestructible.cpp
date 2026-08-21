@@ -12,8 +12,6 @@ void FSerializedDestructibleHelper::Serialize(UMythicResourceManagerComponent *R
     OutData.Empty();
     const TArray<FTrackedDestructibleData> &Items = ResMgr->GetDestroyedItems();
 
-    // RespawnTime is an absolute world-time deadline, but world time resets to ~0 on reload. Persist the
-    // REMAINING seconds (clock-independent) so respawn timing survives save/reload/world-time reset.
     const UWorld *World = ResMgr->GetWorld();
     const double Now = World ? World->GetTimeSeconds() : 0.0;
 
@@ -26,7 +24,7 @@ void FSerializedDestructibleHelper::Serialize(UMythicResourceManagerComponent *R
         Data.ComponentPath = FSoftObjectPath(Item.ResourceISM);
         Data.InstanceId = Item.InstanceId;
         Data.OriginalTransform = Item.Transform;
-        Data.RespawnTime = FMath::Max(0.0, Item.RespawnTime - Now); // remaining seconds, not an absolute deadline
+        Data.RespawnTime = FMath::Max(0.0, Item.RespawnTime - Now);
 
         OutData.Add(Data);
     }

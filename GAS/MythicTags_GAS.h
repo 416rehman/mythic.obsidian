@@ -2,111 +2,84 @@
 
 #include "NativeGameplayTags.h"
 
-/** States */
-// State tags are applied to entities to indicate their current state, such as dead, in combat, etc.
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DEAD); // The entity is dead
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DYING); // The entity is dying
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DOWNED); // Co-op down state: incapacitated but revivable (bleeds out if not revived)
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_INCOMBAT); // The entity was damaged recently
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_SPRINTING); // The entity is sprinting
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_EXHAUSTED); // Winded: out of stamina from sprinting — the sprint speed bonus is suppressed until stamina recovers
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DEAD);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DYING);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_DOWNED);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_INCOMBAT);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_SPRINTING);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_STATE_EXHAUSTED);
 
-/** Debuffs */
-// Debuff tags are applied to entities to indicate that they are suffering from a negative effect, such as bleeding, burning, etc.
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF); // Parent category for all debuffs (match any active debuff)
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_BLEEDING); // The entity is bleeding and taking damage over time
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_BURNING); // The entity is burning and taking damage over time
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_POISONED); // The entity is poisoned and taking damage over time
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_STUNNED); // The entity is stunned and cannot act
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_SLOWED); // The entity is slowed and moves at a reduced speed
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_WEAKENED); // The entity is weakened and deals reduced damage
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_FROZEN); // The entity is frozen and cannot act
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_TERRIFIED); // The entity is terrified and receives increased damage
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_BLEEDING);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_BURNING);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_POISONED);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_STUNNED);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_SLOWED);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_WEAKENED);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_FROZEN);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_DEBUFF_TERRIFIED);
 
-/** Buffs */
-// Buff tags are applied to entities to indicate that they are benefiting from a temporary positive effect, such as healing, increased damage, etc.
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_HEALING); // The entity is healing and gaining health over time
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_RAGE); // The entity is enraged and deals increased damage
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_HASTE); // The entity is hasted and moves at an increased speed
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_FORTIFY); // The entity is fortified and takes reduced damage
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_ENLIGHTEN); // the entity is enlightened and gains increased proficiency XP
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_INVINCIBLE); // The entity is invincible and cannot be damaged
-/// Gameplay Buffs: Changes the entity's gameplay in some way i.e Conduit of Lightning turns the entity into a conduit of lightning
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_GAMEPLAY_CONDUITOFLIGHTNING); // The entity has turned into a ball of lightning and deals damage to nearby enemies
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_GAMEPLAY_GAMBIT); // The entity's attacks trigger a random ability, the ability is swapped every X seconds
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_HEALING);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_RAGE);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_HASTE);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_FORTIFY);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_ENLIGHTEN);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_INVINCIBLE);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_GAMEPLAY_CONDUITOFLIGHTNING);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_BUFF_GAMEPLAY_GAMBIT);
 
-/** SetByCaller */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_GENERIC);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_DAMAGE);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_HEAL);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_DURATION);
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_RADIUS);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_COOLDOWN);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_COST);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_RANGE);
 
-/** Abilities */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_ABILITY_HEAL);
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_ABILITY_TYPE_SKILL); // Marks an outgoing hit as delivered by a skill (vs basic attack)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_ABILITY_TYPE_SKILL);
 
-/** Pipelines */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_PIPELINE_DEATH_HANDLED);
 
-/** Events */
-// The owner has hit an entity with a hitbox - Triggered by melee attacks, if the animation HITBOX hits a target.
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_HITBOX);
-// The owner is about to damage an entity - Triggered by Damage Pipeline DamageContainer's DamageContextEffect. Use cases: Modify damage context before applying
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DMG_PRE);
-// The owner has damaged an entity - Triggered by Damage Pipeline DamageContainer's DamageApplicationEffect. Use cases: Apply damage to target and propagate event to LifeComponent
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DMG_DELIVERED);
-// The owner has been damaged - Triggered by LifeComponent (LifeComponent decides how to interpret an actor's life and death)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DMG_RECEIVED);
 
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DEATH_PRE);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DEATH);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DEATH_POST);
-// The owner has killed an entity - Triggered by LifeComponent (LifeComponent decides how to interpret an actor's life and death)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_KILL);
-// The owner has healed an entity - Triggered by Healing LifeComponent (LifeComponent decides how to interpret an actor's life and death)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_HEAL_DELIVERED);
-// The owner has been healed - Triggered by Healing LifeComponent (LifeComponent decides how to interpret an actor's life and death)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_HEAL_RECEIVED);
-// The owner has hit a destructible object - Triggered by ApplyDamageContainerSpec if it's target data has actors that implement the IDestructible interface
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_DMG_DESTRUCTIBLE);
-// A player has genuinely acquired item(s) (AddItem / PickupItem true grant). Fired server-side on the acquiring player's
-// ASC; EventMagnitude = quantity acquired, TargetTags carries the item's ItemType. Lets the generic ObjectiveTracker
-// drive non-combat "collect N <type>" objectives (the trigger-event family was combat-only before this).
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ITEM_ACQUIRED);
 
-// A player entered a location-objective volume (AMythicLocationObjectiveVolume). Fired server-side on the player's ASC;
-// TargetTags carries the volume's LocationTag so the ObjectiveTracker can drive non-combat "reach/visit X" objectives.
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_REACHED_LOCATION);
 
-// A player talked to a quest-relevant NPC (one with a QuestNpcTag). Fired server-side on the player's ASC from the
-// dialogue path; TargetTags carries the NPC's QuestNpcTag so the ObjectiveTracker can drive "talk to X" objectives.
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_TALKED_TO_NPC);
 
-// A player USED (actioned/consumed) an item. Fired server-side on the player's ASC from the generic consumable ability;
-// TargetTags carries the item's ItemType so the ObjectiveTracker can drive "use N <type>" objectives (distinct from
-// "collect N" — using is a different verb than obtaining).
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ITEM_USED);
 
-// A player EQUIPPED a weapon (first genuine equip, gated by a per-item SaveGame marker so save-restore re-activation does
-// NOT re-fire it). Fired server-side on the player's ASC; TargetTags carries the item's ItemType so the ObjectiveTracker
-// can drive "equip N <type>" objectives. (Weapon-equip only for now; other equipment fragments would emit the same way.)
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ITEM_EQUIPPED);
 
-// The owner has started an attack
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ATTACK_BEGIN);
-// The owner has ended an attack
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_ATTACK_END);
 
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_SKILL_BEGIN);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_SKILL_END);
 
-/** GameplayCues */
+
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_CUE_ABILITY_HEAL_ACTIVATED);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_CUE_ABILITY_HEAL_RECEIVED);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_CUE_ABILITY_LEVELUP);
 
-// Internal Notifies - format NOTIFY_<SYSTEM>_<ACTION>_<RESULT>_<REASON>
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(NOTIFY_ABILITY_ACTIVATION_FAILED_COST);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(NOTIFY_ABILITY_ACTIVATION_FAILED_ISDEAD);
 
-/** Input */
-// Input tags control ability input processing behavior
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_INPUT_BLOCKED); // When present on ASC, all ability input is blocked and cleared
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_INPUT_BLOCKED);
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(AI_KIND_CREATURE);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(AI_KIND_HUMANOID);
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_EVENT_PROFICIENCY_GAINED);

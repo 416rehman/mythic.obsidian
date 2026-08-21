@@ -1,4 +1,3 @@
-// Mythic — toggleable world interactable implementation
 
 #include "MythicToggleable.h"
 
@@ -9,12 +8,14 @@
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Net/UnrealNetwork.h"
-#include "Player/MythicPlayerController.h" // routes client interaction → server via ServerInteractPrimary
+#include "Player/MythicPlayerController.h"
+#include "Player/Proficiency/ProficiencyComponent.h"
+#include "Player/Proficiency/ProficiencyDefinition.h"
+#include "World/Ownership/MythicOwnership.h"
 
 AMythicToggleable::AMythicToggleable() {
     PrimaryActorTick.bCanEverTick = false;
     bReplicates = true;
-    // A door/lever changes state rarely — stay dormant until a toggle wakes it (relevancy/dormancy at scale).
     NetDormancy = DORM_DormantAll;
     SetNetCullDistanceSquared(FMath::Square(6000.f));
 
@@ -33,29 +34,23 @@ void AMythicToggleable::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &Ou
 
 void AMythicToggleable::BeginPlay() {
     Super::BeginPlay();
-    // Apply the authored initial state on the server before any save restore overrides it. (Save restore runs its
-    // own Serialize pass on bIsOn; this only seeds a freshly-placed actor.)
     if (HasAuthority() && bStartsOn && !bIsOn) {
         bIsOn = true;
     }
-    // Match the visuals to the (possibly restored) state on spawn, every machine.
     OnToggleVisualChanged(bIsOn);
     OnLockStateChanged(bLocked);
 }
 
 FMythicToggleOutcome AMythicToggleable::ResolveToggle(const bool bCurrentlyOn, const bool bLocked, const bool bOneShot, const bool bHasActivated) {
     FMythicToggleOutcome Outcome;
-    Outcome.bNewIsOn = bCurrentlyOn; // default: unchanged
+    Outcome.bNewIsOn = bCurrentlyOn;
 
-    // A locked object ignores interaction entirely.
     if (bLocked) {
         return Outcome;
     }
-    // A one-shot that has already fired stays put.
     if (bOneShot && bHasActivated) {
         return Outcome;
     }
-    // A one-shot that hasn't fired only ever goes ON; a normal toggle flips.
     const bool bTarget = bOneShot ? true : !bCurrentlyOn;
     Outcome.bNewIsOn = bTarget;
     Outcome.bChanged = (bTarget != bCurrentlyOn);
@@ -79,7 +74,6 @@ UMythicItemInstance *AMythicToggleable::FindMatchingKey(AActor *Interactor) cons
     if (!RequiredKeyTag.IsValid()) {
         return nullptr;
     }
-    // Resolve the acting controller (the interaction may pass a controller or a pawn).
     AController *Controller = Cast<AController>(Interactor);
     if (!Controller) {
         if (const APawn *Pawn = Cast<APawn>(Interactor)) {
@@ -88,7 +82,7 @@ UMythicItemInstance *AMythicToggleable::FindMatchingKey(AActor *Interactor) cons
     }
     const IInventoryProviderInterface *Provider = Cast<IInventoryProviderInterface>(Controller);
     if (!Provider) {
-        return nullptr; // a non-player / inventory-less interactor can't carry keys
+        return nullptr;
     }
 
     FGameplayTagContainer Probe;
@@ -114,20 +108,85 @@ bool AMythicToggleable::ServerTryUnlockWithKey(AActor *Interactor) {
         return false;
     }
     if (!bLocked) {
-        return true; // already unlocked
+        return true;
     }
     UMythicItemInstance *Key = FindMatchingKey(Interactor);
     const FMythicUnlockOutcome Plan = PlanKeyedUnlock(bLocked, Key != nullptr, bConsumeKeyOnUnlock);
     if (!Plan.bUnlock) {
-        return false; // no matching key (or no key tag) — stays locked
+        return false;
     }
 
     bLocked = false;
-    FlushNetDormancy();       // wake the dormant actor so the bLocked change replicates now
-    OnLockStateChanged(false); // server/listen-host visual; remote clients get it via OnRep_Locked
+    FlushNetDormancy();
+    OnLockStateChanged(false);
     if (Plan.bConsumeKey && Key) {
-        Key->ConsumeItem(1); // single-use key spent on the unlock
+        Key->ConsumeItem(1);
     }
+    return true;
+}
+
+float AMythicToggleable::ComputePickSuccessChance(const int32 SkillLevel, const int32 LockDifficulty) {
+    constexpr float BaseChance = 0.5f;
+    constexpr float PerLevelStep = 0.05f;
+    constexpr float MinChance = 0.05f;
+    constexpr float MaxChance = 0.95f;
+    const float Raw = BaseChance + PerLevelStep * static_cast<float>(SkillLevel - LockDifficulty);
+    return FMath::Clamp(Raw, MinChance, MaxChance);
+}
+
+bool AMythicToggleable::ResolvePickLock(const int32 SkillLevel, const int32 LockDifficulty, const float Roll01) {
+    return Roll01 < ComputePickSuccessChance(SkillLevel, LockDifficulty);
+}
+
+int32 AMythicToggleable::ResolveLockpickLevel(AActor *Interactor) const {
+    if (!LockpickProficiency) {
+        return 0;
+    }
+    AController *Controller = Cast<AController>(Interactor);
+    if (!Controller) {
+        if (const APawn *Pawn = Cast<APawn>(Interactor)) {
+            Controller = Pawn->GetController();
+        }
+    }
+    const AMythicPlayerController *PC = Cast<AMythicPlayerController>(Controller);
+    if (!PC) {
+        return 0;
+    }
+    const UProficiencyComponent *Prof = PC->GetProficiencyComponent();
+    if (!Prof) {
+        return 0;
+    }
+    for (int32 i = 0; i < Prof->Proficiencies.Num(); ++i) {
+        if (Prof->Proficiencies[i].Definition == LockpickProficiency) {
+            return Prof->GetSummary(i).Level;
+        }
+    }
+    return 0;
+}
+
+bool AMythicToggleable::ServerTryPickLock(AActor *Interactor) {
+    if (!HasAuthority()) {
+        return false;
+    }
+    if (!bLocked) {
+        return true;
+    }
+    if (!bLockPickable) {
+        return false;
+    }
+
+    if (UMythicOwnershipComponent *Ownership = FindComponentByClass<UMythicOwnershipComponent>()) {
+        Ownership->TrySubmitTheft(Interactor);
+    }
+
+    const int32 SkillLevel = ResolveLockpickLevel(Interactor);
+    if (!ResolvePickLock(SkillLevel, LockpickDifficulty, FMath::FRand())) {
+        return false;
+    }
+
+    bLocked = false;
+    FlushNetDormancy();
+    OnLockStateChanged(false);
     return true;
 }
 
@@ -135,23 +194,21 @@ void AMythicToggleable::ServerToggle(AActor *Interactor) {
     if (!HasAuthority()) {
         return;
     }
-    // A locked object first tries the interactor's key: a matching key unlocks it (and this same interaction then
-    // opens it). Without a key it stays locked and the toggle below no-ops. (Pre-keyed behaviour for an empty
-    // RequiredKeyTag is unchanged — FindMatchingKey returns nullptr, so bLocked is untouched.)
     if (bLocked) {
-        ServerTryUnlockWithKey(Interactor);
+        const bool bUnlockedByKey = ServerTryUnlockWithKey(Interactor);
+        if (!bUnlockedByKey && bLockPickable) {
+            ServerTryPickLock(Interactor);
+        }
     }
     const FMythicToggleOutcome Outcome = ResolveToggle(bIsOn, bLocked, bOneShot, bHasActivated);
     if (bOneShot && Outcome.bChanged) {
         bHasActivated = true;
     }
     if (!Outcome.bChanged) {
-        return; // locked / one-shot-spent / already in the target state — nothing to do
+        return;
     }
     ApplyState(Outcome.bNewIsOn);
 
-    // Mirror the new state to linked targets (a lever → its gates). One hop: set their state directly, no re-toggle,
-    // so a link cycle can't cascade.
     for (const TObjectPtr<AMythicToggleable> &Linked : LinkedToggleables) {
         if (Linked && Linked != this) {
             Linked->ApplyState(Outcome.bNewIsOn);
@@ -164,8 +221,8 @@ void AMythicToggleable::ApplyState(const bool bNewIsOn) {
         return;
     }
     bIsOn = bNewIsOn;
-    FlushNetDormancy();       // wake the dormant actor so the bIsOn change replicates now
-    OnToggleVisualChanged(bIsOn); // server/listen-host visual; remote clients get it via OnRep
+    FlushNetDormancy();
+    OnToggleVisualChanged(bIsOn);
 }
 
 void AMythicToggleable::OnRep_IsOn() {
@@ -176,20 +233,15 @@ void AMythicToggleable::OnRep_Locked() {
     OnLockStateChanged(bLocked);
 }
 
-void AMythicToggleable::DeserializeCustomData(const TArray<uint8> & /*InCustomData*/) {
-    // The raw SaveGame Serialize just restored bIsOn + bLocked directly into memory — it did NOT wake this dormant
-    // actor (so the restored replicated values wouldn't reach already-relevant clients) and did NOT re-fire the cosmetic
-    // BP events (BeginPlay fired them with the pre-restore authored values). Reconcile both, for bLocked AND bIsOn.
+void AMythicToggleable::DeserializeCustomData(const TArray<uint8> &) {
     if (HasAuthority()) {
-        FlushNetDormancy(); // push the restored bLocked + bIsOn to connected clients
+        FlushNetDormancy();
     }
     OnToggleVisualChanged(bIsOn);
     OnLockStateChanged(bLocked);
 }
 
 void AMythicToggleable::OnPrimaryInteract_Implementation(AActor *Interactor) {
-    // The prompt widget calls this on the CLIENT (Interactor is the player controller). Route to the server via the
-    // generic interaction RPC; when it re-invokes us server-side, do the authoritative toggle.
     if (HasAuthority()) {
         ServerToggle(Interactor);
         return;
@@ -202,7 +254,6 @@ void AMythicToggleable::OnPrimaryInteract_Implementation(AActor *Interactor) {
 }
 
 void AMythicToggleable::OnSecondaryInteract_Implementation(AActor *Interactor) {
-    // No default secondary action.
 }
 
 USceneComponent *AMythicToggleable::GetWidgetAttachmentComponent_Implementation() const {
@@ -210,16 +261,13 @@ USceneComponent *AMythicToggleable::GetWidgetAttachmentComponent_Implementation(
 }
 
 bool AMythicToggleable::GetInteractionData_Implementation(AActor *Interactor, FMythicInteractionData &OutInteractionData) const {
-    // A locked toggleable still shows its prompt (so the player learns it's locked); the server toggle no-ops.
     OutInteractionData.InputActionDataTable = InputActionDataTable;
     OutInteractionData.PrimaryInteractionName = PrimaryInteractionName;
     return true;
 }
 
 void AMythicToggleable::OnFocused_Implementation(AActor *Interactor) {
-    // Visual feedback handled in Blueprint.
 }
 
 void AMythicToggleable::OnUnfocused_Implementation(AActor *Interactor) {
-    // Visual feedback handled in Blueprint.
 }

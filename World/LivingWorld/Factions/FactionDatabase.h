@@ -1,5 +1,3 @@
-// Mythic Living World System — Faction Database
-// Cached faction data snapshot. Background thread computes, game thread reads lock-free.
 
 #pragma once
 
@@ -11,9 +9,6 @@
 #include "Engine/DataAsset.h"
 #include "FactionDatabase.generated.h"
 
-// ─────────────────────────────────────────────────────────────
-// Faction Relationship — Pairwise faction stance
-// ─────────────────────────────────────────────────────────────
 
 UENUM(BlueprintType)
 enum class EMythicFactionRelation : uint8 {
@@ -24,43 +19,19 @@ enum class EMythicFactionRelation : uint8 {
     Hostile UMETA(DisplayName = "Hostile")
 };
 
-// ─────────────────────────────────────────────────────────────
-// Faction Status — Lifecycle state (REQ-FAC-003)
-// ─────────────────────────────────────────────────────────────
 
 UENUM(BlueprintType)
 enum class EMythicFactionStatus : uint8 {
-    /** Faction is active and participating in the simulation */
     Active UMETA(DisplayName = "Active"),
 
-    /** Faction has been completely destroyed (no population, no territory) */
     Annihilated UMETA(DisplayName = "Annihilated"),
 
-    /** Faction was destroyed but retained enough population to form a resistance */
     Resistance UMETA(DisplayName = "Resistance"),
 
-    /** Faction exists in data but has zero presence (e.g. an ancient empire waiting for an event) */
     Dormant UMETA(DisplayName = "Dormant")
 };
 
-// ─────────────────────────────────────────────────────────────
-// Ideology Profile — Per-axis moral stance (designer-facing)
-// ─────────────────────────────────────────────────────────────
 
-/**
- * How strongly a faction feels about each moral axis. Range: -1.0 to +1.0 per axis.
- *   +1.0 = faction fully endorses this behavior (members do it, won't punish it).
- *   -1.0 = faction utterly condemns it (severe punishment, hostility toward offenders).
- *    0.0 = indifferent (no opinion, won't react).
- *
- * Simulation uses:
- *   - Dot-product against player/NPC moral signatures → checked against faction thresholds
- *     to decide reaction severity (disapproval, criminal charge, hostile response).
- *   - Diplomacy: ideology distance between two factions affects relationship score.
- *     Similar ideologies → trend toward allies. Opposed → trend toward hostile.
- *   - Economy: specific axes gate income sources (Theft → raid income, Authority → tax income).
- *   - Faction Evolution: ideology drift + schism detection compare axis values.
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicIdeologyProfile {
     GENERATED_BODY()
@@ -146,7 +117,6 @@ struct MYTHIC_API FMythicIdeologyProfile {
     UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float Arcane = 0.0f;
 
-    /** Indexed access for dot-product evaluation loops. */
     float GetAxis(EMythicMoralAxis Axis) const {
         switch (Axis) {
         case EMythicMoralAxis::Violence:
@@ -170,7 +140,6 @@ struct MYTHIC_API FMythicIdeologyProfile {
         }
     }
 
-    /** Indexed access for simulation writes. */
     float &GetAxisMutable(EMythicMoralAxis Axis) {
         switch (Axis) {
         case EMythicMoralAxis::Violence:
@@ -196,14 +165,7 @@ struct MYTHIC_API FMythicIdeologyProfile {
     }
 };
 
-// ─────────────────────────────────────────────────────────────
-// Faction Data — Runtime state for one faction
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Runtime data for a single faction. Maintained by the background simulation thread.
- * Game thread reads a snapshot copy.
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicFactionData {
     GENERATED_BODY()
@@ -216,7 +178,6 @@ struct MYTHIC_API FMythicFactionData {
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
     FGameplayTag FactionTag;
 
-    // ─── Display ──────────────────────────────────────────
 
     /**
      * If set, FactionColor below is used as this faction's display color (war-map, minimap, NPC appearance tint) instead
@@ -270,10 +231,6 @@ struct MYTHIC_API FMythicFactionData {
         Tooltip = "Severity threshold for hostile response (attack on sight, war declaration, lethal force)."))
     float HostileThreshold = 0.8f;
 
-    // ─── Behavior Flags (runtime-mutable, drive sim formula selection) ───
-    // These flags determine which simulation formulas apply to a faction.
-    // The sim can flip these at runtime based on faction evolution (e.g., a warband
-    // capturing enough territory gains bControlsTerritory + bHasCivilianPopulation).
 
     /**
      * Faction produces resources from territory cells and expands/defends via influence.
@@ -314,7 +271,6 @@ struct MYTHIC_API FMythicFactionData {
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Behavior")
     bool bCanNegotiate = true;
 
-    // ─── Economy ──────────────────────────────────────────
 
     /**
      * Designer-set production profile. Defines this faction's economic identity.
@@ -352,7 +308,6 @@ struct MYTHIC_API FMythicFactionData {
     UPROPERTY(BlueprintReadOnly, Category = "Economy")
     float MilitaryStrength = 0.5f;
 
-    // ─── Population ───────────────────────────────────────
 
     /**
      * Total population count. Set initial value here in data asset.
@@ -362,41 +317,15 @@ struct MYTHIC_API FMythicFactionData {
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Population")
     int32 Population = 0;
 
-    /**
-     * The faction's Population at the instant it was annihilated, captured by AnnihilateFaction BEFORE Population is
-     * zeroed, so the TickFactionEvolution refugee-absorption pass can grant a fraction of it to the nearest ally.
-     * Transient + within-tick: set on annihilation, consumed (cleared to 0) by the same tick's absorption pass, so it
-     * is always 0 between ticks and is NOT serialized. Without it the absorption pass was dead (the collector's
-     * `!bAlive && Population>0` predicate is mutually exclusive with AnnihilateFaction zeroing Population in one call).
-     */
     UPROPERTY(Transient)
     int32 LastAlivePopulation = 0;
 
-    /**
-     * Sticky latch set by the sim when Population first goes above 0 (and seeded from Population>0 at registration).
-     * Prevents annihilation of newly registered factions that haven't been populated yet (e.g., territory grid hasn't
-     * assigned cells). It is a one-way latch (never cleared), so it IS persisted via the custom Serialize() — a faction
-     * that lost its population but still holds territory must stay annihilation-eligible across reload. UPROPERTY(Transient)
-     * only suppresses UE's reflection-based serialization; it does NOT affect this class's explicit FArchive override.
-     */
     UPROPERTY(Transient)
     bool bHasBeenPopulated = false;
 
-    /**
-     * Dirty flag: set when ideology drifts during TickIdeologyMetabolism.
-     * Consumed by NPC generation pipeline to indicate spawned NPC templates need
-     * regeneration (personality, visual archetype, etc.). Reset after consumption.
-     * Phase 6: crystallization also reads this flag.
-     */
     UPROPERTY(Transient)
     bool bIdeologyDirty = false;
 
-    /**
-     * Edge-trigger latches for the distress chronicle beats (famine / military weakness). Set when the faction ENTERS
-     * the distress condition so TickHistoryAppend emits the chronicle event exactly ONCE per episode (not every tick),
-     * cleared when the condition resolves. Transient (not serialized) — a still-distressed faction re-logs once on
-     * reload, which is acceptable.
-     */
     UPROPERTY(Transient)
     bool bFamineActive = false;
 
@@ -411,25 +340,13 @@ struct MYTHIC_API FMythicFactionData {
     UPROPERTY(BlueprintReadOnly, Category = "Population")
     float LeaderSignificanceScore = 0.0f;
 
-    // ─── Territory ────────────────────────────────────────
 
     /** Number of territory grid cells this faction currently dominates. Sim-written from territory propagation. */
     UPROPERTY(BlueprintReadOnly, Category = "Territory")
     int32 ControlledCellCount = 0;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Faction Moral Profile — lightweight read DTO (ideology + thresholds)
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Just the fields needed to evaluate an action's severity against a faction
- * (FMythicMoralSignature::EvaluateActionSeverity). Returned by UMythicFactionDatabase::GetFactionMoralProfile so the hot
- * witness-perception path copies ~44 bytes under the snapshot lock instead of the entire FMythicFactionData (FText
- * DisplayName + four resource stocks + population/territory state). All faction-DB readers serialize on one mutex, so a
- * smaller per-read copy directly shortens the serialized critical path during a witness storm. Plain C++ (no USTRUCT) —
- * it is a transient game-thread read bundle, never serialized or exposed to Blueprint.
- */
 struct FMythicFactionMoralProfile {
     FMythicIdeologyProfile Ideology;
     float DisapproveThreshold = 0.2f;
@@ -437,9 +354,6 @@ struct FMythicFactionMoralProfile {
     float HostileThreshold = 0.8f;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Faction Database Settings — Data asset
-// ─────────────────────────────────────────────────────────────
 
 UCLASS(BlueprintType, Const)
 class MYTHIC_API UMythicFactionDatabaseSettings : public UDataAsset {
@@ -455,150 +369,80 @@ public:
     TArray<FMythicFactionData> InitialFactions;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Faction Database — Double-buffered faction state
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Central faction database. Background thread maintains the write copy,
- * game thread reads from the committed snapshot.
- *
- * Faction relationships are stored as a flat array (NxN matrix, packed upper triangle).
- */
 UCLASS()
 class MYTHIC_API UMythicFactionDatabase : public UObject {
     GENERATED_BODY()
 
 public:
-    /** Initialize from settings. Must be called once before use. */
     void Initialize(const UMythicFactionDatabaseSettings *Settings);
 
-    /** Cleanup arrays before destruction */
     virtual void BeginDestroy() override;
 
-    // ─── Write Interface (Background Thread Only) ─────────
 
-    /** Get mutable reference to a faction's data in the write buffer */
     FMythicFactionData *GetFactionMutable(FMythicFactionId Id);
 
-    /** Set the relationship between two factions */
     void SetRelationship(FMythicFactionId A, FMythicFactionId B, EMythicFactionRelation Relation);
 
-    /**
-     * Register a new faction at runtime (faction creation from schism/conquest).
-     * Returns the assigned FactionId, or invalid if the cap is reached.
-     */
     FMythicFactionId RegisterFaction(const FMythicFactionData &Data);
 
-    /**
-     * Create a resistance faction from the remnants of an annihilated faction (REQ-FAC-003).
-     * Copies ideology, assigns a 'Resistance' tag suffix, and sets status to Resistance.
-     * Returns the new FactionId, or invalid if creation fails.
-     */
     FMythicFactionId CreateFactionFromConquest(FMythicFactionId OriginalFaction, int32 SurvivorCount);
 
-    /** Mark a faction as annihilated */
     void AnnihilateFaction(FMythicFactionId Id);
 
-    /**
-     * Restore a standing Resistance faction to a full, Active faction (REQ-FAC-004) — the symmetric counterpart to the
-     * population-gated CreateFactionFromConquest formation path. No-op if the faction isn't currently a Resistance. The
-     * caller gates WHEN this happens (territory retaken — see WorldSimThread); this just performs the status transition.
-     */
     void RestoreResistanceToFaction(FMythicFactionId Id);
 
-    /** Get number of registered factions (for sim iteration bounds) */
     int32 GetRegisteredCount() const { return RegisteredCount; }
 
-    /** Get mutable faction data by raw index (for sim loops that iterate all factions) */
     FMythicFactionData *GetFactionMutableByIndex(int32 Index);
 
-    /** Read relationship from write buffer (for background thread reads during sim) */
     EMythicFactionRelation GetWriteRelationship(FMythicFactionId A, FMythicFactionId B) const;
 
-    /** Iterate all alive factions in write buffer (background thread only) */
     void ForEachAliveFactionMutable(TFunctionRef<void(FMythicFactionId, FMythicFactionData &)> Callback);
 
-    /** Commit the write buffer — game thread snapshot swap */
     void CommitWrites();
 
-    // ─── Read Interface (Game Thread — Lock-Free) ─────────
 
-    /** Get faction data by ID (read snapshot). Returns false if ID is invalid. Copies thread-safe snapshot. */
     bool GetFaction(FMythicFactionId Id, FMythicFactionData &OutData) const;
 
-    /** Lightweight read: copy ONLY a faction's moral-evaluation fields (ideology + the three severity thresholds) from
-     *  the snapshot. For the hot witness-perception path, which evaluates severity per near-witness — copying the full
-     *  FMythicFactionData there needlessly lengthened the SnapshotLock critical section every faction-DB reader shares.
-     *  Returns false if ID is invalid. Thread-safe (same lock as GetFaction). */
     bool GetFactionMoralProfile(FMythicFactionId Id, FMythicFactionMoralProfile &Out) const;
 
-    /** Get faction by gameplay tag. Linear scan — use sparingly. Copies thread-safe snapshot. Optionally returns ID. */
     bool FindFactionByTag(const FGameplayTag &Tag, FMythicFactionData &OutData, FMythicFactionId *OutId = nullptr) const;
 
-    /** Find faction ID by tag. Lightweight linear scan. Thread-safe. */
     FMythicFactionId FindFactionId(const FGameplayTag &Tag) const;
 
-    /** Get the relationship between two factions */
     EMythicFactionRelation GetRelationship(FMythicFactionId A, FMythicFactionId B) const;
 
-    /** Get the number of active (alive) factions */
     int32 GetActiveFactionCount() const;
 
-    /** Get the maximum faction capacity */
     int32 GetMaxFactions() const { return MaxFactions; }
 
-    /** Iterate all alive factions */
     void ForEachAliveFaction(TFunctionRef<void(FMythicFactionId, const FMythicFactionData &)> Callback) const;
 
-    /**
-     * Report a leadership candidate for a faction (game thread only).
-     * Called by the SignificanceProcessor when it encounters a Tier 2+ entity
-     * that belongs to a faction. If the entity's significance score exceeds
-     * the current leader's score, the entity becomes the new leader.
-     *
-     * @param FactionId     Faction to nominate a leader for
-     * @param EntityId      MASS entity ID of the candidate
-     * @param Score         Significance score of the candidate
-     */
     void ReportLeaderCandidate(FMythicFactionId FactionId, uint32 EntityId, float Score);
 
-    // ─── Serialization ───────────────────────────────────
 
-    /**
-     * Serialize all faction data and relationships for save/load.
-     * Includes ideology profiles, resources, population, relationships,
-     * leader tracking, and dirty flags.
-     */
     virtual void Serialize(FArchive &Ar) override;
 
 private:
     int32 MaxFactions = 0;
 
-    /** Write buffer — background thread only */
     UPROPERTY(Transient)
     TArray<FMythicFactionData> WriteFactions;
 
-    /** Read buffer — game thread snapshot */
     UPROPERTY(Transient)
     TArray<FMythicFactionData> ReadFactions;
 
-    /** Relationship matrix — flat array, indexed by RelationIndex(A, B) */
     UPROPERTY(Transient)
     TArray<EMythicFactionRelation> WriteRelationships;
 
     UPROPERTY(Transient)
     TArray<EMythicFactionRelation> ReadRelationships;
 
-    /** Number of factions currently registered. Atomic: the sim thread increments it under SimulationLock (RegisterFaction,
-     *  SpawnSplinterFaction), while game-thread accessors (GetFaction/GetActiveFactionCount/ForEachAliveFaction) read it
-     *  lock-free — a plain int32 there is a data race (benign-bounded, but real UB). Atomic load/store removes it. */
     std::atomic<int32> RegisteredCount = 0;
 
-    /** Lock protecting the Read snapshots from concurrent modification by CommitWrites */
     mutable FCriticalSection SnapshotLock;
 
-    /** Flatten two faction IDs into a relationship matrix index (upper triangle) */
     int32 RelationIndex(FMythicFactionId A, FMythicFactionId B) const {
         const int32 Low = FMath::Min(A.Index, B.Index);
         const int32 High = FMath::Max(A.Index, B.Index);

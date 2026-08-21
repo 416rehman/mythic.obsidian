@@ -17,12 +17,9 @@ class MYTHIC_API IMythicRegistryInterface {
     GENERATED_BODY()
 
 public:
-    // return the cached ability system component directly
     virtual UAbilitySystemComponent* GetCachedASC() const = 0;
 
-    // return the cached inventory component directly
     virtual UMythicInventoryComponent* GetCachedInventory() const = 0;
 
-    // return the cached life component directly
     virtual UMythicLifeComponent* GetCachedLife() const = 0;
 };

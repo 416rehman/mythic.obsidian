@@ -1,8 +1,6 @@
-// Mythic Living World — Native Gameplay Tag Definitions
 
 #include "World/LivingWorld/MythicTags_LivingWorld.h"
 
-// ─── Event Tags (Causal Fabric) ──────────────────────────────
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EVENT_TERRITORY_SETTLEMENT_TRANSFER, "LivingWorld.Event.Territory.SettlementTransfer")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EVENT_FACTION_SCHISM, "LivingWorld.Event.Faction.Schism")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EVENT_FACTION_RESISTANCE, "LivingWorld.Event.Faction.Resistance")
@@ -16,7 +14,6 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EVENT_DIPLOMACY_SHIFT, "LivingWorld.Event
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EVENT_FACTION_ABSORPTION, "LivingWorld.Event.Faction.Absorption")
 UE_DEFINE_GAMEPLAY_TAG(TAG_WORLD_EVENT_DEATH_PERMANENT, "World.Event.Death.Permanent")
 
-// ─── Action Tags (Moral Evaluation & Crime Pipeline) ─────────
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ACTION_VIOLENCE_ATTACK, "LivingWorld.Action.Violence.Attack")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ACTION_VIOLENCE_KILL, "LivingWorld.Action.Violence.Kill")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ACTION_THEFT_STEAL, "LivingWorld.Action.Theft.Steal")
@@ -26,8 +23,6 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ACTION_MERCY_HEAL, "LivingWorld.Action.Me
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ACTION_MERCY_TEND, "LivingWorld.Action.Mercy.Tend")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ACTION_MAGIC_CAST, "LivingWorld.Action.Magic.Cast")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ACTION_MAGIC_FORBIDDEN, "LivingWorld.Action.Magic.Forbidden")
-// Companion betrayal — registers the tag the PartySubsystem belief/event + brain already request by name (was
-// unregistered → RequestGameplayTag returned an empty tag and could ensure).
 UE_DEFINE_GAMEPLAY_TAG(TAG_WORLD_ACTION_BETRAYAL, "World.Action.Betrayal")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ACTION_AUTHORITY_ENFORCE, "LivingWorld.Action.Authority.Enforce")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ACTION_AUTHORITY_REPORT, "LivingWorld.Action.Authority.Report")
@@ -35,7 +30,6 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ACTION_SOCIAL_RALLY, "LivingWorld.Action.
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ACTION_SOCIAL_FLEE, "LivingWorld.Action.Social.Flee")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ACTION_SOCIAL_SUBMIT, "LivingWorld.Action.Social.Submit")
 
-// ─── Phase 5 Tags (Cognitive, Party, Encounters, Schemes) ────
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EVENT_SCHEME_COMPLETED, "LivingWorld.Event.Scheme.Completed")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EVENT_SCHEME_DISCOVERED, "LivingWorld.Event.Scheme.Discovered")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EVENT_ENCOUNTER_SPAWNED, "LivingWorld.Event.Encounter.Spawned")
@@ -46,13 +40,11 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EVENT_COMPANION_DEPARTED, "LivingWorld.Ev
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EVENT_COMPANION_BETRAYED, "LivingWorld.Event.Companion.Betrayed")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EVENT_COGNITIVE_INTENTION_CHANGED, "LivingWorld.Event.Cognitive.IntentionChanged")
 
-// ─── Phase 6 Tags (Behavioral Responses & Emotions) ──────────
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EMOTION_JOY, "LivingWorld.Emotion.Joy")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EMOTION_DESPAIR, "LivingWorld.Emotion.Despair")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EMOTION_FEAR, "LivingWorld.Emotion.Fear")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_EMOTION_GRIEF, "LivingWorld.Emotion.Grief")
 
-// ─── NPC Role Tags (Dynamic-Population — role-from-context) ───
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_ROLE_CIVILIAN, "NPC.Role.Civilian")
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_ROLE_FARMER, "NPC.Role.Farmer")
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_ROLE_MERCHANT, "NPC.Role.Merchant")
@@ -66,13 +58,11 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_ROLE_SOCIALITE, "NPC.Role.Socialite")
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_ROLE_NOBLE, "NPC.Role.Noble")
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_ROLE_BANDIT, "NPC.Role.Bandit")
 
-// ─── NPC Group Activity Tags (clustered spawning, Step 4) ────
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_GROUP_ACTIVITY, "NPC.Group.Activity")
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_GROUP_RETINUE, "NPC.Group.Retinue")
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_GROUP_BARTER, "NPC.Group.Barter")
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_GROUP_SOCIAL, "NPC.Group.Social")
 
-// ─── NPC Activity Tags (context-driven activity catalog, Step 3) ──
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_ACTIVITY, "NPC.Activity")
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_ACTIVITY_FISH, "NPC.Activity.Fish")
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_ACTIVITY_BARTER, "NPC.Activity.Barter")
@@ -82,7 +72,6 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_ACTIVITY_SOCIALIZE, "NPC.Activity.Socialize")
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_ACTIVITY_PATROL, "NPC.Activity.Patrol")
 UE_DEFINE_GAMEPLAY_TAG(TAG_NPC_ACTIVITY_WANDER, "NPC.Activity.Wander")
 
-// ─── Encounter Type Tags (EncounterDirector code-default templates) ──
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ENCOUNTER_BANDIT_AMBUSH, "LivingWorld.Encounter.BanditAmbush")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ENCOUNTER_PATROL, "LivingWorld.Encounter.Patrol")
 UE_DEFINE_GAMEPLAY_TAG(TAG_LIVINGWORLD_ENCOUNTER_RAID, "LivingWorld.Encounter.Raid")

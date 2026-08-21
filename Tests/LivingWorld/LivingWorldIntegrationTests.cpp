@@ -1,7 +1,3 @@
-// Mythic Living World — Integration Tests
-// Full pipeline testing using MASS entities, subsystems, and processors.
-// Tests the complete event → witness → pressure → significance flow.
-// Run via: Session Frontend → Automation → Mythic.LivingWorld.Integration
 
 #include "Misc/AutomationTest.h"
 #include "Tests/AutomationCommon.h"
@@ -22,9 +18,6 @@
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 
-// ═══════════════════════════════════════════════════════════════
-// Helpers for integration tests
-// ═══════════════════════════════════════════════════════════════
 
 namespace LivingWorldIntegrationHelpers {
     FMythicFactionId MakeFactionId(uint8 Index) {
@@ -38,7 +31,6 @@ namespace LivingWorldIntegrationHelpers {
         Settings->MaxFactions = 10;
         Settings->InitialFactions.SetNum(2);
 
-        // Faction 0: Pacifist — condemns violence
         {
             FMythicFactionData &F = Settings->InitialFactions[0];
             F.DisplayName = FText::FromString(TEXT("Pacifists"));
@@ -52,7 +44,6 @@ namespace LivingWorldIntegrationHelpers {
             F.HostileThreshold = 0.6f;
         }
 
-        // Faction 1: Warlike — endorses violence
         {
             FMythicFactionData &F = Settings->InitialFactions[1];
             F.DisplayName = FText::FromString(TEXT("Warriors"));
@@ -70,11 +61,6 @@ namespace LivingWorldIntegrationHelpers {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Test: Witness perception logic
-// Verifies that moral evaluation correctly classifies severity
-// when a witness entity observes an event near its cell.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldIntegrationWitnessDetectionTest,
@@ -82,15 +68,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FLivingWorldIntegrationWitnessDetectionTest::RunTest(const FString &Parameters) {
-    // Setup faction database
     auto *FactionDB = NewObject<UMythicFactionDatabase>();
     FactionDB->Initialize(LivingWorldIntegrationHelpers::CreateFactionSettings());
 
-    // Create a violent combat event
     FMythicWorldEvent CombatEvent;
     CombatEvent.WorldTime = 10.0;
     CombatEvent.Cell = FMythicCellCoord(5, 5);
-    CombatEvent.PrimaryFaction = LivingWorldIntegrationHelpers::MakeFactionId(1); // Warlike perpetrator
+    CombatEvent.PrimaryFaction = LivingWorldIntegrationHelpers::MakeFactionId(1);
     CombatEvent.Significance = 0.8f;
     CombatEvent.CategoryFlags = EMythicEventCategory::Combat;
     CombatEvent.MoralVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Violence)] = 0.9f;
@@ -98,7 +82,6 @@ bool FLivingWorldIntegrationWitnessDetectionTest::RunTest(const FString &Paramet
     const FMythicCellCoord EventCell = CombatEvent.Cell;
     constexpr int32 HearingRadius = 3;
 
-    // Simulate witness entities at various distances from the event
     struct TestWitness {
         FMythicCellCoord Cell;
         FMythicFactionId Faction;
@@ -107,21 +90,15 @@ bool FLivingWorldIntegrationWitnessDetectionTest::RunTest(const FString &Paramet
     };
 
     TArray<TestWitness> Witnesses;
-    // Near pacifist witness — should hear and condemn
     Witnesses.Add({FMythicCellCoord(5, 5), LivingWorldIntegrationHelpers::MakeFactionId(0), true, TEXT("Same cell pacifist")});
-    // Near warlike witness — should hear but ignore (aligned)
     Witnesses.Add({FMythicCellCoord(6, 5), LivingWorldIntegrationHelpers::MakeFactionId(1), true, TEXT("Adjacent warlike")});
-    // Far witness — outside hearing range
     Witnesses.Add({FMythicCellCoord(20, 20), LivingWorldIntegrationHelpers::MakeFactionId(0), false, TEXT("Far pacifist")});
-    // Edge of range witness
     Witnesses.Add({FMythicCellCoord(5, 8), LivingWorldIntegrationHelpers::MakeFactionId(0), true, TEXT("Edge range pacifist")});
-    // Just outside range
     Witnesses.Add({FMythicCellCoord(9, 5), LivingWorldIntegrationHelpers::MakeFactionId(0), false, TEXT("Outside range pacifist")});
 
     int32 WitnessResultCount = 0;
 
     for (const TestWitness &W : Witnesses) {
-        // Cell-distance hearing check (same as WitnessPerceptionProcessor)
         const int32 CellDist = FMath::Abs(W.Cell.X - EventCell.X) + FMath::Abs(W.Cell.Y - EventCell.Y);
         const bool bInRange = CellDist <= HearingRadius;
 
@@ -131,7 +108,6 @@ bool FLivingWorldIntegrationWitnessDetectionTest::RunTest(const FString &Paramet
             continue;
         }
 
-        // Moral evaluation — same code path as WitnessPerceptionProcessor
         FMythicFactionData FactionData;
         if (!FactionDB->GetFaction(W.Faction, FactionData)) {
             continue;
@@ -145,15 +121,12 @@ bool FLivingWorldIntegrationWitnessDetectionTest::RunTest(const FString &Paramet
             FactionData.HostileThreshold
             );
 
-        if (W.Faction.Index == 0) // Pacifist
+        if (W.Faction.Index == 0)
         {
-            // Violence(0.9) * Ideology.Violence(-0.8) = -0.72 → Severity = 0.72
-            // 0.72 > HostileThreshold(0.6) → Hostile
             TestEqual(*FString::Printf(TEXT("%s severity"), *W.Description), Severity, EMythicMoralSeverity::Hostile);
         }
-        else if (W.Faction.Index == 1) // Warlike
+        else if (W.Faction.Index == 1)
         {
-            // Violence(0.9) * Ideology.Violence(0.9) = 0.81 → Severity = -0.81 → Ignore
             TestEqual(*FString::Printf(TEXT("%s severity"), *W.Description), Severity, EMythicMoralSeverity::Ignore);
         }
 
@@ -162,17 +135,11 @@ bool FLivingWorldIntegrationWitnessDetectionTest::RunTest(const FString &Paramet
         }
     }
 
-    // At least some witnesses should produce results
     TestTrue(TEXT("At least one witness should produce a non-Ignore result"), WitnessResultCount > 0);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Test: Pressure accumulation mechanics
-// Verifies that witness results correctly map to pressure channels
-// and that severity magnitude scaling works.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldIntegrationPressureAccumulationTest,
@@ -180,12 +147,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FLivingWorldIntegrationPressureAccumulationTest::RunTest(const FString &Parameters) {
-    // Create a fresh psychodynamic fragment (zero pressure)
     FMythicPsychodynamicFragment Psycho;
     FMemory::Memzero(Psycho.Pressure, sizeof(Psycho.Pressure));
     Psycho.LastEventTime = 0.0;
 
-    // Create witness results — same logic as PressureProcessor
     FMythicWitnessResult CombatResult;
     CombatResult.Severity = EMythicMoralSeverity::Condemn;
     CombatResult.EventCategoryFlags = EMythicEventCategory::Combat;
@@ -209,7 +174,6 @@ bool FLivingWorldIntegrationPressureAccumulationTest::RunTest(const FString &Par
     const int32 GriefIdx = static_cast<int32>(EMythicPressureChannel::Grief);
     const int32 WrathIdx = static_cast<int32>(EMythicPressureChannel::Wrath);
 
-    // Apply pressure — same logic as PressureProcessor::Execute
     auto ApplyPressure = [&](const FMythicWitnessResult &Result) {
         float SeverityMagnitude = 0.0f;
         switch (Result.Severity) {
@@ -249,25 +213,16 @@ bool FLivingWorldIntegrationPressureAccumulationTest::RunTest(const FString &Par
     ApplyPressure(CrimeResult);
     ApplyPressure(DeathResult);
 
-    // Verify pressure channels
-    // Combat (Condemn, sig=0.8): Threat += 0.7*0.8=0.56, Wrath += 0.56*0.5=0.28
     TestNearlyEqual(TEXT("Threat pressure from combat"), Psycho.Pressure[ThreatIdx], 0.56f, 0.01f);
     TestNearlyEqual(TEXT("Wrath pressure from combat"), Psycho.Pressure[WrathIdx], 0.28f, 0.01f);
 
-    // Crime (Hostile, sig=0.6): Injustice += 1.0*0.6=0.6
     TestNearlyEqual(TEXT("Injustice pressure from crime"), Psycho.Pressure[InjusticeIdx], 0.6f, 0.01f);
 
-    // Death (Disapprove, sig=0.5): Grief += 0.3*0.5*0.8=0.12
     TestNearlyEqual(TEXT("Grief pressure from death"), Psycho.Pressure[GriefIdx], 0.12f, 0.01f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Test: Pressure venting mechanics
-// Verifies that pressure above threshold triggers venting
-// and pressure is halved.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldIntegrationPressureVentingTest,
@@ -277,21 +232,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FLivingWorldIntegrationPressureVentingTest::RunTest(const FString &Parameters) {
     constexpr float VentThreshold = 0.8f;
 
-    // Entity with high pressure in Threat channel
     FMythicPsychodynamicFragment Psycho;
     FMemory::Memzero(Psycho.Pressure, sizeof(Psycho.Pressure));
     Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Threat)] = 1.2f;
     Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Injustice)] = 0.3f;
     Psycho.LastEventTime = 5.0;
 
-    // Personality with Fight as dominant vent channel
     FMythicPersonalityFragment Personality;
     FMemory::Memzero(Personality.VentWeights, sizeof(Personality.VentWeights));
     Personality.VentWeights[static_cast<int32>(EMythicVentChannel::Fight)] = 0.7f;
     Personality.VentWeights[static_cast<int32>(EMythicVentChannel::Flee)] = 0.2f;
     Personality.VentWeights[static_cast<int32>(EMythicVentChannel::Report)] = 0.1f;
 
-    // Vent check — same logic as PressureProcessor
     float MaxPressure = 0.0f;
     int32 MaxPressureChannel = -1;
     for (int32 c = 0; c < PressureChannelCount; ++c) {
@@ -304,7 +256,6 @@ bool FLivingWorldIntegrationPressureVentingTest::RunTest(const FString &Paramete
     TestEqual(TEXT("Max pressure channel should be Threat"), MaxPressureChannel, static_cast<int32>(EMythicPressureChannel::Threat));
     TestTrue(TEXT("Max pressure should exceed vent threshold"), MaxPressure >= VentThreshold);
 
-    // Route through personality
     bool bVented = false;
     int32 SelectedVentChannel = -1;
     if (MaxPressure >= VentThreshold && MaxPressureChannel >= 0) {
@@ -325,17 +276,12 @@ bool FLivingWorldIntegrationPressureVentingTest::RunTest(const FString &Paramete
     TestNearlyEqual(TEXT("Threat pressure should be halved after vent"),
                     Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Threat)], 0.6f, 0.01f);
 
-    // Injustice should be unchanged (below threshold)
     TestNearlyEqual(TEXT("Injustice unchanged"),
                     Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Injustice)], 0.3f, 0.01f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Test: Significance scoring formula
-// Verifies the weighted score calculation matches expected output.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldIntegrationSignificanceRescoreTest,
@@ -343,7 +289,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FLivingWorldIntegrationSignificanceRescoreTest::RunTest(const FString &Parameters) {
-    // Weights from default settings
     constexpr float ProxWeight = 0.4f;
     constexpr float EventWeight = 0.3f;
     constexpr float EmotionWeight = 0.3f;
@@ -351,41 +296,30 @@ bool FLivingWorldIntegrationSignificanceRescoreTest::RunTest(const FString &Para
     constexpr float EventScalingFactor = 16.0f;
     constexpr float PressureScalingFactor = 3.0f;
 
-    // Entity at cell (5,5), player at cell (5,6)
     FMythicCellCoord EntityCell(5, 5);
     FMythicCellCoord PlayerCell(5, 6);
 
-    // Proximity: distance = |5-5| + |5-6| = 1
     const float CellDist = static_cast<float>(
         FMath::Abs(EntityCell.X - PlayerCell.X) + FMath::Abs(EntityCell.Y - PlayerCell.Y));
     const float ProximityScore = FMath::Max(0.0f, 1.0f - (CellDist / FMath::Max(SpawnRadius, 1.0f)));
     TestNearlyEqual(TEXT("Proximity score for distance=1"), ProximityScore, 0.9f, 0.01f);
 
-    // Event count: 8 events
     constexpr uint16 EventCount = 8;
     const float EventScore = FMath::Min(1.0f, static_cast<float>(EventCount) / EventScalingFactor);
     TestNearlyEqual(TEXT("Event score for 8 events"), EventScore, 0.5f, 0.01f);
 
-    // Emotional intensity: total pressure = 1.5 across all channels
     float TotalPressure = 1.5f;
     const float EmotionScore = FMath::Min(1.0f, TotalPressure / PressureScalingFactor);
     TestNearlyEqual(TEXT("Emotion score for 1.5 total pressure"), EmotionScore, 0.5f, 0.01f);
 
-    // Final score
     const float FinalScore = FMath::Clamp(
         ProxWeight * ProximityScore + EventWeight * EventScore + EmotionWeight * EmotionScore,
         0.0f, 1.0f);
-    // 0.4*0.9 + 0.3*0.5 + 0.3*0.5 = 0.36 + 0.15 + 0.15 = 0.66
     TestNearlyEqual(TEXT("Final significance score"), FinalScore, 0.66f, 0.01f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Test: Tier promotion threshold
-// Verifies that entities are promoted to Tier 1 when score
-// exceeds PromotionThreshold + Hysteresis.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldIntegrationSignificancePromotionTest,
@@ -397,13 +331,11 @@ bool FLivingWorldIntegrationSignificancePromotionTest::RunTest(const FString &Pa
     constexpr float DemotionThreshold = 0.2f;
     constexpr float Hysteresis = 0.05f;
 
-    // Entity at Tier 0 with high score
     FMythicSignificanceFragment Sig;
     Sig.Tier = EMythicSignificanceTier::Tier0_Ambient;
-    Sig.Score = 0.7f; // Well above PromotionThreshold + Hysteresis = 0.55
+    Sig.Score = 0.7f;
     Sig.bDirty = false;
 
-    // Promotion check — same as SignificanceProcessor
     bool bPromoted = false;
     if (Sig.Tier == EMythicSignificanceTier::Tier0_Ambient
         && Sig.Score >= (PromotionThreshold + Hysteresis)) {
@@ -414,10 +346,9 @@ bool FLivingWorldIntegrationSignificancePromotionTest::RunTest(const FString &Pa
     TestTrue(TEXT("Entity with score 0.7 should be promoted"), bPromoted);
     TestEqual(TEXT("Tier should be Reactive"), Sig.Tier, EMythicSignificanceTier::Tier1_Reactive);
 
-    // Entity just below threshold — should NOT promote
     FMythicSignificanceFragment SigLow;
     SigLow.Tier = EMythicSignificanceTier::Tier0_Ambient;
-    SigLow.Score = 0.54f; // Below PromotionThreshold + Hysteresis = 0.55
+    SigLow.Score = 0.54f;
     SigLow.bDirty = false;
 
     bool bShouldNotPromote = false;
@@ -430,11 +361,6 @@ bool FLivingWorldIntegrationSignificancePromotionTest::RunTest(const FString &Pa
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Test: Tier demotion threshold
-// Verifies that Tier 1 entities are demoted when score drops
-// below DemotionThreshold - Hysteresis.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldIntegrationSignificanceDemotionTest,
@@ -445,14 +371,12 @@ bool FLivingWorldIntegrationSignificanceDemotionTest::RunTest(const FString &Par
     constexpr float DemotionThreshold = 0.2f;
     constexpr float Hysteresis = 0.05f;
 
-    // Tier 1 entity with low score
     FMythicSignificanceFragment Sig;
     Sig.Tier = EMythicSignificanceTier::Tier1_Reactive;
-    Sig.Score = 0.1f; // Below DemotionThreshold - Hysteresis = 0.15
+    Sig.Score = 0.1f;
     Sig.RelevantEventCount = 5;
     Sig.bDirty = false;
 
-    // Demotion check — same as SignificanceProcessor
     bool bDemoted = false;
     if (Sig.Tier == EMythicSignificanceTier::Tier1_Reactive
         && Sig.Score <= (DemotionThreshold - Hysteresis)) {
@@ -465,10 +389,9 @@ bool FLivingWorldIntegrationSignificanceDemotionTest::RunTest(const FString &Par
     TestEqual(TEXT("Tier should be Ambient"), Sig.Tier, EMythicSignificanceTier::Tier0_Ambient);
     TestEqual(TEXT("Event count should reset"), (int32)Sig.RelevantEventCount, 0);
 
-    // Tier 1 entity just above threshold — should NOT demote
     FMythicSignificanceFragment SigHigh;
     SigHigh.Tier = EMythicSignificanceTier::Tier1_Reactive;
-    SigHigh.Score = 0.16f; // Above DemotionThreshold - Hysteresis = 0.15
+    SigHigh.Score = 0.16f;
     SigHigh.bDirty = false;
 
     bool bShouldNotDemote = false;
@@ -481,11 +404,6 @@ bool FLivingWorldIntegrationSignificanceDemotionTest::RunTest(const FString &Par
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Test: Lazy pressure decay
-// Verifies that exponential decay is applied correctly when
-// time elapses between events.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldIntegrationPressureDecayTest,
@@ -501,11 +419,9 @@ bool FLivingWorldIntegrationPressureDecayTest::RunTest(const FString &Parameters
     Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Injustice)] = 0.5f;
     Psycho.LastEventTime = 10.0;
 
-    // Simulate 5 seconds of elapsed time
     const double CurrentWorldTime = 15.0;
     const double Elapsed = CurrentWorldTime - Psycho.LastEventTime;
 
-    // Apply lazy decay — same logic as PressureProcessor
     if (Elapsed > 0.0 && Psycho.LastEventTime > 0.0) {
         const float DecayMultiplier = FMath::Exp(-DecayRate * static_cast<float>(Elapsed));
         for (int32 c = 0; c < PressureChannelCount; ++c) {
@@ -513,12 +429,10 @@ bool FLivingWorldIntegrationPressureDecayTest::RunTest(const FString &Parameters
         }
     }
 
-    // exp(-0.1 * 5) = exp(-0.5) ≈ 0.6065
     const float ExpectedMultiplier = FMath::Exp(-0.5f);
     TestNearlyEqual(TEXT("Threat after 5s decay"), Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Threat)], ExpectedMultiplier, 0.01f);
     TestNearlyEqual(TEXT("Injustice after 5s decay"), Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Injustice)], 0.5f * ExpectedMultiplier, 0.01f);
 
-    // After long time (30s), pressure should be near zero
     Psycho.LastEventTime = 0.0;
     Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Threat)] = 1.0f;
 
@@ -526,18 +440,12 @@ bool FLivingWorldIntegrationPressureDecayTest::RunTest(const FString &Parameters
     const float LongDecay = FMath::Exp(-DecayRate * static_cast<float>(LongElapsed));
     Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Threat)] *= LongDecay;
 
-    // exp(-3.0) ≈ 0.0498 — pressure nearly gone
     TestTrue(TEXT("Threat after 30s should be near zero"),
              Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Threat)] < 0.06f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Test: Full Pipeline — Event → Witness → Pressure → Significance
-// End-to-end test of the complete Living World event processing 
-// chain, exercising all pipeline stages in sequence.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldIntegrationFullPipelineTest,
@@ -545,19 +453,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FLivingWorldIntegrationFullPipelineTest::RunTest(const FString &Parameters) {
-    // ─── Stage 1: Setup ─────────────────────────────────────
     auto *Fabric = NewObject<UMythicCausalFabric>();
     Fabric->Initialize(128);
 
     auto *FactionDB = NewObject<UMythicFactionDatabase>();
     FactionDB->Initialize(LivingWorldIntegrationHelpers::CreateFactionSettings());
 
-    // ─── Stage 2: Event Creation ────────────────────────────
-    // Simulate a violent kill event at cell (5,5)
     FMythicWorldEvent KillEvent;
     KillEvent.WorldTime = 10.0;
     KillEvent.Cell = FMythicCellCoord(5, 5);
-    KillEvent.PrimaryFaction = LivingWorldIntegrationHelpers::MakeFactionId(1); // Warlike perpetrator
+    KillEvent.PrimaryFaction = LivingWorldIntegrationHelpers::MakeFactionId(1);
     KillEvent.Significance = 0.9f;
     KillEvent.CategoryFlags = EMythicEventCategory::Combat | EMythicEventCategory::Death;
     KillEvent.MoralVector.AxisValues[static_cast<int32>(EMythicMoralAxis::Violence)] = 1.0f;
@@ -566,12 +471,9 @@ bool FLivingWorldIntegrationFullPipelineTest::RunTest(const FString &Parameters)
     Fabric->CommitWrites();
     TestTrue(TEXT("Event should be recorded in fabric"), EventId > 0);
 
-    // Verify event is queryable
     const FMythicWorldEvent *StoredEvent = Fabric->GetEvent(EventId);
     TestNotNull(TEXT("Event should be retrievable"), StoredEvent);
 
-    // ─── Stage 3: Witness Evaluation ────────────────────────
-    // Pacifist NPC at cell (5,5) witnesses the event
     const FMythicCellCoord WitnessCell(5, 5);
     const FMythicFactionId WitnessFaction = LivingWorldIntegrationHelpers::MakeFactionId(0);
     constexpr int32 HearingRadius = 3;
@@ -591,15 +493,12 @@ bool FLivingWorldIntegrationFullPipelineTest::RunTest(const FString &Parameters)
         WitnessFactionData.CondemnThreshold,
         WitnessFactionData.HostileThreshold
         );
-    // Violence(1.0) * Ideology(-0.8) = -0.8 → Severity = 0.8 → Hostile (threshold 0.6)
     TestEqual(TEXT("Pacifist should be Hostile to extreme violence"), Severity, EMythicMoralSeverity::Hostile);
 
-    // ─── Stage 4: Pressure Accumulation ─────────────────────
     FMythicPsychodynamicFragment Psycho;
     FMemory::Memzero(Psycho.Pressure, sizeof(Psycho.Pressure));
     Psycho.LastEventTime = 0.0;
 
-    // Build witness result (produced by witness stage)
     FMythicWitnessResult WitnessResult;
     WitnessResult.Severity = Severity;
     WitnessResult.EventCategoryFlags = KillEvent.CategoryFlags;
@@ -608,8 +507,7 @@ bool FLivingWorldIntegrationFullPipelineTest::RunTest(const FString &Parameters)
     WitnessResult.EventCell = KillEvent.Cell;
     WitnessResult.PerpFaction = KillEvent.PrimaryFaction;
 
-    // Accumulate pressure (same logic as PressureProcessor)
-    const float SeverityMagnitude = 1.0f * WitnessResult.EventSignificance; // Hostile = 1.0×sig
+    const float SeverityMagnitude = 1.0f * WitnessResult.EventSignificance;
     const bool bIsCombat = (WitnessResult.EventCategoryFlags & EMythicEventCategory::Combat) != 0;
     const bool bIsDeath = (WitnessResult.EventCategoryFlags & EMythicEventCategory::Death) != 0;
 
@@ -622,12 +520,10 @@ bool FLivingWorldIntegrationFullPipelineTest::RunTest(const FString &Parameters)
     }
     Psycho.LastEventTime = KillEvent.WorldTime;
 
-    // Threat = 1.0*0.9 = 0.9, Wrath = 0.9*0.5 = 0.45, Grief = 0.9*0.8 = 0.72
     TestNearlyEqual(TEXT("Pipeline: Threat pressure"), Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Threat)], 0.9f, 0.01f);
     TestNearlyEqual(TEXT("Pipeline: Wrath pressure"), Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Wrath)], 0.45f, 0.01f);
     TestNearlyEqual(TEXT("Pipeline: Grief pressure"), Psycho.Pressure[static_cast<int32>(EMythicPressureChannel::Grief)], 0.72f, 0.01f);
 
-    // ─── Stage 5: Vent Check ────────────────────────────────
     constexpr float VentThreshold = 0.8f;
 
     float MaxPressure = 0.0f;
@@ -642,19 +538,17 @@ bool FLivingWorldIntegrationFullPipelineTest::RunTest(const FString &Parameters)
     TestTrue(TEXT("Pipeline: Should trigger vent (Threat=0.9 > 0.8)"), MaxPressure >= VentThreshold);
     TestEqual(TEXT("Pipeline: Max channel = Threat"), MaxPressureChannel, static_cast<int32>(EMythicPressureChannel::Threat));
 
-    // ─── Stage 6: Significance Scoring ──────────────────────
     FMythicSignificanceFragment Sig;
     Sig.Tier = EMythicSignificanceTier::Tier0_Ambient;
     Sig.bDirty = true;
-    Sig.RelevantEventCount = 1; // Set by witness detection
+    Sig.RelevantEventCount = 1;
     Sig.Score = 0.0f;
 
-    // Close proximity + event + high emotional pressure = high score
     constexpr float ProxWeight = 0.4f;
     constexpr float EventWeight = 0.3f;
     constexpr float EmotionWeight = 0.3f;
 
-    const float ProximityScore = 1.0f; // Same cell = max proximity
+    const float ProximityScore = 1.0f;
     const float EventScore = FMath::Min(1.0f, static_cast<float>(Sig.RelevantEventCount) / 16.0f);
     float TotalPressure = 0.0f;
     for (int32 c = 0; c < PressureChannelCount; ++c) {
@@ -666,10 +560,8 @@ bool FLivingWorldIntegrationFullPipelineTest::RunTest(const FString &Parameters)
         ProxWeight * ProximityScore + EventWeight * EventScore + EmotionWeight * EmotionScore,
         0.0f, 1.0f);
 
-    // 0.4*1.0 + 0.3*(1/16) + 0.3*(2.07/3.0) = 0.4 + 0.01875 + 0.207 = 0.6258
     TestTrue(TEXT("Pipeline: Significance score should be high"), Sig.Score > 0.5f);
 
-    // ─── Stage 7: Tier Promotion ────────────────────────────
     constexpr float PromotionThreshold = 0.5f;
     constexpr float Hysteresis = 0.05f;
 

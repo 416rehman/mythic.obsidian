@@ -1,7 +1,3 @@
-// Mythic — objective prerequisite (multi-step quest chain) unit tests.
-// Covers the pure chain gate: AreObjectivePrerequisitesMet + its effect on the ResolveObjectiveOfferResult offer
-// decision. The live quest-giver assignment is server-driven and PIE-verified; this locks the gate logic.
-// Run via: Session Frontend → Automation → Mythic.Objectives.Prerequisites
 
 #include "Misc/AutomationTest.h"
 #include "Objectives/ObjectiveDefinition.h"
@@ -13,13 +9,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicObjectivePrereqTest::RunTest(const FString &Parameters) {
-    // Two chain steps: B requires A. (Fresh UObjectiveDefinitions default to TriggerEventTag=GAS.Event.Kill,
-    // RequiredCount=1, so they are valid offers.) Raw pointers are safe — the test runs synchronously, no GC mid-test.
     UObjectiveDefinition *StepA = NewObject<UObjectiveDefinition>();
     UObjectiveDefinition *StepB = NewObject<UObjectiveDefinition>();
     StepB->PrerequisiteObjectives.Add(StepA);
 
-    // ── AreObjectivePrerequisitesMet(Prerequisites, Tracked) ──
     {
         TArray<FObjectiveProgress> Tracked;
         const TArray<TObjectPtr<UObjectiveDefinition>> NoPrereqs;
@@ -38,13 +31,11 @@ bool FMythicObjectivePrereqTest::RunTest(const FString &Parameters) {
         TestTrue(TEXT("completed prerequisite → met"),
                  UObjectiveTracker::AreObjectivePrerequisitesMet(StepB->PrerequisiteObjectives, Tracked));
 
-        // A null prerequisite entry is ignored (designer slop), not a blocker.
         StepB->PrerequisiteObjectives.Add(nullptr);
         TestTrue(TEXT("a null prerequisite entry is ignored"),
                  UObjectiveTracker::AreObjectivePrerequisitesMet(StepB->PrerequisiteObjectives, Tracked));
     }
 
-    // ── The gate's effect on ResolveObjectiveOfferResult ──
     {
         TArray<FObjectiveProgress> Tracked;
         FObjectiveProgress ProgA;
@@ -63,7 +54,6 @@ bool FMythicObjectivePrereqTest::RunTest(const FString &Parameters) {
                   EObjectiveOfferResult::Assigned);
     }
 
-    // A prereq-free objective still assigns immediately (the original, non-chained behaviour).
     {
         TArray<FObjectiveProgress> Empty;
         FObjectiveProgress Out;
@@ -75,21 +65,18 @@ bool FMythicObjectivePrereqTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ─── Chain auto-advance: CollectAssignableNextObjectives picks the next step(s) on completion ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicObjectiveChainAdvanceTest,
     "Mythic.Objectives.ChainAdvance",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicObjectiveChainAdvanceTest::RunTest(const FString &Parameters) {
-    // Chain: A → {B, C}; C is a CONVERGING step that requires B. (Fresh defs default to a valid trigger + count.)
     UObjectiveDefinition *A = NewObject<UObjectiveDefinition>();
     UObjectiveDefinition *B = NewObject<UObjectiveDefinition>();
     UObjectiveDefinition *C = NewObject<UObjectiveDefinition>();
     A->NextObjectives = {B, C};
     C->PrerequisiteObjectives = {B};
 
-    // A just completed: B (no prereqs) is assignable; C (needs B, not done) is not.
     {
         TArray<FObjectiveProgress> Tracked;
         FObjectiveProgress PA;
@@ -103,7 +90,6 @@ bool FMythicObjectiveChainAdvanceTest::RunTest(const FString &Parameters) {
         TestFalse(TEXT("C waits for its prerequisite B"), Out.Contains(C));
         TestEqual(TEXT("only B unlocks first"), Out.Num(), 1);
 
-        // Now B is also complete: re-evaluating A's next steps yields C (B already tracked → skipped; C's prereq met).
         FObjectiveProgress PB;
         PB.Definition = B;
         PB.bCompleted = true;
@@ -115,7 +101,6 @@ bool FMythicObjectiveChainAdvanceTest::RunTest(const FString &Parameters) {
         TestEqual(TEXT("only C now"), Out.Num(), 1);
     }
 
-    // Cycle safety: an objective whose NextObjectives points back at itself never re-assigns once tracked.
     {
         UObjectiveDefinition *Loop = NewObject<UObjectiveDefinition>();
         Loop->NextObjectives = {Loop};
@@ -130,7 +115,6 @@ bool FMythicObjectiveChainAdvanceTest::RunTest(const FString &Parameters) {
         TestEqual(TEXT("a self-cycle does not re-assign"), Out.Num(), 0);
     }
 
-    // Dedup + null-skip: A → {B, B, null} unlocks B exactly once.
     {
         UObjectiveDefinition *Parent = NewObject<UObjectiveDefinition>();
         UObjectiveDefinition *Step = NewObject<UObjectiveDefinition>();

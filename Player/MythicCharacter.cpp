@@ -14,8 +14,16 @@
 #include "GameplayEffect.h"
 
 AMythicCharacter::AMythicCharacter() {
-    // Replication
     bReplicates = true;
+}
+
+void AMythicCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(AMythicCharacter, bIsSneaking);
+}
+
+void AMythicCharacter::ServerSetSneaking_Implementation(bool bNewSneaking) {
+    bIsSneaking = bNewSneaking;
 }
 
 float AMythicCharacter::ComputeFallDamage(float ImpactSpeed, float SafeSpeed, float DamagePerSpeed, float MaxDamage) {
@@ -30,8 +38,6 @@ float AMythicCharacter::ComputeFallDamage(float ImpactSpeed, float SafeSpeed, fl
 void AMythicCharacter::Landed(const FHitResult &Hit) {
     Super::Landed(Hit);
 
-    // Server-authoritative, opt-in, and inert without a configured GE. The downward impact speed is still in the
-    // movement component's velocity at the moment Landed fires (it is zeroed afterward in SetPostLandedPhysics).
     if (!bEnableFallDamage || !HasAuthority() || !FallDamageEffect) {
         return;
     }
@@ -46,8 +52,6 @@ void AMythicCharacter::Landed(const FHitResult &Hit) {
     if (!ASC) {
         return;
     }
-    // Same pipeline as environmental hazards: configurable GE, computed magnitude carried as the spec level so the
-    // damage routes through the normal attribute pipeline (mitigation, clamps, out-of-health latch).
     FGameplayEffectContextHandle Ctx = ASC->MakeEffectContext();
     Ctx.AddInstigator(this, this);
     const FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(FallDamageEffect, Damage, Ctx);
@@ -98,9 +102,8 @@ void AMythicCharacter::SetupPlayerInputComponent(UInputComponent *PlayerInputCom
         return;
     }
 
-    // Bind Ability Actions (Gas Input)
     TArray<uint32> BindHandles;
-    MythicIC->BindAbilityActions(InputConfig, this, &ThisClass::Input_AbilityInputTagPressed, &ThisClass::Input_AbilityInputTagReleased, /*out*/ BindHandles);
+    MythicIC->BindAbilityActions(InputConfig, this, &ThisClass::Input_AbilityInputTagPressed, &ThisClass::Input_AbilityInputTagReleased, BindHandles);
 
     UE_LOG(Myth, Log, TEXT("SetupPlayerInputComponent: Bound %d Ability Actions"), BindHandles.Num());
 }
@@ -150,10 +153,8 @@ void AMythicCharacter::ApplyLocalEquipmentMesh(USkeletalMesh* EquipmentMesh, EIn
         return;
     }
 
-    // clean up any existing mesh in the same slot first
     RemoveLocalEquipmentMesh(Slot);
 
-    // spawn the new local skeletal mesh component
     USkeletalMeshComponent* NewMeshComp = NewObject<USkeletalMeshComponent>(this);
     if (!NewMeshComp) {
         return;
@@ -162,7 +163,6 @@ void AMythicCharacter::ApplyLocalEquipmentMesh(USkeletalMesh* EquipmentMesh, EIn
     NewMeshComp->RegisterComponent();
     NewMeshComp->SetSkeletalMeshAsset(EquipmentMesh);
 
-    // handle socket attachment or leader pose alignment depending on slot type
     if (Slot == EInventorySlotType::OffHand) {
         NewMeshComp->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, FName("OffHandWeapon"));
     } else if (Slot == EInventorySlotType::MainHand) {
@@ -172,7 +172,6 @@ void AMythicCharacter::ApplyLocalEquipmentMesh(USkeletalMesh* EquipmentMesh, EIn
         NewMeshComp->SetLeaderPoseComponent(GetMesh());
     }
 
-    // cache the spawned component for unequip cleanup
     EquippedVisualMeshes.Add(Slot, NewMeshComp);
 }
 

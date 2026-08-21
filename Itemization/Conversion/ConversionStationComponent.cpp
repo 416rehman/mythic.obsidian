@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Controller.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/GameStateBase.h"
 #include "Interaction/MythicInteractionComponent.h"
 #include "Itemization/InventoryProviderInterface.h"
@@ -17,31 +18,38 @@
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
+#include "Itemization/Inventory/Fragments/Passive/PerishableFragment.h"
+#include "Itemization/Inventory/Fragments/Passive/YieldQualityFragment.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
+#include "Itemization/Cooking/MythicCookingRecipe.h"
+#include "World/Gathering/MythicYieldQuality.h"
 #include "Itemization/MythicTags_Conversion.h"
-#include "GAS/Executions/MythicCombatRoll.h" // boundary-correct probability gate for chance/byproduct outputs
-#include "Player/MythicPlayerController.h" // repaired-durability callout over the job's instigator
-#include "Player/Proficiency/ProficiencyComponent.h"  // crafter proficiency resolution (ProficiencyScaled product level)
-#include "Player/Proficiency/ProficiencyDefinition.h"  // CalcLevelAtXP + ProgressAttribute
-#include "AbilitySystemGlobals.h"                      // GetAbilitySystemComponentFromActor
+#include "GAS/Executions/MythicCombatRoll.h"
+#include "Player/MythicPlayerController.h"
+#include "Player/Proficiency/ProficiencyComponent.h"
+#include "Player/Proficiency/ProficiencyDefinition.h"
+#include "AbilitySystemGlobals.h"
 #include "ViewModels/ConversionViewModels.h"
 
 namespace {
     constexpr double kMinRequestInterval = 0.2;
 }
 
-// ============================ FastArray ============================
 
-int32 FConversionJobArray::AddJob(const FGameplayTag &RecipeId, int32 Quantity, int32 JobId, int32 SnapshotInputLevel, int32 SnapshotCrafterProficiencyLevel) {
+int32 FConversionJobArray::AddJob(const FGameplayTag &RecipeId, int32 Quantity, int32 JobId, const FConversionConsumeSnapshot &Snapshot,
+                                  int32 SnapshotCrafterProficiencyLevel) {
     FConversionJobEntry Entry;
     Entry.RecipeId = RecipeId;
     Entry.Quantity = Quantity;
     Entry.JobId = JobId;
-    Entry.SnapshotInputLevel = SnapshotInputLevel;
+    Entry.SnapshotInputLevel = Snapshot.Level;
+    Entry.SnapshotAvgQualityTierValue = Snapshot.AvgQualityTierValue;
+    Entry.SnapshotMinFreshnessFraction = Snapshot.MinFreshnessFraction;
     Entry.SnapshotCrafterProficiencyLevel = SnapshotCrafterProficiencyLevel;
     Entry.State = EConversionJobState::Pending;
     const int32 Index = Items.Add(Entry);
     MarkItemDirty(Items[Index]);
+    if (Owner) { Owner->FlushOwnerNetDormancy(); }
     return Index;
 }
 
@@ -51,6 +59,7 @@ void FConversionJobArray::RemoveAt(int32 Index) {
     }
     Items.RemoveAt(Index);
     MarkArrayDirty();
+    if (Owner) { Owner->FlushOwnerNetDormancy(); }
 }
 
 FConversionJobEntry *FConversionJobArray::EditHead() {
@@ -78,6 +87,7 @@ int32 FConversionJobArray::IndexOfId(int32 JobId) const {
 void FConversionJobArray::MarkDirtyAt(int32 Index) {
     if (Items.IsValidIndex(Index)) {
         MarkItemDirty(Items[Index]);
+        if (Owner) { Owner->FlushOwnerNetDormancy(); }
     }
 }
 
@@ -93,7 +103,6 @@ void FConversionJobArray::PostReplicatedChange(const TArrayView<int32> &C, int32
     if (Owner) { Owner->NotifyJobsReplicated(); }
 }
 
-// ============================ Component ============================
 
 UConversionStationComponent::UConversionStationComponent() {
     PrimaryComponentTick.bCanEverTick = false;
@@ -109,6 +118,36 @@ void UConversionStationComponent::GetLifetimeReplicatedProps(TArray<FLifetimePro
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(UConversionStationComponent, Jobs);
     DOREPLIFETIME(UConversionStationComponent, FuelState);
+    DOREPLIFETIME(UConversionStationComponent, StationTags);
+}
+
+void UConversionStationComponent::Server_GrantStationTags(const FGameplayTagContainer &NewTags) {
+    if (!HasAuthority() || NewTags.IsEmpty()) {
+        return;
+    }
+    StationTags.AppendTags(NewTags);
+    if (AActor *Owner = GetOwner()) {
+        Owner->FlushNetDormancy();
+    }
+}
+
+void UConversionStationComponent::Server_RevokeStationTags(const FGameplayTagContainer &TagsToRemove) {
+    if (!HasAuthority() || TagsToRemove.IsEmpty()) {
+        return;
+    }
+    StationTags.RemoveTags(TagsToRemove);
+    if (AActor *Owner = GetOwner()) {
+        Owner->FlushNetDormancy();
+    }
+}
+
+void UConversionStationComponent::FlushOwnerNetDormancy() {
+    if (!HasAuthority()) {
+        return;
+    }
+    if (AActor *O = GetOwner()) {
+        O->FlushNetDormancy();
+    }
 }
 
 bool UConversionStationComponent::HasAuthority() const {
@@ -137,7 +176,6 @@ void UConversionStationComponent::BeginPlay() {
         Subsystem = GI->GetSubsystem<UConversionSubsystem>();
     }
 
-    // Resolve the station inventory from the owning actor's provider interface.
     if (IInventoryProviderInterface *Provider = Cast<IInventoryProviderInterface>(GetOwner())) {
         const TArray<UMythicInventoryComponent *> Invs = Provider->GetAllInventoryComponents();
         if (Invs.Num() > 0) {
@@ -149,7 +187,6 @@ void UConversionStationComponent::BeginPlay() {
         return;
     }
 
-    // Single source for the use-range gate: the interaction range (+ tolerance).
     const float BaseRange = GetDefault<UMythicInteractionComponent>()->InteractionRange;
     ServerUseRangeSq = FMath::Square(BaseRange + UseRangeTolerance);
 
@@ -169,11 +206,9 @@ void UConversionStationComponent::BeginPlay() {
 
 void UConversionStationComponent::EndPlay(const EEndPlayReason::Type Reason) {
     if (HasAuthority() && Reason != EEndPlayReason::LevelTransition) {
-        // Refund every outstanding job so nothing is lost on teardown.
         for (const FConversionJobEntry &Job : Jobs.GetItems()) {
             RefundJob(Job);
         }
-        // Route back any held transform instances not tied to a refunded job (defensive).
         for (FHeldTransform &Held : HeldTransforms) {
             if (IsValid(Held.Instance)) {
                 RouteInstance(Held.Instance, EConversionOutputRouting::DropInWorld, FConversionJobEntry());
@@ -198,10 +233,6 @@ void UConversionStationComponent::NotifyJobsReplicated() {
     OnJobsChanged.Broadcast();
 }
 
-void UConversionStationComponent::NotifyFuelReplicated() {
-    OnFuelChanged.Broadcast();
-}
-
 void UConversionStationComponent::OnRep_Fuel() {
     OnFuelChanged.Broadcast();
 }
@@ -210,7 +241,6 @@ void UConversionStationComponent::HandleRecipesReady() {
     if (HasAuthority() && StationMode == EConversionTrigger::Automatic) {
         ScheduleAutoEnqueue();
     }
-    // A stalled head waiting on NotLoaded should retry now that recipes resolved.
     AdvanceProcessing();
 }
 
@@ -219,7 +249,7 @@ bool UConversionStationComponent::IsActorInRange(const AActor *A) const {
         return false;
     }
     if (ServerUseRangeSq <= 0.f) {
-        return true; // not configured -> do not block
+        return true;
     }
     return FVector::DistSquared(A->GetActorLocation(), GetOwner()->GetActorLocation()) <= ServerUseRangeSq;
 }
@@ -238,7 +268,7 @@ void UConversionStationComponent::GetSourceInventories(AController *JobControlle
         if (IInventoryProviderInterface *Prov = Cast<IInventoryProviderInterface>(JobController)) {
             OutInvs = Prov->GetAllInventoryComponents();
         }
-        OutInputGroup = FGameplayTag(); // all player slots
+        OutInputGroup = FGameplayTag();
         OutCatalystGroup = FGameplayTag();
     }
     else {
@@ -329,8 +359,9 @@ bool UConversionStationComponent::VerifyCatalystsPresent(UConversionRecipe *R, A
     return true;
 }
 
-bool UConversionStationComponent::ConsumeInputs(UConversionRecipe *R, AController *JobController, int32 Cycles, int32 JobId, int32 &OutSnapshotLevel) {
-    OutSnapshotLevel = 0;
+bool UConversionStationComponent::ConsumeInputs(UConversionRecipe *R, AController *JobController, int32 Cycles, int32 JobId,
+                                                FConversionConsumeSnapshot &OutSnapshot) {
+    OutSnapshot = FConversionConsumeSnapshot{};
     if (!R) {
         return false;
     }
@@ -342,7 +373,6 @@ bool UConversionStationComponent::ConsumeInputs(UConversionRecipe *R, AControlle
     TArray<UMythicItemInstance *> Insts;
     GatherInstances(Invs, InGroup, Insts);
 
-    // Atomic verify first so we never partially consume.
     for (const FConversionIngredient &Ing : R->Inputs) {
         if (!Ing.bConsumed) {
             continue;
@@ -359,13 +389,6 @@ bool UConversionStationComponent::ConsumeInputs(UConversionRecipe *R, AControlle
         }
     }
 
-    // Pair each Transform product with the consumed input it will transform (released + held, not destroyed). For
-    // a bRepairToFull product the paired input MUST carry a UDurabilityFragment (the durable item being repaired):
-    // otherwise the repair would no-op on the wrong instance AND the real durable item would fall into the
-    // destroy branch below — the exact data-loss the embodiment-arc review caught. Selecting by which matched
-    // instance actually has durability (rather than raw input order) makes authoring order irrelevant. Plain
-    // transforms take the first free consumed input (prior behavior). IsDataValid enforces this at author time;
-    // this is the runtime guard, aborting BEFORE any consumption if a repair product has no durable input.
     TSet<int32> TransformInputIdx;
     for (const FConversionProduct &P : R->Products) {
         if (P.Mode != EConversionProductMode::Transform) {
@@ -399,7 +422,6 @@ bool UConversionStationComponent::ConsumeInputs(UConversionRecipe *R, AControlle
         TransformInputIdx.Add(ChosenIdx);
     }
 
-    // Reset the reservation record for this job/cycle.
     FJobReservation &Res = JobReservations.FindOrAdd(JobId);
     Res = FJobReservation{};
     Res.ReservedCycles = Cycles;
@@ -409,6 +431,22 @@ bool UConversionStationComponent::ConsumeInputs(UConversionRecipe *R, AControlle
     auto NoteLevel = [&](const UMythicItemInstance *I) {
         bAnyLevel = true;
         MinLevel = FMath::Min(MinLevel, I->GetItemLevel());
+    };
+
+    double QualityTierWeightedSum = 0.0;
+    int64 QualityTierWeight = 0;
+    float MinFreshness = 1.0f;
+    const double NowUtc = UPerishableFragment::UtcNowSeconds();
+    auto NoteQualityAndFreshness = [&](UMythicItemInstance *I, int32 Units) {
+        if (Units <= 0) {
+            return;
+        }
+        const EMythicYieldQuality Tier = UYieldQualityFragment::GetTierOfInstance(I);
+        QualityTierWeightedSum += static_cast<double>(FMythicYieldQuality::TierIndex(Tier)) * Units;
+        QualityTierWeight += Units;
+        if (const UPerishableFragment *Perishable = I->GetFragment<UPerishableFragment>()) {
+            MinFreshness = FMath::Min(MinFreshness, Perishable->GetFreshnessFraction(NowUtc));
+        }
     };
 
     for (int32 ii = 0; ii < R->Inputs.Num(); ii++) {
@@ -426,13 +464,13 @@ bool UConversionStationComponent::ConsumeInputs(UConversionRecipe *R, AControlle
             }
 
             if (bTransform) {
-                // Release whole (non-stackable) instances and hold them for the transform step.
                 UMythicInventoryComponent *OwnInv = I->GetInventoryComponent();
                 const int32 SlotIdx = I->GetSlot();
                 if (!OwnInv || SlotIdx == INDEX_NONE) {
                     continue;
                 }
                 NoteLevel(I);
+                NoteQualityAndFreshness(I, 1);
                 if (UMythicItemInstance *Released = OwnInv->ReleaseFromSlot(SlotIdx)) {
                     FHeldTransform Held;
                     Held.JobId = JobId;
@@ -445,8 +483,8 @@ bool UConversionStationComponent::ConsumeInputs(UConversionRecipe *R, AControlle
             else {
                 const int32 Take = FMath::Min(Remaining, I->GetStacks());
                 NoteLevel(I);
+                NoteQualityAndFreshness(I, Take);
 
-                // Record per-job reserved totals for dupe-safe refund.
                 bool bMerged = false;
                 for (FReservedRefundEntry &E : Res.Items) {
                     if (E.Def.Get() == I->GetItemDefinition()) {
@@ -477,7 +515,6 @@ bool UConversionStationComponent::ConsumeInputs(UConversionRecipe *R, AControlle
 
         if (Remaining > 0) {
             UE_LOG(Myth, Error, TEXT("ConversionStation: input shortfall after verify (race), job %d. Aborting + refunding."), JobId);
-            // Refund everything already taken for this aborted job so nothing is lost.
             if (const FJobReservation *RR = JobReservations.Find(JobId)) {
                 for (const FReservedRefundEntry &E : RR->Items) {
                     if (UItemDefinition *D = E.Def.Get()) {
@@ -498,9 +535,13 @@ bool UConversionStationComponent::ConsumeInputs(UConversionRecipe *R, AControlle
         }
     }
 
-    OutSnapshotLevel = bAnyLevel ? MinLevel : 0;
+    OutSnapshot.Level = bAnyLevel ? MinLevel : 0;
+    OutSnapshot.AvgQualityTierValue = QualityTierWeight > 0
+        ? static_cast<float>(QualityTierWeightedSum / static_cast<double>(QualityTierWeight))
+        : -1.0f;
+    OutSnapshot.MinFreshnessFraction = MinFreshness;
     if (FJobReservation *RR = JobReservations.Find(JobId)) {
-        RR->SnapshotLevel = OutSnapshotLevel; // so refunds restore the consumed input level
+        RR->SnapshotLevel = OutSnapshot.Level;
     }
     return true;
 }
@@ -543,9 +584,6 @@ bool UConversionStationComponent::EnsureFuel(UConversionRecipe *R) {
             break;
         }
 
-        // A fuel that yields no burn time (BurnSecondsPerUnit <= 0, authorable since ClampMin is inclusive) would
-        // otherwise be consumed forever for zero progress — BufferedBurnSeconds never reaches Duration, so the loop
-        // drains the entire stock. Treat it as unusable and stop rather than destroy the player's fuel for nothing.
         if (MatchedFuel->BurnSecondsPerUnit <= 0.0f) {
             bExhausted = true;
             break;
@@ -559,6 +597,7 @@ bool UConversionStationComponent::EnsureFuel(UConversionRecipe *R) {
 
     if (bChanged) {
         FuelState.LastSampleServerTime = ServerNow();
+        FlushOwnerNetDormancy();
         OnFuelChanged.Broadcast();
     }
 
@@ -570,7 +609,7 @@ int32 UConversionStationComponent::ResolveProductLevel(EProductLevelMode LevelMo
     case EProductLevelMode::InheritInputLevel:
         return InputLevel;
     case EProductLevelMode::InheritStationLevel:
-        return InStationLevel; // now driven by the station's configured StationLevel (was hard-stubbed to 1)
+        return InStationLevel;
     case EProductLevelMode::FixedLevel:
     default:
         return FixedLevel;
@@ -578,9 +617,6 @@ int32 UConversionStationComponent::ResolveProductLevel(EProductLevelMode LevelMo
 }
 
 int32 UConversionStationComponent::ComputeProficiencyScaledLevel(int32 CrafterProfLevel, int32 BaseLevel, int32 PerLevelBonus, int32 MaxLevel) {
-    // 64-bit intermediate so a large designer-set PerLevelBonus can't overflow int32 BEFORE the cap is applied — that
-    // would wrap negative and floor the result to 0 (silently losing the base/cap). Clamp to int32 range, floor at 0,
-    // then cap. This keeps the result monotonic in the inputs regardless of how absurd a config value is.
     const int64 Scaled = (int64)BaseLevel + (int64)FMath::Max(0, CrafterProfLevel) * (int64)FMath::Max(0, PerLevelBonus);
     int32 Level = (int32)FMath::Clamp<int64>(Scaled, 0, (int64)MAX_int32);
     if (MaxLevel > 0) {
@@ -593,8 +629,6 @@ float UConversionStationComponent::ComputeCraftingXpReward(float BaseXpPerCraft,
     if (BaseXpPerCraft <= 0.0f || Cycles <= 0) {
         return 0.0f;
     }
-    // Anti-grind: a recipe stops paying out once the crafter has reached/passed NoGainAtOrAboveLevel (you don't master
-    // smithing by forging the same trivial item forever). 0 = no cap.
     if (NoGainAtOrAboveLevel > 0 && CrafterLevel >= NoGainAtOrAboveLevel) {
         return 0.0f;
     }
@@ -610,7 +644,6 @@ int32 UConversionStationComponent::ResolveCrafterProficiencyLevel(AController *C
     if (!ProfComp) {
         return 0;
     }
-    // Match the crafter's proficiency entry, then resolve its current level from the ASC XP (mirrors the gathering path).
     for (const FProficiency &Prof : ProfComp->Proficiencies) {
         if (Prof.Definition == ProfDef) {
             UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Crafter);
@@ -625,7 +658,6 @@ int32 UConversionStationComponent::ResolveCrafterProficiencyLevel(AController *C
 }
 
 int32 UConversionStationComponent::ComputeProductLevel(const FConversionProduct &P, const FConversionJobEntry &Job) const {
-    // ProficiencyScaled: the crafter's level (snapshotted at enqueue) drives the product level off the FixedLevel base.
     if (P.LevelMode == EProductLevelMode::ProficiencyScaled) {
         return ComputeProficiencyScaledLevel(Job.SnapshotCrafterProficiencyLevel, P.FixedLevel, P.ProficiencyLevelBonus, P.MaxProductLevel);
     }
@@ -654,7 +686,7 @@ void UConversionStationComponent::RouteInstance(UMythicItemInstance *Inst, EConv
                 Dest = Invs.Num() > 0 ? Invs[0] : nullptr;
             }
             if (Dest) {
-                Dest->AddItem(Inst, C); // adds to a slot; overflow drops as a world item targeted to C
+                Dest->AddItem(Inst, C);
                 return;
             }
         }
@@ -668,11 +700,8 @@ void UConversionStationComponent::RouteInstance(UMythicItemInstance *Inst, EConv
     case EConversionOutputRouting::StationOutputSlots:
     default: {
         const int32 Original = Inst->GetStacks();
-        const int32 Added = StationInv.IsValid() ? StationInv->AddToAnySlot(Inst, /*bFromPlayer=*/false) : 0;
+        const int32 Added = StationInv.IsValid() ? StationInv->AddToAnySlot(Inst,false) : 0;
         if (Added < Original && IsValid(Inst) && Loot) {
-            // Output full or type not whitelisted -> spill the remainder to the world so production is
-            // never lost. (The job keeps running; we do not stall, to avoid a phantom stall on a head
-            // that is still producing.)
             Loot->Spawn(Inst, Loc, 100.f, nullptr);
             UE_LOG(Myth, Verbose, TEXT("ConversionStation: output full/blocked; spilled product to world."));
         }
@@ -689,7 +718,6 @@ void UConversionStationComponent::ProduceAndRoute(UConversionRecipe *R, const FC
         return;
     }
 
-    // Pull this job's held transform instances (FIFO).
     TArray<UMythicItemInstance *> Held;
     for (FHeldTransform &H : HeldTransforms) {
         if (H.JobId == Job.JobId && IsValid(H.Instance)) {
@@ -698,11 +726,15 @@ void UConversionStationComponent::ProduceAndRoute(UConversionRecipe *R, const FC
     }
     int32 TransformCursor = 0;
 
+    FMythicConversionProductContext SeamCtx;
+    SeamCtx.SnapshotInputLevel = Job.SnapshotInputLevel;
+    SeamCtx.SnapshotCrafterProficiencyLevel = Job.SnapshotCrafterProficiencyLevel;
+    SeamCtx.SnapshotAvgQualityTierValue = Job.SnapshotAvgQualityTierValue;
+    SeamCtx.SnapshotMinFreshnessFraction = Job.SnapshotMinFreshnessFraction;
+    SeamCtx.InstigatorController = ResolveInstigatorController(Job.JobId);
+    SeamCtx.Station = this;
+
     for (const FConversionProduct &P : R->Products) {
-        // Chance / byproduct outputs: roll via the centralized boundary-correct gate. A guaranteed product (Probability
-        // >= 1, the default) is NEVER dropped — even when FMath::FRand() returns exactly 1.0; a Probability <= 0 product
-        // never fires. The old raw `FRand() >= Probability` skip WRONGLY dropped a guaranteed product on an exact-1.0 sample
-        // (FRand() is 1.0-inclusive) — the very boundary MythicCombat::RollSucceeds (Roll <= Probability) was built to fix.
         if (!MythicCombat::RollSucceeds(P.Probability, FMath::FRand())) {
             continue;
         }
@@ -719,12 +751,13 @@ void UConversionStationComponent::ProduceAndRoute(UConversionRecipe *R, const FC
             while (Remaining > 0) {
                 const int32 Take = FMath::Min(Remaining, MaxStack);
                 if (UMythicItemInstance *Inst = Loot->Create(Def, Take, nullptr, Level)) {
+                    R->PostProcessProduct(Inst, SeamCtx);
                     RouteInstance(Inst, R->Process.OutputRouting, Job);
                 }
                 Remaining -= Take;
             }
         }
-        else { // Transform
+        else {
             UMythicItemInstance *T = Held.IsValidIndex(TransformCursor) ? Held[TransformCursor] : nullptr;
             TransformCursor++;
             if (!IsValid(T)) {
@@ -732,16 +765,10 @@ void UConversionStationComponent::ProduceAndRoute(UConversionRecipe *R, const FC
                 continue;
             }
             T->ServerApplyTransform(P.NewItemType, P.TagsToAdd, P.TagsToRemove, P.TransformToDefinition.Get());
-            // Repair job: restore the transformed instance's durability to full (clears the broken latch). This is
-            // the recovery path for the otherwise-permanent breakage from durability wear. const_cast mirrors the
-            // wear chokepoints (the only writers of the durability fragment). No-op without a durability fragment.
             if (P.bRepairToFull) {
                 if (const UDurabilityFragment *Dura = T->GetFragment<UDurabilityFragment>()) {
                     const bool bWasBroken = Dura->IsBroken();
                     const_cast<UDurabilityFragment *>(Dura)->ServerRepairFull();
-                    // Confirm a genuine broken -> working recovery over the player who ordered the job (the repaired
-                    // instance is detached mid-routing, so it can't resolve its own owner — the station can). A top-up
-                    // of a still-working item is implied by the job completing, so it stays quiet.
                     if (bWasBroken && !Dura->IsBroken()) {
                         if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(ResolveInstigatorController(Job.JobId))) {
                             FText ItemName;
@@ -753,11 +780,11 @@ void UConversionStationComponent::ProduceAndRoute(UConversionRecipe *R, const FC
                     }
                 }
             }
+            R->PostProcessProduct(T, SeamCtx);
             RouteInstance(T, R->Process.OutputRouting, Job);
         }
     }
 
-    // Remove exactly the held instances routed this cycle, matched by identity (not by tail position).
     for (int32 c = 0; c < TransformCursor; c++) {
         UMythicItemInstance *Routed = Held[c];
         for (int32 i = HeldTransforms.Num() - 1; i >= 0; i--) {
@@ -768,19 +795,18 @@ void UConversionStationComponent::ProduceAndRoute(UConversionRecipe *R, const FC
         }
     }
 
-    // Award crafting proficiency XP for this completed cycle (closes the MAKE progression loop: crafting raises the
-    // CraftingProficiency that ProficiencyScaled recipes read for output quality). Server-only; granted to the LIVE
-    // crafter resolved at produce time (skipped if they disconnected — XP to a gone player is moot). The crafter's
-    // CURRENT level gates the anti-grind cap. Awarded per cycle even on a probability-empty roll: the inputs were
-    // consumed and time spent, so the attempt still teaches.
     if (R->CraftingProficiency && R->CraftingXpReward > 0.0f) {
         if (AController *Crafter = ResolveInstigatorController(Job.JobId)) {
             const int32 CrafterLevel = ResolveCrafterProficiencyLevel(Crafter, R->CraftingProficiency);
-            const float Xp = ComputeCraftingXpReward(R->CraftingXpReward, /*Cycles*/ 1, CrafterLevel, R->XpNoGainAtOrAboveLevel);
+            const float Xp = ComputeCraftingXpReward(R->CraftingXpReward, 1, CrafterLevel, R->XpNoGainAtOrAboveLevel);
             if (Xp > 0.0f) {
                 if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(Crafter)) {
                     if (UProficiencyComponent *Prof = const_cast<UProficiencyComponent *>(PC->GetProficiencyComponent())) {
-                        Prof->GrantProficiencyXP(R->CraftingProficiency, Xp);
+                        FGameplayTagContainer Context = GetStationTags();
+                        const int32 TierIdx = FMath::RoundToInt(Job.SnapshotAvgQualityTierValue);
+                        const EMythicYieldQuality InputTier = FMythicYieldQuality::TierFromIndex(TierIdx);
+                        Context.AddTag(FGameplayTag::RequestGameplayTag(FMythicYieldQuality::QualityTagName(InputTier)));
+                        Prof->GrantProficiencyXPWithContext(R->CraftingProficiency, Xp, Context);
                     }
                 }
             }
@@ -800,10 +826,6 @@ void UConversionStationComponent::MintTo(UItemDefinition *Def, int32 Qty, AContr
     }
     const FVector Loc = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
 
-    // Give to the player's inventory when they have one. CreateAndGive places the item and world-drops any
-    // overflow INTERNALLY — its non-null return means "overflow handled", NOT "failed", so gating CreateAndSpawn
-    // on its return (the old code) double-minted the refund on the common fit case. Gate on player-validity
-    // instead: valid player -> CreateAndGive (handles fit + overflow), done; no player -> world-drop.
     if (C && Cast<IInventoryProviderInterface>(C)) {
         Loot->CreateAndGive(Def, Qty, C, C, Level);
         return;
@@ -814,7 +836,6 @@ void UConversionStationComponent::MintTo(UItemDefinition *Def, int32 Qty, AContr
 void UConversionStationComponent::RefundJob(const FConversionJobEntry &Job) {
     AController *C = ResolveInstigatorController(Job.JobId);
 
-    // Route back any held (released, not destroyed) transform inputs.
     for (int32 i = HeldTransforms.Num() - 1; i >= 0; i--) {
         if (HeldTransforms[i].JobId == Job.JobId) {
             if (IsValid(HeldTransforms[i].Instance)) {
@@ -835,9 +856,6 @@ void UConversionStationComponent::RefundJob(const FConversionJobEntry &Job) {
     UConversionRecipe *R = Subsystem.IsValid() ? Subsystem->GetRecipeById(Job.RecipeId) : nullptr;
     const bool bContinuous = R && R->Process.Timing == EConversionTiming::Continuous;
 
-    // Continuous reserves one cycle at a time and Items is cleared the moment a cycle is produced, so a
-    // non-empty Items here is always the current un-produced cycle -> refund it in full (no dupe).
-    // Timed/Instant reserve all cycles up front; refund the fraction still un-produced (remaining Quantity).
     const int32 RefundCycles = bContinuous ? Res->ReservedCycles : Job.Quantity;
     if (RefundCycles <= 0) {
         return;
@@ -863,7 +881,6 @@ void UConversionStationComponent::ClearJobBookkeeping(int32 JobId) {
     JobReservations.Remove(JobId);
 }
 
-// ============================ Processing ============================
 
 void UConversionStationComponent::AdvanceProcessing() {
     if (!HasAuthority() || !GetWorld()) {
@@ -875,11 +892,9 @@ void UConversionStationComponent::AdvanceProcessing() {
 
     FConversionJobEntry *Head = Jobs.EditHead();
     if (!Head) {
-        // Queue drained — nothing is burning. Clear the replicated lit flag (BeginCycle sets bBurning true for any fuel
-        // recipe; previously only the NoFuel stall cleared it, so a completed/cancelled fuel job left the furnace
-        // showing lit forever). Both the completion path and Server_CancelJob funnel here once the queue empties.
         if (FuelState.bBurning) {
             FuelState.bBurning = false;
+            FlushOwnerNetDormancy();
             OnFuelChanged.Broadcast();
         }
         return;
@@ -902,19 +917,15 @@ void UConversionStationComponent::AdvanceProcessing() {
         return;
     }
 
-    // A Continuous head resuming from a stall must re-consume this cycle's inputs (its reserved cycle was
-    // never produced, but a fresh Pending head already paid at enqueue and must NOT re-consume).
     const bool bReConsume = (R->Process.Timing == EConversionTiming::Continuous
         && Head->State == EConversionJobState::Stalled);
 
-    // Guard the whole synchronous StationInv-mutating window (EnsureFuel removes fuel, which fires
-    // OnSlotUpdated -> HandleStationInventoryChanged -> AdvanceProcessing re-entrantly otherwise).
     bMutatingStationInv = true;
     const bool bStarted = BeginCycle(*Head, R, bReConsume);
     bMutatingStationInv = false;
 
     if (!bStarted) {
-        return; // BeginCycle stalled the head
+        return;
     }
     if (R->Process.Timing == EConversionTiming::Instant) {
         CompleteCurrentCycleAndContinue();
@@ -936,28 +947,28 @@ bool UConversionStationComponent::BeginCycle(FConversionJobEntry &Head, UConvers
         OnJobsChanged.Broadcast();
     };
 
-    // 1. Catalysts must be present this cycle.
     if (!VerifyCatalystsPresent(R, C)) {
         Stall(EConversionStallReason::MissingCatalyst);
         return false;
     }
 
-    // 2. Fuel must cover this whole cycle.
     if (R->Process.bRequiresFuel && !EnsureFuel(R)) {
         FuelState.bBurning = false;
+        FlushOwnerNetDormancy();
         OnFuelChanged.Broadcast();
         Stall(EConversionStallReason::NoFuel);
         return false;
     }
 
-    // 3. Continuous re-cycles consume this cycle's inputs now (reserve-1 model). Timed/Instant reserved up front.
     if (bReConsume && R->Process.Timing == EConversionTiming::Continuous) {
-        int32 SnapLevel = 0;
-        if (!VerifyInputs(R, C, 1, false) || !ConsumeInputs(R, C, 1, Head.JobId, SnapLevel)) {
+        FConversionConsumeSnapshot Snap;
+        if (!VerifyInputs(R, C, 1, false) || !ConsumeInputs(R, C, 1, Head.JobId, Snap)) {
             Stall(EConversionStallReason::MissingInput);
             return false;
         }
-        Head.SnapshotInputLevel = SnapLevel;
+        Head.SnapshotInputLevel = Snap.Level;
+        Head.SnapshotAvgQualityTierValue = Snap.AvgQualityTierValue;
+        Head.SnapshotMinFreshnessFraction = Snap.MinFreshnessFraction;
     }
 
     Head.State = EConversionJobState::Processing;
@@ -1002,25 +1013,22 @@ void UConversionStationComponent::CompleteCurrentCycleAndContinue() {
 
         bMutatingStationInv = true;
 
-        const FConversionJobEntry CycleSnapshot = *Head; // stable copy for production
+        const FConversionJobEntry CycleSnapshot = *Head;
         ProduceAndRoute(R, CycleSnapshot);
 
-        // For Continuous (reserve-1), this cycle's reserved inputs are now produced and no longer refundable.
-        // Clearing them keeps a cancel after this point from re-refunding an already-produced cycle.
         if (R->Process.Timing == EConversionTiming::Continuous) {
             if (FJobReservation *Res = JobReservations.Find(CycleSnapshot.JobId)) {
                 Res->Items.Reset();
             }
         }
 
-        // Burn fuel for the cycle just completed.
         if (R->Process.bRequiresFuel) {
             FuelState.BufferedBurnSeconds = FMath::Max(0.f, FuelState.BufferedBurnSeconds - CycleSnapshot.CycleDuration);
             FuelState.LastSampleServerTime = ServerNow();
+            FlushOwnerNetDormancy();
             OnFuelChanged.Broadcast();
         }
 
-        // The head may have moved if ProduceAndRoute spilled; re-fetch by id.
         const int32 HeadIdx = Jobs.IndexOfId(CycleSnapshot.JobId);
         Head = (HeadIdx == 0) ? Jobs.EditHead() : nullptr;
         if (!Head) {
@@ -1036,21 +1044,19 @@ void UConversionStationComponent::CompleteCurrentCycleAndContinue() {
         const bool bMoreCycles = bUnbounded || Head->Quantity > 0;
 
         if (bMoreCycles) {
-            if (BeginCycle(*Head, R, /*bReConsume=*/true)) {
+            if (BeginCycle(*Head, R,true)) {
                 bMutatingStationInv = false;
                 if (R->Process.Timing == EConversionTiming::Instant) {
-                    continue; // produce the next cycle immediately
+                    continue;
                 }
                 GetWorld()->GetTimerManager().SetTimer(ProcessTimerHandle, this, &UConversionStationComponent::OnCycleComplete,
                                                        FMath::Max(Head->CycleDuration, UE_KINDA_SMALL_NUMBER), false);
                 return;
             }
-            // BeginCycle stalled the head (missing fuel/input/catalyst).
             bMutatingStationInv = false;
             return;
         }
 
-        // Job finished.
         const FConversionJobEntry Completed = *Head;
         Jobs.RemoveAt(0);
         ClearJobBookkeeping(Completed.JobId);
@@ -1062,15 +1068,12 @@ void UConversionStationComponent::CompleteCurrentCycleAndContinue() {
     }
 }
 
-// ============================ Auto enqueue ============================
 
 void UConversionStationComponent::HandleStationInventoryChanged(int32 Slot) {
-    // Ignore changes we caused mid-mutation; the mutating path re-schedules explicitly afterwards.
     if (!HasAuthority() || bMutatingStationInv || StationMode != EConversionTrigger::Automatic) {
         return;
     }
     ScheduleAutoEnqueue();
-    // Inventory changed (e.g. output drained, fuel added) -> a stalled head may resume.
     AdvanceProcessing();
 }
 
@@ -1089,7 +1092,6 @@ void UConversionStationComponent::TryAutoEnqueue() {
         return;
     }
 
-    // Only enqueue when idle (one auto job at a time).
     if (const FConversionJobEntry *Head = Jobs.GetItems().Num() > 0 ? &Jobs.GetItems()[0] : nullptr) {
         if (Head->State == EConversionJobState::Processing) {
             return;
@@ -1099,15 +1101,17 @@ void UConversionStationComponent::TryAutoEnqueue() {
         return;
     }
 
-    // Resolve the bounded auto recipe set.
     TArray<UConversionRecipe *> RestrictTo;
     for (const TSoftObjectPtr<UConversionRecipe> &Ref : AutoRecipes) {
         if (UConversionRecipe *R = Ref.Get()) {
+            if (R->Process.Trigger != EConversionTrigger::Automatic) {
+                continue;
+            }
             RestrictTo.Add(R);
         }
     }
     if (RestrictTo.Num() == 0) {
-        return; // not loaded yet, or none configured
+        return;
     }
 
     TArray<UMythicItemInstance *> Inputs;
@@ -1118,9 +1122,8 @@ void UConversionStationComponent::TryAutoEnqueue() {
         return;
     }
 
-    // Fuel before inputs, then catalysts, then inputs.
     if (R->Process.bRequiresFuel && !EnsureFuel(R)) {
-        return; // wait for fuel
+        return;
     }
     if (!VerifyCatalystsPresent(R, nullptr)) {
         return;
@@ -1130,15 +1133,15 @@ void UConversionStationComponent::TryAutoEnqueue() {
     }
 
     bMutatingStationInv = true;
-    int32 SnapLevel = 0;
-    if (!ConsumeInputs(R, nullptr, 1, NextJobId, SnapLevel)) {
+    FConversionConsumeSnapshot Snap;
+    if (!ConsumeInputs(R, nullptr, 1, NextJobId, Snap)) {
         bMutatingStationInv = false;
         return;
     }
 
     const int32 Id = NextJobId++;
     const int32 Q = (R->Process.Timing == EConversionTiming::Continuous && R->Process.bRepeatWhileInputsAvailable) ? 0 : 1;
-    Jobs.AddJob(R->RecipeId, Q, Id, SnapLevel, /*SnapshotCrafterProficiencyLevel*/ 0); // station auto-fire has no crafter
+    Jobs.AddJob(R->RecipeId, Q, Id, Snap, 0);
     JobRefundTargets.Add(Id, FJobRefundInfo{nullptr, R->RecipeId});
     bMutatingStationInv = false;
 
@@ -1146,7 +1149,6 @@ void UConversionStationComponent::TryAutoEnqueue() {
     AdvanceProcessing();
 }
 
-// ============================ Eligibility ============================
 
 bool UConversionStationComponent::EvaluateEligibility(const UConversionRecipe *Recipe, const AActor *Interactor, FText &OutReason) const {
     if (!Recipe) {
@@ -1174,11 +1176,22 @@ bool UConversionStationComponent::EvaluateEligibility(const UConversionRecipe *R
         return false;
     }
 
+    AController *InteractorController = Cast<AController>(const_cast<AActor *>(Interactor));
+    if (!InteractorController) {
+        if (const APawn *Pawn = Cast<APawn>(Interactor)) {
+            InteractorController = Pawn->GetController();
+        }
+    }
+    FText DynamicReason;
+    if (!Recipe->PassesDynamicGates(InteractorController, DynamicReason)) {
+        OutReason = DynamicReason;
+        return false;
+    }
+
     OutReason = FText::GetEmpty();
     return true;
 }
 
-// ============================ Server entry points ============================
 
 void UConversionStationComponent::Server_RegisterInstigator(AController *Controller, AActor *Pawn) {
     if (!HasAuthority() || !Controller) {
@@ -1203,7 +1216,6 @@ void UConversionStationComponent::Server_RegisterInstigator(AController *Control
     FConversionSession &S = Sessions.FindOrAdd(Controller);
     S.Controller = Controller;
     S.Pawn = RangeActor;
-    // Back-date so the first craft right after opening isn't swallowed by the rate limiter.
     S.LastRequestServerTime = ServerNow() - kMinRequestInterval;
 }
 
@@ -1213,7 +1225,7 @@ void UConversionStationComponent::Server_RequestStart(AController *Controller, F
     }
     FConversionSession *S = Sessions.Find(Controller);
     if (!S) {
-        return; // must register (open) first
+        return;
     }
     AActor *Pawn = S->Pawn.Get();
     if (!IsActorInRange(Pawn)) {
@@ -1236,7 +1248,23 @@ void UConversionStationComponent::Server_RequestStart(AController *Controller, F
         return;
     }
 
-    // Re-check the station-use + instigator gates server-side (defense in depth).
+    if (UMythicCookingRecipe *Fallback = Cast<UMythicCookingRecipe>(R); Fallback && Fallback->bExperimentFallback) {
+        TArray<UMythicInventoryComponent *> ExpInvs;
+        FGameplayTag ExpInGroup, ExpCatGroup;
+        GetSourceInventories(Controller, ExpInvs, ExpInGroup, ExpCatGroup);
+        TArray<UMythicItemInstance *> ExpInputs;
+        GatherInstances(ExpInvs, ExpInGroup, ExpInputs);
+
+        if (UMythicCookingRecipe *Match = UMythicCookingRecipe::PickExperimentMatch(Subsystem->GetAllRecipes(), StationTags, ExpInputs)) {
+            FText MatchGateReason;
+            if (Match->PassesDynamicGates(Controller, MatchGateReason)) {
+                Match->GrantDiscovery(Controller);
+                R = Match;
+                RecipeId = Match->RecipeId;
+            }
+        }
+    }
+
     FGameplayTagContainer Owned;
     if (UAbilitySystemComponent *ASC = Cast<IInventoryProviderInterface>(Controller)->GetSchematicsASC()) {
         ASC->GetOwnedGameplayTags(Owned);
@@ -1247,14 +1275,15 @@ void UConversionStationComponent::Server_RequestStart(AController *Controller, F
     if (!R->Requirements.InstigatorTagQuery.IsEmpty() && !R->Requirements.InstigatorTagQuery.Matches(Owned)) {
         return;
     }
+    FText DynamicGateReason;
+    if (!R->PassesDynamicGates(Controller, DynamicGateReason)) {
+        return;
+    }
 
-    // Continuous batch quantity is meaningless: 0 (unbounded+repeat) or 1.
     if (R->Process.Timing == EConversionTiming::Continuous) {
         Quantity = R->Process.bRepeatWhileInputsAvailable ? 0 : 1;
     }
 
-    // A Transform consumes a distinct non-stackable input per cycle; reserve-all batching is unsupported for
-    // Timed/Instant, so cap to a single cycle. (Continuous transform reserves one input per cycle, which is fine.)
     bool bHasTransform = false;
     for (const FConversionProduct &P : R->Products) {
         if (P.Mode == EConversionProductMode::Transform) {
@@ -1269,35 +1298,23 @@ void UConversionStationComponent::Server_RequestStart(AController *Controller, F
     const int32 EffectiveCycles = (Quantity == 0) ? 1 : Quantity;
     const int32 ReserveCycles = (R->Process.Timing == EConversionTiming::Continuous) ? 1 : EffectiveCycles;
 
-    if (!VerifyInputs(R, Controller, EffectiveCycles, /*bCheckCatalysts=*/true)) {
+    if (!VerifyInputs(R, Controller, EffectiveCycles,true)) {
         return;
     }
 
-    const int32 Id = NextJobId; // tentative; only commit if consume succeeds
-    int32 SnapLevel = 0;
-    if (!ConsumeInputs(R, Controller, ReserveCycles, Id, SnapLevel)) {
+    const int32 Id = NextJobId;
+    FConversionConsumeSnapshot Snap;
+    if (!ConsumeInputs(R, Controller, ReserveCycles, Id, Snap)) {
         return;
     }
     NextJobId++;
 
-    // ProficiencyScaled recipes: snapshot the crafter's level in the recipe's CraftingProficiency NOW, so the product
-    // level is reproducible even if the crafter disconnects before the job finishes (mirrors SnapLevel). One skill per
-    // recipe — resolved once from R->CraftingProficiency when any product actually scales.
     int32 CrafterProfLevel = 0;
     if (R->CraftingProficiency) {
-        bool bAnyScaled = false;
-        for (const FConversionProduct &Prod : R->Products) {
-            if (Prod.LevelMode == EProductLevelMode::ProficiencyScaled) {
-                bAnyScaled = true;
-                break;
-            }
-        }
-        if (bAnyScaled) {
-            CrafterProfLevel = ResolveCrafterProficiencyLevel(Controller, R->CraftingProficiency);
-        }
+        CrafterProfLevel = ResolveCrafterProficiencyLevel(Controller, R->CraftingProficiency);
     }
 
-    Jobs.AddJob(RecipeId, Quantity, Id, SnapLevel, CrafterProfLevel);
+    Jobs.AddJob(RecipeId, Quantity, Id, Snap, CrafterProfLevel);
     JobRefundTargets.Add(Id, FJobRefundInfo{Controller, RecipeId});
     S->OwnedJobs++;
 
@@ -1320,7 +1337,7 @@ void UConversionStationComponent::Server_CancelJob(AController *Controller, int3
     }
     const FJobRefundInfo *Info = JobRefundTargets.Find(JobId);
     if (!Info || Info->Controller.Get() != Controller) {
-        return; // only the owner may cancel; auto jobs (null controller) are not player-cancelable
+        return;
     }
 
     const FConversionJobEntry JobCopy = Jobs.GetItems()[Idx];
@@ -1346,7 +1363,7 @@ void UConversionStationComponent::Server_SetAutoRepeat(AController *Controller, 
     }
     const FConversionSession *S = Sessions.Find(Controller);
     if (!S || !IsActorInRange(S->Pawn.Get())) {
-        return; // same session + range gate as every other mutating entry point
+        return;
     }
     FConversionJobEntry *Head = Jobs.EditHead();
     if (!Head) {

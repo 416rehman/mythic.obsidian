@@ -11,7 +11,6 @@ class MYTHIC_API UMythicToggleInput : public UMythicSelectInput {
                                               {{FText::FromString("Off"), FText::FromString("Off")}, {FText::FromString("On"), FText::FromString("On")}}) {
     };
 
-    // Constructor
     UMythicToggleInput(FText InLabel, FText InDescription, bool DefaultOn, FText OnDesc = FText::FromString("On"), FText OffDesc = FText::FromString("Off")) :
         UMythicSelectInput(InLabel, InDescription, {{OnDesc, FText::FromString("On")}, {OffDesc, FText::FromString("Off")}}) {
         this->Label = InLabel;

@@ -1,4 +1,3 @@
-// 
 
 
 #include "MythicGamePlayerSubsystem.h"
@@ -7,7 +6,6 @@
 #include "Streaming/LevelStreamingDelegates.h"
 
 bool UMythicGamePlayerSubsystem::ShouldCreateSubsystem(UObject *Outer) const {
-    // Should only create the subsystem on the server
     UWorld *World = Outer->GetWorld();
     if (World->WorldType != EWorldType::None && World->GetNetMode() < NM_Client) {
         UE_LOG(Myth, Log, TEXT("GameDirector created on server"));
@@ -27,10 +25,6 @@ void UMythicGamePlayerSubsystem::Initialize(FSubsystemCollectionBase &Collection
 }
 
 void UMythicGamePlayerSubsystem::Deinitialize() {
-    // Remove the process-global FLevelStreamingDelegates binds added in Initialize. These statics outlive this
-    // ULocalPlayerSubsystem (recreated per local-player / PIE / seamless travel), so leaving them bound accumulates
-    // stale invocation-list entries forever (+ a type-confused dispatch window on GC slot reuse). Mirrors the RemoveAll
-    // UMythicGameInstance already does for the same delegate.
     FLevelStreamingDelegates::OnLevelBeginMakingInvisible.RemoveAll(this);
     FLevelStreamingDelegates::OnLevelBeginMakingVisible.RemoveAll(this);
     FLevelStreamingDelegates::OnLevelStreamingStateChanged.RemoveAll(this);
@@ -50,7 +44,6 @@ void UMythicGamePlayerSubsystem::OnLevelBeginMakingVisible(UWorld *World, const 
         UE_LOG(Myth, Log, TEXT("Actor: %s"), *Actor->GetName());
     }
 
-    // The location of our player
     if (auto local_player = this->GetLocalPlayer()) {
         auto player_controller = local_player->GetPlayerController(World);
         if (player_controller == nullptr) {
@@ -66,7 +59,6 @@ void UMythicGamePlayerSubsystem::OnLevelBeginMakingVisible(UWorld *World, const 
         auto player_location = pawn->GetActorLocation();
         UE_LOG(Myth, Log, TEXT("Player location: %s"), *player_location.ToString());
 
-        // Check if the player is in the level
         auto LevelTransform = LevelStreaming->LevelTransform;
         UE_LOG(Myth, Log, TEXT("Level transform: %s"), *LevelTransform.ToString());
         UE_LOG(Myth, Log, TEXT("Level location: %s"), *LevelTransform.GetLocation().ToString());
@@ -92,7 +84,6 @@ void UMythicGamePlayerSubsystem::OnLevelBeginMakingInvisible(UWorld *World, cons
 
 void UMythicGamePlayerSubsystem::OnLevelStreamingStateChanged(UWorld *World, const ULevelStreaming *LevelStreaming, ULevel *Level,
                                                               ELevelStreamingState LevelStreamingState, ELevelStreamingState LevelStreamingState1) {
-    // The level could be null if it is not loaded
     if (Level) {
         UE_LOG(Myth, Log, TEXT("Level %s has changed state. Level Streaming State: %d"), *Level->GetName(), static_cast<uint8>(LevelStreamingState));
     }

@@ -1,7 +1,3 @@
-// Mythic — Environmental Hazard Component
-// Consumes the (already-simulated, replicated) weather/season/time backend: applies designer-authored
-// GameplayEffects to the player when the world conditions match, and removes them when they no longer do.
-// The weather state machine ran with zero gameplay consumers before this; this is the consumer.
 
 #pragma once
 
@@ -16,12 +12,6 @@ class UGameplayEffect;
 class UAbilitySystemComponent;
 class AMythicEnvironmentController;
 
-/**
- * One designer-authored hazard rule: when the world matches ALL non-empty axes (weather AND season AND daytime),
- * HazardEffect is applied to the player at EffectLevel; it's removed when the rule stops matching. Empty axis =
- * unconstrained. All effect content (the GE, its magnitudes/duration/stacking, and the exact conditions) is
- * designer-authored — nothing is fabricated in code.
- */
 USTRUCT(BlueprintType)
 struct FEnvironmentHazardCondition {
     GENERATED_BODY()
@@ -61,12 +51,6 @@ struct FEnvironmentHazardCondition {
     FText DisplayName;
 };
 
-/**
- * Hosted on AMythicPlayerController (persistent across respawn; resolves the PlayerState ASC). Binds the existing
- * environment-controller weather/daytime/season delegates and, on any change, re-evaluates every rule against the
- * live world state, diffing against the set of currently-applied GE handles (apply newly-true, remove
- * newly-false). Server-authoritative — the GE replicates to the owning client via the PlayerState ASC.
- */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class MYTHIC_API UMythicEnvironmentHazardComponent : public UActorComponent {
     GENERATED_BODY()
@@ -78,9 +62,6 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Hazard")
     TArray<FEnvironmentHazardCondition> Conditions;
 
-    // Read-only debug view of the hazards CURRENTLY applied to the player: the rule index plus a readable label
-    // (the rule's DisplayName when authored, else "Hazard[<idx>]"). Surfaces the private ActiveHazardHandles map
-    // for the Living World gameplay debugger (Environment pane) without exposing the GE handles. Game thread.
     void GetActiveHazards(TArray<int32> &OutRuleIndices, TArray<FString> &OutLabels) const {
         OutRuleIndices.Reset();
         OutLabels.Reset();
@@ -98,8 +79,6 @@ protected:
     UFUNCTION()
     void OnEnvironmentControllerRegistered(AMythicEnvironmentController *Controller);
 
-    // Delegate handlers — signatures MUST match the controller's delegates. They ignore the payload and just
-    // re-evaluate against live state (single source of truth).
     UFUNCTION()
     void HandleWeatherChanged(FGameplayTag PreviousWeather, FGameplayTag NewWeather);
 
@@ -109,56 +88,34 @@ protected:
     UFUNCTION()
     void HandleMonthChanged(int32 PrevMonth, int32 NewMonth, ESeason PrevSeason, ESeason NewSeason);
 
-    // Re-evaluate when a suppression tag is gained/lost on the player's ASC (e.g. stepping into / out of a campfire's
-    // warmth aura) so a hazard lifts/returns IMMEDIATELY, not only on the next weather/season/daytime change.
     void OnSuppressionTagChanged(const FGameplayTag CallbackTag, int32 NewCount);
 
 public:
-    // Pure: is a hazard suppressed for a player with the given owned tags? True iff the player owns ANY of the (valid)
-    // SuppressionTags (hierarchical HasTag). Static so the gate is unit-testable without a live ASC.
     static bool IsHazardSuppressed(const FGameplayTagContainer &PlayerOwnedTags, const TArray<FGameplayTag> &SuppressionTags);
 
 private:
     void BindController(AMythicEnvironmentController *Controller);
-    // Public entry: re-entrancy-guarded + coalescing wrapper around ReevaluateAllOnce (see the .cpp).
     void ReevaluateAll();
-    // One full apply/remove diff pass over all rules. Only ever called from ReevaluateAll (never re-entrantly).
     void ReevaluateAllOnce();
-    // PlayerOwnedTags is snapshotted ONCE per diff pass by the caller (not re-read per rule) — used for the suppression gate.
     bool EvaluateCondition(const FEnvironmentHazardCondition &Condition, const FGameplayTagContainer &PlayerOwnedTags) const;
     UAbilitySystemComponent *ResolvePlayerASC() const;
 
-    // ReevaluateAll re-entrancy guard: a GE apply/remove can synchronously fire a bound suppression-tag delegate that
-    // re-calls ReevaluateAll. bReevaluating blocks a nested diff; bReevaluatePending coalesces it into one more pass.
     bool bReevaluating = false;
     bool bReevaluatePending = false;
 
-    // (Re)bind the suppression-tag change listeners to ASC — idempotent on ASC identity; rebinds on a seamless-travel ASC
-    // swap (mirrors the GE-handle swap handling). Unbind removes this object's bindings from the currently-bound ASC.
     void RebindSuppressionTags(UAbilitySystemComponent *ASC);
     void UnbindSuppressionTags();
 
-    // Float the onset / relief callout for a hazard over the owning player (no-op if the rule has no DisplayName, or
-    // the owner isn't a player controller). Server-side; routes through the PC's Client RPC.
     void NotifyHazard(const FEnvironmentHazardCondition &Condition, bool bOnset) const;
 
-    // Rule index -> the active GE handle currently applied for it (diff state; not replicated — the GE itself is).
     TMap<int32, FActiveGameplayEffectHandle> ActiveHazardHandles;
 
-    // Rule indices the player has currently been ANNOUNCED (onset shown, relief pending). Tracked separately from
-    // ActiveHazardHandles so a seamless-travel ASC swap — which clears/re-applies the GE handles without any real
-    // world-state change — never re-announces a hazard the player already knows about. Drives the callouts only.
     TSet<int32> NotifiedConditions;
 
-    // The ASC the current handles were issued against. The component lives on the (persistent) PlayerController
-    // but the ASC lives on the PlayerState, which can be REPLACED (seamless travel). If the ASC identity changes,
-    // the old handles are stale — we drop the map (without removing on the new ASC) and re-apply fresh.
     TWeakObjectPtr<UAbilitySystemComponent> HandlesOwnerASC;
 
-    // The ASC the suppression-tag listeners are currently bound to (parallels HandlesOwnerASC — rebind on swap).
     TWeakObjectPtr<UAbilitySystemComponent> SuppressionBoundASC;
 
-    // The distinct suppression tags currently bound on SuppressionBoundASC (so UnbindSuppressionTags removes exactly them).
     TArray<FGameplayTag> BoundSuppressionTags;
 
     TWeakObjectPtr<AMythicEnvironmentController> BoundController;

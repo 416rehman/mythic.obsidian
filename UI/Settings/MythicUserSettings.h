@@ -1,0 +1,309 @@
+// Copyright Stellar Games. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/GameUserSettings.h"
+#include "MythicUserSettings.generated.h"
+
+UCLASS(Config = GameUserSettings, ConfigDoNotCheckDefaults)
+class MYTHIC_API UMythicUserSettings : public UGameUserSettings {
+    GENERATED_BODY()
+
+public:
+    UMythicUserSettings();
+
+    /** Convenience accessor, so callers do not have to cast the engine singleton themselves. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    static UMythicUserSettings *Get();
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetMasterVolume() const { return MasterVolume; }
+
+    /** Set and apply immediately — a volume slider that only takes effect on Apply feels broken. Clamped to [0,1]. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetMasterVolume(float NewVolume);
+
+    /** Invert the vertical look axis. Read by the camera input path. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    bool GetInvertLookY() const { return bInvertLookY; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetInvertLookY(bool bInvert);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetLookSensitivity() const { return LookSensitivity; }
+
+    /** Clamped to [0.1, 3.0] — a sensitivity of zero would look like a broken controller, not a setting. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetLookSensitivity(float NewSensitivity);
+
+
+    /** 0 None, 1 FXAA, 2 TAA, 3 MSAA, 4 TSR. Matches r.AntiAliasingMethod exactly. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    int32 GetAntiAliasingMethod() const { return AntiAliasingMethod; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetAntiAliasingMethod(int32 Method);
+
+    /** Post-tonemap sharpening, 0..2. Temporal AA softens; this is how a player gets the edge back. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetSharpness() const { return Sharpness; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetSharpness(float NewSharpness);
+
+
+    /**
+     * Hold the whole HUD at full strength, permanently.
+     *
+     * The contextual HUD hides what it thinks you do not need. That is right for most players and wrong for anyone
+     * who needs their vitals to simply be there — low vision, cognitive load, or just preference. This is the
+     * off switch, and UMythicHUDLayout treats it exactly like the reveal key being held down forever.
+     */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    bool GetAlwaysShowHUD() const { return bAlwaysShowHUD; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetAlwaysShowHUD(bool bAlways);
+
+    DECLARE_MULTICAST_DELEGATE(FMythicAccessibilityChanged);
+    FMythicAccessibilityChanged OnAccessibilityChanged;
+
+
+    /**
+     * Screen gamma. It lives on UEngine as a config property of its own, so we keep a copy and re-push it on load --
+     * otherwise it reverts to 2.2 every boot and reads as "brightness does not save".
+     */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetDisplayGamma() const { return DisplayGamma; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetDisplayGamma(float NewGamma);
+
+    /** Frames per second while the window is not focused. 0 = no separate limit. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetBackgroundFrameRateLimit() const { return BackgroundFrameRateLimit; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetBackgroundFrameRateLimit(float NewLimit);
+
+    void ApplyFrameRateLimit();
+
+
+    /** 0 off .. 4 very high. Off by default: motion blur is the commonest motion-sickness trigger. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    int32 GetMotionBlurQuality() const { return MotionBlurQuality; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetMotionBlurQuality(int32 Quality);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    bool GetBloom() const { return bBloom; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetBloom(bool bEnabled);
+
+    /** Texture filtering, 1..16. Both r.MaxAnisotropy and its virtual-texture twin are pushed. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    int32 GetMaxAnisotropy() const { return MaxAnisotropy; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetMaxAnisotropy(int32 Samples);
+
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    bool GetMuteWhenUnfocused() const { return bMuteWhenUnfocused; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetMuteWhenUnfocused(bool bMute);
+
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetMouseLookSensitivity() const { return MouseLookSensitivity; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetMouseLookSensitivity(float V);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetGamepadLookSensitivity() const { return GamepadLookSensitivity; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetGamepadLookSensitivity(float V);
+
+    /** Multiplier on the vertical axis only, so a player can slow Y without slowing the turn. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetVerticalLookScale() const { return VerticalLookScale; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetVerticalLookScale(float V);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    bool GetInvertLookX() const { return bInvertLookX; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetInvertLookX(bool bInvert);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetGamepadDeadzoneLeft() const { return GamepadDeadzoneLeft; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetGamepadDeadzoneLeft(float V);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetGamepadDeadzoneRight() const { return GamepadDeadzoneRight; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetGamepadDeadzoneRight(float V);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetVibrationScale() const { return VibrationScale; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetVibrationScale(float Scale);
+
+    void ApplyVibration() const;
+
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetUIScale() const { return UIScale; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetUIScale(float Scale);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetHUDOpacity() const { return HUDOpacity; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetHUDOpacity(float Opacity);
+
+    /** 0 off, 1 damage you deal, 2 everything. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    uint8 GetDamageNumberMode() const { return DamageNumberMode; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetDamageNumberMode(uint8 Mode);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetDamageNumberScale() const { return DamageNumberScale; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetDamageNumberScale(float Scale);
+
+    /**
+     * The quality preset the eleven scalability groups agree on, or -1 for Custom.
+     *
+     * NOT GetOverallScalabilityLevel(): that also demands ResolutionQuality match a fixed table, and our
+     * render-scale restore guarantees it does not -- so the preset row would read "Custom" the moment it was set.
+     */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    int32 GetQualityPresetLevel() const;
+
+    DECLARE_MULTICAST_DELEGATE(FMythicInputSettingsChanged);
+    FMythicInputSettingsChanged OnInputSettingsChanged;
+
+    DECLARE_MULTICAST_DELEGATE(FMythicInterfaceChanged);
+    FMythicInterfaceChanged OnInterfaceChanged;
+
+    virtual void ApplySettings(bool bCheckForCommandLineOverrides) override;
+    virtual void SetToDefaults() override;
+
+    virtual void SetOverallScalabilityLevel(int32 Value) override;
+
+    virtual float GetEffectiveFrameRateLimit() override;
+
+    /** Screen percentage, 25-100. Kept separate from the quality preset on purpose. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetRenderScale(float Percent);
+
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    float GetRenderScale() const;
+
+private:
+    void ApplyMasterVolume() const;
+
+    UPROPERTY(Config)
+    float MasterVolume = 1.0f;
+
+    UPROPERTY(Config)
+    bool bInvertLookY = false;
+
+    UPROPERTY(Config)
+    float LookSensitivity = 1.0f;
+
+    void ApplyImageSettings() const;
+
+    UPROPERTY(Config)
+    int32 AntiAliasingMethod = 4; // TSR: the engine default for UE5 and the right one for an open world
+
+    UPROPERTY(Config)
+    float Sharpness = 0.4f;
+
+    UPROPERTY(Config)
+    bool bAlwaysShowHUD = false;
+
+    // ---- Display ----
+    UPROPERTY(Config)
+    float DisplayGamma = 2.2f;
+
+    UPROPERTY(Config)
+    float BackgroundFrameRateLimit = 30.0f;
+
+    void ApplyDisplayGamma() const;
+
+    // ---- Image ----
+    UPROPERTY(Config)
+    int32 MotionBlurQuality = 0;
+
+    UPROPERTY(Config)
+    bool bBloom = true;
+
+    UPROPERTY(Config)
+    int32 MaxAnisotropy = 8;
+
+    // ---- Audio ----
+    UPROPERTY(Config)
+    bool bMuteWhenUnfocused = true;
+
+    void ApplyAudioSettings() const;
+
+    // ---- Controls ----
+    UPROPERTY(Config)
+    float MouseLookSensitivity = 1.0f;
+
+    UPROPERTY(Config)
+    float GamepadLookSensitivity = 1.0f;
+
+    UPROPERTY(Config)
+    float VerticalLookScale = 1.0f;
+
+    UPROPERTY(Config)
+    bool bInvertLookX = false;
+
+    UPROPERTY(Config)
+    float GamepadDeadzoneLeft = 0.15f;
+
+    UPROPERTY(Config)
+    float GamepadDeadzoneRight = 0.15f;
+
+    UPROPERTY(Config)
+    float VibrationScale = 1.0f;
+
+    // ---- Interface ----
+    UPROPERTY(Config)
+    float UIScale = 1.0f;
+
+    UPROPERTY(Config)
+    float HUDOpacity = 1.0f;
+
+    UPROPERTY(Config)
+    uint8 DamageNumberMode = 1;
+
+    UPROPERTY(Config)
+    float DamageNumberScale = 1.0f;
+
+    void ApplyInterfaceSettings() const;
+
+    static void PushCVar(const TCHAR *Name, int32 Value);
+    static void PushCVar(const TCHAR *Name, float Value);
+};

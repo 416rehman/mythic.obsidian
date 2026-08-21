@@ -6,12 +6,6 @@
 #include "GAS/Abilities/MythicGameplayAbility.h"
 #include "GA_GenericConsumable.generated.h"
 
-/**
- * UGA_GenericConsumable
- *
- *	Wrapper ability that calls ServerHandleAction on the Item Instance's Fragment.
- *	Used for items that have Input Tags but no specific Gameplay Ability (e.g., just applying tags).
- */
 UCLASS()
 class MYTHIC_API UGA_GenericConsumable : public UMythicGameplayAbility {
     GENERATED_BODY()

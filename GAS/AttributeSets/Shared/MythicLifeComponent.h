@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -13,7 +12,8 @@
 #include "MythicLifeComponent.generated.h"
 
 class UMythicAbilitySystemComponent;
-class APawn; // revive-channel reviver (ServerBeginReviveChannel / ActiveReviver)
+class APawn;
+class AMythicCorpse;
 
 UCLASS(Blueprintable, BlueprintType)
 class UDamageResult : public UObject {
@@ -25,14 +25,11 @@ public:
 
     UPROPERTY(BlueprintReadOnly, Category = "Damage")
     float NewHealth;
-
 };
 
-// Event for HealthChange
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FMythicHealthChanged, float, New, float, Old, FGameplayAttribute,
                                               Attribute, const FGameplayEffectContextHandle&, ContextHandle);
 
-// SERVER: fired when the owner dies (Health reached 0). Bind to diverge behaviour (NPC pooling, drop loot, etc.).
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMythicOnDeath, AActor*, DeadActor);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -78,19 +75,14 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Health")
     float GetHealthNormalized() const;
 
-    // SERVER: On Instigator ASC, trigger gameplay event with tag OnDeliveredHitGameplayEventTag.
     void TriggerGameplayEvent_DeliveredHit(AActor *DamageInstigator, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude, float OldValue, float
                                            NewValue) const;
-    // SERVER: On Instigator ASC, trigger gameplay event with tag OnDeliveredHealGameplayEventTag.
     void TriggerGameplayEvent_DeliveredHeal(AActor *DamageInstigator, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude, float OldValue, float
                                             NewValue);
-    // SERVER: On Instigator ASC, trigger gameplay event with tag OnDeathGameplayEventTag.
     void TriggerGameplayEvent_Kill(AActor *DamageInstigator, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude, float OldValue,
                                    float NewValue);
-    // SERVER: On owning ASC, trigger gameplay event with tag OnHealReceivedGameplayEventTag.
     void TriggerGameplayEvent_ReceivedHeal(AActor *DamageInstigator, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude, float OldValue, float
                                            NewValue);
-    // SERVER: On owning ASC, trigger gameplay event with tag OnDeathGameplayEventTag.
     void TriggerGameplayEvent_Death(AActor *DamageInstigator, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude, float OldValue, float
                                     NewValue);
 
@@ -162,14 +154,18 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mythic|Health")
     FLootTableOverride LootDrop;
 
+    // SERVER (Death keystone): on a lootable NPC death, spawn this corpse actor at the death transform and route the
+    // rolled loot INTO its searchable, decaying inventory instead of ejecting loose world items. Defaults to the C++
+    // AMythicCorpse (runs unauthored); assign a BP subclass for ragdoll/skeletal visuals + a loot InventoryProfile.
+    // If unset or the spawn fails, loot falls back to loose world items exactly as before.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mythic|Health")
+    TSubclassOf<AMythicCorpse> CorpseClass;
+
     // SERVER: re-enable the movement + collision that StartDeath disabled, so a revived / pooled-and-reused
     // owner can move again. Mirror of StartDeath's disable (kept colocated as the single source of truth).
     UFUNCTION(BlueprintCallable, Category = "Mythic|Health")
     void RestoreAfterDeath();
 
-    // Pure: is a player eligible for shared kill credit? The killer ALWAYS qualifies (bIsKiller); any other player
-    // qualifies iff within range (DistSqToVictim <= RangeSq). A RangeSq <= 0 reduces this to killer-only. Static so the
-    // co-op credit rule is unit-testable without a live world.
     static bool IsEligibleForSharedKillCredit(bool bIsKiller, float DistSqToVictim, float RangeSq);
 
     // True while the owner is in the co-op downed state (incapacitated, bleeding out, revivable).
@@ -185,8 +181,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Health")
     void ServerReviveFromDowned();
 
-    // Pure revive-eligibility gate: a downed target can be revived only by a reviver who is NOT themselves downed.
-    // (Range is enforced separately by the interaction RPC.) Static + no engine state for unit testing.
     static bool CanReviveTarget(bool bTargetDowned, bool bReviverDowned);
 
     // Proficiency XP paid to the teammate who revives this owner (co-op incentive). 0 (default) = no reward,
@@ -200,19 +194,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mythic|Health")
     TObjectPtr<class UProficiencyDefinition> ReviveRewardProficiency = nullptr;
 
-    // One-shot: set true ONLY by the genuine reviver-initiated revive paths (channel completion + the instant fallback),
-    // consumed in ServerReviveFromDowned to gate the reward — so a DIRECT/debug ServerReviveFromDowned (e.g. a self-revive
-    // cheat) never credits an in-flight channeling teammate for a revive they did not complete.
     bool bPayReviverOnNextRevive = false;
 
-    // Pure: the reward actually paid to a reviver — the configured amount (floored at 0) iff the reviver is an eligible
-    // player, else 0. Static so the co-op incentive rule is unit-testable without a live world.
     static float ComputeReviveReward(bool bReviverIsEligiblePlayer, float ConfiguredReward);
 
-    // SERVER: begin (or refresh) a proximity-maintained revive channel on this downed owner by Reviver. While the channel
-    // runs, progress accrues each tick as long as Reviver stays in range + isn't downed (re-validated server-side); on
-    // completion this calls ServerReviveFromDowned. No-op if not downed / already being revived by someone else / off
-    // authority / ReviveChannelSeconds<=0 (the instant path is taken by the caller instead).
     void ServerBeginReviveChannel(APawn *Reviver);
 
     // Normalized revive-channel progress [0,1] for the UI bar (0 when no channel / ReviveChannelSeconds<=0). Reads the
@@ -220,16 +205,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Health")
     float GetReviveProgress01() const;
 
-    // Pure revive-channel rules (static + unit-testable):
-    //  - ComputeReviveProgressAfterTick: accrue DeltaSeconds onto CurrentSeconds, clamped to [0, ChannelSeconds].
-    //  - IsReviveComplete: channel enabled (ChannelSeconds>0) and progress reached it.
-    //  - ShouldContinueReviveChannel: the per-tick keep-going gate (target still downed, reviver valid + not downed + in range).
     static float ComputeReviveProgressAfterTick(float CurrentSeconds, float DeltaSeconds, float ChannelSeconds);
     static bool IsReviveComplete(float ProgressSeconds, float ChannelSeconds);
     static bool ShouldContinueReviveChannel(bool bTargetDowned, bool bReviverValid, bool bReviverDowned, bool bReviverInRange);
 
-    // Pure: the reviver took damage since the last channel tick (current health dropped below the prior baseline, past a
-    // tiny epsilon so float/replication noise never spuriously interrupts). Used to break a channel under fire.
     static bool ShouldInterruptReviveOnDamage(float ReviverHealthNow, float ReviverHealthAtLastTick);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
@@ -259,6 +238,28 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mythic|CrowdControl", meta = (ClampMin = "0.0"))
     float StaggerImmunityWindow = 1.5f;
 
+    // ---- Combat state ----
+    // SERVER: put the owner in combat and keep them there for CombatTagDuration, refreshing on every fresh hit.
+    //
+    // GAS.State.InCombat was declared, and READ in four separate places -- the fast-travel block, mount summoning,
+    // POI discovery and the HUD -- but was applied by NOTHING. Every one of those "you can't do that in combat"
+    // checks was therefore dead code that always said "sure, go ahead". This is the missing half.
+    //
+    // The tag is a REPLICATED loose tag, not a plain loose one: those stay server-side, and the owning client needs
+    // to see this to drive the HUD. It is not a Gameplay Effect because there is no magnitude, no stacking and no
+    // duration curve here -- just a flag with a timeout, which is what a loose tag is for.
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Combat")
+    void MarkInCombat();
+
+    // SERVER: drop out of combat immediately, whatever the timer says (death, respawn, pool recycle).
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Combat")
+    void ClearInCombat();
+
+    // How long a single hit keeps you "in combat". Long enough that a pause between exchanges is not read as the
+    // fight ending, short enough that walking away from one clears promptly.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mythic|Combat", meta = (ClampMin = "0.0"))
+    float CombatTagDuration = 8.0f;
+
     // SERVER: attempt to spend stamina (StaminaCostReduction is applied). Returns false (and spends nothing) if
     // the owner does not have enough stamina. Abilities / sprint / dodge call this to gate actions.
     UFUNCTION(BlueprintCallable, Category = "Mythic|Health")
@@ -269,41 +270,18 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Health")
     bool CanSpendStamina(float Cost) const;
 
-    // The actual stamina a RawCost spends after StaminaCostReduction: RawCost * (1 - Clamp(Reduction, 0, 1)). Single
-    // source for the reduction math so CanSpendStamina (affordability) and TrySpendStamina (deduction) cannot drift
-    // apart. Pure + static so the reduction rule is unit-testable. Reduction 1.0 → free; 0.0 → full cost; clamped so
-    // an over-/under-range attribute can't make the cost negative or amplified.
     static float EffectiveStaminaCost(float RawCost, float StaminaCostReduction);
 
-    // Stagger trigger threshold: a hit staggers only if its magnitude is at least HeavyHitHealthFraction of MaxHealth,
-    // so the bar scales with the entity (a chip hit never staggers; a boss needs a proportionally bigger hit). A
-    // non-positive MaxHealth never staggers. Pure + static for unit testing.
     static bool IsHeavyHit(float EventMagnitude, float MaxHealth, float HeavyHitHealthFraction);
 
-    // Stagger-immunity (anti-stun-lock) gate: immune if the previous stagger started less than ImmunityWindow seconds
-    // ago. A non-positive LastStaggerTime means "never staggered yet" → NOT immune, so the first heavy hit always
-    // staggers even when it lands before ImmunityWindow seconds of world time have elapsed (a load-into-combat arena).
-    // Pure + static for unit testing.
     static bool IsStaggerImmune(double Now, double LastStaggerTime, float ImmunityWindow);
 
-    // One regeneration step for a Cur→Max attribute: Cur + Rate*DeltaSeconds, CLAMPED to Max (never overshoots).
-    // Returns Cur UNCHANGED when there's nothing to do (Rate <= 0, or already at/above Max), so a caller can cheaply
-    // detect "did it regen?" with `result > Cur` and skip a redundant attribute set. Single source for the regen
-    // math shared by Health/Shield/Stamina in ApplyRegen. Pure + static for unit testing.
     static float ComputeRegenTarget(float Cur, float Max, float Rate, float DeltaSeconds);
 
-    // Stamina remaining after one sprint-drain tick: Cur − DrainPerSecond×DeltaSeconds, clamped to >= 0 (both inputs
-    // clamped non-negative). The drain counterpart to ComputeRegenTarget. Pure + static for unit testing.
     static float ComputeStaminaAfterSprintTick(float Cur, float DrainPerSecond, float DeltaSeconds);
 
-    // True once an exhausted entity's stamina has recovered to RecoverFraction of max — the hysteresis gate that
-    // re-enables sprinting. A non-positive Max never recovers (degenerate / no stamina). RecoverFraction clamped [0,1].
-    // Pure + static for unit testing.
     static bool ShouldRecoverFromExhaustion(float CurrentStamina, float MaxStamina, float RecoverFraction);
 
-    // Tear down any in-flight stagger: clear the recovery timer, remove the transient loose STUNNED tag, reset state.
-    // Single source for the stagger teardown — called by StartDeath, Uninitialize, AND the pool-return path (so a
-    // reused actor never inherits a leftover loose STUNNED tag + orphaned timer and spawn movement-frozen).
     void ClearStagger();
 
     // If set, gameplay event with this tag will be triggered on the Instigator AbilitySystemComponent when the health value goes down (if currently: 0 < health)
@@ -350,107 +328,79 @@ protected:
 
     void ClearGameplayTags() const;
 
-    // Reacts to crowd-control debuff tags (GAS.Debuff.Stunned/Frozen = cannot move; GAS.Debuff.Slowed = reduced
-    // speed) changing on the owning ASC. Bound for NewOrRemoved, so it fires wherever the GE-granted tag is present
-    // (server + owning client — correct for client-predicted movement). Delegates to the idempotent recompute.
     void HandleCrowdControlTagChanged(const FGameplayTag Tag, int32 NewCount);
 
-    // Recomputes the owner's movement from the live CC tags (idempotent — no apply/restore pairing). Stun/Frozen
-    // disable movement (mirrors StartDeath); Slow scales MaxWalkSpeed by SlowMultiplier off the captured base.
-    // No-op while dead (death owns movement) or without a character/movement component.
     void ReevaluateCrowdControl();
 
-    // The encumbrance move-speed multiplier folded into ReevaluateCrowdControl's SpeedScale. 1.0 when encumbrance is
-    // disabled (default) or the owner carries within capacity; <1 when Heavy/Overloaded. Pulls the owner's carried
-    // weight from its inventory provider (players); NPCs/inventory-less owners are always 1.0.
     float ComputeEncumbranceSpeedScale() const;
 
-    // The owner's inventory components, reached via its controller's inventory provider (players). Empty for an owner
-    // with no provider (NPC / inventory-less). Single source for both the weight read and the change-binding below.
     TArray<class UMythicInventoryComponent *> GetOwnerInventoryComponents() const;
 
-    // Bound to each owner inventory's OnSlotUpdated so carried-weight changes (pickup/drop/stack) recompute move speed
-    // immediately, not only on a CC tag change. UFUNCTION (the inventory delegate is dynamic). Recompute is gated on
-    // bEncumbranceEnabled so the default-off path stays zero-cost.
     UFUNCTION()
     void HandleInventoryChanged(int32 Slot);
 
-    // The inventories this component bound HandleInventoryChanged to (for a clean RemoveDynamic on teardown / re-init).
     TArray<TWeakObjectPtr<class UMythicInventoryComponent>> EncumbranceBoundInventories;
 
-    // (Un)subscribe HandleInventoryChanged from the owner's inventory OnSlotUpdated delegates. Bind on ASC init (post-
-    // possession, when the provider exists); unbind on uninit (re-possession / teardown) so no dangling delegate.
     void BindEncumbranceInventoryDelegates();
     void UnbindEncumbranceInventoryDelegates();
 
-    // SERVER: consumes the owner's received-hit event and STAGGERS on a heavy hit (transient STUNNED loose tag,
-    // immunity-windowed against stun-lock). The CC handler above turns the tag into a movement halt + restore.
     void HandleReceivedHit(const struct FGameplayEventData *Payload);
 
-    // SERVER: consumes the owner's delivered-hit event (fired on the instigator) and applies LIFESTEAL — heals a flat
-    // LifePerHit per landed hit, capped at MaxHealth (mirrors ApplyRegen).
     void HandleDamageDelivered(const struct FGameplayEventData *Payload);
 
-    // SERVER: consumes the owner's KILL event (fired on the killer by the victim's Life set on a lethal blow) and
-    // applies LIFESTEAL-ON-KILL — heals a flat LifePerKill, capped at MaxHealth (mirrors HandleDamageDelivered).
     void HandleKill(const struct FGameplayEventData *Payload);
 
-    // SERVER: consumes the owner's death gameplay event and runs the death sequence (idempotent).
     void HandleDeathEvent(const struct FGameplayEventData *Payload);
-    // SERVER: applies the Dead state, disables movement, cancels abilities, fires hooks, awards kill XP to Killer,
-    // requests player respawn.
     void StartDeath(AActor *Killer);
 
-    // SERVER: enter the co-op downed state instead of dying — downed tag, cancel abilities, disable MOVEMENT (collision
-    // kept so the body is reachable for revive), broadcast OnDowned, and start the bleed-out timer that calls StartDeath
-    // if no revive arrives in time. Reached from HandleDeathEvent only when co-op down is enabled + the owner is a
-    // revivable player.
+    void SpawnDeathStakeGravestone(class AController *PlayerController, AActor *DeadActor);
+
     void EnterDownedState(AActor *Killer);
 
-    // True if the owner is a player-controlled pawn (the only thing that can be downed/revived; NPCs die outright).
     bool IsOwnerRevivablePlayer() const;
 
-    // SERVER: periodic regen tick (Health / Shield / Stamina toward max). Paused while dead.
     void ApplyRegen();
     FTimerHandle RegenTimerHandle;
 
-    // Internal handler which when the health is changed, sends out the gameplay events.
     virtual void HandleHealthChanged(AActor *DamageInstigator, AActor *DamageCauser, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude,
                                      float OldValue, float NewValue);
 
-    // Internal handler which when the health is changed, sends out the gameplay events.
     virtual void HandleMaxHealthChanged(AActor *DamageInstigator, AActor *DamageCauser, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude,
                                         float OldValue, float NewValue);
 
 protected:
-    // Ability system used by this component.
     UPROPERTY()
     TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
 
-    // Health set used by this component.
     UPROPERTY()
     TObjectPtr<const UMythicAttributeSet_Life> LifeSet;
 
-    // The owner's un-slowed MaxWalkSpeed, captured at init — the value Slow scales and restore returns to.
     float BaseWalkSpeed = 0.0f;
 
-    // Stagger state: the recovery timer that clears the transient STUNNED, whether a stagger is currently active
-    // (no stacking), and the world-time of the last stagger's START (for the immunity window).
     FTimerHandle StaggerTimerHandle;
     bool bStaggered = false;
     double LastStaggerTime = 0.0;
 
-    // Co-op downed state (server-authoritative; only entered for revivable players when the policy is enabled).
+    FTimerHandle CombatTagTimerHandle;
+
     bool bIsDowned = false;
     FTimerHandle BleedOutTimerHandle;
-    TWeakObjectPtr<AActor> DownedKiller; // remembered so a bleed-out attributes the eventual death correctly
+    TWeakObjectPtr<AActor> DownedKiller;
 
-    // Revive channel (server-authoritative; only active while a teammate is reviving this downed owner).
+    void ResetKillContextCapture();
+    void CaptureLethalKillContext(const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude, float OldValue);
+    int32 DamageEventsTaken = 0;
+    bool bLethalCritical = false;
+    bool bLethalBurn = false;
+    bool bLethalBleed = false;
+    bool bLethalPoison = false;
+    float LethalOverkillFraction = 0.0f;
+
     UPROPERTY(Replicated)
-    float ReviveProgressSeconds = 0.0f; // replicated so the reviver + downed player can show the progress bar
-    TWeakObjectPtr<APawn> ActiveReviver; // server-only: who is currently channeling the revive
-    float ReviverHealthAtLastTick = 0.0f; // server-only: the reviver's health snapshot, to detect damage-during-channel
+    float ReviveProgressSeconds = 0.0f;
+    TWeakObjectPtr<APawn> ActiveReviver;
+    float ReviverHealthAtLastTick = 0.0f;
     FTimerHandle ReviveChannelTimerHandle;
-    void ReviveChannelTick();    // per-tick: re-validate + accrue; complete or interrupt
-    void CancelReviveChannel();  // stop the timer, clear the reviver, reset replicated progress
+    void ReviveChannelTick();
+    void CancelReviveChannel();
 };

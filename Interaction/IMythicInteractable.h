@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -7,7 +6,6 @@
 #include "UObject/Interface.h"
 #include "IMythicInteractable.generated.h"
 
-// Struct that contains the interaction data for an actor
 USTRUCT(BlueprintType)
 struct FMythicInteractionData {
     GENERATED_BODY()
@@ -15,7 +13,7 @@ struct FMythicInteractionData {
     // The data table to use for the interactable
     UPROPERTY(BlueprintReadWrite)
     TObjectPtr<const UCommonGenericInputActionDataTable> InputActionDataTable;
-    
+
     // The name of the primary interaction
     UPROPERTY(BlueprintReadWrite)
     FName PrimaryInteractionName;
@@ -30,19 +28,14 @@ struct FMythicInteractionData {
 };
 
 
-// This class does not need to be modified.
 UINTERFACE(MinimalAPI, Blueprintable)
 class UMythicInteractable : public UInterface {
     GENERATED_BODY()
 };
 
-/**
- * This interface should be implemented by any actor that can be interacted with. I.e. a chest, a door, a lever, etc.
- */
 class MYTHIC_API IMythicInteractable {
     GENERATED_BODY()
 
-    // Add interface functions to this class. This is the class that will be inherited to implement this interface.
 public:
     // Called when this item has been interacted with using the primary interaction.
     UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interactable")

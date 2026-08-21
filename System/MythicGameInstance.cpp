@@ -25,19 +25,15 @@ void UMythicGameInstance::Shutdown() {
 }
 
 bool UMythicGameInstance::CanJoinRequestedSession() const {
-    // Temporary first pass:  Always return true
-    // This will be fleshed out to check the player's state
     if (!Super::CanJoinRequestedSession()) {
         return false;
     }
     return true;
 }
 
-// Adds a widget to the viewport, tries to load the level async, waits for the level to be loaded async, and then removes the widget
 void UMythicGameInstance::LoadLevel(FName LevelName, TSoftClassPtr<UUserWidget> LoadingScreenWidgetClass) {
     MapName = LevelName;
 
-    // LoadAsync handles null and already-loaded cases automatically
     UMythicAssetManager::LoadAsync(this, LoadingScreenWidgetClass,
                                    [this](TSubclassOf<UUserWidget> LoadedClass) {
                                        OnLoadingScreenClassLoaded(LoadedClass);
@@ -45,7 +41,6 @@ void UMythicGameInstance::LoadLevel(FName LevelName, TSoftClassPtr<UUserWidget> 
 }
 
 void UMythicGameInstance::OnLoadingScreenClassLoaded(TSubclassOf<UUserWidget> LoadedClass) {
-    // Create and show loading screen if we have a valid class
     if (LoadedClass) {
         LoadingScreenWidget = CreateWidget<UUserWidget>(this, LoadedClass);
         if (LoadingScreenWidget) {
@@ -59,11 +54,9 @@ void UMythicGameInstance::OnLoadingScreenClassLoaded(TSubclassOf<UUserWidget> Lo
         }
     }
 
-    // Get the game player subsystem and start level load
     ULocalPlayer *LocalPlayer = GetFirstGamePlayer();
     UMythicGamePlayerSubsystem *GamePlayerSubsystem = LocalPlayer ? LocalPlayer->GetSubsystem<UMythicGamePlayerSubsystem>() : nullptr;
     if (GamePlayerSubsystem) {
-        // Bind to the on level loaded delegate
         FLevelStreamingDelegates::OnLevelStreamingStateChanged.AddUObject(this, &UMythicGameInstance::OnLevelLoaded);
         UGameplayStatics::OpenLevel(GetWorld(), MapName, true, "");
     }
@@ -76,7 +69,6 @@ void UMythicGameInstance::OnLevelLoaded(UWorld *World, const ULevelStreaming *Le
                                         ELevelStreamingState NewState) {
     auto IncomingMap = World->GetName();
     if (IncomingMap == MapName && NewState == ELevelStreamingState::LoadedVisible) {
-        // Unbind from the on level loaded delegate
         FLevelStreamingDelegates::OnLevelStreamingStateChanged.RemoveAll(this);
 
         if (LoadingScreenWidget) {

@@ -3,23 +3,65 @@
 #include "Mythic.h"
 #include "Input/CommonUIInputTypes.h"
 
+UCommonButtonBase *UMythicInteractionPromptWidget::GetOrCreateActionButton(int32 Index) {
+    if (ActionButtonPool.IsValidIndex(Index)) {
+        return ActionButtonPool[Index];
+    }
+    if (!this->ActionButtonClass || !this->VerticalBox) {
+        return nullptr;
+    }
+    UCommonButtonBase *Button = CreateWidget<UCommonButtonBase>(this, this->ActionButtonClass);
+    if (!Button) {
+        return nullptr;
+    }
+    Button->SetVisibility(ESlateVisibility::Collapsed);
+    this->VerticalBox->AddChild(Button);
+    ActionButtonPool.Add(Button);
+    return Button;
+}
+
+void UMythicInteractionPromptWidget::ShowActionButton(int32 Index, const FUIActionBindingHandle &Handle) {
+    UCommonButtonBase *Button = GetOrCreateActionButton(Index);
+    if (!Button) {
+        return;
+    }
+    if (ICommonBoundActionButtonInterface *ActionButtonInterface = Cast<ICommonBoundActionButtonInterface>(Button)) {
+        ActionButtonInterface->SetRepresentedAction(Handle);
+        Button->SetVisibility(ESlateVisibility::Visible);
+    }
+    else {
+        UE_LOG(Myth, Error, TEXT("Interaction Error: action button does not implement ICommonBoundActionButtonInterface"));
+    }
+}
+
+void UMythicInteractionPromptWidget::CollapseActionButtonsFrom(int32 Index) {
+    for (int32 i = Index; i < ActionButtonPool.Num(); ++i) {
+        if (ActionButtonPool[i]) {
+            ActionButtonPool[i]->SetVisibility(ESlateVisibility::Collapsed);
+        }
+    }
+}
+
 void UMythicInteractionPromptWidget::SetInteractionData(FMythicInteractionData InInteractionData, AActor *InInteractableActor,
                                                         APlayerController *InPlayerController, UMythicActivatableWidget *UI_LayerRootWidget) {
     Clear();
 
-    // Add the complimentary widget
-    if (InInteractionData.ComplimentaryWidget) {
-        this->VerticalBox->AddChild(InInteractionData.ComplimentaryWidget);
+    if (InInteractionData.ComplimentaryWidget != ActiveComplimentaryWidget) {
+        if (ActiveComplimentaryWidget) {
+            this->VerticalBox->RemoveChild(ActiveComplimentaryWidget);
+        }
+        ActiveComplimentaryWidget = InInteractionData.ComplimentaryWidget;
+        if (ActiveComplimentaryWidget) {
+            this->VerticalBox->AddChildToVerticalBox(ActiveComplimentaryWidget);
+        }
     }
+    CollapseActionButtonsFrom(0);
 
-    // Both input-action bindings require the UI layer root widget. Guard once here — the secondary block previously had
-    // NO null-check (only the primary did), so a None primary + set secondary + null root dereferenced null below.
     if (!UI_LayerRootWidget) {
         UE_LOG(Myth, Error, TEXT("Interaction Error: UI_LayerRootWidget is nullptr"));
         return;
     }
 
-    // Bind the primary input action
     if (InInteractionData.PrimaryInteractionName.IsNone() || InInteractionData.PrimaryInteractionName == FName("")) {
         UE_LOG(Myth, Error, TEXT("Interaction Warning: Actor %s's PrimaryInteractionName is None"), *InInteractableActor->GetName());
     }
@@ -41,28 +83,17 @@ void UMythicInteractionPromptWidget::SetInteractionData(FMythicInteractionData I
 
         this->PrimaryInteractionHandle = UI_LayerRootWidget->RegisterUIActionBinding(BindArgs);
         if (this->PrimaryInteractionHandle.IsValid()) {
-            // Create widget for the primary action from the ActionButtonClass
-            if (UCommonButtonBase *PrimaryActionBtn = CreateWidget<UCommonButtonBase>(this, this->ActionButtonClass)) {
-                ICommonBoundActionButtonInterface *ActionButtonInterface = Cast<ICommonBoundActionButtonInterface>(PrimaryActionBtn);
-                if (ensure(ActionButtonInterface)) {
-                    ActionButtonInterface->SetRepresentedAction(this->PrimaryInteractionHandle);
-                }
-                else {
-                    UE_LOG(Myth, Error, TEXT("Interaction Error: PrimaryActionBtn does not implement ICommonBoundActionButtonInterface"));
-                }
-
-                this->VerticalBox->AddChild(PrimaryActionBtn);
-            }
+            ShowActionButton(0, this->PrimaryInteractionHandle);
         }
         else {
             UE_LOG(Myth, Error, TEXT("Interaction Error: PrimaryInteractionHandle is not valid"));
         }
     }
 
-    // Bind the Secondary input action
     if (InInteractionData.SecondaryInteractionName.IsNone() || InInteractionData.SecondaryInteractionName ==
         FName("")) {
-        UE_LOG(Myth, Error, TEXT("Interaction Warning: Actor %s's SecondaryInteractionName is None"), *InInteractableActor->GetName());
+        UE_LOG(Myth, Verbose, TEXT("Interaction: Actor %s has no SecondaryInteractionName; skipping the secondary bind."),
+               *InInteractableActor->GetName());
     }
     else {
         FDataTableRowHandle rowhandle;
@@ -80,18 +111,7 @@ void UMythicInteractionPromptWidget::SetInteractionData(FMythicInteractionData I
         this->SecondaryInteractionHandle = UI_LayerRootWidget->RegisterUIActionBinding(BindArgs2);
 
         if (this->SecondaryInteractionHandle.IsValid()) {
-            // Create widget for the Secondary action from the ActionButtonClass
-            if (UCommonButtonBase *SecondaryActionBtn = CreateWidget<UCommonButtonBase>(this, this->ActionButtonClass)) {
-                ICommonBoundActionButtonInterface *ActionButtonInterface = Cast<ICommonBoundActionButtonInterface>(SecondaryActionBtn);
-                if (ensure(ActionButtonInterface)) {
-                    ActionButtonInterface->SetRepresentedAction(this->SecondaryInteractionHandle);
-                }
-                else {
-                    UE_LOG(Myth, Error, TEXT("Interaction Error: SecondaryActionBtn does not implement ICommonBoundActionButtonInterface"));
-                }
-
-                this->VerticalBox->AddChild(SecondaryActionBtn);
-            }
+            ShowActionButton(1, this->SecondaryInteractionHandle);
         }
         else {
             UE_LOG(Myth, Error, TEXT("Interaction Error: SecondaryInteractionHandle is not valid"));
@@ -104,7 +124,12 @@ void UMythicInteractionPromptWidget::SetInteractionData(FMythicInteractionData I
 void UMythicInteractionPromptWidget::Clear() {
     this->PrimaryInteractionHandle.Unregister();
     this->SecondaryInteractionHandle.Unregister();
-    this->VerticalBox->ClearChildren();
 
-    UE_LOG(Myth, Log, TEXT("Interaction Prompt Cleared"));
+    CollapseActionButtonsFrom(0);
+    if (ActiveComplimentaryWidget) {
+        this->VerticalBox->RemoveChild(ActiveComplimentaryWidget);
+        ActiveComplimentaryWidget = nullptr;
+    }
+
+    UE_LOG(Myth, Verbose, TEXT("Interaction Prompt Cleared"));
 }

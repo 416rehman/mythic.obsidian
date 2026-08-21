@@ -1,0 +1,12 @@
+
+#pragma once
+
+#include "NativeGameplayTags.h"
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Status_Starving);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Status_WellFed);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Status_Dehydrated);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Status_Cold);
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Status_Warm);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Status_Sheltered);

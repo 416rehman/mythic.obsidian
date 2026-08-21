@@ -1,4 +1,3 @@
-// 
 
 
 #include "MythicDamageCalculation.h"
@@ -9,7 +8,6 @@
 #include "GAS/Executions/MythicCombatRoll.h"
 
 struct FMythicDamageCalcStatics {
-    /** Source Attributes */
     FGameplayEffectAttributeCaptureDefinition CriticalHitChance;
     FGameplayEffectAttributeCaptureDefinition ApplyBurnOnHitChance;
     FGameplayEffectAttributeCaptureDefinition ApplyBleedOnHitChance;
@@ -62,12 +60,11 @@ UMythicDamageCalculation::UMythicDamageCalculation() {
 void UMythicDamageCalculation::Execute_Implementation(const FGameplayEffectCustomExecutionParameters &ExecutionParams,
                                                       FGameplayEffectCustomExecutionOutput &OutExecutionOutput) const {
     Super::Execute_Implementation(ExecutionParams, OutExecutionOutput);
-    UE_LOG(Myth, Warning, TEXT("Calculating damage"));
+    UE_LOG(Myth, Verbose, TEXT("Calculating damage"));
 
     auto Spec = ExecutionParams.GetOwningSpecForPreExecuteMod();
     FMythicGameplayEffectContext *MythicContext = FMythicGameplayEffectContext::ExtractEffectContext(Spec->GetContext());
     if (!MythicContext) {
-        // Non-Mythic / empty effect context — abort (the checked extractor is the single source of truth for the cast).
         UE_LOG(Myth, Error, TEXT("DamageCalculation:: non-Mythic/empty effect context - aborting"));
         return;
     }
@@ -98,27 +95,15 @@ void UMythicDamageCalculation::Execute_Implementation(const FGameplayEffectCusto
     float ApplyTerrifyOnHitChance = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageCalcStatics().ApplyTerrifyOnHitChance, EvaluateParameters, ApplyTerrifyOnHitChance);
 
-    // Proc roll: a 0% chance must NEVER fire and a 100% chance must ALWAYS fire (FMath::FRand() returns [0,1] INCLUSIVE).
-    // The boundary rule lives in MythicCombat::RollSucceeds (shared with the dodge + resistance gates in the application
-    // execution); the random sample is taken here so the helper stays pure + testable.
     const auto ProcRoll = [](float Chance) { return MythicCombat::RollSucceeds(Chance, FMath::FRand()); };
 
-    // Apply Critical damage
     MythicContext->SetCriticalHit(ProcRoll(CriticalHitChance));
-    // Apply bleed
     MythicContext->SetBleed(MythicContext->IsBleed() || ProcRoll(ApplyBleedOnHitChance));
-    // Apply Burn
     MythicContext->SetBurn(MythicContext->IsBurn() || ProcRoll(ApplyBurnOnHitChance));
-    // Apply poison
     MythicContext->SetPoison(MythicContext->IsPoison() || ProcRoll(ApplyPoisonOnHitChance));
-    // Apply slow
     MythicContext->SetSlow(MythicContext->IsSlow() || ProcRoll(ApplySlowOnHitChance));
-    // Apply freeze
     MythicContext->SetFreeze(MythicContext->IsFreeze() || ProcRoll(ApplyFreezeOnHitChance));
-    // Apply stun
     MythicContext->SetStun(MythicContext->IsStun() || ProcRoll(ApplyStunOnHitChance));
-    // Apply weaken
     MythicContext->SetWeaken(MythicContext->IsWeaken() || ProcRoll(ApplyWeakenOnHitChance));
-    // Apply terrify
     MythicContext->SetTerrify(MythicContext->IsTerrify() || ProcRoll(ApplyTerrifyOnHitChance));
 }

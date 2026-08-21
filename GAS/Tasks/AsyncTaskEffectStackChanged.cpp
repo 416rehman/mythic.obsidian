@@ -27,7 +27,7 @@ void UAsyncTaskEffectStackChanged::EndTask()
 	{
 		ASC->OnActiveGameplayEffectAddedDelegateToSelf.RemoveAll(this);
 		ASC->OnAnyGameplayEffectRemovedDelegate().RemoveAll(this);
-		
+
 		if(ActiveEffectHandle.IsValid())
 		{
 			ASC->OnGameplayEffectStackChangeDelegate(ActiveEffectHandle)->RemoveAll(this);

@@ -10,7 +10,6 @@ class UItemFragment;
 class UMythicInventorySlot;
 class UMythicInventoryComponent;
 
-// Call Initialize after spawning to set the item definition and quantity
 UCLASS(Blueprintable, BlueprintType)
 class MYTHIC_API UMythicItemInstance : public UMythicReplicatedObject {
     GENERATED_BODY()
@@ -42,8 +41,20 @@ protected:
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item", SaveGame)
     FGameplayTagContainer ItemTags;
 
+    // Loot-filter "junk" mark (P5): the PERSISTED, server-authoritative source of truth for whether the player has
+    // manually flagged this item as junk. Travels with the instance (SaveGame persists it; replication lets the owning
+    // client's slot VM read it), so the flag survives moving the item between bags/containers. A dedicated bool (not a
+    // gameplay tag) keeps it OUT of the item's type probe (GetTypeProbe) so it can never affect slot whitelisting or
+    // conversion-ingredient matching. Set only via ServerSetMarkedJunk (authority). Auto-junk (low rarity) is derived,
+    // not stored — see MythicLootFilter::IsJunk.
+    UPROPERTY(ReplicatedUsing=OnRep_MarkedJunk, BlueprintReadOnly, Category = "Item", SaveGame)
+    bool bMarkedJunk = false;
+
     UFUNCTION()
     void OnRep_Quantity();
+
+    UFUNCTION()
+    void OnRep_MarkedJunk();
 
     UFUNCTION()
     void OnRep_ItemDefinition();
@@ -66,10 +77,9 @@ public:
         DOREPLIFETIME(UMythicItemInstance, ItemFragments);
         DOREPLIFETIME(UMythicItemInstance, ItemLevel);
         DOREPLIFETIME(UMythicItemInstance, ItemTags);
-        // was flagged Replicated but never registered → runtime tags (e.g. ore→ingot transforms) never reached clients, and it tripped the "marked for replication but not registered" validation
+        DOREPLIFETIME(UMythicItemInstance, bMarkedJunk);
     }
 
-    // Set the quantity of the item, clamped to the max stack size - Should be called via LootSubsystem
     void SetStackSize(const int32 newQuantity);
 
     // Get the quantity of the item
@@ -80,15 +90,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Item")
     int32 GetItemLevel() const { return ItemLevel; }
 
-    // Initialize the item instance
     void Initialize(UItemDefinition *ItemDef, const int32 quantityIfStackable, const int32 level);
 
-    /**
-     * Clamp a requested initial stack quantity to the item's contract: a created stack is always >= 1 (the Quantity
-     * ClampMin) and never exceeds StackSizeMax (the same cap SetStackSize enforces — Initialize previously bypassed it,
-     * so a created stack could exceed the max or be zero/negative). Non-stackable items (StackSizeMax <= 1) are always
-     * a single unit. Static + pure so the clamp is unit-testable without an owning actor.
-     */
     static int32 ClampInitialStackQuantity(int32 Requested, int32 StackSizeMax);
 
     // Get the item definition
@@ -97,21 +100,16 @@ public:
         return ItemDefinition;
     }
 
-    // Creates a fragment from a fragment config and adds it to the item
     void AddFragment(TObjectPtr<UItemFragment> Fragment);
 
-    // the item is the active item in inventory (only one item can be active at a time)
     void OnActiveItem();
 
-    // the item is no longer the active item in inventory
     void OnInactiveItem();
 
-    // Client-side activation methods
     void OnClientActiveItem();
     void OnClientInactiveItem();
     void SetInventory(UMythicInventoryComponent *NewInventory, int32 NewSlotIndex);
 
-    // Set Slot
     int32 GetSlot() const;
 
     // Get Inventory Component, can be null if the item is not in an inventory
@@ -122,25 +120,22 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Item")
     AActor *GetInventoryOwner() const;
 
-    // Add a tag to the item
     void AddTag(const FGameplayTag &Tag);
 
-    // Remove a tag from the item
     void RemoveTag(const FGameplayTag &Tag);
 
-    // Check if the item has a tag
     bool HasTag(const FGameplayTag &Tag) const;
 
-    // Read-only access to the item's runtime tags (used by conversion ingredient matching + slot whitelisting).
+    // Loot-filter (P5): read the persisted manual "junk" mark. Valid on server + owning client (replicated).
+    UFUNCTION(BlueprintCallable, Category = "Item")
+    bool IsMarkedJunk() const { return bMarkedJunk; }
+
+    void ServerSetMarkedJunk(bool bJunk);
+
     const FGameplayTagContainer &GetItemTags() const { return ItemTags; }
 
-    // Centralized "effective type" probe: {Definition->ItemType} ∪ ItemTags.
-    // Single source of truth for type matching (conversion ingredients) and slot whitelisting.
     void GetTypeProbe(FGameplayTagContainer &Out) const;
 
-    // SERVER-ONLY: transform THIS instance in place, preserving fragments / level / seed / quantity.
-    // Adds/removes runtime type tags (and optionally swaps the definition), then notifies the owning slot
-    // exactly once if currently slotted. Used by conversion "Transform" products.
     void ServerApplyTransform(const FGameplayTag &NewItemType,
                               const FGameplayTagContainer &TagsToAdd,
                               const FGameplayTagContainer &TagsToRemove,
@@ -148,7 +143,6 @@ public:
 
     bool isStackableWith(const UMythicItemInstance *Other) const;
 
-    // Templated Item Fragment getter
     template <typename T>
     const T *GetFragment() {
         for (const UItemFragment *frag : this->ItemFragments) {
@@ -160,10 +154,7 @@ public:
         return nullptr;
     }
 
-    /// Consume the item by reducing its stack size by StackQty. If in inventory, uses inventory's ServerRemoveItem. 
-    /// On zero stack, inventory will remove the item from inventory, if not in inventory, destroys world item.
     void ConsumeItem(int32 StackQty = 1);
 
-    /// on destroy, do proper chain of destruction
     virtual void OnDestroyed() override;
 };

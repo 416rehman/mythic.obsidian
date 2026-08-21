@@ -1,4 +1,3 @@
-// Data-driven objective/quest definition — the first slice of a quest system.
 
 #pragma once
 
@@ -7,19 +6,44 @@
 #include "GameplayTagContainer.h"
 #include "Rewards/RewardBase.h"
 #include "GAS/MythicTags_GAS.h"
+#include "Narrative/MythicStoryCondition.h"
 #include "ObjectiveDefinition.generated.h"
 
 class UItemDefinition;
+class UObjectiveDefinition;
 
-/**
- * A single, designer-authored objective: "do {TriggerEventTag} [x{RequiredCount}, of {RequiredPayloadTag}], then
- * receive {Rewards}". Tracked per-player by UObjectiveTracker. The trigger is a GAS gameplay-event tag from the
- * GAS.Event.* family emitted server-side: combat (Kill / Death / Dmg.* / Heal.*) AND item acquisition
- * (GAS.Event.Item.Acquired — fires on every genuine pickup/grant). With RequiredPayloadTag + bCountByEventMagnitude
- * this expresses non-combat "collect N <type>" objectives (e.g. gather 20 wood) on the same atomic unit. Multi-step
- * quest chains are modeled by PrerequisiteObjectives (gate assignment) + NextObjectives (auto-assign the next step on
- * completion); branching (choose one of N next steps) is still a follow-up.
- */
+UENUM(BlueprintType)
+enum class EMythicObjectiveOutcome : uint8 {
+    Completed,
+    Spared,
+    Killed,
+    Failed
+};
+
+USTRUCT(BlueprintType)
+struct FMythicObjectiveBranch {
+    GENERATED_BODY()
+
+    // The outcome this branch handles. Matched (hierarchical) against the completing event tag / payload tags. The
+    // canonical kinds are named by EMythicObjectiveOutcome; authored as the event/payload tag that signifies them.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective|Branch")
+    FGameplayTag OutcomeTag;
+
+    // Objectives auto-assigned when this branch is taken (each still gated by its own PrerequisiteObjectives + the same
+    // dedup/null-skip/cycle-safety as the default NextObjectives path).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective|Branch")
+    TArray<TObjectPtr<UObjectiveDefinition>> NextObjectives;
+
+    // Story tags stamped into the player's narrative ledger when this branch is taken (the choice's consequence).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective|Branch")
+    FGameplayTagContainer GrantStoryTags;
+
+    // Sibling objectives to ABANDON when this branch is taken — the mutually-exclusive OTHER path(s). Any currently
+    // tracked, non-completed one is abandoned so the alternative route is genuinely closed (spare-vs-kill sticks).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective|Branch")
+    TArray<TObjectPtr<UObjectiveDefinition>> CancelSiblings;
+};
+
 UCLASS(BlueprintType)
 class MYTHIC_API UObjectiveDefinition : public UDataAsset {
     GENERATED_BODY()
@@ -61,8 +85,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective|Delivery")
     FGameplayTag DeliverToNpcTag;
 
-    // True iff this is a turn-in/deliver objective (advanced ONLY by handing DeliverItem to DeliverToNpcTag, never by a
-    // GAS event). Pure → keeps the "delivery vs event-driven" rule in one place and unit-testable.
     bool IsDeliveryObjective() const { return DeliverItem != nullptr && DeliverToNpcTag.IsValid(); }
 
     // Rewards granted (server-side) on completion. Reuses the canonical one-of-each reward holder so the derived
@@ -84,6 +106,36 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")
     TArray<TObjectPtr<UObjectiveDefinition>> NextObjectives;
 
+    // --- Narrative gating + agency (KEYSTONE) ---
+    // Tag-driven PRECONDITION gating assignment: the offer is refused (EObjectiveOfferResult::PreconditionNotMet) unless
+    // this condition passes against the player's owned story tags (∪ world flags). Empty (default) = ungated (assignment
+    // depends only on prerequisites, the prior behaviour). Layered ON TOP of PrerequisiteObjectives.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective|Narrative")
+    FMythicStoryCondition Precondition;
+
+    // Story tags stamped into the player's narrative ledger when THIS objective completes (regardless of branch) — the
+    // fact of having done it. Branch-specific consequences live on FMythicObjectiveBranch::GrantStoryTags instead.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective|Narrative")
+    FGameplayTagContainer GrantStoryTagsOnComplete;
+
+    // OUTCOME-ROUTED branches — the agency mechanic. On completion the achieved outcome (derived from HOW it finished)
+    // selects the matching branch; its successors assign, its story tags stamp, and its CancelSiblings are abandoned. If
+    // no branch matches (or none authored), completion falls back to the default NextObjectives (Completed) path — so
+    // this is fully back-compatible. See UObjectiveTracker::SelectBranchForOutcome / DeriveAchievedOutcome.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective|Narrative")
+    TArray<FMythicObjectiveBranch> OutcomeBranches;
+
+    // --- Map / compass marker (W4) ---
+    // When true, a location objective carries a world anchor (WorldMarkerLocation) that a HUD compass + war-map can
+    // render as an Objective/Waypoint marker. Default false = no marker (unchanged behaviour). NOTE: wiring the
+    // ObjectiveTracker to EMIT the marker and the actual compass/map WIDGET rendering are UI and remain a follow-up.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Objective|Map")
+    bool bShowOnMap = false;
+
+    // World-space anchor for this objective's map/compass marker. Only meaningful when bShowOnMap is true. Zero = unset.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Objective|Map", meta = (EditCondition = "bShowOnMap"))
+    FVector WorldMarkerLocation = FVector::ZeroVector;
+
     // Player-facing objective line (e.g. "Slay 5 wolves").
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")
     FText DisplayText;
@@ -100,9 +152,18 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective")
     bool bOptional = false;
 
-    /** The player-facing callout line for the objective's current state: the completion line once complete (if one was
-     *  authored), otherwise the progress line. CompletedText is optional — falls back to DisplayText when empty, so an
-     *  objective with no completion line keeps the prior behaviour. Pure (reads only this asset) → unit-testable. */
+    // REPEATABLE (bounty/daily): a completed instance can be re-accepted from its offer source once RepeatCooldownSeconds
+    // has elapsed (endless-content loop — bounty boards, dailies). Default false = one-shot (the original behavior; a
+    // completed objective stays AlreadyCompleted forever). Chain objectives (NextObjectives) should stay one-shot.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective|Repeat")
+    bool bRepeatable = false;
+
+    // Cooldown (seconds) before a completed bRepeatable objective can be re-accepted. 0 = re-accept immediately on the
+    // next offer. Ignored unless bRepeatable. (Runtime cooldown vs. server world-time; not persisted across a reload —
+    // a repeatable bounty simply becomes available again after this many seconds of session uptime post-completion.)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Objective|Repeat", meta = (ClampMin = "0.0", EditCondition = "bRepeatable"))
+    float RepeatCooldownSeconds = 0.0f;
+
     FText GetCalloutText(bool bCompleted) const {
         return (bCompleted && !CompletedText.IsEmpty()) ? CompletedText : DisplayText;
     }

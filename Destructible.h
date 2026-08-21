@@ -5,19 +5,14 @@
 #include "Destructible.generated.h"
 
 class UMythicResourceManagerComponent;
-// This class does not need to be modified.
 UINTERFACE(NotBlueprintable, MinimalAPI)
 class UDestructible : public UInterface {
     GENERATED_BODY()
 };
 
-/**
- * This interface should be implemented by any actor that can be damaged
- */
 class MYTHIC_API IDestructible {
     GENERATED_BODY()
 
 public:
-    // The rewards to give to the player when they kill this actor.
     virtual FRewardsToGive GetOnKillRewards(AActor *Killer = nullptr) = 0;
 };

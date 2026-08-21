@@ -10,12 +10,23 @@ class UItemDefinition;
 class UMythicItemInstance;
 class UTexture2D;
 class UProficiencyDefinition;
+class UConversionStationComponent;
+class AController;
 
-/**
- * One ingredient slot of a recipe. Matches a concrete item either by exact definition or by a tag query
- * over the item's effective type ({def ItemType} ∪ runtime ItemTags), so "any ore" works. Non-consumed
- * ingredients are catalysts/tools: required to be present each cycle but never removed.
- */
+struct FMythicConversionProductContext {
+    int32 SnapshotInputLevel = 0;
+
+    int32 SnapshotCrafterProficiencyLevel = 0;
+
+    float SnapshotAvgQualityTierValue = -1.0f;
+
+    float SnapshotMinFreshnessFraction = 1.0f;
+
+    AController *InstigatorController = nullptr;
+
+    UConversionStationComponent *Station = nullptr;
+};
+
 USTRUCT(BlueprintType)
 struct MYTHIC_API FConversionIngredient {
     GENERATED_BODY()
@@ -46,14 +57,9 @@ struct MYTHIC_API FConversionIngredient {
     UPROPERTY(VisibleAnywhere, Transient)
     FString DisplayLabel;
 
-    // Server-side: does this concrete instance satisfy this slot? (does NOT check amount.)
     bool MatchesInstance(const UMythicItemInstance *Inst) const;
 };
 
-/**
- * One product of a recipe. Either CREATES a new item, or TRANSFORMS a consumed input in place (preserving
- * the input instance's fragments / level / seed / quantity), optionally swapping its definition.
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FConversionProduct {
     GENERATED_BODY()
@@ -117,7 +123,6 @@ struct MYTHIC_API FConversionProduct {
     FString DisplayLabel;
 };
 
-/** Gate queries evaluated against the instigator's schematic/proficiency tags and the station's owned tags. */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FConversionRequirements {
     GENERATED_BODY()
@@ -131,7 +136,6 @@ struct MYTHIC_API FConversionRequirements {
     FGameplayTagQuery StationTagQuery;
 };
 
-/** A fuel item type and how many burn-seconds one unit yields. Reuses ingredient matching ("any wood"). */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FFuelDefinition {
     GENERATED_BODY()
@@ -146,7 +150,6 @@ struct MYTHIC_API FFuelDefinition {
     FString DisplayLabel;
 };
 
-/** How a recipe processes: trigger, timing, fuel, repeat, output routing. */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FConversionProcess {
     GENERATED_BODY()
@@ -177,11 +180,6 @@ struct MYTHIC_API FConversionProcess {
     int32 Priority = 0;
 };
 
-/**
- * The atomic, configurable unit of conversion: {Inputs, Products, Requirements, Process}.
- * A station type is expressed purely as data: a set of recipes + a station tag + an inventory profile.
- * Discovered by UConversionSubsystem as a primary asset (mirrors UItemDefinition).
- */
 UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API UConversionRecipe : public UMythicDataAsset {
     GENERATED_BODY()
@@ -232,18 +230,22 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Recipe|Process", meta=(ShowOnlyInnerProperties))
     FConversionProcess Process;
 
-    // True if this recipe's station gate is satisfied by the given station tags.
     bool MatchesStation(const FGameplayTagContainer &StationOwnedTags) const;
 
-    // True if every ingredient (consumed + catalyst) is satisfiable by the provided instances (presence/amount).
     bool MatchesInputs(const TArray<UMythicItemInstance *> &InInputs) const;
+
+
+    virtual void PostProcessProduct(UMythicItemInstance *ProductInstance, const FMythicConversionProductContext &Context) const {}
+
+    virtual bool IsVisibleTo(const FGameplayTagContainer &InstigatorOwnedTags) const { return true; }
+
+    virtual bool PassesDynamicGates(AController *Instigator, FText &OutReason) const { return true; }
 
 #if WITH_EDITOR
     virtual void PostLoad() override;
     virtual void PostEditChangeProperty(struct FPropertyChangedEvent &PropertyChangedEvent) override;
     virtual EDataValidationResult IsDataValid(class FDataValidationContext &Context) const override;
 
-    // Rebuilds the transient DisplayLabel strings used as array TitleProperty in the editor.
     void RebuildDisplayLabels();
 #endif
 };

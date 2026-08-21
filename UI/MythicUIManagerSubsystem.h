@@ -4,6 +4,7 @@
 
 #include "CommonActivatableWidget.h"
 #include "Containers/Ticker.h"
+#include "Engine/TimerHandle.h"
 #include "GameUIManagerSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "Components/SlateWrapperTypes.h"
@@ -53,7 +54,6 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic UI Manager", meta = (EditCondition = "bModalLayerAffectsOtherLayers"))
     ESlateVisibility OtherLayersVisibility = ESlateVisibility::HitTestInvisible;
 
-    // The map of layers to their visibility state before the modal layer was pushed. Only show in BP if above is set to true.
     UPROPERTY(Transient)
     TMap<FGameplayTag, ESlateVisibility> LayerVisibilityMap;
 
@@ -86,7 +86,17 @@ private:
     bool Tick(float DeltaTime);
     void SyncRootLayoutVisibilityToShowHUD();
 
+    void BindModalLayerWatch();
+
+    void HandleModalDisplayedWidgetChanged(UCommonActivatableWidget *Displayed);
+
+    void ApplyModalLayerEffect(bool bModalShowing);
+
     FTSTicker::FDelegateHandle TickHandle;
+
+    bool bModalWatchBound = false;
+    int32 ModalWatchAttempts = 0;
+    FTimerHandle ModalWatchRetryTimer;
 
     UPROPERTY()
     UCommonLocalPlayer *PrimaryLocalPlayer = nullptr;

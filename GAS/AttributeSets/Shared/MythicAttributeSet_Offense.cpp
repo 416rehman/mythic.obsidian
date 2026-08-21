@@ -1,4 +1,3 @@
-// 
 
 
 #include "MythicAttributeSet_Offense.h"
@@ -6,7 +5,6 @@
 #include "Net/UnrealNetwork.h"
 
 UMythicAttributeSet_Offense::UMythicAttributeSet_Offense() {
-    // initialize outgoing damage multiplier to standard scale
     InitOutgoingDamageMultiplier(1.0f);
 }
 
@@ -25,7 +23,14 @@ bool UMythicAttributeSet_Offense::IsProbabilityAttribute(const FGameplayAttribut
 void UMythicAttributeSet_Offense::PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) {
     Super::PreAttributeChange(Attribute, NewValue);
 
-    // probabilities are fractions, clamp to range so stacked buffs cannot push past 100 percent
+    if (IsProbabilityAttribute(Attribute)) {
+        NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    }
+}
+
+void UMythicAttributeSet_Offense::PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const {
+    Super::PreAttributeBaseChange(Attribute, NewValue);
+
     if (IsProbabilityAttribute(Attribute)) {
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     }
@@ -128,29 +133,28 @@ void UMythicAttributeSet_Offense::OnRep_OutgoingDamageMultiplier(const FGameplay
 void UMythicAttributeSet_Offense::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-    // register the offensive attributes for replication
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, Power, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, DamagePerHit, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, AttackSpeed, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, CriticalHitChance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, CriticalHitDamage, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyBurnOnHitChance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyBleedOnHitChance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyPoisonOnHitChance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplySlowOnHitChance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyFreezeOnHitChance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyStunOnHitChance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyWeakenOnHitChance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyTerrifyOnHitChance, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusSkillDamage, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusSwordDamage, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusAxeDamage, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusDaggerDamage, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusSickleDamage, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusSpearDamage, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusHammerDamage, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, IncreasedDamageToEnemiesUnderStatusEffects, COND_None,
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, Power, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, DamagePerHit, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, AttackSpeed, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, CriticalHitChance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, CriticalHitDamage, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyBurnOnHitChance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyBleedOnHitChance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyPoisonOnHitChance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplySlowOnHitChance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyFreezeOnHitChance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyStunOnHitChance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyWeakenOnHitChance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyTerrifyOnHitChance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusSkillDamage, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusSwordDamage, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusAxeDamage, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusDaggerDamage, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusSickleDamage, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusSpearDamage, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusHammerDamage, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, IncreasedDamageToEnemiesUnderStatusEffects, COND_OwnerOnly,
                                    REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies, COND_None, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, OutgoingDamageMultiplier, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, OutgoingDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
 }

@@ -1,7 +1,3 @@
-// Mythic — crafting proficiency-scaled product level unit tests.
-// Covers the pure rule the ProficiencyScaled conversion mode uses: a crafter's proficiency level raises the crafted
-// item's level off a base, capped. The live snapshot+produce path is server-driven and PIE-verified; this locks the math.
-// Run via: Session Frontend → Automation → Mythic.Itemization.Conversion.ProficiencyScaled
 
 #include "Misc/AutomationTest.h"
 #include "Itemization/Conversion/ConversionStationComponent.h"
@@ -12,8 +8,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicCraftingProficiencyTest::RunTest(const FString &Parameters) {
-    // ComputeProficiencyScaledLevel(CrafterProfLevel, BaseLevel, PerLevelBonus, MaxLevel)
-    // = clamp_lo0(BaseLevel + max(0,prof) × max(0,bonus)), then cap at MaxLevel when MaxLevel > 0.
     using S = UConversionStationComponent;
 
     TestEqual(TEXT("a novice (level 0) gets just the base"), S::ComputeProficiencyScaledLevel(0, 5, 2, 0), 5);
@@ -25,8 +19,6 @@ bool FMythicCraftingProficiencyTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("a base above the cap is still capped"), S::ComputeProficiencyScaledLevel(0, 50, 1, 10), 10);
     TestEqual(TEXT("exact-at-cap"), S::ComputeProficiencyScaledLevel(5, 10, 2, 20), 20);
 
-    // Overflow-hardening: an absurd PerLevelBonus that would overflow int32 in 32-bit math must still respect the cap
-    // (monotonic), NOT wrap negative and floor to 0. With the int64 intermediate, prof×bonus is clamped, then capped.
     TestEqual(TEXT("huge bonus respects the cap, not wrap-to-0"), S::ComputeProficiencyScaledLevel(30, 5, 100000000, 50), 50);
     TestEqual(TEXT("huge bonus uncapped clamps to MAX_int32, not negative"), S::ComputeProficiencyScaledLevel(30, 5, 100000000, 0), MAX_int32);
 
@@ -39,8 +31,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicCraftingXpTest::RunTest(const FString &Parameters) {
-    // ComputeCraftingXpReward(BaseXpPerCraft, Cycles, CrafterLevel, NoGainAtOrAboveLevel)
-    // = 0 if BaseXp<=0 or Cycles<=0; 0 if NoGainAtOrAboveLevel>0 && CrafterLevel>=it (anti-grind); else BaseXp×Cycles.
     using S = UConversionStationComponent;
 
     TestEqual(TEXT("no reward when the recipe grants 0 XP (conservative default)"), S::ComputeCraftingXpReward(0.0f, 1, 5, 0), 0.0f);

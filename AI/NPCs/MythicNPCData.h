@@ -5,7 +5,6 @@
 #include "MythicNPCData.generated.h"
 
 
-// Struct containing the NPC Data that can be cached/tracked
 USTRUCT(BlueprintType, Blueprintable)
 struct FMythicNPCData {
     GENERATED_BODY()
@@ -68,18 +67,15 @@ struct FMythicNPCData {
         FlightOrFightOverrides.Empty();
         NPCFamilyId.Invalidate();
         Proficiencies.Empty();
-        // "Cleared" perception = the standard defaults (NOT zero — a 0-radius NPC would be blind).
         SightRadius = 1500.0f;
         LoseSightRadius = 2000.0f;
         PeripheralVisionAngleDegrees = 90.0f;
     }
 
-    // Default Constructor
     FMythicNPCData() {
         ClearAll();
     }
 
-    // Creates a new NPCData from an NPCDefinition
     FMythicNPCData(UNPCDefinition *NPCDef) {
         this->NPCId = NPCDef->NPCId;
         this->NPCName = NPCDef->Name;
@@ -96,6 +92,4 @@ struct FMythicNPCData {
             this->NPCFamilyId = FamilyDef->FamilyId;
         }
     }
-
-    //TODO: Creates a new random NPCData from an NPCTypeDefinition
 };

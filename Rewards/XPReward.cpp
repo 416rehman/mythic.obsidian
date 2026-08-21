@@ -1,4 +1,3 @@
-// 
 
 
 #include "XPReward.h"
@@ -6,13 +5,12 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
 #include "GameFramework/PlayerController.h"
+#include "World/Camping/MythicRestedXp.h"
 
 bool UXPReward::Give(FRewardContext &Context) const {
-    // Cast the context to FXpRewardContext
     FXPRewardContext *XPContext = static_cast<FXPRewardContext *>(&Context);
     checkf(XPContext, TEXT("XPContext is null"));
 
-    // Get the ability system component from the player controller
     UAbilitySystemComponent *AbilitySystemComponent = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Context.PlayerController);
     checkf(AbilitySystemComponent, TEXT("AbilitySystemComponent is null"));
 
@@ -25,6 +23,8 @@ bool UXPReward::Give(FRewardContext &Context) const {
 
     float XPToReward = CalculateXP(AbilitySystemComponent, Proficiency, TargetLvl, OverlevelBonus, PercentageOfActionXPtoGive);
 
+    XPToReward *= MythicCampsite::ReadRestedXpMultiplier(AbilitySystemComponent);
+
     AbilitySystemComponent->ApplyModToAttribute(Proficiency->ProgressAttribute, EGameplayModOp::Additive, XPToReward);
 
     return true;
@@ -34,19 +34,15 @@ float UXPReward::CalculateXP(UAbilitySystemComponent *AbilitySystemComponent, UP
                              float PercentageOfActionXPtoGive) {
     auto PreScaledXP = Proficiency->BaseXPPerAction * PercentageOfActionXPtoGive;
 
-    // If the target level is 0, then no scaling is done
     if (TargetLvl <= 0) {
         return PreScaledXP;
     }
 
-    // Get the current proficiency level
     float CurrentProgress = AbilitySystemComponent->GetNumericAttribute(Proficiency->ProgressAttribute);
     int32 CurrentLevel = UProficiencyDefinition::CalcLevelAtXP(CurrentProgress, Proficiency);
 
-    // Level Difference
     int32 LevelDifference = TargetLvl - CurrentLevel;
 
-    // scaled xp, clamped so overlevel kills never subtract xp
     return FMath::Max(0.0f, PreScaledXP + (LevelDifference * PreScaledXP * OverlevelBonus));
 }
 

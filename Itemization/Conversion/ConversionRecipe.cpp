@@ -21,7 +21,7 @@ bool FConversionIngredient::MatchesInstance(const UMythicItemInstance *Inst) con
     else {
         FGameplayTagContainer Probe;
         Inst->GetTypeProbe(Probe);
-        bTypeMatch = TypeQuery.Matches(Probe);
+        bTypeMatch = !TypeQuery.IsEmpty() && TypeQuery.Matches(Probe);
     }
     if (!bTypeMatch) {
         return false;
@@ -46,7 +46,7 @@ bool UConversionRecipe::MatchesStation(const FGameplayTagContainer &StationOwned
 bool UConversionRecipe::MatchesInputs(const TArray<UMythicItemInstance *> &InInputs) const {
     for (const FConversionIngredient &Ing : Inputs) {
         if (!Ing.bConsumed) {
-            continue; // catalysts live in a separate slot group; presence is checked by VerifyCatalystsPresent
+            continue;
         }
         int32 Found = 0;
         for (const UMythicItemInstance *Inst : InInputs) {
@@ -126,7 +126,6 @@ EDataValidationResult UConversionRecipe::IsDataValid(FDataValidationContext &Con
         }
     }
 
-    // 1. Must consume or produce something.
     if (ConsumedInputs == 0 && Products.Num() == 0) {
         Fail(TEXT("Recipe has no consumed inputs and no products."));
     }
@@ -135,7 +134,6 @@ EDataValidationResult UConversionRecipe::IsDataValid(FDataValidationContext &Con
         Fail(TEXT("Recipe has no RecipeId (stable identity is required)."));
     }
 
-    // Process checks.
     if (Process.Timing == EConversionTiming::Timed && Process.Duration <= UE_KINDA_SMALL_NUMBER) {
         Fail(TEXT("Timed recipe must have Duration > 0 (avoids divide-by-zero in progress)."));
     }
@@ -145,12 +143,10 @@ EDataValidationResult UConversionRecipe::IsDataValid(FDataValidationContext &Con
     if (Process.bRequiresFuel && Process.AcceptedFuels.Num() == 0) {
         Fail(TEXT("Recipe requires fuel but lists no AcceptedFuels."));
     }
-    // Instant cycles have zero duration, so they would burn zero fuel per cycle (free production after one load).
     if (Process.bRequiresFuel && Process.Timing == EConversionTiming::Instant) {
         Fail(TEXT("Instant recipes cannot require fuel (a 0-duration cycle burns no fuel). Use Timed."));
     }
 
-    // Product checks.
     for (int32 i = 0; i < Products.Num(); i++) {
         const FConversionProduct &P = Products[i];
 
@@ -171,11 +167,10 @@ EDataValidationResult UConversionRecipe::IsDataValid(FDataValidationContext &Con
                                      i, P.Quantity, Def->StackSizeMax));
             }
         }
-        else { // Transform
+        else {
             if (ConsumedInputs == 0) {
                 Fail(FString::Printf(TEXT("Product %d (Transform): recipe has no consumed input to transform."), i));
             }
-            // A failed probability roll would strip the already-consumed input and produce nothing.
             if (P.Probability < 1.f) {
                 Fail(FString::Printf(TEXT("Product %d (Transform): Probability must be 1.0 (transforms cannot be chance-based)."), i));
             }
@@ -185,10 +180,6 @@ EDataValidationResult UConversionRecipe::IsDataValid(FDataValidationContext &Con
                 Fail(FString::Printf(TEXT("Product %d (Transform): NewItemType must equal TransformToDefinition->ItemType."), i));
             }
 
-            // bRepairToFull needs a consumed input that can supply a durable item (UDurabilityFragment). Only
-            // ExactItem inputs are statically checkable; a TypeQuery consumed input may match a durable item at
-            // runtime (the runtime guard in UConversionStationComponent verifies durability before consuming), so
-            // don't fail when a TypeQuery consumed input is present. Fail only the clearly-broken cases.
             if (P.bRepairToFull) {
                 bool bAnyTypeQueryConsumed = false;
                 int32 DurableExactCount = 0;
@@ -242,10 +233,6 @@ EDataValidationResult UConversionRecipe::IsDataValid(FDataValidationContext &Con
                 }
             }
 
-            // A Transform consumes/produces exactly ONE non-stackable item per cycle, so every consumed input able to
-            // pair with a Transform product must require exactly one. A higher RequiredAmount releases extra instances
-            // that are held for the job but never transformed/routed (then refunded untouched) — a consumed-vs-produced
-            // accounting mismatch the player sees as items vanishing and reappearing.
             for (const FConversionIngredient &Ing : Inputs) {
                 if (Ing.bConsumed
                     && (Ing.MatchMode == EConversionMatchMode::ExactItem || Ing.MatchMode == EConversionMatchMode::TypeQuery)
@@ -261,4 +248,4 @@ EDataValidationResult UConversionRecipe::IsDataValid(FDataValidationContext &Con
     return Result;
 }
 
-#endif // WITH_EDITOR
+#endif

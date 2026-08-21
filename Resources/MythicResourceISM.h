@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -11,7 +10,6 @@
 struct FTrackedDestructibleData;
 class UMythicResourceManagerComponent;
 
-// Health configuration structure for each destructible type
 USTRUCT(BlueprintType)
 struct FDestructibleHealthConfig {
     GENERATED_BODY()
@@ -35,24 +33,17 @@ struct FDestructibleHealthConfig {
     }
 };
 
-/**
- * Class to be used to represent a resource that can be mined. I.e stone, tree, ore, etc.
- * The PCG should have the collision set to destructible on the Mesh Spawner, and the "Use Default Collision" should be unchecked.
- */
 UCLASS()
 class MYTHIC_API UMythicResourceISM : public UInstancedStaticMeshComponent, public IDestructible {
-    // IDestructible Interface
 public:
     virtual FRewardsToGive GetOnKillRewards(AActor *Killer = nullptr) override;
-    // End IDestructible Interface
 
 private:
     GENERATED_BODY()
 
-    // Track destroyed instances to prevent double destruction
     UPROPERTY()
     TSet<int32> DestroyedInstances;
-    
+
 public:
     // Check if an instance is already destroyed
     UFUNCTION(BlueprintCallable)
@@ -61,9 +52,8 @@ public:
     }
 
 public:
-    // BeginPlay
     virtual void BeginPlay() override;
-    
+
     // Health Configuration for this resource type
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Destructible|Health", meta = (ShowOnlyInnerProperties))
     FDestructibleHealthConfig HealthConfig = FDestructibleHealthConfig();
@@ -75,16 +65,26 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource", meta = (Categories="Destructible"))
     FGameplayTag ResourceType;
 
+    // GATHERING DEPTH (Part A) — required tool tag to gather this node. EMPTY (default) = any tool (or none) gathers it,
+    // preserving today's behaviour. When set, the manager gates gathering via FMythicGatherRules::CanGather against the
+    // interactor's equipped-tool type-probe (see World/Gathering/MythicGatherRules.h for the documented owner one-liner).
+    // Inert data until the manager reads it.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource|Gathering")
+    FGameplayTag RequiredToolTag;
+
+    // GATHERING DEPTH (Part A) — resource tier index (0 = default/common). Higher tiers drop more (TierYieldMultiplier)
+    // and respawn slower (ScaledRespawnDelay) via FMythicGatherRules. Inert data until the manager reads it.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource|Gathering")
+    int32 ResourceTier = 0;
+
     // Convert Instance Index to Instance Id
     UFUNCTION(BlueprintCallable)
     FPrimitiveInstanceId InstanceIndexToId(int32 InstanceIndex) {
         return this->PrimitiveInstanceDataManager.IndexToId(InstanceIndex);
     }
 
-    // Get maximum health based on transform
     int32 CalculateHealthFromTransform(const FTransform &Transform) const;
 
-    // Destroy Instance - Hides and disables collision
     UFUNCTION()
     void DestroyResource(int32 InstanceId);
 

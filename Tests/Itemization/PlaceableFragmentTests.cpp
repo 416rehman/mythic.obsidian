@@ -1,15 +1,10 @@
-// Mythic — Placeable fragment unit tests
-// Covers the pure placement-validation rule shared by the client ghost-preview and the server deploy authority,
-// plus the instance-level degrees->cosine slope conversion.
-// Run via: Session Frontend → Automation → Mythic.Itemization.Placement
 
 #include "Misc/AutomationTest.h"
 #include "Itemization/Inventory/Fragments/Passive/PlaceableFragment.h"
 #include "Itemization/Placeable/MythicPlacementModeComponent.h"
-#include "Player/MythicPlayerController.h" // AMythicPlayerController::CanDeployMore (per-player placeable cap gate)
+#include "Player/MythicPlayerController.h"
 
 namespace PlaceableTestHelpers {
-    // Build a placement query inline. Order: hit?, surface normal Z, distance (cm), blocking overlap?
     static FPlaceablePlacementQuery MakeQuery(bool bHit, float NormalZ, float Distance, bool bOverlap) {
         FPlaceablePlacementQuery Q;
         Q.bDidHitSurface = bHit;
@@ -20,7 +15,6 @@ namespace PlaceableTestHelpers {
     }
 }
 
-// ─── Core verdicts ────────────────────────────────────────────────
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FPlaceablePlacementRulesTest,
     "Mythic.Itemization.Placement.CoreRules",
@@ -28,29 +22,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FPlaceablePlacementRulesTest::RunTest(const FString &Parameters) {
     using namespace PlaceableTestHelpers;
-    // Rules: reach 200cm, min surface normal Z 0.8 (~36deg), ground required.
 
-    // Flat ground, within reach, clear -> Valid.
     TestEqual(TEXT("Flat clear in-reach ground is placeable"),
               UPlaceableFragment::EvaluatePlacement(MakeQuery(true, 1.0f, 150.0f, false), 200.0f, 0.8f, true),
               EPlaceablePlacementResult::Valid);
 
-    // Aimed at empty space while ground is required -> NoSurface.
     TestEqual(TEXT("No surface hit (ground required) rejects"),
               UPlaceableFragment::EvaluatePlacement(MakeQuery(false, 1.0f, 100.0f, false), 200.0f, 0.8f, true),
               EPlaceablePlacementResult::NoSurface);
 
-    // Surface farther than reach -> OutOfReach.
     TestEqual(TEXT("Beyond reach rejects"),
               UPlaceableFragment::EvaluatePlacement(MakeQuery(true, 1.0f, 300.0f, false), 200.0f, 0.8f, true),
               EPlaceablePlacementResult::OutOfReach);
 
-    // Steep surface (normal Z 0.5 < 0.8) -> SurfaceTooSteep.
     TestEqual(TEXT("Too-steep surface rejects"),
               UPlaceableFragment::EvaluatePlacement(MakeQuery(true, 0.5f, 100.0f, false), 200.0f, 0.8f, true),
               EPlaceablePlacementResult::SurfaceTooSteep);
 
-    // Flat, in reach, but something is in the way -> Obstructed.
     TestEqual(TEXT("Blocking overlap rejects"),
               UPlaceableFragment::EvaluatePlacement(MakeQuery(true, 1.0f, 100.0f, true), 200.0f, 0.8f, true),
               EPlaceablePlacementResult::Obstructed);
@@ -58,7 +46,6 @@ bool FPlaceablePlacementRulesTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ─── Inclusive boundaries (lock the comparison operators) ─────────
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FPlaceablePlacementBoundaryTest,
     "Mythic.Itemization.Placement.Boundaries",
@@ -67,7 +54,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FPlaceablePlacementBoundaryTest::RunTest(const FString &Parameters) {
     using namespace PlaceableTestHelpers;
 
-    // Distance exactly at the reach limit is allowed (reject is strictly greater-than).
     TestEqual(TEXT("Distance exactly at reach is allowed"),
               UPlaceableFragment::EvaluatePlacement(MakeQuery(true, 1.0f, 200.0f, false), 200.0f, 0.8f, true),
               EPlaceablePlacementResult::Valid);
@@ -75,7 +61,6 @@ bool FPlaceablePlacementBoundaryTest::RunTest(const FString &Parameters) {
               UPlaceableFragment::EvaluatePlacement(MakeQuery(true, 1.0f, 201.0f, false), 200.0f, 0.8f, true),
               EPlaceablePlacementResult::OutOfReach);
 
-    // Surface normal exactly at the slope limit is allowed (reject is strictly less-than).
     TestEqual(TEXT("Surface exactly at slope limit is allowed"),
               UPlaceableFragment::EvaluatePlacement(MakeQuery(true, 0.8f, 100.0f, false), 200.0f, 0.8f, true),
               EPlaceablePlacementResult::Valid);
@@ -86,7 +71,6 @@ bool FPlaceablePlacementBoundaryTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ─── Check precedence (lock the evaluation order) ─────────────────
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FPlaceablePlacementPrecedenceTest,
     "Mythic.Itemization.Placement.Precedence",
@@ -95,12 +79,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FPlaceablePlacementPrecedenceTest::RunTest(const FString &Parameters) {
     using namespace PlaceableTestHelpers;
 
-    // Out-of-reach is reported before steepness and overlap (a far, steep, blocked spot reads OutOfReach).
     TestEqual(TEXT("Reach failure takes precedence over steep + overlap"),
               UPlaceableFragment::EvaluatePlacement(MakeQuery(true, 0.1f, 500.0f, true), 200.0f, 0.8f, true),
               EPlaceablePlacementResult::OutOfReach);
 
-    // Steepness is reported before overlap (an in-reach, steep, blocked spot reads SurfaceTooSteep).
     TestEqual(TEXT("Steepness takes precedence over overlap"),
               UPlaceableFragment::EvaluatePlacement(MakeQuery(true, 0.1f, 100.0f, true), 200.0f, 0.8f, true),
               EPlaceablePlacementResult::SurfaceTooSteep);
@@ -108,7 +90,6 @@ bool FPlaceablePlacementPrecedenceTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ─── Floating placeables (bRequireGround = false) ─────────────────
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FPlaceableFloatingTest,
     "Mythic.Itemization.Placement.Floating",
@@ -117,17 +98,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FPlaceableFloatingTest::RunTest(const FString &Parameters) {
     using namespace PlaceableTestHelpers;
 
-    // A floating placeable may be placed in mid-air (no surface hit) when in reach and clear.
     TestEqual(TEXT("Floating placeable allows a mid-air spot"),
               UPlaceableFragment::EvaluatePlacement(MakeQuery(false, 1.0f, 150.0f, false), 200.0f, 0.8f, false),
               EPlaceablePlacementResult::Valid);
 
-    // Slope is not enforced for a floating placeable: a vertical-wall hit (normal Z 0) is still Valid.
     TestEqual(TEXT("Floating placeable ignores surface slope"),
               UPlaceableFragment::EvaluatePlacement(MakeQuery(true, 0.0f, 150.0f, false), 200.0f, 0.8f, false),
               EPlaceablePlacementResult::Valid);
 
-    // Reach and overlap STILL apply to floating placeables.
     TestEqual(TEXT("Floating placeable still respects reach"),
               UPlaceableFragment::EvaluatePlacement(MakeQuery(false, 1.0f, 300.0f, false), 200.0f, 0.8f, false),
               EPlaceablePlacementResult::OutOfReach);
@@ -138,7 +116,6 @@ bool FPlaceableFloatingTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ─── Instance path: authored degrees -> cosine slope threshold ────
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FPlaceableFragmentInstanceRulesTest,
     "Mythic.Itemization.Placement.InstanceSlopeConversion",
@@ -148,19 +125,17 @@ bool FPlaceableFragmentInstanceRulesTest::RunTest(const FString &Parameters) {
     using namespace PlaceableTestHelpers;
 
     UPlaceableFragment *Fragment = NewObject<UPlaceableFragment>();
-    Fragment->MaxGroundSlopeDegrees = 60.0f; // cos(60) = 0.5
+    Fragment->MaxGroundSlopeDegrees = 60.0f;
     Fragment->MaxPlacementReach = 200.0f;
     Fragment->bRequireGroundSurface = true;
 
     TestNearlyEqual(TEXT("60-degree slope limit yields a 0.5 normal-Z threshold"),
                     Fragment->GetMinSurfaceNormalZ(), 0.5f, 0.001f);
 
-    // A surface above the threshold (normal Z 0.6 > 0.5) is placeable through the instance method.
     TestEqual(TEXT("Surface within authored slope is placeable"),
               Fragment->EvaluatePlacement(MakeQuery(true, 0.6f, 100.0f, false)),
               EPlaceablePlacementResult::Valid);
 
-    // A surface below the threshold (normal Z 0.4 < 0.5) is rejected as too steep.
     TestEqual(TEXT("Surface past authored slope is too steep"),
               Fragment->EvaluatePlacement(MakeQuery(true, 0.4f, 100.0f, false)),
               EPlaceablePlacementResult::SurfaceTooSteep);
@@ -168,7 +143,6 @@ bool FPlaceableFragmentInstanceRulesTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ─── Placement-mode session brain (DecidePlacementAction, model B + stay-in-mode) ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FPlaceableSessionActionTest,
     "Mythic.Itemization.Placement.SessionAction",
@@ -176,57 +150,45 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FPlaceableSessionActionTest::RunTest(const FString &Parameters) {
     using EAct = EMythicPlacementAction;
-    auto Decide = &UMythicPlacementModeComponent::DecidePlacementAction; // (cancel, present, confirm, valid)
+    auto Decide = &UMythicPlacementModeComponent::DecidePlacementAction;
 
-    // Cancel always exits — even with an otherwise-valid confirm.
     TestEqual(TEXT("cancel exits (masks a valid confirm)"), Decide(true, true, true, true), EAct::Exit);
 
-    // Source item gone (stack exhausted) exits — even on a confirm.
     TestEqual(TEXT("source item gone exits"), Decide(false, false, true, true), EAct::Exit);
 
-    // A valid confirm with stock present deploys (the component then STAYS in mode).
     TestEqual(TEXT("valid confirm + stock → deploy"), Decide(false, true, true, true), EAct::Deploy);
 
-    // A confirm on an INVALID spot does not deploy — just refreshes the ghost.
     TestEqual(TEXT("confirm on invalid spot → update ghost"), Decide(false, true, true, false), EAct::UpdateGhost);
 
-    // No confirm, stock present → just keep the ghost current.
     TestEqual(TEXT("no confirm → update ghost"), Decide(false, true, false, true), EAct::UpdateGhost);
 
-    // Precedence: cancel beats source-gone beats deploy.
     TestEqual(TEXT("cancel beats everything"), Decide(true, false, true, true), EAct::Exit);
 
     return true;
 }
 
-// ─── Server deploy-gate decision (PlanDeploy) ─────────────────────
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FPlaceableDeployPlanTest,
     "Mythic.Itemization.Placement.DeployPlan",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FPlaceableDeployPlanTest::RunTest(const FString &Parameters) {
-    // All gates pass -> Deployed.
     TestEqual(TEXT("Authorized + item + class + valid placement deploys"),
               UPlaceableFragment::PlanDeploy(true, true, true, EPlaceablePlacementResult::Valid),
               EPlaceableDeployResult::Deployed);
 
-    // Unauthorized inventory -> NotAuthorized (even with everything else valid).
     TestEqual(TEXT("Unauthorized inventory is rejected"),
               UPlaceableFragment::PlanDeploy(false, true, true, EPlaceablePlacementResult::Valid),
               EPlaceableDeployResult::NotAuthorized);
 
-    // Empty/non-placeable slot -> SlotEmpty.
     TestEqual(TEXT("Empty slot is rejected"),
               UPlaceableFragment::PlanDeploy(true, false, true, EPlaceablePlacementResult::Valid),
               EPlaceableDeployResult::SlotEmpty);
 
-    // Missing DeployedActorClass -> NoDeployedClass (content error).
     TestEqual(TEXT("Missing deployed class is rejected"),
               UPlaceableFragment::PlanDeploy(true, true, false, EPlaceablePlacementResult::Valid),
               EPlaceableDeployResult::NoDeployedClass);
 
-    // Bad placement -> PlacementInvalid (carry through any non-Valid placement verdict).
     TestEqual(TEXT("Invalid placement is rejected"),
               UPlaceableFragment::PlanDeploy(true, true, true, EPlaceablePlacementResult::OutOfReach),
               EPlaceableDeployResult::PlacementInvalid);
@@ -237,25 +199,20 @@ bool FPlaceableDeployPlanTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ─── Deploy-gate precedence (authority first, then slot, then content, then placement) ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FPlaceableDeployPrecedenceTest,
     "Mythic.Itemization.Placement.DeployPrecedence",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FPlaceableDeployPrecedenceTest::RunTest(const FString &Parameters) {
-    // Authority is checked before anything else — an unauthorized request with EVERYTHING else also failing still
-    // reports only NotAuthorized (never leaks that the slot was empty / placement bad).
     TestEqual(TEXT("Authority failure masks all other failures"),
               UPlaceableFragment::PlanDeploy(false, false, false, EPlaceablePlacementResult::NoSurface),
               EPlaceableDeployResult::NotAuthorized);
 
-    // With authority, slot-empty is reported before the content check.
     TestEqual(TEXT("Slot check precedes content check"),
               UPlaceableFragment::PlanDeploy(true, false, false, EPlaceablePlacementResult::NoSurface),
               EPlaceableDeployResult::SlotEmpty);
 
-    // With authority + item, the content check precedes the placement check.
     TestEqual(TEXT("Content check precedes placement check"),
               UPlaceableFragment::PlanDeploy(true, true, false, EPlaceablePlacementResult::NoSurface),
               EPlaceableDeployResult::NoDeployedClass);
@@ -263,14 +220,12 @@ bool FPlaceableDeployPrecedenceTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ─── Trace -> query bridge (BuildPlacementQuery) ──────────────────
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FPlaceableBuildQueryTest,
     "Mythic.Itemization.Placement.BuildQuery",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FPlaceableBuildQueryTest::RunTest(const FString &Parameters) {
-    // A hit: candidate point is the impact, distance measured instigator->impact, normalZ from the impact normal.
     {
         const FPlaceablePlacementQuery Q = UPlaceableFragment::BuildPlacementQuery(
             true, FVector(100.0f, 0.0f, 0.0f), FVector(0.0f, 0.0f, 1.0f), FVector(200.0f, 0.0f, 0.0f), FVector::ZeroVector, false);
@@ -280,7 +235,6 @@ bool FPlaceableBuildQueryTest::RunTest(const FString &Parameters) {
         TestFalse(TEXT("no overlap"), Q.bHasBlockingOverlap);
     }
 
-    // A miss: candidate point is the trace endpoint, distance measured to the endpoint, normalZ defaults flat.
     {
         const FPlaceablePlacementQuery Q = UPlaceableFragment::BuildPlacementQuery(
             false, FVector::ZeroVector, FVector::ZeroVector, FVector(200.0f, 0.0f, 0.0f), FVector::ZeroVector, false);
@@ -289,7 +243,6 @@ bool FPlaceableBuildQueryTest::RunTest(const FString &Parameters) {
         TestNearlyEqual(TEXT("miss treated as flat"), Q.SurfaceNormalZ, 1.0f, 0.001f);
     }
 
-    // Distance is instigator->candidate (not from world origin); a steep normal + overlap are carried verbatim.
     {
         const FPlaceablePlacementQuery Q = UPlaceableFragment::BuildPlacementQuery(
             true, FVector(100.0f, 0.0f, 0.0f), FVector(0.7f, 0.0f, 0.5f), FVector(300.0f, 0.0f, 0.0f), FVector(50.0f, 0.0f, 0.0f), true);
@@ -298,7 +251,6 @@ bool FPlaceableBuildQueryTest::RunTest(const FString &Parameters) {
         TestTrue(TEXT("overlap carried"), Q.bHasBlockingOverlap);
     }
 
-    // Composition: the bridge feeds EvaluatePlacement and produces the right verdict end-to-end.
     {
         const FPlaceablePlacementQuery Near = UPlaceableFragment::BuildPlacementQuery(
             true, FVector(150.0f, 0.0f, 0.0f), FVector(0.0f, 0.0f, 1.0f), FVector(200.0f, 0.0f, 0.0f), FVector::ZeroVector, false);
@@ -316,14 +268,12 @@ bool FPlaceableBuildQueryTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ─── Verdict -> client preview presentation (DescribePlacement) ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FPlaceablePreviewTest,
     "Mythic.Itemization.Placement.Preview",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FPlaceablePreviewTest::RunTest(const FString &Parameters) {
-    // Valid -> confirmable, green, no reason text.
     {
         const FPlaceablePreview P = UPlaceableFragment::DescribePlacement(EPlaceablePlacementResult::Valid);
         TestTrue(TEXT("valid is confirmable"), P.bCanConfirm);
@@ -331,7 +281,6 @@ bool FPlaceablePreviewTest::RunTest(const FString &Parameters) {
         TestTrue(TEXT("valid has no reason"), P.Reason.IsEmpty());
     }
 
-    // Every rejection -> NOT confirmable, red, with a non-empty player-facing reason.
     const EPlaceablePlacementResult Rejections[] = {
         EPlaceablePlacementResult::NoSurface,
         EPlaceablePlacementResult::OutOfReach,
@@ -348,35 +297,29 @@ bool FPlaceablePreviewTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ─── Per-player deploy cap (CanDeployMore) ────────────────────────
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FPlaceableDeployCapTest,
     "Mythic.Itemization.Placement.DeployCap",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FPlaceableDeployCapTest::RunTest(const FString &Parameters) {
-    auto Can = &AMythicPlayerController::CanDeployMore; // (currentValidCount, maxAllowed)
+    auto Can = &AMythicPlayerController::CanDeployMore;
 
-    // Cap 0 (default) = unlimited — always allowed regardless of how many are live.
     TestTrue(TEXT("cap 0 is unlimited (none placed)"), Can(0, 0));
     TestTrue(TEXT("cap 0 is unlimited (many placed)"), Can(999, 0));
-    // A negative cap is also treated as unlimited (defensive).
     TestTrue(TEXT("negative cap is unlimited"), Can(50, -1));
 
-    // A positive cap allows up to but NOT including it.
     TestTrue(TEXT("under the cap → allowed"), Can(0, 3));
     TestTrue(TEXT("one below the cap → allowed"), Can(2, 3));
     TestFalse(TEXT("exactly at the cap → blocked"), Can(3, 3));
     TestFalse(TEXT("over the cap (defensive) → blocked"), Can(4, 3));
 
-    // Cap of 1 (single placeable) boundary.
     TestTrue(TEXT("cap 1, none placed → allowed"), Can(0, 1));
     TestFalse(TEXT("cap 1, one placed → blocked"), Can(1, 1));
 
     return true;
 }
 
-// ─── Deploy-rejection player feedback (DescribeDeployFailure) ──────
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FPlaceableDeployFeedbackTest,
     "Mythic.Itemization.Placement.DeployFeedback",
@@ -387,17 +330,13 @@ bool FPlaceableDeployFeedbackTest::RunTest(const FString &Parameters) {
     using P = EPlaceablePlacementResult;
     auto Msg = &UPlaceableFragment::DescribeDeployFailure;
 
-    // Success surfaces no callout.
     TestTrue(TEXT("Deployed → no message"), Msg(D::Deployed, P::Valid).IsEmpty());
 
-    // Outcomes that should NOT toast: a UI-impossible empty slot, and the content-error no-class.
     TestTrue(TEXT("SlotEmpty → no message (UI shouldn't offer it)"), Msg(D::SlotEmpty, P::Valid).IsEmpty());
     TestTrue(TEXT("NoDeployedClass → no message (content error, logged)"), Msg(D::NoDeployedClass, P::Valid).IsEmpty());
 
-    // NotAuthorized surfaces a non-empty deploy-level line.
     TestFalse(TEXT("NotAuthorized → a player-facing line"), Msg(D::NotAuthorized, P::Valid).IsEmpty());
 
-    // PlacementInvalid surfaces the SPECIFIC placement reason — single-sourced from DescribePlacement (no duplicate copy).
     TestTrue(TEXT("PlacementInvalid(OutOfReach) reuses the placement reason"),
              Msg(D::PlacementInvalid, P::OutOfReach).EqualTo(UPlaceableFragment::DescribePlacement(P::OutOfReach).Reason));
     TestTrue(TEXT("PlacementInvalid(Obstructed) reuses the placement reason"),

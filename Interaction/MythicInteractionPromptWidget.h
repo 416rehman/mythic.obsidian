@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -10,9 +9,6 @@
 #include "UI/MythicActivatableWidget.h"
 #include "MythicInteractionPromptWidget.generated.h"
 
-/**
- * 
- */
 UCLASS()
 class MYTHIC_API UMythicInteractionPromptWidget : public UMythicActivatableWidget {
     GENERATED_BODY()
@@ -30,9 +26,16 @@ public:
     UPROPERTY(BlueprintReadOnly)
     FUIActionBindingHandle SecondaryInteractionHandle;
 
+    /**
+     * How many action buttons the prompt keeps alive. Two covers primary + secondary, which is every interactable
+     * in the game today; a third would be built on demand and then kept.
+     */
+    UPROPERTY(EditDefaultsOnly, Category = "Interaction", meta = (ClampMin = "1"))
+    int32 ActionButtonPoolSize = 2;
+
     UFUNCTION()
     void Clear();
-    
+
     // Use this function to update the Widget state based on the InteractionData
     UFUNCTION(BlueprintCallable)
     void SetInteractionData(FMythicInteractionData InInteractionData, AActor *InInteractableActor, APlayerController *InPlayerController,
@@ -42,4 +45,17 @@ public:
     UFUNCTION(BlueprintImplementableEvent)
     void OnInteractionDataUpdated(FMythicInteractionData InInteractionData, AActor *InInteractableActor);
     void OnInteractionDataUpdated_Implementation(FMythicInteractionData InInteractionData, AActor *InInteractableActor) {}
+
+private:
+    UPROPERTY()
+    TArray<TObjectPtr<UCommonButtonBase>> ActionButtonPool;
+
+    UPROPERTY()
+    TObjectPtr<UWidget> ActiveComplimentaryWidget;
+
+    UCommonButtonBase *GetOrCreateActionButton(int32 Index);
+
+    void ShowActionButton(int32 Index, const FUIActionBindingHandle &Handle);
+
+    void CollapseActionButtonsFrom(int32 Index);
 };

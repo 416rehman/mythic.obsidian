@@ -1,4 +1,3 @@
-// 
 #include "WorldAttributes.h"
 
 #include "GameModes/GameState/MythicGameState.h"

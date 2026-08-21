@@ -49,14 +49,11 @@ FGameplayAbilitySpecHandle UActionableItemFragment::GrantItemAbility(UMythicAbil
         return FGameplayAbilitySpecHandle();
     }
 
-    // Determine the ability to grant
     UClass *TargetAbilityClass = AbilityClass.Get();
     UE_LOG(Myth, Log, TEXT("  -> Initial TargetAbilityClass: %s"), *GetNameSafe(TargetAbilityClass));
 
-    // If no specific ability is provided, but we have an Input Tag, try to use the Generic Consumable Ability.
     if (!TargetAbilityClass && InputTag.IsValid()) {
         UE_LOG(Myth, Log, TEXT("  -> No ability class, but have InputTag. Trying to use Generic Consumable."));
-        // Try Settings (allows for BP overrides with Vfx/Sfx)
         if (const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>()) {
             TargetAbilityClass = Settings->DefaultItemInputAbility.LoadSynchronous();
             UE_LOG(Myth, Log, TEXT("  -> From Settings: %s"), *GetNameSafe(TargetAbilityClass));
@@ -65,7 +62,6 @@ FGameplayAbilitySpecHandle UActionableItemFragment::GrantItemAbility(UMythicAbil
             UE_LOG(Myth, Warning, TEXT("  -> Could not get MythicDeveloperSettings."));
         }
 
-        // Fallback to Native Class if settings are empty
         if (!TargetAbilityClass) {
             TargetAbilityClass = UGA_GenericConsumable::StaticClass();
             UE_LOG(Myth, Log, TEXT("  -> Fallback to native GA_GenericConsumable: %s"), *GetNameSafe(TargetAbilityClass));
@@ -78,11 +74,9 @@ FGameplayAbilitySpecHandle UActionableItemFragment::GrantItemAbility(UMythicAbil
         return FGameplayAbilitySpecHandle();
     }
 
-    // We set 'this' (The Fragment) as the SourceObject so the Ability knows EXACTLY which fragment granted it.
     FGameplayAbilitySpec Spec(TargetAbilityClass, 1, INDEX_NONE, this);
     UE_LOG(Myth, Log, TEXT("  -> Created AbilitySpec with SourceObject=%s"), *GetName());
 
-    // Apply the Input Tag so the ASC can route input to this ability
     if (InputTag.IsValid()) {
         Spec.GetDynamicSpecSourceTags().AddTag(InputTag);
         UE_LOG(Myth, Log, TEXT("  -> Added InputTag %s to DynamicSpecSourceTags"), *InputTag.ToString());
@@ -98,6 +92,5 @@ FGameplayAbilitySpecHandle UActionableItemFragment::GrantItemAbility(UMythicAbil
 }
 
 void UActionableItemFragment::ExecuteGenericAction(UMythicItemInstance *ItemInstance) {
-    // Default implementation does nothing. Subclasses should override.
     UE_LOG(Myth, Warning, TEXT("ExecuteGenericAction called on base ActionableItemFragment. Override this in subclasses."));
 }

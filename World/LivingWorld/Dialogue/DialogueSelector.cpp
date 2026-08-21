@@ -1,4 +1,3 @@
-// Mythic Living World — Dialogue Selector Implementation
 
 #include "World/LivingWorld/Dialogue/DialogueSelector.h"
 #include "World/LivingWorld/Dialogue/MythicDialogueTypes.h"
@@ -18,37 +17,32 @@ FMythicDialogueResult FMythicDialogueSelector::SelectTemplate(
     for (const FMythicDialogueTemplate& Template : Database->Templates) {
         int32 Score = 0;
 
-        // ─── Companion commentary filter ───
         if (Context.bIsCompanionCommentary != Template.bIsCompanionCommentary) {
             continue;
         }
         if (Template.bIsCompanionCommentary) {
-            // Companion commentary: only fire when player action exceeds moral threshold
             if (Context.PlayerActionMoralScore < Template.CommentaryMoralThreshold) {
                 continue;
             }
-            Score += 10; // Bonus for commentary match
+            Score += 10;
         }
 
-        // ─── Role match ───
         if (Template.RequiredRole.IsValid()) {
             if (Context.RoleTag.MatchesTag(Template.RequiredRole)) {
-                Score += 20; // Exact role match bonus
+                Score += 20;
             } else {
-                continue; // Hard filter: role mismatch = skip
+                continue;
             }
         }
 
-        // ─── Faction match ───
         if (Template.RequiredFaction.IsValid()) {
             if (Context.FactionTag.MatchesTag(Template.RequiredFaction)) {
-                Score += 15; // Faction match bonus
+                Score += 15;
             } else {
-                continue; // Hard filter: faction mismatch = skip
+                continue;
             }
         }
 
-        // ─── Situation tag overlap ───
         if (Template.SituationTags.Num() > 0) {
             int32 Overlap = 0;
             for (const FGameplayTag& Tag : Template.SituationTags) {
@@ -57,33 +51,26 @@ FMythicDialogueResult FMythicDialogueSelector::SelectTemplate(
                 }
             }
             if (Overlap == 0) {
-                continue; // No situation match at all = skip
+                continue;
             }
-            Score += Overlap * 10; // +10 per matching situation tag
+            Score += Overlap * 10;
         }
 
-        // ─── Severity range check ───
         if (Context.RecentEventSeverity >= Template.MinSeverity
             && Context.RecentEventSeverity <= Template.MaxSeverity) {
             Score += 5;
         } else if (TemplateConstrainsSeverity(Template.MinSeverity, Template.MaxSeverity)) {
-            // Out of range AND the template constrains severity (tightened EITHER bound). Was `MinSeverity > 0` only,
-            // which ignored a lowered MaxSeverity when MinSeverity stayed at its default 0 → a low-severity template
-            // wrongly matched high-severity events.
             continue;
         }
 
-        // ─── Moral axis filter ───
         if (Template.MoralAxisFilter != 0xFF && Context.DominantPressureChannel >= 0) {
             if ((Template.MoralAxisFilter & (1 << Context.DominantPressureChannel)) != 0) {
-                Score += 8; // Pressure channel matches axis filter
+                Score += 8;
             }
         }
 
-        // ─── Priority scoring ───
         Score += Template.Priority;
 
-        // ─── Best candidate ───
         if (Score > BestScore) {
             BestScore = Score;
             BestTemplate = &Template;
@@ -92,14 +79,13 @@ FMythicDialogueResult FMythicDialogueSelector::SelectTemplate(
 
     if (BestTemplate) {
         Result.Template = BestTemplate;
-        Result.ResolvedText = BestTemplate->DialogueText; // Variables resolved in caller
+        Result.ResolvedText = BestTemplate->DialogueText;
     }
 
     return Result;
 }
 
 bool FMythicDialogueSelector::TemplateConstrainsSeverity(uint8 MinSeverity, uint8 MaxSeverity) {
-    // Defaults are Min=0 / Max=0xFF ("any severity"); the template constrains severity if it tightened either bound.
     return MinSeverity > 0 || MaxSeverity < 0xFF;
 }
 

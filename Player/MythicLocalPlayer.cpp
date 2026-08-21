@@ -10,6 +10,5 @@ class UObject;
 
 UMythicLocalPlayer::UMythicLocalPlayer()
 {
-	
 }
 

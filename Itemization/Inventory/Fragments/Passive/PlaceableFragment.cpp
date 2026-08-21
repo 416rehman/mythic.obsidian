@@ -1,10 +1,7 @@
-// Mythic — Placeable item fragment implementation
 
 #include "Itemization/Inventory/Fragments/Passive/PlaceableFragment.h"
 
 float UPlaceableFragment::GetMinSurfaceNormalZ() const {
-    // cos(slope): a surface whose normal Z is at least this is within the allowed tilt (flat ground = 1.0). Clamp
-    // the authored angle defensively so a mis-set value outside [0,90] can't produce a nonsensical threshold.
     const float ClampedDegrees = FMath::Clamp(MaxGroundSlopeDegrees, 0.0f, 90.0f);
     return FMath::Cos(FMath::DegreesToRadians(ClampedDegrees));
 }
@@ -17,24 +14,18 @@ EPlaceablePlacementResult UPlaceableFragment::EvaluatePlacement(const FPlaceable
                                                                 const float MaxReach,
                                                                 const float MinSurfaceNormalZ,
                                                                 const bool bRequireGround) {
-    // A ground-requiring placeable aimed at empty space has nowhere to sit.
     if (bRequireGround && !Query.bDidHitSurface) {
         return EPlaceablePlacementResult::NoSurface;
     }
 
-    // Reach is checked for every placeable (ground or floating): you can't deploy beyond arm's length. Inclusive —
-    // a spot exactly at MaxReach is allowed.
     if (Query.DistanceFromInstigator > MaxReach) {
         return EPlaceablePlacementResult::OutOfReach;
     }
 
-    // Slope only constrains ground placeables; a flatter surface has a larger normal Z. Inclusive — a surface
-    // exactly at the slope limit is allowed.
     if (bRequireGround && Query.SurfaceNormalZ < MinSurfaceNormalZ) {
         return EPlaceablePlacementResult::SurfaceTooSteep;
     }
 
-    // Finally, the spot must be physically clear.
     if (Query.bHasBlockingOverlap) {
         return EPlaceablePlacementResult::Obstructed;
     }
@@ -46,23 +37,18 @@ EPlaceableDeployResult UPlaceableFragment::PlanDeploy(const bool bAuthorizedInve
                                                       const bool bSlotHasPlaceableItem,
                                                       const bool bHasDeployedClass,
                                                       const EPlaceablePlacementResult Placement) {
-    // Authority/ownership FIRST: a request from a client that doesn't own (or have open+in-range) the inventory is
-    // rejected before we even look at what's in the slot, so a forged request can't probe another player's slots.
     if (!bAuthorizedInventory) {
         return EPlaceableDeployResult::NotAuthorized;
     }
 
-    // The slot must actually hold a deployable item.
     if (!bSlotHasPlaceableItem) {
         return EPlaceableDeployResult::SlotEmpty;
     }
 
-    // The placeable must point at something to spawn (a content/authoring error otherwise).
     if (!bHasDeployedClass) {
         return EPlaceableDeployResult::NoDeployedClass;
     }
 
-    // And the chosen spot must be a legal placement (same rule the client previewed).
     if (Placement != EPlaceablePlacementResult::Valid) {
         return EPlaceableDeployResult::PlacementInvalid;
     }
@@ -79,14 +65,10 @@ FPlaceablePlacementQuery UPlaceableFragment::BuildPlacementQuery(const bool bDid
     FPlaceablePlacementQuery Query;
     Query.bDidHitSurface = bDidHit;
 
-    // The deployed object sits at the surface hit, or at the aim endpoint when nothing was hit (floating placeable).
     const FVector CandidatePoint = bDidHit ? ImpactPoint : TraceEnd;
 
-    // Slope only matters when a surface was actually hit; a miss is treated as flat (the slope gate is skipped for
-    // floating placeables, and a ground-required placeable rejects a miss before the slope check is reached).
     Query.SurfaceNormalZ = bDidHit ? ImpactNormal.Z : 1.0f;
 
-    // Reach is measured to where the object would actually sit, not the raw trace length.
     Query.DistanceFromInstigator = FVector::Dist(InstigatorLocation, CandidatePoint);
 
     Query.bHasBlockingOverlap = bHasBlockingOverlap;
@@ -135,12 +117,10 @@ FText UPlaceableFragment::DescribeDeployFailure(const EPlaceableDeployResult Dep
     case EPlaceableDeployResult::NotAuthorized:
         return NSLOCTEXT("Placeable", "DeployNotAuthorized", "You can't build here");
     case EPlaceableDeployResult::PlacementInvalid:
-        // The candidate spot failed — surface the SPECIFIC reason (out of reach / too steep / blocked / no surface),
-        // single-sourced from the same map the ghost preview uses.
         return DescribePlacement(PlacementResult).Reason;
-    case EPlaceableDeployResult::Deployed:        // success — no callout
-    case EPlaceableDeployResult::SlotEmpty:       // the UI shouldn't offer an empty slot — nothing to tell the player
-    case EPlaceableDeployResult::NoDeployedClass: // content error — logged, not surfaced to the player
+    case EPlaceableDeployResult::Deployed:
+    case EPlaceableDeployResult::SlotEmpty:
+    case EPlaceableDeployResult::NoDeployedClass:
     default:
         return FText::GetEmpty();
     }

@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -31,9 +30,6 @@ struct FLootTableEntry {
     float OverrideDropChance = 0.0f;
 };
 
-/**
- * 
- */
 UCLASS()
 class MYTHIC_API UMythicLootTable : public UDataAsset {
     GENERATED_BODY()
@@ -72,9 +68,6 @@ struct FLootTableOverride {
     bool bSkipGlobal = false;
 };
 
-//--------------------------------------------------------------------------------------------------
-// Loot Reward
-//--------------------------------------------------------------------------------------------------
 
 USTRUCT(BlueprintType, Blueprintable)
 struct FLootRewardContext : public FRewardContext {
@@ -94,12 +87,15 @@ struct FLootRewardContext : public FRewardContext {
     // Item level to spawn items at.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     int32 ItemLevel = 0;
+
+    // C2 — combat tier of the SOURCE enemy (Normal=1..Boss=5, per GetAITierInt; 0 = unknown/none == Normal, inert).
+    // Escalates drop count / rarity / a boss rarity floor. Defaults to 0 so any caller that doesn't set it (and the
+    // legacy loot path) behaves EXACTLY as before. Set at the kill site via GetAITierInt(SlainNPC->EnemyTier).
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    int32 EnemyTierInt = 0;
 };
 
 
-/**
- * 
- */
 UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API ULootReward : public URewardBase {
     GENERATED_BODY()
@@ -110,17 +106,12 @@ class MYTHIC_API ULootReward : public URewardBase {
                                       int32 DropLevel, UMythicLootTable *LootTable, TScriptInterface<IInventoryProviderInterface> InventoryProvider,
                                       bool isPrivate, FVector SpawnLocation,
                                       UMythicLootManagerSubsystem *
-                                      MythicLootManager);
+                                      MythicLootManager,
+                                      float RarityFind = 0.0f, float QuantityFind = 0.0f, int32 EnemyTierInt = 0);
 
 public:
     virtual bool Give(FRewardContext &Context) const override;
 
-    /**
-     * Resolve a loot entry's drop chance: a positive OverrideDropChance wins; otherwise the per-rarity weight (indexed
-     * by the item's rarity). Returns FALSE — the entry must be SKIPPED — for an out-of-range rarity with no override,
-     * rather than reading the rarity-weight array out of bounds (the weights array is fixed-size; a future/extra or
-     * corrupt rarity would otherwise UB-read it). Pure + static so the resolution is unit-testable.
-     */
     static bool ResolveEntryDropChance(float OverrideDropChance, int32 RarityIndex, TConstArrayView<float> RarityWeights, float &OutChance);
 
     // The loot table to use

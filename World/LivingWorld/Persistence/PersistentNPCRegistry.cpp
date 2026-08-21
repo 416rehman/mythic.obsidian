@@ -1,4 +1,3 @@
-// Mythic Living World — Persistent NPC Registry Implementation
 
 #include "World/LivingWorld/Persistence/PersistentNPCRegistry.h"
 #include "World/LivingWorld/Social/SocialGraph.h"
@@ -14,12 +13,10 @@ void UMythicPersistentNPCRegistry::RegisterDeath(
     const FMythicCellCoord &Cell,
     double WorldTime,
     UMythicLivingWorldSubsystem *OwningLWS) {
-    // Guard against duplicate registration
     if (DeadNPCHashes.Contains(NameHash)) {
         return;
     }
 
-    // ─── 1. Add to permanent death set ───
     DeadNPCHashes.Add(NameHash);
 
     FMythicPersistentDeathRecord Record;
@@ -28,21 +25,16 @@ void UMythicPersistentNPCRegistry::RegisterDeath(
     Record.RoleTag = RoleTag;
     Record.DeathTime = WorldTime;
     Record.DeathCell = Cell;
+    constexpr int32 MaxDeathRecords = 256;
+    if (DeathRecords.Num() >= MaxDeathRecords) {
+        DeathRecords.RemoveAt(0, DeathRecords.Num() - MaxDeathRecords + 1);
+    }
     DeathRecords.Add(Record);
 
     UE_LOG(LogMythLivingWorld, Log, TEXT("Permanent death registered: NameHash=%u, Faction=%d, Role=%s, Cell=(%d,%d)"),
            NameHash, Faction.Index, *RoleTag.ToString(), Cell.X, Cell.Y);
 
-    // ─── 2. Grief from this death ───
-    // Grief pressure is NOT generated here. The World.Event.Death.Permanent event submitted below (section 3) is
-    // witnessed by the PressureProcessor, which raises Grief on nearby entities — that is the live grief path.
-    // (A social-graph grief channel via edge-severing was never wired: PruneStaleEdges only decays edges, it
-    // generates no grief. If that channel is wanted later it is a separate feature — tracked in BACKLOG.)
 
-    // ─── 3. Write death event to Causal Fabric (via the thread-safe queue) ───
-    // RegisterDeath runs on the GAME thread (HandleNPCDeath's OnDeath delegate), so it MUST route through the
-    // subsystem's SubmitWorldEvent queue (drained by the sim thread) — a direct CausalFabric->AppendEvent here would
-    // race the sim-thread single-writer (matches the EncounterDirector/PartySubsystem fixes).
     if (OwningLWS) {
         FMythicWorldEvent DeathEvent;
         DeathEvent.WorldTime = WorldTime;
@@ -50,29 +42,20 @@ void UMythicPersistentNPCRegistry::RegisterDeath(
         DeathEvent.PrimaryFaction = Faction;
         DeathEvent.EventTag = TAG_WORLD_EVENT_DEATH_PERMANENT;
         DeathEvent.PerpEntityId = NameHash;
-        DeathEvent.Significance = 1.0f; // Max significance — permanent death
+        DeathEvent.Significance = 1.0f;
         DeathEvent.CategoryFlags = EMythicEventCategory::Death;
 
-        // Canonical kill moral vector (Rule 3 single source — same constant the live kill path uses). Positive
-        // Violence = harm, so anti-violence factions condemn it; the prior inline -0.9 inverted that (review HIGH).
         DeathEvent.MoralVector = FMythicMoralSignature::MakeKillActionMoralVector();
 
         OwningLWS->SubmitWorldEvent(DeathEvent);
     }
 
-    // ─── 4. Role Vacation and Succession (via the subsystem's SimulationLock-guarded wrapper) ───
-    // Routed through OwningLWS (NOT a direct registry call): HandleNPCDeath walks the Settlements TMap that the sim
-    // thread rehashes/mutates under SimulationLock — a direct game-thread walk here would race a rehash (TMap UAF/crash).
     if (OwningLWS) {
         OwningLWS->HandleNPCDeathSettlements(NameHash, WorldTime);
     }
 }
 
 void UMythicPersistentNPCRegistry::Serialize(FArchive &Ar) {
-    // v2 (R18-M7): appends NextSpawnSerial after the death records.
-    // v3: RoleTag is serialized as a native FGameplayTag (Ar << FGameplayTag) instead of a String→RequestGameplayTag
-    //     round-trip. This eliminates the runtime tag lookup on load (no more literal-string→tag resolution). The
-    //     on-disk layout for the RoleTag field changes, so v1/v2 saves are still read via the legacy FString path below.
     int32 Version = 3;
     Ar << Version;
 
@@ -81,10 +64,9 @@ void UMythicPersistentNPCRegistry::Serialize(FArchive &Ar) {
 
     if (Ar.IsSaving()) {
         for (const FMythicPersistentDeathRecord &Record : DeathRecords) {
-            // Serialize each field explicitly for version stability
             uint32 Hash = Record.NameHash;
             int32 FactionIdx = Record.Faction.Index;
-            FGameplayTag RoleTag = Record.RoleTag; // v3: native tag round-trip (no string→RequestGameplayTag)
+            FGameplayTag RoleTag = Record.RoleTag;
             double Time = Record.DeathTime;
             int32 CellX = Record.DeathCell.X;
             int32 CellY = Record.DeathCell.Y;
@@ -98,9 +80,6 @@ void UMythicPersistentNPCRegistry::Serialize(FArchive &Ar) {
         }
     }
     else {
-        // Bound-check before SetNum: a desynced/corrupted stream can yield a garbage Count; an unbounded SetNum (and the
-        // Empty(Count) reserves) would then attempt a massive allocation (OOM/crash). 1,000,000 is far above any
-        // legitimate death-record count. SetError flags the archive so the load is treated as failed.
         if (Count < 0 || Count > 1000000) {
             Ar.SetError();
             return;
@@ -119,19 +98,12 @@ void UMythicPersistentNPCRegistry::Serialize(FArchive &Ar) {
             Ar << Hash;
             Ar << FactionIdx;
             if (Version >= 3) {
-                // v3+: RoleTag was saved as a native FGameplayTag — round-trips with no runtime lookup.
                 Ar << RoleTag;
             }
             else {
-                // Legacy (v1/v2) saves stored the role as a string. Read it and resolve with ErrorIfNotFound=false:
-                // a death record's RoleTag is historical display/succession data. Most perma-dead NPCs are non-leaders
-                // with NO role, so the string round-trips as "None" — and a tag could also be removed between save and
-                // load. The default-true call logged an Error on EVERY load of such a record (and the tag still resolved
-                // to empty anyway). This is the one unavoidable string→tag deserialization lookup, scoped to old saves
-                // only; v3+ saves never hit it.
                 FString RoleStr;
                 Ar << RoleStr;
-                RoleTag = FGameplayTag::RequestGameplayTag(FName(*RoleStr), /*ErrorIfNotFound=*/false);
+                RoleTag = FGameplayTag::RequestGameplayTag(FName(*RoleStr),false);
             }
             Ar << Time;
             Ar << CellX;
@@ -148,11 +120,6 @@ void UMythicPersistentNPCRegistry::Serialize(FArchive &Ar) {
         }
     }
 
-    // ─── v2 (R18-M7): persisted global monotonic spawn serial ───
-    // Seeds FMythicNPCGenerator::GenerateNameHash (replaces the old wave-local SpawnIdx). MUST persist: a reset to 0
-    // would regenerate NameHashes already in DeadNPCHashes and wrongly perma-dead freshly-spawned NPCs. Appended
-    // AFTER the death records and gated on Version>=2 so v1 saves still load byte-aligned (the registry is part of
-    // the unframed LWS stream). Symmetric for save + load (Ar << on a uint32).
     if (Version >= 2) {
         Ar << NextSpawnSerial;
     }

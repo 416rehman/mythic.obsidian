@@ -14,7 +14,6 @@ USTRUCT(BlueprintType, Blueprintable)
 struct FAttributeGoal {
     GENERATED_BODY()
 
-    // constructor
     FAttributeGoal();
 
     FAttributeGoal(FGameplayAttribute InAttribute, float InGoal, EGameplayModOp::Type InModifier);
@@ -49,17 +48,11 @@ struct FMilestone {
     TArray<URewardBase *> Rewards;
 };
 
-/**
- * This can be used to create proficiency tracks for the player to level up in.
- * Give it a name, a description, list of milestone rewards, and list of attributes to improve up to a maximum level,
- * and the attribute improvements will be scattered across the milestones.
- */
 UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API UProficiencyDefinition : public UDataAsset {
     GENERATED_BODY()
 
 public:
-    // Constructor for the proficiency track
     UProficiencyDefinition();
 
     // The name of the proficiency track
@@ -69,6 +62,24 @@ public:
     // The description of the proficiency track
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track")
     FText Description;
+
+    /**
+     * The track's own mark -- the pick for Mining, the sickle for Harvesting. Shown on the track's row and at the
+     * head of its rail, so a player finds a trade by its tool rather than by reading twelve names.
+     *
+     * Soft, and loaded by the page when it opens rather than per row: a TryLoad on a recycled row is a synchronous
+     * disk hitch mid-scroll.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track")
+    TSoftObjectPtr<UTexture2D> Icon;
+
+    /**
+     * Identifies this track to gameplay rules, e.g. Proficiency.Woodcutting. Carried on the GAS.Event.Proficiency.Gained
+     * event this track fires, which is what lets a talent or a woven spell say "when you fell a tree" instead of only
+     * "when you do anything productive". UNSET = the event still fires, it just cannot be gated by track.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track")
+    FGameplayTag TrackTag;
 
     // The attribute to use to track the progress of this proficiency track
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track | Rewards")
@@ -96,7 +107,7 @@ public:
     // Base XP per action. For instance, a combat proficiency track might reward XP per enemy kill.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track | Balancing")
     float BaseXPPerAction = 10.0f;
-    
+
     //----------------------------------------------------------------------------
     // 1. Returns the XP cost to level up from the specified level (i.e. from level L to L+1)
     //----------------------------------------------------------------------------

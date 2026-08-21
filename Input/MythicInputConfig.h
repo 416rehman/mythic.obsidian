@@ -11,11 +11,6 @@ class UInputAction;
 class UObject;
 struct FFrame;
 
-/**
- * FMythicInputAction
- *
- *	Struct used to map a input action to a gameplay input tag.
- */
 USTRUCT(BlueprintType)
 struct FMythicInputAction {
     GENERATED_BODY()
@@ -28,11 +23,6 @@ public:
     FGameplayTag InputTag;
 };
 
-/**
- * UMythicInputConfig
- *
- *	Non-mutable data asset that contains input configuration properties.
- */
 UCLASS(BlueprintType, Const)
 class MYTHIC_API UMythicInputConfig : public UDataAsset {
     GENERATED_BODY()

@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -47,7 +46,6 @@ private:
     TArray<FTrackedDestructibleData> Items = TArray<FTrackedDestructibleData>();
 
 public:
-    // Store reference to the owning component
     UPROPERTY(NotReplicated)
     TWeakObjectPtr<UMythicResourceManagerComponent> OwnerComponent;
 
@@ -59,7 +57,6 @@ public:
     void PostReplicatedAdd(const TArrayView<int32> &AddedIndices, int32 FinalSize);
     void PostReplicatedChange(const TArrayView<int32> &ChangedIndices, int32 FinalSize);
 
-    // Helper function to get the owner safely
     UMythicResourceManagerComponent *GetOwnerComponent() const {
         return OwnerComponent.IsValid() ? OwnerComponent.Get() : nullptr;
     }
@@ -68,25 +65,18 @@ public:
         return &this->Items;
     }
 
-    // Add an item and mark the array dirty and call PreReplicatedAdd manually (because server doesn't call it automatically)
     void AddItem(const FTrackedDestructibleData &NewItem) {
         Items.Add(NewItem);
         MarkItemDirty(Items.Last());
 
-        // Manually call PostReplicatedAdd on server as it won't be called automatically
         TArray<int32> AddedIndices;
         AddedIndices.Add(Items.Num() - 1);
         PostReplicatedAdd(AddedIndices, Items.Num());
     }
 
-    // Batch remove
     void RemoveItems(const TArrayView<int32> &RemovedIndices) {
         PreReplicatedRemove(RemovedIndices, Items.Num() - RemovedIndices.Num());
 
-        // Remove in DESCENDING index order: RemoveAt(i) shifts every later element down by one, so removing ascending
-        // indices in-order deletes the WRONG elements once 2+ indices are given (the batch-respawn case — multiple nodes
-        // due at the same time). Sorting a local copy descending makes each removal independent. (PreReplicatedRemove
-        // above already received the original index set against the still-intact array.)
         TArray<int32> SortedIndices(RemovedIndices.GetData(), RemovedIndices.Num());
         SortedIndices.Sort([](int32 A, int32 B) { return A > B; });
         for (int32 Index : SortedIndices) {
@@ -110,16 +100,12 @@ UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class MYTHIC_API UMythicResourceManagerComponent : public UActorComponent {
     GENERATED_BODY()
 
-    // Tracked Resources - This is not replicated from the server
     UPROPERTY()
     TArray<FTrackedDestructibleData> TrackedResources = TArray<FTrackedDestructibleData>();
 
-    // Fast Array Serializer - Destroyed Resources
     UPROPERTY(ReplicatedUsing=OnRep_DestroyedResources)
     FTrackedDestructibleDataArray DestroyedResources = FTrackedDestructibleDataArray();
 
-    ///////////// RESPAWNING SYSTEM /////////////
-    // Single timer handle for the 10-minute check
     UPROPERTY()
     FTimerHandle BatchRespawnTimerHandle;
 
@@ -137,17 +123,13 @@ class MYTHIC_API UMythicResourceManagerComponent : public UActorComponent {
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Respawn", meta = (AllowPrivateAccess = "true"))
     float DefaultRespawnDelay = 300.0f; // 5 minutes
 protected:
-    // The main respawn function - called every 10 minutes
     UFUNCTION()
     void ProcessBatchRespawn();
-    ///////////// END RESPAWNING SYSTEM /////////////
 
-    // OnRep_DestroyedResources
     UFUNCTION()
     void OnRep_DestroyedResources();
 
 public:
-    // Sets default values for this component's properties
     UMythicResourceManagerComponent();
 
     // Add a resource to the tracked list
@@ -160,41 +142,25 @@ public:
     void LoadDestroyedResource(UMythicResourceISM *ResourceISM, int32 InstanceId, FTransform Transform, double RemainingSeconds);
 
 private:
-    // Helper functions. Both return the resulting HitsTillDestruction (0 = depleted this hit, >0 = hits remaining),
-    // or -1 for an error / already-destroyed branch with nothing to surface — so AddOrUpdateResource can emit the
-    // gather feedback ONCE for every branch (existing hit, new-tracked, one-shot destroy).
     int32 ApplyDamageToResource(FTrackedDestructibleData &Resource, int32 DamageAmount, APlayerController *PlayerController);
     int32 AddNewResource(FTransform Transform, int32 DamageAmount, APlayerController *PlayerController, UMythicResourceISM *ResourceISM, int32
                          Index);
     void AddToDestroyedResources(FTrackedDestructibleData DestroyedResource, APlayerController *PlayerController);
 
-    // resolve the gatherer's proficiency level for the given resource type tag (0 if no match)
     int32 GetGathererProficiencyLevel(APlayerController *PlayerController, const FGameplayTag &ResourceType) const;
 
 protected:
-    // Called when the game starts
     virtual void BeginPlay() override;
 
 public:
-    // Lifetime replication
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
     TArray<FTrackedDestructibleData> GetTrackedDestructibles() const;
 
-    /** Respawn-eligibility gate (used by ProcessBatchRespawn): a destroyed node returns once its delay has elapsed.
-     *  Requires HitsTillDestruction <= 0 (actually destroyed), RespawnTime > 0 (a real respawn time was assigned —
-     *  guards a default-constructed/uninitialized entry from respawning at world-time 0), and CurrentTime >= RespawnTime.
-     *  Pure + static so the respawn loop's core decision is unit-testable without a live world/timer. */
     static bool ShouldRespawnDestructible(int32 HitsTillDestruction, float RespawnTime, float CurrentTime);
-
-    /** Pure gathering XP reward for one harvested node: 0 when BaseXpPerHarvest<=0, 0 when the gatherer has hit the
-     *  anti-grind cap (NoGainAtOrAboveLevel>0 && GathererLevel>=it), else BaseXpPerHarvest. Static + unit-testable;
-     *  mirrors the crafting XP rule. */
-    static float ComputeGatherXpReward(float BaseXpPerHarvest, int32 GathererLevel, int32 NoGainAtOrAboveLevel);
 
     const TArray<FTrackedDestructibleData> &GetDestroyedItems() const { return *DestroyedResources.GetItems(); }
 
-    // Used for handling destruction of resources after they are added to the destroyed resources array
     static void HandleResourceDestruction(const TArray<FTrackedDestructibleData> &DestroyedResources);
     static void HandleResourceRespawn(const TArray<FTrackedDestructibleData> &RespawnedResources);
 };

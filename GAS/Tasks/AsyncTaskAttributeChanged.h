@@ -9,19 +9,15 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnAttributeChanged, FGameplayAttribute, Attribute, float, NewValue, float, OldValue);
 
-/**
- * Blueprint node to automatically register a listener for all attribute changes in an AbilitySystemComponent.
- * Useful to use in UI.
- */
 UCLASS(BlueprintType, meta=(ExposedAsyncProxy = AsyncTask))
 class MYTHIC_API UAsyncTaskAttributeChanged : public UBlueprintAsyncActionBase
 {
     GENERATED_BODY()
-	
+
 public:
     UPROPERTY(BlueprintAssignable)
     FOnAttributeChanged OnAttributeChanged;
-	
+
     // Listens for an attribute changing.
     // You must call EndTask manually when you want the AsyncTask to end.
     // For UMG Widgets, you would call it in the Widget's Destruct event.

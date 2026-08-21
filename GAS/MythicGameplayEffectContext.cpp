@@ -9,8 +9,6 @@
 
 #if UE_WITH_IRIS
 namespace UE::Net {
-    // Forward to FGameplayEffectContextNetSerializer
-    // Note: If FMythicGameplayEffectContext::NetSerialize() is modified, a custom NetSerializesr must be implemented as the current fallback will no longer be sufficient.
     UE_NET_IMPLEMENT_FORWARDING_NETSERIALIZER_AND_REGISTRY_DELEGATES(MythicGameplayEffectContext, FGameplayEffectContextNetSerializer);
 }
 #endif
@@ -60,6 +58,7 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         REP_IsFreeze,
         REP_IsTerrify,
         REP_IsDodged,
+        REP_ApplierPlayerKey,
         REP_MAX
     };
     uint32 RepBits = 0;
@@ -114,6 +113,9 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         }
         if (bDodged) {
             RepBits |= 1 << REP_IsDodged;
+        }
+        if (!ApplierPlayerKey.IsEmpty()) {
+            RepBits |= 1 << REP_ApplierPlayerKey;
         }
     }
 
@@ -179,9 +181,12 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
     if (RepBits & (1 << REP_IsDodged)) {
         Ar << bDodged;
     }
+    if (RepBits & (1 << REP_ApplierPlayerKey)) {
+        Ar << ApplierPlayerKey;
+    }
 
     if (Ar.IsLoading()) {
-        AddInstigator(Instigator.Get(), EffectCauser.Get()); // Just to initialize InstigatorAbilitySystemComponent
+        AddInstigator(Instigator.Get(), EffectCauser.Get());
     }
 
     bOutSuccess = true;

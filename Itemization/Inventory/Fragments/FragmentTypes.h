@@ -2,10 +2,11 @@
 #include "GameplayAbilitySpec.h"
 #include "Abilities/GameplayAbility.h"
 #include "Misc/DataValidation.h"
+#include "Itemization/Inventory/ItemDefinition.h"
+#include "GameplayTagContainer.h"
 #include "FragmentTypes.generated.h"
 
 struct FRolledTagSpec;
-// This struct is used to define how a value can be rolled when an item is instanced
 USTRUCT(Blueprintable, BlueprintType)
 struct MYTHIC_API FRollDefinition {
     GENERATED_BODY()
@@ -34,13 +35,10 @@ struct MYTHIC_API FRollDefinition {
     UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category="Presentation")
     bool bIsPercentage = true;
 
-    // Custom serialization - only for save games
     bool Serialize(FArchive &Ar) {
-        // For assets, use default serialization
         if (!Ar.IsSaveGame()) {
             return false;
         }
-        // For save games, manually serialize all fields
         Ar << Min;
         Ar << Max;
         Ar << Modifier;
@@ -50,7 +48,6 @@ struct MYTHIC_API FRollDefinition {
         return true;
     }
 
-    // == Operator
     bool operator==(const FRollDefinition &Other) const {
         return Min == Other.Min
             && Max == Other.Max
@@ -59,7 +56,6 @@ struct MYTHIC_API FRollDefinition {
             && bIsPercentage == Other.bIsPercentage;
     }
 
-    // The item-level based scaling formula.
     static float ScaleValue(float Value, float Level, float LevelScaling) {
         return Value + (Level * LevelScaling);
     }
@@ -81,7 +77,6 @@ struct MYTHIC_API FRollDefinition {
     }
 };
 
-// Enable custom serialization for FRollDefinition
 template <>
 struct TStructOpsTypeTraits<FRollDefinition> : TStructOpsTypeTraitsBase2<FRollDefinition> {
     enum {
@@ -89,7 +84,6 @@ struct TStructOpsTypeTraits<FRollDefinition> : TStructOpsTypeTraitsBase2<FRollDe
     };
 };
 
-// This struct holds rolled gameplay attribute instances
 USTRUCT(BlueprintType)
 struct MYTHIC_API FRolledAttributeSpec {
     GENERATED_BODY()
@@ -103,10 +97,8 @@ struct MYTHIC_API FRolledAttributeSpec {
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     FGameplayAttribute Attribute;
 
-    // For serialization - stores the attribute set class path
     FString AttributeSetClassName;
 
-    // For serialization - stores the property name  
     FString AttributePropertyName;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
@@ -121,7 +113,6 @@ struct MYTHIC_API FRolledAttributeSpec {
         Attribute = InAttribute;
         bIsApplied = false;
 
-        // Store attribute identity for serialization
         if (Attribute.IsValid()) {
             if (UStruct *AttrSet = Attribute.GetAttributeSetClass()) {
                 AttributeSetClassName = AttrSet->GetPathName();
@@ -129,27 +120,21 @@ struct MYTHIC_API FRolledAttributeSpec {
             AttributePropertyName = Attribute.GetName();
         }
 
-        // Apply level scaling
         auto Min = RollDef.GetScaledMin(ItemLvl);
         auto Max = RollDef.GetScaledMax(ItemLvl);
 
-        // Roll the value
         Value = FMath::RandRange(Min, Max);
 
-        // Set the roll definition
         Definition = RollDef;
     }
 
-    // Custom serialization - handles FGameplayAttribute which can't serialize directly
     bool Serialize(FArchive &Ar);
 
-    // == Operator
     bool operator==(const FRolledAttributeSpec &Other) const {
         return Attribute == Other.Attribute && Value == Other.Value;
     }
 };
 
-// Enable custom serialization for FRolledAttributeSpec
 template <>
 struct TStructOpsTypeTraits<FRolledAttributeSpec> : TStructOpsTypeTraitsBase2<FRolledAttributeSpec> {
     enum {
@@ -157,7 +142,6 @@ struct TStructOpsTypeTraits<FRolledAttributeSpec> : TStructOpsTypeTraitsBase2<FR
     };
 };
 
-// This struct holds rolled gameplay tag instances
 USTRUCT(BlueprintType)
 struct FRolledTagSpec {
     GENERATED_BODY()
@@ -172,20 +156,16 @@ struct FRolledTagSpec {
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Itemization", SaveGame)
     float Value;
 
-    // Constructor
     FRolledTagSpec(FGameplayTag Key, float Value) {
         this->Tag = Key;
         this->Value = Value;
     }
 
-    // == Operator
     bool operator==(const FRolledTagSpec &Other) const {
         return Tag == Other.Tag && Value == Other.Value;
     }
 };
 
-/// This struct defines how an ability is rolled.
-/// The instanced/rolled counterpart is FAbilityRollSpec.
 USTRUCT(Blueprintable, BlueprintType)
 struct FAbilityDefinition {
     GENERATED_BODY()
@@ -211,12 +191,9 @@ struct FAbilityDefinition {
 
         FText SourceString = FText::FromString(RichText.ToString());
 
-        // Find every <#...> tag in the RichText and replace it with the rolled value
-        // Example: <#GAS.Damage> with min 10 and max 20, and rolled value 15 -> will become <RichText>15</RichText><Optional>[10-20]</Optional>
         for (auto &AttributeRoll : RolledAttributes) {
             FText ToReplace = FText::FromString(FString::Printf(TEXT("<#%s>"), *AttributeRoll.Tag.ToString()));
 
-            // Check if exists
             if (SourceString.ToString().Contains(ToReplace.ToString())) {
                 auto RollDef = this->ParameterRolls[AttributeRoll.Tag];
                 float AttributeValue = AttributeRoll.Value;
@@ -229,7 +206,6 @@ struct FAbilityDefinition {
                     MaxValue *= 100.0f;
                 }
 
-                // Replace the tag with <RichText>Value</RichText><Optional>[Min-Max]</Optional>
                 FText Replacement = FText::FromString(FString::Printf(
                     TEXT("<Roll>%d%hs</><Context>[%d-%d]</>"), static_cast<int>(AttributeValue), RollDef.bIsPercentage ? "%" : "", static_cast<int>(MinValue),
                     static_cast<int>(MaxValue)));
@@ -244,7 +220,6 @@ struct FAbilityDefinition {
         return true;
     }
 
-    // == Operator
     bool operator==(const FAbilityDefinition &Other) const {
         if (ParameterRolls.Num() != Other.ParameterRolls.Num()) {
             return false;
@@ -285,7 +260,6 @@ struct FAbilityDefinition {
     }
 };
 
-// AbilityRoll Spec - The instance of the AbilityRollDefinition that is rolled
 USTRUCT(BlueprintType)
 struct FAbilityRollSpec {
     GENERATED_BODY()
@@ -304,23 +278,18 @@ struct FAbilityRollSpec {
     UPROPERTY(BlueprintReadOnly, SaveGame)
     FText RichText;
 
-    // Constructor to roll the attributes
     FAbilityRollSpec(FAbilityDefinition &AbilityRoll) {
-        // Empty ability spec
         this->AbilitySpec = FGameplayAbilitySpec();
 
-        // Roll the attributes
         for (auto &AttributeRoll : AbilityRoll.ParameterRolls) {
             this->RolledAttributes.Add(FRolledTagSpec(AttributeRoll.Key, FMath::RandRange(AttributeRoll.Value.Min, AttributeRoll.Value.Max)));
         }
 
-        // Get the rich text
         if (!AbilityRoll.GetRichText(RichText, RolledAttributes)) {
             RichText = FText::FromString("???");
         }
     }
 
-    // == Operator
     bool operator==(const FAbilityRollSpec &Other) const {
         if (RolledAttributes.Num() != Other.RolledAttributes.Num()) {
             return false;
@@ -336,8 +305,6 @@ struct FAbilityRollSpec {
     }
 };
 
-/// Talent definition - an AbilityDefinition with identifying information
-/// Instanced/rolled counterpart is FAbilityRollSpec
 UCLASS(Blueprintable, BlueprintType, EditInlineNew, meta=(ShowOnlyInnerProperties))
 class MYTHIC_API UTalentDefinition : public UDataAsset {
     GENERATED_BODY()
@@ -353,25 +320,41 @@ public:
 
     // Ability to grant. The ability MUST be a passive ability (activated at grant time)
     // The source object of the ability will be the owning TalentFragment.
+    //
     UPROPERTY(BlueprintReadWrite, EditDefaultsOnly)
     FAbilityDefinition AbilityDef;
 
+    bool HasAnyPayload() const {
+        return AbilityDef.Ability != nullptr;
+    }
+
+    // Minimum item rarity this talent is eligible to roll on. UTalentFragment::RollTalents only considers defs whose
+    // MinRarity <= the item's rarity, so a designer can reserve strong talents for higher tiers. Default Common (lowest
+    // rarity) = eligible on every item, so this is additive / back-compat: existing pools behave exactly as before.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
+    TEnumAsByte<EItemRarity> MinRarity = Common;
+
+    /** Which item TYPES this talent may roll on, matched over the item's GetTypeProbe tags — the same mechanism
+     *  UMythicAspectDefinition::AllowedItemTypes and FMythicTieredAffixDef::Applicability already use. An EMPTY query
+     *  is UNIVERSAL (rollable on anything), so every existing talent is unaffected. Use it to stop a family-specific
+     *  talent landing on the wrong weapon; leave it empty for anything that should stay cross-build, since a wide
+     *  talent space is the point. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
+    FGameplayTagQuery AllowedItemTypes;
+
 #if WITH_EDITOR
-    // Validate the talent definition
     virtual EDataValidationResult IsDataValid(class FDataValidationContext &Context) const override {
         EDataValidationResult Result = Super::IsDataValid(Context);
-        if (AbilityDef.Ability.Get() == nullptr) {
-            Context.AddError(FText::FromString("Ability is not set"));
+        if (!HasAnyPayload()) {
+            Context.AddError(FText::FromString("Talent does nothing: set AbilityDef.Ability."));
             Result = EDataValidationResult::Invalid;
         }
 
-        // Icon must exist
         if (Icon.IsNull()) {
             Context.AddError(FText::FromString("Icon is not set"));
             Result = EDataValidationResult::Invalid;
         }
 
-        // Name must be set
         if (Name.IsEmpty()) {
             Context.AddError(FText::FromString("Name is not set"));
             Result = EDataValidationResult::Invalid;

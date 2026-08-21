@@ -7,25 +7,17 @@
 
 UENUM(BlueprintType)
 enum EDayTime {
-    // 06:00 - 12:00
     Morning,
-    // 12:00 - 17:00
     Afternoon,
-    // 17:00 - 20:00
     Evening,
-    // 20:00 - 06:00
     Night
 };
 
 UENUM(BlueprintType)
 enum ESeason {
-    // Months: 3, 4, 5
     Spring,
-    // Months: 6, 7, 8
     Summer,
-    // Months: 9, 10, 11
     Autumn,
-    // Months: 12, 1, 2
     Winter,
 };
 
@@ -45,7 +37,6 @@ struct FScalarWeatherAttribute {
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float MaxValue = 1.0f;
 
-    // Return a random value between MinValue and MaxValue
     FCollectionScalarParameter ComputeScalarParameter() const {
         auto Value = FCollectionScalarParameter();
         Value.DefaultValue = FMath::Lerp(MinValue, MaxValue, FMath::FRand());
@@ -84,7 +75,6 @@ struct FVectorWeatherAttribute {
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FLinearColor MaxValue = FLinearColor::White;
 
-    // Return a random value between MinValue and MaxValue
     FCollectionVectorParameter ComputeVectorParameter() const {
         auto Value = FCollectionVectorParameter();
         Value.DefaultValue = FLinearColor(FMath::Lerp(MinValue.R, MaxValue.R, FMath::FRand()),
@@ -98,7 +88,6 @@ struct FVectorWeatherAttribute {
     }
 };
 
-// Struct to define the characteristics of a weather type
 UCLASS(BlueprintType, Blueprintable, EditInlineNew)
 class MYTHIC_API UWeatherType : public UDataAsset {
     GENERATED_BODY()
@@ -165,24 +154,19 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Perception")
     bool bImpairsPerception = false;
 
-    // Check if this weather type can transition to the target weather
     bool CanTransitionTo(const UWeatherType &TargetWeather) const {
-        // If we have a Post-Weather, we can only transition to the target weather if the target weather is the Post-Weather
         if (OnlyAllowTransitionToWeather.IsValid()) {
             return TargetWeather.Tag == OnlyAllowTransitionToWeather;
         }
 
-        // If the target weather has a Pre-Weather, we can only transition to the target weather if the current weather is the Pre-Weather
         if (TargetWeather.OnlyAllowTransitionFromWeather.IsValid()) {
             return Tag == TargetWeather.OnlyAllowTransitionFromWeather;
         }
 
-        // If the target weather has no Pre-Weather, we can transition to the target weather
         return true;
     }
 };
 
-// Struct to define the characteristics of a weather state that is calculated by the server and replicated to clients
 USTRUCT(BlueprintType)
 struct FWeatherCycleInfo {
     GENERATED_BODY()
@@ -191,43 +175,30 @@ struct FWeatherCycleInfo {
     UPROPERTY(BlueprintReadOnly, SaveGame, Category = "Time of Day Controller | Weather")
     TSoftObjectPtr<UWeatherType> TransitionToWeather = nullptr;
 
-    // Stores the transition values, calculated by the server and replicated.
-    // Custom serialization used to bypass SaveGame limitations on inner engine structs.
     UPROPERTY(SaveGame)
     TArray<FCollectionScalarParameter> TransitionToScalarValues = TArray<FCollectionScalarParameter>();
 
-    // Stores the transition values, this is used by the current transition to interpolate between the current weather and the target weather
-    // Calculated by the server, replicated to clients
     UPROPERTY(SaveGame)
     TArray<FCollectionVectorParameter> TransitionToVectorValues = TArray<FCollectionVectorParameter>();
 
-    // This is how long the weather will last before another transition is triggered
     UPROPERTY(SaveGame)
     float TransitionLength = 15.0f;
 
-    // The fog density of the current weather
     UPROPERTY(SaveGame)
     float FogDensity = 0.02f;
 
-    // The fog height falloff of the current weather
     UPROPERTY(SaveGame)
     float FogHeightFalloff = 0.2f;
 
-    // Set Instantly
     UPROPERTY(SaveGame)
     bool bSetInstantly = false;
 
-    // Time the transition started
     UPROPERTY(SaveGame)
     FTimespan StartTime;
 
     FWeatherCycleInfo() {};
 
-    // Constructor from a weather type
     FWeatherCycleInfo(UWeatherType *SelectedWeather, FTimespan InStartTime, bool SetInstantly = false) {
-        /// /////////////////////////////////
-        /// COMPUTE THE NEW WEATHER CYCLE
-        /// /////////////////////////////////
         this->TransitionLength = FMath::RandRange(SelectedWeather->MinDurationInMinutes, SelectedWeather->MaxDurationInMinutes);
         this->TransitionToWeather = SelectedWeather;
         this->StartTime = InStartTime;
@@ -235,12 +206,10 @@ struct FWeatherCycleInfo {
         this->TransitionToScalarValues.Empty();
         this->TransitionToVectorValues.Empty();
 
-        // Update the TransitionToScalarValues
         for (const auto &ScalarAttribute : SelectedWeather->ScalarAttributes) {
             this->TransitionToScalarValues.Add(ScalarAttribute.ComputeScalarParameter());
         }
 
-        // Update the TransitionToVectorValues
         for (const auto &VectorAttribute : SelectedWeather->VectorAttributes) {
             this->TransitionToVectorValues.Add(VectorAttribute.ComputeVectorParameter());
         }
@@ -248,7 +217,6 @@ struct FWeatherCycleInfo {
         this->FogHeightFalloff = FMath::RandRange(SelectedWeather->FogHeightFalloff.X, SelectedWeather->FogHeightFalloff.Y);
         this->FogDensity = FMath::RandRange(SelectedWeather->FogDensity.X, SelectedWeather->FogDensity.Y);
 
-        // Print the computed weather cycle values
         UE_LOG(Myth_Environment, Warning, TEXT("Computed Fog Density: %f"), this->FogDensity);
         UE_LOG(Myth_Environment, Warning, TEXT("Computed Fog Height Falloff: %f"), this->FogHeightFalloff);
 

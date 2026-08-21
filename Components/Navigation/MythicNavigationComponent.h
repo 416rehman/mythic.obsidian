@@ -1,4 +1,4 @@
-﻿// 
+﻿
 
 #pragma once
 
@@ -13,8 +13,8 @@
 
 UENUM()
 enum ENavigationType {
-    Controlled, // The player controls the movement with WASD or the joystick
-    DestinationBased, // The player clicks on the ground and the character moves to that location
+    Controlled,
+    DestinationBased,
 };
 
 
@@ -24,17 +24,15 @@ class MYTHIC_API UMythicNavigationComponent : public UActorComponent {
 
     FVector CachedDestination;
 
-    bool bIsTouch; // Is it a touch device
-    float FollowTime; // For how long it has been pressed
-    float ShortPressThreshold; // How long is a short press
-    float AvoidingObstacleSince; // For how long it has been avoiding an obstacle
+    bool bIsTouch;
+    float FollowTime;
+    float ShortPressThreshold;
+    float AvoidingObstacleSince;
 
-    // Handles of the input-action bindings THIS component registered, so SetupBinds can remove its own (and only its
-    // own) bindings before re-binding on a runtime nav-type switch — avoids the additive double-bind / stale-handler leak.
     TArray<uint32> BindHandles;
 
     UPROPERTY()
-    ACharacter *CachedPlayerCharacter; // Cached character
+    ACharacter *CachedPlayerCharacter;
 
     UPROPERTY()
     UCapsuleComponent *CachedPlayerObstacleCapsule;
@@ -46,7 +44,6 @@ class MYTHIC_API UMythicNavigationComponent : public UActorComponent {
     USphereComponent *CachedPlayerInteractionSphere;
 
 public:
-    // Sets default values for this component's properties
     UMythicNavigationComponent();
     void CachePlayerInteractionSphere();
     void CachePlayerObstacleCapsule();
@@ -116,23 +113,18 @@ public:
 protected:
     UFUNCTION()
     void OnPossessedPawnChanged(APawn *OldPawn, APawn *NewPawn);
-    // Called when the game starts
     virtual void BeginPlay() override;
-    // Unbind everything this component registered (overlap delegates, OnPossessedPawnChanged, input binds) on teardown.
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    /** DestinationBased handlers */
     void OnInputStarted();
     void CacheLocationUnderCursor();
     void OnSetDestinationTriggered();
     void OnSetDestinationReleased();
     void OnTouchTriggered();
     void OnTouchReleased();
-    /** Checks if there is an actor under the cursor with the Destination tag, if so, it sets targetActor to that actor */
     bool HandleMoveToDestinationActor();
 
-    /** Controlled Handlers */
-    void OnControlledInputStarted(); // Caches the character
+    void OnControlledInputStarted();
     void OnMoveForwardTriggered(const FInputActionValue &Value);
     void OnMoveRightTriggered(const FInputActionValue &);
 

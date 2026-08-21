@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -6,6 +5,8 @@
 #include "Itemization/Inventory/Fragments/FragmentTypes.h"
 #include "Itemization/Inventory/Fragments/ItemFragment.h"
 #include "TalentFragment.generated.h"
+
+class UMythicLootSettings;
 
 UCLASS(Blueprintable, BlueprintType)
 class UTalentPool : public UDataAsset {
@@ -28,7 +29,6 @@ struct FTalentSpec : public FAbilityRollSpec {
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "TalentDefs", SaveGame)
     bool bIsLocked = false;
 
-    // Constructor
     FTalentSpec(FAbilityDefinition &AbilityRoll, TSoftObjectPtr<UTalentDefinition> SourceTalentDef, bool IsLocked = false) : FAbilityRollSpec(AbilityRoll) {
         this->TalentDef = SourceTalentDef;
         bIsLocked = IsLocked;
@@ -40,8 +40,6 @@ struct FTalentSpec : public FAbilityRollSpec {
     }
 };
 
-/// Contains the runtime state of the fragment (replicated to client)
-/// This should be REPLICATED 
 USTRUCT(BlueprintType)
 struct FTalentRuntimeReplicatedData {
     GENERATED_BODY()
@@ -51,43 +49,32 @@ struct FTalentRuntimeReplicatedData {
     TArray<FTalentSpec> RolledTalents;
 };
 
-/// Contains the runtime client side state of the fragment for use in methods like OnActiveItemClient
-/// Shouldn't be accessed on server side methods like OnActiveItem.
 USTRUCT(BlueprintType)
 struct FTalentRuntimeClientOnlyData {
     GENERATED_BODY()
 };
 
-/// Contains the runtime server-only state of the fragment for use in methods like OnActiveItem
-/// Shouldn't be accessed on client side methods like OnActiveItemClient.
 USTRUCT(BlueprintType)
 struct FTalentRuntimeServerOnlyData {
     GENERATED_BODY()
 };
 
-/// Designer friendly configuration data that defines this fragment. This is accessible from the ItemDefinition Data Asset.
-/// This should be REPLICATED and fields should be BlueprintReadOnly
 USTRUCT(Blueprintable, BlueprintType)
 struct FTalentConfig {
     GENERATED_BODY()
 };
 
-/// Designer friendly data that is used to create the instance data structs. This is used in the OnInstanced method to calculate/fill the rest of the data.
-/// This should not be replicated or blueprint accessible and safely discarded after being used in the OnInstanced method.
 USTRUCT(BlueprintType, meta=(ShowOnlyInnerProperties))
 struct FTalentBuildData {
     GENERATED_BODY()
 
     // TalentDefs from this pool will be randomly chosen and applied to the item.
-    // Amount of TalentDefs picked depends on Item Rarity.
-    // Common, Rare, Epic = 0; Legendary = 1; Mythic = 2;
+    // Amount of TalentDefs picked depends on Item Rarity, set in Project Settings -> Game -> Mythic Loot Settings
+    // (TalentCountByRarity). Shipped defaults: Common = 0; Rare, Epic, Legendary = 1; Mythic = 2.
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(ShowOnlyInnerProperties))
     TSoftObjectPtr<UTalentPool> TalentPool;
 };
 
-/**
- * TALENT: Grants an ability when the item becomes active and removed when the item becomes inactive
- */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
 class MYTHIC_API UTalentFragment : public UItemFragment {
     GENERATED_BODY()
@@ -120,7 +107,6 @@ public:
     UPROPERTY(BlueprintReadOnly)
     FTalentRuntimeServerOnlyData TalentRuntimeServerOnlyData;
 
-    //~ Overrides
 #if WITH_EDITOR
     virtual bool IsValidFragment(FText &OutErrorMessage) const override;
 #endif
@@ -129,24 +115,32 @@ public:
     virtual void OnItemDeactivated(UMythicItemInstance *ItemInstance) override;
 
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
-    //~
 
-    void RollTalents(UTalentPool *TalentPool, int NumTalentsToRoll);
+    void RollTalents(UTalentPool *TalentPool, int NumTalentsToRoll, EItemRarity ItemRarity, const FGameplayTagContainer &TypeProbe);
+
+
+    static int32 ResolveTalentCount(int32 Rarity, const UMythicLootSettings *LootSettings);
+
+    static bool IsTalentEligible(EItemRarity ItemRarity, EItemRarity MinRarity) {
+        return static_cast<int32>(ItemRarity) >= static_cast<int32>(MinRarity);
+    }
+
+    static bool IsTalentAllowedOnItem(const FGameplayTagQuery &AllowedItemTypes, const FGameplayTagContainer &TypeProbe) {
+        return AllowedItemTypes.IsEmpty() || AllowedItemTypes.Matches(TypeProbe);
+    }
+
+    static TArray<int32> SampleWithoutReplacement(const TArray<int32> &EligibleIndexes, int32 NumToPick, FRandomStream &Rng);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {
         Super::GetLifetimeReplicatedProps(OutLifetimeProps);
         REP_FRAGMENT_DATA(Talent)
     }
 
-    //~ GiveAbility only works on the server
     UFUNCTION(Server, Reliable)
     void ServerHandleGrantAbility();
-    //~
 
-    //~ RemoveAbility only works on the server
     UFUNCTION(Server, Reliable)
     void ServerRemoveAbility();
-    //~
 
     // Helper function to get the talent for a specific TalentDefinition
     UFUNCTION(BlueprintCallable, Category = "Talent")

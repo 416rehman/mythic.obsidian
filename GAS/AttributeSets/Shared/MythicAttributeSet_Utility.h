@@ -1,15 +1,9 @@
-// 
 
 #pragma once
 #include "AbilitySystemComponent.h"
 #include "GAS/AttributeSets/MythicAttributeSet.h"
 #include "MythicAttributeSet_Utility.generated.h"
 
-/**
- * Utility attributes
- * These attributes are used for utility purposes such as stamina, resolve, and other non-combat attributes.
- * These can influence combat, but are not directly related to damage or defense.
- */
 UCLASS()
 class MYTHIC_API UMythicAttributeSet_Utility : public UMythicAttributeSet {
     GENERATED_BODY()
@@ -51,23 +45,23 @@ protected:
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_BonusSprintSpeed)
     FGameplayAttributeData BonusSprintSpeed;
 
+    UPROPERTY(BlueprintReadOnly, Category = "Utility", ReplicatedUsing = OnRep_ItemRarityFind)
+    FGameplayAttributeData ItemRarityFind;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Utility", ReplicatedUsing = OnRep_ItemQuantityFind)
+    FGameplayAttributeData ItemQuantityFind;
+
 public:
     UMythicAttributeSet_Utility();
 
-    // Clamp CurrentStamina to [0, MaxStamina], MaxStamina to >= 0, and the reduction-fraction attributes
-    // (StaminaCostReduction + CooldownReduction) to [0, 1].
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
     virtual void PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const override;
 
     virtual void PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) override;
 
-    // Re-clamp CurrentStamina down when a GE changes MaxStamina (PreAttributeChange fires only for the written attr).
     virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) override;
 
-    // True for the [0,1] reduction-fraction attributes (StaminaCostReduction + CooldownReduction). Pure + static so the
-    // membership is unit-testable. (CooldownReduction was previously unclamped — only its consumer ApplyCooldown clamped
-    // it — so the raw attribute could hold >1 / negative values, unlike its sibling StaminaCostReduction.)
     static bool IsReductionFractionAttribute(const FGameplayAttribute &Attribute);
 
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, Resolve)
@@ -79,8 +73,9 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, MaxCooldownReduction)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, ProficiencyXPBonus)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, BonusSprintSpeed)
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, ItemRarityFind)
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, ItemQuantityFind)
 
-    // Replication
     UFUNCTION()
     virtual void OnRep_Resolve(const FGameplayAttributeData &OldValue);
     UFUNCTION()
@@ -99,10 +94,13 @@ public:
     virtual void OnRep_ProficiencyXPBonus(const FGameplayAttributeData &OldValue);
     UFUNCTION()
     virtual void OnRep_BonusSprintSpeed(const FGameplayAttributeData &OldValue);
+    UFUNCTION()
+    virtual void OnRep_ItemRarityFind(const FGameplayAttributeData &OldValue);
+    UFUNCTION()
+    virtual void OnRep_ItemQuantityFind(const FGameplayAttributeData &OldValue);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
 private:
-    // guard to prevent infinite reentrancy when updating stamina
     mutable bool bIsUpdatingMaxStamina = false;
 };

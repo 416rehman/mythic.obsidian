@@ -32,14 +32,17 @@ int32 GetAITierInt(const FGameplayTag &TierTag) {
     if (TierTag.MatchesTag(AI_TIER_NORMAL)) {
         return 1;
     }
-    else if (TierTag.MatchesTag(AI_TIER_ELITE)) {
+    else if (TierTag.MatchesTag(AI_TIER_SUPERIOR)) {
         return 2;
     }
-    else if (TierTag.MatchesTag(AI_TIER_CHAMPION)) {
+    else if (TierTag.MatchesTag(AI_TIER_ELITE)) {
         return 3;
     }
-    else if (TierTag.MatchesTag(AI_TIER_BOSS)) {
+    else if (TierTag.MatchesTag(AI_TIER_CHAMPION)) {
         return 4;
+    }
+    else if (TierTag.MatchesTag(AI_TIER_BOSS)) {
+        return 5;
     }
 
     return -1;

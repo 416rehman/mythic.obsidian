@@ -1,0 +1,19 @@
+#include "MythicTags_Knowledge.h"
+
+
+UE_DEFINE_GAMEPLAY_TAG(CODEX_BESTIARY_CREATURE_GENERIC, "Codex.Bestiary.Creature.Generic")
+UE_DEFINE_GAMEPLAY_TAG(CODEX_BESTIARY_HUMANOID_GENERIC, "Codex.Bestiary.Humanoid.Generic")
+UE_DEFINE_GAMEPLAY_TAG(CODEX_BESTIARY_HUMANOID_BANDIT, "Codex.Bestiary.Humanoid.Bandit")
+
+UE_DEFINE_GAMEPLAY_TAG(NPC_TYPE_BANDIT, "NPC.Type.Bandit")
+
+UE_DEFINE_GAMEPLAY_TAG(CODEX_TERM_STATUS_STARVING, "Codex.Term.Status.Starving")
+UE_DEFINE_GAMEPLAY_TAG(CODEX_TERM_STATUS_WELLFED, "Codex.Term.Status.WellFed")
+UE_DEFINE_GAMEPLAY_TAG(CODEX_TERM_STATUS_DEHYDRATED, "Codex.Term.Status.Dehydrated")
+UE_DEFINE_GAMEPLAY_TAG(CODEX_TERM_STATUS_COLD, "Codex.Term.Status.Cold")
+UE_DEFINE_GAMEPLAY_TAG(CODEX_TERM_ACTIVITY_FISHING, "Codex.Term.Activity.Fishing")
+
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(KNOWLEDGE_BESTIARY_FULL, "Knowledge.Bestiary.Full",
+                               "Root of the codex Full-tier ASC mirror family (Wave P apex-hunt gate)")
+UE_DEFINE_GAMEPLAY_TAG(KNOWLEDGE_BESTIARY_FULL_CREATURE_GENERIC, "Knowledge.Bestiary.Full.Creature.Generic")
+UE_DEFINE_GAMEPLAY_TAG(KNOWLEDGE_BESTIARY_FULL_HUMANOID_GENERIC, "Knowledge.Bestiary.Full.Humanoid.Generic")

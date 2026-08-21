@@ -1,0 +1,14 @@
+#pragma once
+
+#include "NativeGameplayTags.h"
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Status_Rested);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Data_Camping_RestedXpMult);
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_FieldActivity_Event_Rest);
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Influence_Shelter);
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Comfort_Fire);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Comfort_Shelter);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Comfort_Rack);

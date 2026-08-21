@@ -1,4 +1,3 @@
-// Mythic Living World — Debug Visualization Implementation
 
 #include "World/LivingWorld/Debugging/MythicLivingWorldDebugActor.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -15,7 +14,7 @@
 
 AMythicLivingWorldDebugActor::AMythicLivingWorldDebugActor() {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10fps update is plenty for debug viz
+    PrimaryActorTick.TickInterval = 0.1f;
 
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 
@@ -72,16 +71,14 @@ void AMythicLivingWorldDebugActor::Tick(float DeltaTime) {
 }
 
 void AMythicLivingWorldDebugActor::DrawTerritoryGrid(const UMythicTerritoryGrid *Grid, const UMythicFactionDatabase *FactionDB, const FVector &ViewLocation) {
-    // Clear all existing instances
     for (auto &Pair : FactionISMs) {
         if (Pair.Value) {
             Pair.Value->ClearInstances();
         }
     }
 
-    // Draw text labels only near the camera (culling is mandatory for text performance)
-    const float DrawTextRadius = 5000.0f; // 50m radius for text
-    const int32 Range = 15; // Increased range for ISM (15 * 5000 = 750m) which is reasonable for blocked visualization
+    const float DrawTextRadius = 5000.0f;
+    const int32 Range = 15;
 
     FMythicCellCoord CenterCell = Grid->WorldToCell(ViewLocation);
     int32 MinX = FMath::Max(0, CenterCell.X - Range);
@@ -103,26 +100,19 @@ void AMythicLivingWorldDebugActor::DrawTerritoryGrid(const UMythicTerritoryGrid 
 
             FVector CellCenter = Grid->CellToWorld(Coord);
 
-            // Add Instance
-            // Note: We use GetFactionColor to determine color from index, no need to lookup FactionData unless we filter by Alive
             FColor ScaleColor = GetFactionColor(Cell.DominantFaction.Index);
             UInstancedStaticMeshComponent *ISM = GetOrCreateFactionISM((int32)Cell.DominantFaction.Index, ScaleColor);
 
             if (ISM) {
-                // Scale: CellSize is 5000. Cube is 100. XY Scale = 50.
-                // Z Scale based on Influence (0..1 -> 0..5000 -> 0..50)
                 float ZScale = (Cell.Influence * 50.0f) + 0.1f;
                 FVector Scale(50.0f, 50.0f, ZScale);
 
-                // Position: Center. Z is Scale * 50 (Half height)? No, Pivot is center.
-                // We want base at 0. So Z = ZScale * 50.
                 FVector Loc = CellCenter + FVector(0, 0, ZScale * 50.0f);
 
                 ISM->AddInstance(FTransform(FRotator::ZeroRotator, Loc, Scale), true);
             }
 
 
-            // Draw Debug String if close
             if (FVector::DistSquared(CellCenter, ViewLocation) < FMath::Square(DrawTextRadius)) {
                 float Height = Cell.Influence * 5000.0f + 60.0f;
                 DrawDebugString(GetWorld(), CellCenter + FVector(0, 0, Height),
@@ -131,27 +121,9 @@ void AMythicLivingWorldDebugActor::DrawTerritoryGrid(const UMythicTerritoryGrid 
             }
         }
     }
-
-    // Batch update transforms if needed? No, AddInstance marks render state dirty automatically.
 }
 
 void AMythicLivingWorldDebugActor::DrawSettlements(const UMythicSettlementRegistry *Registry, const UMythicFactionDatabase *FactionDB) {
-    // Iterate valid settlement IDs
-    // Since Registry doesn't expose a clean iterator for external use easily without copy, 
-    // we might need to assume a max ID or add an iterator API. 
-    // For now, let's just cheat and iterate 0 to 1000 looking for valid ones if API allows, 
-    // OR use GetSettlementData if we know IDs.
-
-    // Actually, looking at Registry.h, `Settlements` is private. 
-    // But `GetSettlementData(Id)` exists. 
-    // We lack a way to get *all* IDs efficiently publicly?
-    // Let's assume there's a getter we added or use `AMythicSettlement` actors in world if needed.
-    // Wait, `LivingWorldSubsystem` owns `SettlementRegistry`.
-
-    // Let's use `GetAllSettlements` if it exists (it probably doesn't based on previous read).
-    // Alternative: Iterate actors `TActorIterator<AMythicSettlement>` and get their ID.
-    // This is slower but fine for debug.
-
     for (TActorIterator<AMythicSettlement> It(GetWorld()); It; ++It) {
         AMythicSettlement *Settlement = *It;
         if (!Settlement) {
@@ -175,22 +147,16 @@ void AMythicLivingWorldDebugActor::DrawSettlements(const UMythicSettlementRegist
                         FString::Printf(TEXT("%s\nFaction: %d\nPop: %d"), *DispName, GovFaction, PopCount),
                         nullptr, Color, 0.11f, false, 3.0f);
 
-        // Draw rasterized cells
         for (const FMythicCellCoord &Cell : Data.RasterizedCells) {
-            // Note: This relies on Grid availability, but we don't have grid ref here easily without passing it.
-            // Just skipping cell viz for settlement specific unless we want to look up world pos.
-            // We already draw these in DrawTerritoryGrid if they are influential.
         }
     }
 }
 
 FColor AMythicLivingWorldDebugActor::GetFactionColor(uint8 FactionIndex) const {
-    // Generate a deterministic color from the index
     if (FactionIndex == FMythicFactionId::InvalidIndex) {
         return FColor(50, 50, 50);
     }
 
-    // Stable color generation based on index
     switch (FactionIndex % 6) {
     case 0:
         return FColor::Red;
@@ -214,7 +180,6 @@ UInstancedStaticMeshComponent *AMythicLivingWorldDebugActor::GetOrCreateFactionI
         return *FoundISM;
     }
 
-    // Create new ISM
     UInstancedStaticMeshComponent *NewISM = NewObject<UInstancedStaticMeshComponent>(this);
     NewISM->SetupAttachment(RootComponent);
     NewISM->RegisterComponent();
@@ -226,7 +191,7 @@ UInstancedStaticMeshComponent *AMythicLivingWorldDebugActor::GetOrCreateFactionI
     if (CellMaterial) {
         UMaterialInstanceDynamic *MID = UMaterialInstanceDynamic::Create(CellMaterial, NewISM);
         MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(Color));
-        MID->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(Color)); // Redundant safety
+        MID->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(Color));
         NewISM->SetMaterial(0, MID);
     }
 

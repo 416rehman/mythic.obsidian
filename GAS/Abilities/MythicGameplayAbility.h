@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -6,6 +5,7 @@
 #include "MythicAbilityCost.h"
 #include "MythicDamageContainer.h"
 #include "Abilities/GameplayAbility.h"
+#include "Engine/TimerHandle.h"
 #include "GAS/MythicAbilitySourceInterface.h"
 #include "Itemization/Inventory/Fragments/FragmentTypes.h"
 #include "MythicGameplayAbility.generated.h"
@@ -13,37 +13,21 @@
 class UMythicAbilitySystemComponent;
 class AMythicPlayerController;
 
-/**
- * EMythicAbilityActivationPolicy
- *
- *	Defines how an ability is meant to activate.
- */
 UENUM(BlueprintType)
 enum class EMythicAbilityActivationPolicy : uint8 {
-    // Try to activate the ability when the input is triggered.
     OnInputTriggered,
 
-    // Continually try to activate the ability while the input is active.
     WhileInputActive,
 
-    // Try to activate the ability when an avatar is assigned.
     OnSpawn
 };
 
-/**
- * EMythicAbilityActivationGroup
- *
- *	Defines how an ability activates in relation to other abilities.
- */
 UENUM(BlueprintType)
 enum class EMythicAbilityActivationGroup : uint8 {
-    // Ability runs independently of all other abilities.
     Independent,
 
-    // Ability is canceled and replaced by other exclusive abilities.
     Exclusive_Replaceable,
 
-    // Ability blocks all other exclusive abilities from activating.
     Exclusive_Blocking,
 
     MAX UMETA(Hidden)
@@ -56,14 +40,11 @@ class MYTHIC_API UMythicGameplayAbility : public UGameplayAbility {
     void SendEvent(FGameplayAbilityTargetDataHandle TargetData, FGameplayEffectContextHandle EffectContextHandle, FGameplayTag EventTag);
 
 public:
-    // Constructor
     UMythicGameplayAbility(const FObjectInitializer &ObjectInitializer = FObjectInitializer::Get());
     void TryActivateAbilityOnSpawn(const FGameplayAbilityActorInfo *ActorInfo, const FGameplayAbilitySpec &Spec) const;
 
-    // Override OnAvatarSet
     virtual void OnAvatarSet(const FGameplayAbilityActorInfo *ActorInfo, const FGameplayAbilitySpec &Spec) override;
 
-    /// --- DAMAGE ---
 
     /** Creates gameplay effect container spec to be applied later via ApplyDamageContainerSpec */
     UFUNCTION(BlueprintCallable, Category = "MythicAbility", meta=(AutoCreateRefTerm = "EventData"))
@@ -72,11 +53,6 @@ public:
     /** Applies a gameplay effect container spec that was previously created */
     UFUNCTION(BlueprintCallable, Category = "MythicAbility")
     virtual TArray<FActiveGameplayEffectHandle> ApplyDamageContainerSpec(const FMythicDamageContainerSpec &ContainerSpec);
-
-    /** Applies the designer-mapped debuff GE for each status flag set on PerTargetContext (skips null maps). */
-    TArray<FActiveGameplayEffectHandle> ApplyMappedStatusEffects(const FGameplayEffectContextHandle &PerTargetContext,
-                                                                 const FMythicStatusEffectMapping &Mapping,
-                                                                 const FGameplayAbilityTargetDataHandle &SingleTarget, float Level);
 
     /** Applies a gameplay effect container, by creating and applying the spec */
     UFUNCTION(BlueprintCallable, Category = "MythicAbility", meta = (AutoCreateRefTerm = "EventData"))
@@ -87,7 +63,6 @@ public:
     virtual void AddTargetsToDamageContainerSpec(UPARAM(ref) FMythicDamageContainerSpec &ContainerSpec, const TArray<FHitResult> &HitResults,
                                                  const TArray<AActor *> &TargetActors);
 
-    /// ~~~ END DAMAGE ~~~
 
     EMythicAbilityActivationPolicy GetActivationPolicy() const { return ActivationPolicy; }
     EMythicAbilityActivationGroup GetActivationGroup() const { return ActivationGroup; }
@@ -100,7 +75,6 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "Mythic|Ability", Meta = (ExpandBoolAsExecs = "ReturnValue"))
     bool ChangeActivationGroup(EMythicAbilityActivationGroup NewGroup);
 
-    //~UGameplayAbility interface
     virtual bool CanActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo,
                                     const FGameplayTagContainer *SourceTags, const FGameplayTagContainer *TargetTags,
                                     FGameplayTagContainer *OptionalRelevantTags) const override;
@@ -111,19 +85,21 @@ public:
                            OUT FGameplayTagContainer *OptionalRelevantTags = nullptr) const override;
     virtual void ApplyCost(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo,
                            const FGameplayAbilityActivationInfo ActivationInfo) const override;
-    // Applies the ability's cooldown GE with its duration scaled by the owner's UMythicAttributeSet_Utility::
-    // CooldownReduction (the canonical 1 - CDR), so the dormant CDR stat actually accelerates every ability that has a
-    // cooldown. Defers to the stock engine path when CDR is zero (the common case) so non-CDR owners are unaffected.
     virtual void ApplyCooldown(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo,
                                const FGameplayAbilityActivationInfo ActivationInfo) const override;
     virtual FGameplayEffectContextHandle MakeEffectContext(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo) const override;
     virtual void GetAbilitySource(FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo, float &OutSourceLevel,
                                   const IMythicAbilitySourceInterface *&OutAbilitySource, AActor *&OutEffectCauser) const;
     virtual void ApplyAbilityTagsToGameplayEffectSpec(FGameplayEffectSpec &Spec, FGameplayAbilitySpec *AbilitySpec) const override;
+
+
+protected:
+    FGameplayTagContainer BuildAbilityContextTags() const;
+
+public:
     virtual bool DoesAbilitySatisfyTagRequirements(const UAbilitySystemComponent &AbilitySystemComponent, const FGameplayTagContainer *SourceTags = nullptr,
                                                    const FGameplayTagContainer *TargetTags = nullptr,
                                                    OUT FGameplayTagContainer *OptionalRelevantTags = nullptr) const override;
-    //~End of UGameplayAbility interface
 
     /** Called when this ability is granted to the ability system component. */
     UFUNCTION(BlueprintImplementableEvent, Category = Ability, DisplayName = "OnAbilityAdded")
@@ -165,4 +141,36 @@ public:
     // Map of failure tags to anim montages that should be played with them
     UPROPERTY(EditDefaultsOnly, Category = "Advanced")
     TMap<FGameplayTag, TObjectPtr<UAnimMontage>> FailureTagToAnimMontage;
+
+    // Number of stored uses before the ability is gated. <=1 => legacy single-use behavior (charge system disabled).
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Ability|Charges", meta = (ClampMin = "1"))
+    int32 MaxCharges = 1;
+
+    // Seconds to regenerate one charge. <=0 with MaxCharges>1 => charges never regenerate on their own.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Ability|Charges", meta = (ClampMin = "0.0"))
+    float RechargeSeconds = 0.0f;
+
+    // Optional shared-block tag. When this ability exhausts its charges it adds this loose tag to the owner ASC (and
+    // removes it once a charge is available again); other abilities can list it in their ActivationBlockedTags to share
+    // a group cooldown via the existing tag machinery — no owner-side wiring required.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Ability|Charges")
+    FGameplayTag CooldownCategoryTag;
+
+    bool AreChargesEnabled() const { return MaxCharges > 1; }
+
+    // Current stored charges (server-authoritative runtime state).
+    UFUNCTION(BlueprintPure, Category = "Mythic|Ability|Charges")
+    int32 GetCurrentCharges() const { return CurrentCharges; }
+
+private:
+    UPROPERTY(Transient)
+    int32 CurrentCharges = 1;
+
+    FTimerHandle ChargeRechargeTimer;
+
+    void InitializeCharges();
+    void ConsumeChargeOnActivation();
+    void EnsureRechargeTimer();
+    void HandleChargeRecharge();
+    void SetCategoryBlock(bool bBlocked);
 };

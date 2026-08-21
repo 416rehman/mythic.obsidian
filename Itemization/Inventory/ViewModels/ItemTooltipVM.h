@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -11,7 +10,6 @@
 class UMythicItemInstance;
 class UTexture2D;
 
-// display data for a single rolled affix
 USTRUCT(BlueprintType)
 struct FAffixDisplayData {
     GENERATED_BODY()
@@ -28,16 +26,23 @@ struct FAffixDisplayData {
     UPROPERTY(BlueprintReadOnly, Category="Mythic|Tooltip")
     bool bLowerIsBetter = false;
 
-    // compare two affix display structures for equality
+    // The whole affix as one rich-text line, in the project's own markup:
+    // "<Roll>+15%</><Context>[10-20]</> Bonus Dagger Damage".
+    //
+    // AttributeName above is the RAW property name and the tooltip printed it verbatim, so a player read
+    // "BonusDaggerDamage 0.15" and learned nothing about what rolled or whether it rolled well. Bind to this instead.
+    UPROPERTY(BlueprintReadOnly, Category="Mythic|Tooltip")
+    FText RichText;
+
     bool operator==(const FAffixDisplayData& Other) const {
         return AttributeName.EqualTo(Other.AttributeName) &&
                FMath::IsNearlyEqual(Value, Other.Value) &&
                bIsPercentage == Other.bIsPercentage &&
-               bLowerIsBetter == Other.bLowerIsBetter;
+               bLowerIsBetter == Other.bLowerIsBetter &&
+               RichText.EqualTo(Other.RichText);
     }
 };
 
-// display data for a single rolled talent
 USTRUCT(BlueprintType)
 struct FTalentDisplayData {
     GENERATED_BODY()
@@ -51,7 +56,6 @@ struct FTalentDisplayData {
     UPROPERTY(BlueprintReadOnly, Category="Mythic|Tooltip")
     FText Description;
 
-    // compare two talent display structures for equality
     bool operator==(const FTalentDisplayData& Other) const {
         return Name.EqualTo(Other.Name) &&
                Icon == Other.Icon &&
@@ -105,6 +109,14 @@ public:
     UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category="Mythic|Tooltip")
     FText DamageRange;
 
+    // numeric min/max behind the DamageRange text (0 when the item has no attack fragment) — the comparison VM
+    // diffs these directly instead of parsing the display string
+    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category="Mythic|Tooltip")
+    float DamageMin = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category="Mythic|Tooltip")
+    float DamageMax = 0.0f;
+
     UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category="Mythic|Tooltip")
     float AttackSpeed = 0.0f;
 
@@ -129,7 +141,6 @@ public:
     UFUNCTION(BlueprintCallable, Category="Mythic|Tooltip")
     static UItemTooltipVM *CreateFromItemInstance(UObject *Outer, UMythicItemInstance *Item);
 
-    // setters and getters
     void SetName(FText InName);
     FText GetName() const;
     void SetDescription(FText InDescription);
@@ -154,6 +165,10 @@ public:
     float GetDurabilityPercent() const;
     void SetDamageRange(FText InDamageRange);
     FText GetDamageRange() const;
+    void SetDamageMin(float InDamageMin);
+    float GetDamageMin() const;
+    void SetDamageMax(float InDamageMax);
+    float GetDamageMax() const;
     void SetAttackSpeed(float InAttackSpeed);
     float GetAttackSpeed() const;
     void SetWeight(float InWeight);

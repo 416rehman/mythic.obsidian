@@ -44,12 +44,6 @@ int32 UProficiencyDefinition::CalcLevelAtXP(float XP, const UProficiencyDefiniti
         return 1;
     }
     const int32 MaxLvl = FMath::Max(1, Def->MaxLevel);
-    // Largest level whose cumulative XP requirement is met, CAPPED at MaxLevel. Walking the SAME
-    // CalcCumulativeXPForLevel the costs come from keeps this EXACTLY consistent at level boundaries — the prior
-    // closed-form log inversion (Floor(LogX(...))) could float-round a boundary like XP == Cumulative(L) down to L-1
-    // (a player with exactly enough XP failing to level) — and naturally clamps so an XP overshoot (e.g. a large
-    // single reward past the cap, evaluated before OnAttributeChanged writes the XP clamp back) can't report a level
-    // above MaxLevel to the player callout / restore. MaxLvl is a few dozen and this runs only on XP change / restore.
     int32 Level = 1;
     while (Level < MaxLvl && CalcCumulativeXPForLevel(Level + 1, Def) <= XP) {
         ++Level;
@@ -66,7 +60,6 @@ float UProficiencyDefinition::CalcXPRemainingForLevel(float CurrentXP, int32 Tar
 }
 #if WITH_EDITOR
 FString UProficiencyDefinition::GetProgressionBreakdown() const {
-    // Warn on high growth rates.
     if (GrowthRate > 1.4f) {
         UE_LOG(Myth, Warning, TEXT("High growth rate of %.2f may result in very high XP requirements for later levels."), GrowthRate);
     }
@@ -82,6 +75,16 @@ FString UProficiencyDefinition::GetProgressionBreakdown() const {
     Proficiency.Definition = const_cast<UProficiencyDefinition *>(this);
     Proficiency.Instantiate();
 
+    if (Proficiency.Track.Num() < MaxLevel) {
+        return Breakdown + FString::Printf(
+                   TEXT("\n[no track] This definition cannot generate a progression track yet.\n")
+                   TEXT("  AttributeGoals : %d  (must be >= 1)\n")
+                   TEXT("  KeyMilestones  : %d  (must be >= 1)\n")
+                   TEXT("  MaxLevel       : %d  (must be >= 1)\n")
+                   TEXT("Fill all three, then re-edit any property to see the breakdown.\n"),
+                   AttributeGoals.Num(), KeyMilestones.Num(), MaxLevel);
+    }
+
     auto TotalActions = 0;
     for (int32 Level = 1; Level <= MaxLevel; ++Level) {
         float XPCost;
@@ -91,7 +94,6 @@ FString UProficiencyDefinition::GetProgressionBreakdown() const {
             CumulativeXP = CalcCumulativeXPForLevel(Level + 1, this);
         }
         else {
-            // At MaxLevel, no further XP is required.
             XPCost = 0.0f;
             CumulativeXP = CalcCumulativeXPForLevel(Level, this);
         }
@@ -104,30 +106,28 @@ FString UProficiencyDefinition::GetProgressionBreakdown() const {
         if (!MilestoneText.IsEmpty()) {
             MilestoneText += TEXT("⭐");
         }
-        if (Milestone.Rewards.Num() > 0) {
-            for (auto Reward : Milestone.Rewards) {
-                // Make sure the spec has a reward definition.
-                auto RewardDef = Reward;
-                if (!RewardDef) {
-                    continue;
-                }
-
-                // If the reward is an attribute reward, print it.
-                auto AttributeRwdDef = Cast<UAttributeReward>(RewardDef);
-                if (AttributeRwdDef) {
-                    MilestoneText += FString::Printf(TEXT(" (%s %s%.0f)"),
-                                                     *AttributeRwdDef->Attribute.GetName(),
-                                                     AttributeRwdDef->Modifier == EGameplayModOp::Additive ? TEXT("+") : TEXT("*"),
-                                                     AttributeRwdDef->Magnitude);
-                }
-                else {
-                    MilestoneText += RewardDef->GetName();
-                }
-
-                if (&Reward != &Milestone.Rewards.Last()) {
-                    MilestoneText += TEXT(", ");
-                }
+        bool bWroteAnyReward = false;
+        for (int32 RewardIdx = 0; RewardIdx < Milestone.Rewards.Num(); ++RewardIdx) {
+            const URewardBase *RewardDef = Milestone.Rewards[RewardIdx];
+            if (!RewardDef) {
+                continue;
             }
+
+            if (bWroteAnyReward) {
+                MilestoneText += TEXT(", ");
+            }
+
+            const UAttributeReward *AttributeRwdDef = Cast<UAttributeReward>(RewardDef);
+            if (AttributeRwdDef) {
+                MilestoneText += FString::Printf(TEXT(" (%s %s%.0f)"),
+                                                 *AttributeRwdDef->Attribute.GetName(),
+                                                 AttributeRwdDef->Modifier == EGameplayModOp::Additive ? TEXT("+") : TEXT("*"),
+                                                 AttributeRwdDef->Magnitude);
+            }
+            else {
+                MilestoneText += RewardDef->GetName();
+            }
+            bWroteAnyReward = true;
         }
 
         Breakdown += FString::Printf(TEXT("%3d   | %10.0f | %12.0f | %14d | %18d | %s\n"),
@@ -143,7 +143,6 @@ FString UProficiencyDefinition::GetTimeToMaxLevelEstimate(float ActionsPerMinute
         return TEXT("Invalid actions per minute.");
     }
 
-    // Total XP required to reach max level is given by the cumulative XP for MaxLevel.
     float TotalXPNeeded = CalcCumulativeXPForLevel(MaxLevel, this);
     float TotalActionsNeeded = (BaseXPPerAction > 0) ? TotalXPNeeded / BaseXPPerAction : 0.0f;
     float MinutesNeeded = TotalActionsNeeded / ActionsPerMinute;

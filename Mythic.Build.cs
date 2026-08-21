@@ -92,6 +92,9 @@ public class Mythic : ModuleRules
 			"DTLSHandlerComponent",
 			"CommonLoadingScreen",
 			"ModelViewViewModel",
+			// INotifyFieldValueChanged, which UMVVMView::SetViewModelByClass takes. ModelViewViewModel alone links
+			// the view but not the interface's UClass.
+			"FieldNotification",
 		});
 
 		DynamicallyLoadedModuleNames.AddRange(

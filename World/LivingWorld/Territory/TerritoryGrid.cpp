@@ -1,4 +1,3 @@
-// Mythic Living World System — Territory Grid Implementation
 
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 
@@ -12,7 +11,6 @@ void UMythicTerritoryGrid::Initialize(const UMythicTerritoryGridSettings *Settin
     InfluenceBleedRate = Settings->InfluenceBleedRate;
     MinControlThreshold = Settings->MinControlThreshold;
 
-    // Cache the immutable biome settings so GetBiomeAtCell stays lock-free + allocation-free.
     BiomeWorldSeed = Settings->BiomeWorldSeed;
     BiomeNoiseFrequency = Settings->BiomeNoiseFrequency;
     BiomeThresholds = Settings->BiomeThresholds;
@@ -23,7 +21,6 @@ void UMythicTerritoryGrid::Initialize(const UMythicTerritoryGridSettings *Settin
     DirtyCells.Init(false, TotalCells);
     ReadDirtyCells.Init(false, TotalCells);
 
-    // 256 max factions per FMythicFactionId (uint8 index)
     WriteFactionCells.SetNum(256);
     ReadFactionCells.SetNum(256);
 
@@ -58,15 +55,6 @@ void UMythicTerritoryGrid::SetCellPlayerOwned(const FMythicCellCoord &Coord, boo
 void UMythicTerritoryGrid::PropagateInfluence() {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicTerritoryGrid_PropagateInfluence);
 
-    // Territory propagation: influence bleeds from owned cells into neighbors.
-    // Three behaviors:
-    //   1. Empty cells — strongest adjacent faction above threshold claims them
-    //   2. Same-faction neighbors — reinforce (increase influence)
-    //   3. Different-faction neighbors — erode (decrease influence, can flip ownership)
-    //
-    // Iterates all cells — ~16K cells at 128×128, each with 4 neighbor checks.
-    // Uses a small per-cell faction map (max 4 entries from 4 neighbors).
-    // Cost: ~1-2ms worst case (only runs on background thread every 5-30s)
 
     struct FCellUpdate {
         FMythicFactionId Faction;
@@ -82,8 +70,6 @@ void UMythicTerritoryGrid::PropagateInfluence() {
             const int32 Index = Y * Width + X;
             const FMythicTerritoryCell &Cell = WriteBuffer[Index];
 
-            // Track incoming influence from each faction via neighbors
-            // Max 4 neighbors → max 4 distinct factions (use inline allocation)
             struct FFactionBleed {
                 FMythicFactionId Faction;
                 float TotalInfluence;
@@ -105,7 +91,6 @@ void UMythicTerritoryGrid::PropagateInfluence() {
                     continue;
                 }
 
-                // Accumulate bleed per faction
                 bool bFound = false;
                 for (int32 b = 0; b < BleedCount; ++b) {
                     if (FactionBleeds[b].Faction == Neighbor.DominantFaction) {
@@ -121,12 +106,8 @@ void UMythicTerritoryGrid::PropagateInfluence() {
                 }
             }
 
-            // No averaging by neighbor count — bleed rate already controls per-neighbor
-            // contribution. More faction neighbors → more total bleed, which correctly
-            // models stronger influence from faction clusters.
 
             if (!Cell.DominantFaction.IsValid()) {
-                // ─── Empty cell: strongest adjacent faction claims it ───
                 float BestInfluence = 0.0f;
                 FMythicFactionId BestFaction;
                 for (int32 b = 0; b < BleedCount; ++b) {
@@ -140,7 +121,6 @@ void UMythicTerritoryGrid::PropagateInfluence() {
                 Updates[Index].Influence = BestInfluence;
             }
             else {
-                // ─── Owned cell: reinforce from allies, erode from enemies ───
                 float Reinforcement = 0.0f;
                 float Erosion = 0.0f;
 
@@ -157,7 +137,6 @@ void UMythicTerritoryGrid::PropagateInfluence() {
                 Updates[Index].Influence = NewInfluence;
                 Updates[Index].Faction = Cell.DominantFaction;
 
-                // If eroded below zero, the strongest attacker claims it
                 if (NewInfluence <= 0.0f) {
                     float BestAttacker = 0.0f;
                     FMythicFactionId BestFaction;
@@ -176,7 +155,6 @@ void UMythicTerritoryGrid::PropagateInfluence() {
         }
     }
 
-    // Apply updates
     for (int32 i = 0; i < TotalCells; ++i) {
         const float ClampedInfluence = FMath::Clamp(Updates[i].Influence, 0.0f, 1.0f);
         const bool bAboveThreshold = ClampedInfluence >= MinControlThreshold && Updates[i].Faction.IsValid();
@@ -193,8 +171,6 @@ void UMythicTerritoryGrid::PropagateInfluence() {
 }
 
 void UMythicTerritoryGrid::GetWriteCellCounts(TArray<int32> &OutCountsByFactionIndex) const {
-    // Mirror WriteFactionCells' 256-index space. Scan the write buffer (sim-thread-private; the same access CommitWrites
-    // uses to rebuild WriteFactionCells) and count cells per dominant faction.
     OutCountsByFactionIndex.Reset();
     OutCountsByFactionIndex.AddZeroed(256);
 
@@ -208,7 +184,6 @@ void UMythicTerritoryGrid::GetWriteCellCounts(TArray<int32> &OutCountsByFactionI
 }
 
 void UMythicTerritoryGrid::CommitWrites() {
-    // Rebuild the cached faction cells list for O(1) queries
     for (int32 i = 0; i < 256; ++i) {
         WriteFactionCells[i].Reset();
     }
@@ -225,12 +200,6 @@ void UMythicTerritoryGrid::CommitWrites() {
     FMemory::Memcpy(ReadBuffer.GetData(), WriteBuffer.GetData(), WriteBuffer.Num() * sizeof(FMythicTerritoryCell));
     ReadFactionCells = WriteFactionCells;
 
-    // Fold this tick's dirty cells into the replication snapshot (accumulates across commits until the game-thread
-    // GetChangedCells drains it — so no delta is lost if commits outpace the replicator), then CLEAR DirtyCells.
-    // DirtyCells is consistently SimulationLock-guarded (this fold + the game-thread settlement seed/transfer writers
-    // all hold SimulationLock); the game thread reads replication deltas ONLY via ReadDirtyCells under SnapshotLock —
-    // closing the old unlocked GetChangedCells/Serialize race. Clearing also fixes the old unbounded growth (DirtyCells
-    // was never reset, so GetChangedCells used to re-emit every cell ever dirtied).
     for (TConstSetBitIterator<> It(DirtyCells); It; ++It) {
         ReadDirtyCells[It.GetIndex()] = true;
     }
@@ -274,13 +243,8 @@ bool UMythicTerritoryGrid::IsValidCoord(const FMythicCellCoord &Coord) const {
     return Coord.X >= 0 && Coord.X < Width && Coord.Y >= 0 && Coord.Y < Height;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Biome (pure, lock-free, allocation-free)
-// ─────────────────────────────────────────────────────────────
 
 uint32 UMythicTerritoryGrid::BiomeHash2D(int32 X, int32 Y, uint32 Seed) {
-    // Fold the 2D coord + seed, then apply the EXACT Wang mix from FMythicNPCGenerator::HashStep (re-implemented inline
-    // so the two stay independent — no cross-include). Same avalanche, deterministic.
     uint32 H = Seed;
     H = HashCombine(H, ::GetTypeHash(X));
     H = HashCombine(H, ::GetTypeHash(Y));
@@ -293,7 +257,6 @@ uint32 UMythicTerritoryGrid::BiomeHash2D(int32 X, int32 Y, uint32 Seed) {
 }
 
 float UMythicTerritoryGrid::BiomeValueNoise(int32 X, int32 Y, uint32 Seed, float Frequency) {
-    // Value noise: hash the four integer lattice corners around the scaled sample point, smoothstep-interpolate.
     const float SampleX = static_cast<float>(X) * Frequency;
     const float SampleY = static_cast<float>(Y) * Frequency;
 
@@ -305,11 +268,9 @@ float UMythicTerritoryGrid::BiomeValueNoise(int32 X, int32 Y, uint32 Seed, float
     const float Fx = SampleX - static_cast<float>(X0);
     const float Fy = SampleY - static_cast<float>(Y0);
 
-    // Hermite smoothstep weights.
     const float Wx = Fx * Fx * (3.0f - 2.0f * Fx);
     const float Wy = Fy * Fy * (3.0f - 2.0f * Fy);
 
-    // Map each corner hash to [0,1].
     constexpr float InvU32 = 1.0f / 4294967295.0f;
     const float V00 = static_cast<float>(BiomeHash2D(X0, Y0, Seed)) * InvU32;
     const float V10 = static_cast<float>(BiomeHash2D(X1, Y0, Seed)) * InvU32;
@@ -344,8 +305,6 @@ EMythicBiome UMythicTerritoryGrid::GetBiomeAtCell(const FMythicCellCoord &Coord)
     if (!IsValidCoord(Coord)) {
         return EMythicBiome::Plains;
     }
-    // Two decorrelated channels at the cached frequency: the elevation + moisture seeds XOR distinct constants so the
-    // two noise fields are independent. Classification is delegated to the single-source-of-truth ComputeBiome.
     const float Elevation = BiomeValueNoise(Coord.X, Coord.Y, BiomeWorldSeed ^ 0xA5A5A5A5u, BiomeNoiseFrequency);
     const float Moisture = BiomeValueNoise(Coord.X, Coord.Y, BiomeWorldSeed ^ 0x5A5A5A5Au, BiomeNoiseFrequency);
     return ComputeBiome(Elevation, Moisture, BiomeThresholds);
@@ -353,6 +312,20 @@ EMythicBiome UMythicTerritoryGrid::GetBiomeAtCell(const FMythicCellCoord &Coord)
 
 EMythicBiome UMythicTerritoryGrid::GetBiomeAtWorld(const FVector &WorldPos) const {
     return GetBiomeAtCell(WorldToCell(WorldPos));
+}
+
+
+EMythicDangerTier UMythicTerritoryGrid::GetCellDangerTier(const FMythicCellCoord &Cell) const {
+    if (!IsValidCoord(Cell)) {
+        return EMythicDangerTier::Safe;
+    }
+
+    const FMythicCellCoord Core(Width / 2, Height / 2);
+    const FMythicTerritoryCell CellData = GetCell(Cell);
+
+    const int32 Distance = FMythicDanger::ChebyshevDistance(Cell, Core);
+    const bool bSafeZone = (Cell == Core) || CellData.bPlayerOwned;
+    return FMythicDanger::ComputeDangerTier(Distance, CellData.Influence, bSafeZone, FMythicDangerTierParams());
 }
 
 void UMythicTerritoryGrid::GetFactionCells(FMythicFactionId Faction, int32 MaxResults, TArray<FMythicCellCoord> &OutCells) const {
@@ -366,16 +339,12 @@ void UMythicTerritoryGrid::GetFactionCells(FMythicFactionId Faction, int32 MaxRe
 
     const int32 Count = FMath::Min(MaxResults, CachedCells.Num());
     if (Count > 0) {
-        // Fast bulk copy to output
         OutCells.Append(CachedCells.GetData(), Count);
     }
 }
 
 void UMythicTerritoryGrid::GetChangedCells(TArray<FMythicCellCoord> &OutChangedCells) const {
     OutChangedCells.Reset();
-    // Drain the committed-delta snapshot under SnapshotLock (the same lock CommitWrites holds when folding deltas in) —
-    // never touch the sim-thread DirtyCells from here. Consuming (clearing) means each replicator pass gets exactly the
-    // cells changed since its last pass.
     FScopeLock Lock(&SnapshotLock);
     for (TConstSetBitIterator<> It(ReadDirtyCells); It; ++It) {
         const int32 Index = It.GetIndex();
@@ -384,12 +353,10 @@ void UMythicTerritoryGrid::GetChangedCells(TArray<FMythicCellCoord> &OutChangedC
             Index / Width
             ));
     }
-    ReadDirtyCells.Init(false, ReadDirtyCells.Num()); // consumed — clear for the next pass
+    ReadDirtyCells.Init(false, ReadDirtyCells.Num());
 }
 
 void UMythicTerritoryGrid::Serialize(FArchive &Ar) {
-    // v2: serialize bPlayerOwned + the FULL uint8 OwningPlayerIndex separately (v1 packed both into one byte, truncating
-    // any player index >= 128 on round-trip).
     int32 Version = 2;
     Ar << Version;
 
@@ -401,13 +368,9 @@ void UMythicTerritoryGrid::Serialize(FArchive &Ar) {
     Ar << InfluenceBleedRate;
     Ar << MinControlThreshold;
 
-    // Compute in int64 to detect int32 overflow from a corrupted/tampered Width*Height (e.g. 100000*100000 wraps int32).
     const int64 TotalCells64 = static_cast<int64>(Width) * static_cast<int64>(Height);
 
     if (Ar.IsLoading()) {
-        // Bound-check the stream-controlled dimensions BEFORE SetNum: garbage Width/Height would otherwise overflow
-        // int32 and/or SetNum(garbage) → a massive allocation (OOM/crash). Cap at 100M cells (far above any real world
-        // grid); SetError flags the load as failed. Mirrors the CausalFabric / PersistentNPCRegistry stream guards.
         if (Width < 0 || Height < 0 || TotalCells64 < 0 || TotalCells64 > 100000000) {
             Ar.SetError();
             return;
@@ -426,8 +389,6 @@ void UMythicTerritoryGrid::Serialize(FArchive &Ar) {
         Ar << Cell.DominantFaction.Index;
         Ar << Cell.Influence;
 
-        // v2: two separate fields so the full uint8 OwningPlayerIndex (0-255) round-trips. v1 saves load via the old
-        // packed byte (which only carried a 7-bit index — the bug this fixes).
         if (Version >= 2) {
             uint8 PlayerOwnedByte = Cell.bPlayerOwned ? 1 : 0;
             Ar << PlayerOwnedByte;

@@ -6,12 +6,6 @@
 #include "World/WorldData.h"
 #include "MythicSaveGame.generated.h"
 
-/**
- * UMythicSaveGame
- * 
- * The root object serialized to disk.
- * Can hold either a Character Save (Client) or World Save (Host).
- */
 UCLASS()
 class MYTHIC_API UMythicSaveGame : public USaveGame {
     GENERATED_BODY()
@@ -27,7 +21,6 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Save Data")
     FString DataChecksum;
 
-    // --- Data Sections ---
 
     // If this is a Character Save, this will be populated.
     UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Save Data")
@@ -37,8 +30,6 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Save Data")
     FSerializedWorldData WorldData;
 
-    // --- Helper Methods ---
 
-    // Checks definitions to ensure data is valid for the current game version
     void FixupData();
 };

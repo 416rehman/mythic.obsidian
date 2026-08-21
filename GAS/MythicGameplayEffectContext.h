@@ -13,7 +13,6 @@ class FArchive;
 class UObject;
 class UPhysicalMaterial;
 
-// #define that creates bool UPROPERTY, getter, setter
 #define MYTHIC_CONTEXT_BOOL_PROPERTY(PropertyName) \
     protected: \
     UPROPERTY() \
@@ -32,51 +31,45 @@ struct FMythicGameplayEffectContext : public FGameplayEffectContext {
     FMythicGameplayEffectContext(AActor *InInstigator, AActor *InEffectCauser)
         : FGameplayEffectContext(InInstigator, InEffectCauser) {}
 
-    /** Returns the wrapped FMythicGameplayEffectContext from the handle, or nullptr if it doesn't exist or is the wrong type */
     static FMythicGameplayEffectContext *ExtractEffectContext(struct FGameplayEffectContextHandle Handle);
 
-    /** Sets the object used as the ability source */
     void SetAbilitySource(const IMythicAbilitySourceInterface *InObject, float InSourceLevel);
 
-    /** Returns the ability source interface associated with the source object. Only valid on the authority. */
     const IMythicAbilitySourceInterface *GetAbilitySource() const;
     const UPhysicalMaterial *GetPhysicalMaterial() const;
 
-    // Is this a critical hit?
     MYTHIC_CONTEXT_BOOL_PROPERTY(CriticalHit)
 
-    // Will/Did this bleed the target?
     MYTHIC_CONTEXT_BOOL_PROPERTY(Bleed)
 
-    // Will/Did this burn the target?
     MYTHIC_CONTEXT_BOOL_PROPERTY(Burn)
 
-    // Will/Did this poison the target?
     MYTHIC_CONTEXT_BOOL_PROPERTY(Poison)
 
-    // Will/Did this STUN the target?
     MYTHIC_CONTEXT_BOOL_PROPERTY(Stun)
 
-    // Will/Did this SLOW the target?
     MYTHIC_CONTEXT_BOOL_PROPERTY(Slow)
 
-    // Will/Did this WEAKEN the target?
     MYTHIC_CONTEXT_BOOL_PROPERTY(Weaken)
 
-    // Will/Did this FREEZE the target?
     MYTHIC_CONTEXT_BOOL_PROPERTY(Freeze)
 
-    // Will/Did this TERRIFY the target?
     MYTHIC_CONTEXT_BOOL_PROPERTY(Terrify)
 
-    // Was this attack dodged by the target? (rolled per-target in DamageApplication; drives the dodge cue)
     MYTHIC_CONTEXT_BOOL_PROPERTY(Dodged)
+
+protected:
+    UPROPERTY()
+    FString ApplierPlayerKey;
+
+public:
+    const FString &GetApplierPlayerKey() const { return ApplierPlayerKey; }
+    void SetApplierPlayerKey(const FString &InApplierPlayerKey) { ApplierPlayerKey = InApplierPlayerKey; }
 
     virtual FGameplayEffectContext *Duplicate() const override {
         FMythicGameplayEffectContext *NewContext = new FMythicGameplayEffectContext();
         *NewContext = *this;
         if (GetHitResult()) {
-            // Does a deep copy of the hit result
             NewContext->AddHitResult(*GetHitResult(), true);
         }
         return NewContext;
@@ -86,11 +79,9 @@ struct FMythicGameplayEffectContext : public FGameplayEffectContext {
         return StaticStruct();
     }
 
-    /** Overridden to serialize new fields */
     virtual bool NetSerialize(FArchive &Ar, class UPackageMap *Map, bool &bOutSuccess) override;
 
 protected:
-    /** Ability Source object (should implement IMythicAbilitySourceInterface). NOT replicated currently */
     UPROPERTY()
     TWeakObjectPtr<const UObject> AbilitySourceObject;
 };

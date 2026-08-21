@@ -8,13 +8,9 @@
 #include "Debug/GameplayDebuggerCategory_MythicLivingWorld.h"
 #endif
 
-/**
- * FMythicGameModule
- */
 class FMythicGameModule : public FDefaultGameModuleImpl {
     virtual void StartupModule() override {
 #if WITH_GAMEPLAY_DEBUGGER
-        // Register the Living World MASS visualizer as a Gameplay Debugger category (apostrophe key to toggle in PIE).
         IGameplayDebugger &GameplayDebugger = IGameplayDebugger::Get();
         GameplayDebugger.RegisterCategory(
             "MythicLivingWorld",

@@ -1,4 +1,3 @@
-// 
 #include "EnvironmentComponent.h"
 
 #include "Mythic.h"
@@ -8,18 +7,15 @@ UEnvironmentComponent::UEnvironmentComponent() {}
 
 void UEnvironmentComponent::BeginPlay() {
     Super::BeginPlay();
-    // Get the game instance
     UGameInstance *GameInstance = GetWorld()->GetGameInstance();
     if (!GameInstance) {
         UE_LOG(Myth, Error, TEXT("UEnvironmentComponent::BeginPlay: GameInstance is null"));
     }
-    // Get the Environment subsystem
     UMythicEnvironmentSubsystem *EnvironmentSubsystem = GameInstance->GetSubsystem<UMythicEnvironmentSubsystem>();
     if (!EnvironmentSubsystem) {
         UE_LOG(Myth, Error, TEXT("UEnvironmentComponent::BeginPlay: EnvironmentSubsystem is null"));
         return;
     }
-    // Listen for the environment controller to be set in the environment subsystem then do the following
     if (auto Controller = EnvironmentSubsystem->GetEnvironmentController()) {
         OnEnvironmentControllerRegistered(Controller);
     }
@@ -34,7 +30,6 @@ void UEnvironmentComponent::OnEnvironmentControllerRegistered(AMythicEnvironment
         return;
     }
 
-    // When the environment controller broadcasts its events, broadcast our own events
     EnvironmentController->HourChangeDelegate.AddUniqueDynamic(this, &UEnvironmentComponent::CallOnHourChanged);
     EnvironmentController->DayTimeChangeDelegate.AddUniqueDynamic(this, &UEnvironmentComponent::CallOnDaytimeChanged);
     EnvironmentController->DayChangeDelegate.AddUniqueDynamic(this, &UEnvironmentComponent::CallOnDayChanged);
@@ -44,14 +39,10 @@ void UEnvironmentComponent::OnEnvironmentControllerRegistered(AMythicEnvironment
     EnvironmentController->WeatherChangeDelegate.AddUniqueDynamic(this, &UEnvironmentComponent::CallOnWeatherChanged);
     EnvironmentController->TargetWeatherReachedDelegate.AddUniqueDynamic(this, &UEnvironmentComponent::CallOnTargetWeatherReached);
 
-    // CATCH-UP LOGIC: Broadcast current state immediately so actors initialize correctly
-    // 1. DayTime
     auto CurrentHour = EnvironmentController->GetTimespan().GetHours();
     auto CurrentDayTime = HourAsDayTime(CurrentHour);
-    // Broadcast with same Old/New to indicate immediate state
     this->CallOnDaytimeChanged(CurrentDayTime, CurrentDayTime);
 
-    // 2. Weather
     if (auto CurrentWeather = EnvironmentController->GetCurrentWeather()) {
         this->CallOnWeatherChanged(CurrentWeather->Tag, CurrentWeather->Tag);
     }

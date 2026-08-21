@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -33,9 +32,6 @@ struct FItemRewardContext : public FRewardContext {
     FVector SpawnLocation = FVector::ZeroVector;
 };
 
-/**
- * 
- */
 UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API UItemReward : public URewardBase {
     GENERATED_BODY()
@@ -53,8 +49,9 @@ public:
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
     TObjectPtr<UItemDefinition> Item;
 
-    // Should special celebration be played when the item is given?
-    // TODO: No effect yet
+    // Should a reward fanfare (banner/particles/sound) be played when this item is granted? When true, a successful
+    // Give() fires AMythicPlayerController::ClientNotifyRewardCelebration to the receiving player's owning client (P6).
+    // This is a THIN server->client notify only; the actual presentation is UMG-owned (out of scope — see the RPC).
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
     bool bCelebrate = true;
 
@@ -63,4 +60,7 @@ public:
     // TO PUT AN ITEM IN AN INVENTORY: Provide an inventory. If inventory is full, inventory owner's location will be used to drop the item.
     UFUNCTION(BlueprintCallable)
     static bool GiveItemReward(UItemReward *Reward, FItemRewardContext Context);
+
+private:
+    void NotifyCelebration(APlayerController *PC) const;
 };

@@ -8,8 +8,12 @@
 #include "Itemization/InventoryProviderInterface.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Player/Proficiency/ProficiencyComponent.h"
-#include "AI/NPCs/MythicSocialVerbs.h" // EMythicSocialVerb / EMythicSocialReaction in the RPC sigs (UHT can't FWD-declare a UENUM param)
+#include "AI/NPCs/MythicSocialVerbs.h"
+#include "AI/Party/MythicPartyTypes.h"
+#include "UI/HUD/MythicHudNotice.h"
 #include "MythicPlayerController.generated.h"
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMythicHudNoticeRaised, const FMythicHudNotice &, Notice);
 
 struct FTrackedDestructibleData;
 class UMythicItemInstance;
@@ -17,6 +21,7 @@ class UItemDefinition;
 class AMythicConversionStation;
 class AMythicStorageContainer;
 class AMythicVendor;
+class AMythicPlayerStall;
 enum class EMythicTradeResult : uint8;
 class AMythicNPCCharacter;
 
@@ -169,14 +174,10 @@ protected:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void PostProcessInput(const float DeltaTime, const bool bGamePaused) override;
 
-    // Login with the saved credentials if passed in via command line arguments. Otherwise, start the login process.
-    // I.e Before this function is called, you could display a "Logging in..." message to the user.
     void Login(int32 LocalUserNum);
 
-    // Handle Login Response. This is called when the login process is complete.
     void CB_LoginResponse(int32 LocalUserNum, bool bWasSuccessful, const FUniqueNetId &UserId, const FString &Error);
 
-    // Delegate for handling the login response
     FDelegateHandle LoginDelegateHandle;
 
 public:
@@ -207,61 +208,81 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Progression")
     FPlayerStatsSummary GetPlayerStats() const;
 
-    // ---- Conversion station RPCs (client-owned PC -> trusted sender identity) ----
-    // Registers this player as an instigator of the station (range + station-use gate enforced server-side).
     UFUNCTION(Server, Reliable, WithValidation, Category = "Conversion")
     void ServerOpenConversionStation(AMythicConversionStation *Station);
 
-    // Requests a manual conversion of the given recipe (qty cycles) at the station.
     UFUNCTION(Server, Reliable, WithValidation, Category = "Conversion")
     void ServerConversionRequestStart(AMythicConversionStation *Station, FGameplayTag RecipeId, int32 Quantity);
 
-    // Cancels one of this player's jobs at the station (refunds reserved inputs).
     UFUNCTION(Server, Reliable, WithValidation, Category = "Conversion")
     void ServerConversionCancelJob(AMythicConversionStation *Station, int32 JobId);
 
-    // Toggles auto-repeat on this player's active continuous job at the station.
     UFUNCTION(Server, Reliable, WithValidation, Category = "Conversion")
     void ServerConversionSetAutoRepeat(AMythicConversionStation *Station, bool bRepeat);
 
-    // ---- Storage container RPCs (client-owned PC -> trusted sender identity) ----
-    // Moves an item between two inventories the player is allowed to act on (own inventory <-> an open,
-    // in-range container). Both directions. Server-authoritative, identity- + range- + take-rule-gated.
     UFUNCTION(Server, Reliable, WithValidation, Category = "Storage")
     void ServerMoveItemBetweenInventories(UMythicInventoryComponent *Source, int32 SourceSlot, UMythicInventoryComponent *Target, int32 TargetSlot);
+
+    /**
+     * Total currency this player carries, summed across every inventory they own. This is the wallet balance a trade
+     * or HUD widget shows. BlueprintPure because the UI needs it every frame it draws a price, and there was
+     * previously no Blueprint-reachable way to ask "how much gold do I have".
+     */
+    UFUNCTION(BlueprintPure, Category = "Inventory")
+    int32 GetCarriedCurrency() const;
 
     // ---- Vendor RPCs (client-owned PC -> server-authoritative currency-gated trade) ----
     // Buy Quantity units of the vendor's StockSlotIndex into the player's inventory; charges the player's currency.
     // Authorized exactly like a container access (the player must have THIS vendor open + be in range).
-    UFUNCTION(Server, Reliable, WithValidation, Category = "Vendor")
+    UFUNCTION(BlueprintCallable, Server, Reliable, WithValidation, Category = "Vendor")
     void ServerVendorBuy(AMythicVendor *Vendor, int32 StockSlotIndex, int32 Quantity);
 
     // Sell Quantity units of PlayerSlotIndex (in one of the player's OWN inventories) to the vendor; pays proceeds.
-    UFUNCTION(Server, Reliable, WithValidation, Category = "Vendor")
+    UFUNCTION(BlueprintCallable, Server, Reliable, WithValidation, Category = "Vendor")
     void ServerVendorSell(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex, int32 Quantity);
+
+    // Buy Quantity units of StallSlotIndex from a TEAMMATE's player stall at its listed price. Coins move from the
+    // buyer into the stall owner's till (never minted). Authorized exactly like a vendor buy: the stall's inventory
+    // must be open + in range via CanPlayerAccessInventory (AMythicPlayerStall derives from AMythicStorageContainer).
+    UFUNCTION(BlueprintCallable, Server, Reliable, WithValidation, Category = "Stall")
+    void ServerStallBuy(AMythicPlayerStall *Stall, int32 StallSlotIndex, int32 Quantity);
+
+    void RecordVendorAcquaintance(const AMythicVendor *Vendor, const struct FMythicTradePlan &Plan);
 
     // Repair the durable item in PlayerSlotIndex (one of the player's OWN inventories) at the vendor (blacksmith) for
     // currency. Authorized like sell (vendor open + in range, source is the player's own).
-    UFUNCTION(Server, Reliable, WithValidation, Category = "Vendor")
+    UFUNCTION(BlueprintCallable, Server, Reliable, WithValidation, Category = "Vendor")
     void ServerVendorRepair(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory, int32 PlayerSlotIndex);
 
     // Repair ALL damaged items in one of the player's OWN inventories at the vendor (a "Repair All" convenience), charging
     // cheapest-first within the player's budget. Same authorization as single repair (vendor open + in range, own inventory).
-    UFUNCTION(Server, Reliable, WithValidation, Category = "Vendor")
+    UFUNCTION(BlueprintCallable, Server, Reliable, WithValidation, Category = "Vendor")
     void ServerVendorRepairAll(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory);
 
-    // ---- Co-op item GIFT (one-directional give with the recipient's consent) ----
-    // GIVER → server: offer the item in SourceSlotIndex of one of the giver's OWN inventories to Recipient. Validated
-    // (different valid players, in range, takeable item); on success the offer is parked on the recipient + they get a prompt.
-    UFUNCTION(Server, Reliable, WithValidation, Category = "Gift")
-    void ServerOfferGift(AMythicPlayerController *Recipient, UMythicInventoryComponent *SourceInv, int32 SourceSlotIndex);
+    // Buy back a recently-sold instance from the vendor's buyback ring (indexed by BuybackIndex) at the buyback price —
+    // the price it was sold for × the vendor's small markup. Same authorization as buy (vendor open + in range). The
+    // vendor hands back the SAME instance (rolled affixes / item level / durability intact, never a re-mint); on a hard
+    // reject (unaffordable / already gone / no room) the standard trade-result callout is surfaced.
+    UFUNCTION(BlueprintCallable, Server, Reliable, WithValidation, Category = "Vendor")
+    void ServerBuyback(AMythicVendor *Vendor, int32 BuybackIndex);
 
-    // SERVER → RECIPIENT client: a gift was offered — drives the accept/decline prompt (BP UI calls ServerRespondGift).
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Itemization")
+    void ServerSetItemJunk(UMythicItemInstance *Item, bool bJunk);
+
+    // Sell EVERY junk-flagged (manual OR auto), sellable item across the player's own inventories to Vendor, reusing the
+    // per-item vendor sell path (AMythicVendor::Server_ExecuteSell) — so it's exactly-once with no dupe/loss, and the
+    // vendor re-validates each item. Server-authoritative; the vendor must be open + in range (same gate as a manual
+    // sell). Bounded: a single forward pass over the slots (equipment/currency/non-takeable slots are skipped by the
+    // junk predicate). A successful sale already floats the "+N <currency>" callout per item, so no extra feedback here.
+    UFUNCTION(BlueprintCallable, Server, Reliable, WithValidation, Category = "Vendor")
+    void ServerSellAllJunk(AMythicVendor *Vendor);
+
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Gift")
+    void ServerOfferGift(AMythicPlayerController *Recipient, UMythicInventoryComponent *SourceInv, int32 SourceSlotIndex, int32 Quantity = 0);
+
     UFUNCTION(Client, Reliable, Category = "Gift")
     void ClientReceiveGiftOffer(AMythicPlayerController *Giver, const FText &ItemName);
 
-    // RECIPIENT → server: accept (true) or decline (false) the pending offer. On accept the server re-validates everything
-    // (giver still in range + still holds the exact offered item) and atomically moves the stack; otherwise it clears.
     UFUNCTION(Server, Reliable, Category = "Gift")
     void ServerRespondGift(bool bAccept);
 
@@ -270,18 +291,12 @@ public:
     UFUNCTION(BlueprintImplementableEvent, Category = "Gift")
     void OnGiftOffered(AMythicPlayerController *Giver, const FText &ItemName);
 
-    // SERVER → client: float a gift OUTCOME beat (server-composed text/color). Fired to BOTH the recipient ("Received <item>")
-    // and the giver ("Gift given" / "No room" / "Declined"), so neither side is left guessing how the hand-off resolved.
     UFUNCTION(Client, Reliable, Category = "Gift")
     void ClientNotifyGiftResult(const FText &Message, FLinearColor Color);
 
-    // deploy the placeable item in SlotIndex of Inventory into the world
     UFUNCTION(Server, Reliable, WithValidation, Category = "Placeable")
     void ServerDeployPlaceable(UMythicInventoryComponent *Inventory, int32 SlotIndex, FVector AimOrigin, FVector AimDirection);
 
-    // server→owning-client: a deploy attempt was rejected — show the player WHY (a HUD "can't build" toast). The reason
-    // is computed server-side via UPlaceableFragment::DescribeDeployFailure (or the build-limit line); empty reasons are
-    // never sent (no toast for a UI-impossible slot / a content error). Closes the previously-silent deploy-rejection loop.
     UFUNCTION(Client, Reliable, Category = "Placeable")
     void ClientNotifyDeployRejected(const FText &Reason);
 
@@ -289,185 +304,158 @@ public:
     UFUNCTION(BlueprintImplementableEvent, Category = "Placeable")
     void OnDeployRejected(const FText &Reason);
 
-    // routes primary interaction to the server
     UFUNCTION(Server, Reliable, WithValidation, Category = "Interaction")
     void ServerInteractPrimary(AActor *Interactable);
 
-    // ---- NPC dialogue (client-owned PC -> server picks the contextual line from authoritative brain state) ----
-    // The NPC brain's dialogue context (Faction/Role/pressure) is server-only + non-replicated, so the line MUST
-    // be chosen server-side; it round-trips back to the requesting client for display.
     UFUNCTION(Server, Reliable, WithValidation, Category = "Dialogue")
     void ServerRequestNpcDialogue(AMythicNPCCharacter *NPC);
 
     UFUNCTION(Client, Reliable, Category = "Dialogue")
     void ClientReceiveNpcDialogue(AMythicNPCCharacter *NPC, const FText &Line);
 
-    // ---- Social verbs (client-owned PC -> server resolves the trait-driven reaction + escalation) ----
-    //player→NPC verbs (Greet/Compliment/Provoke/Bully/Threaten). The NPC's personality + the player's
-    // faction standing decide the reaction SERVER-side (authoritative, non-replicated brain state), which then drives
-    // standing changes / aggro / guard alerts. The reaction round-trips back to the requesting client for the bark.
-    // Mirrors the dialogue RPC pair exactly (incl. the range gate). A BP radial menu calls ServerPerformSocialVerb.
     UFUNCTION(Server, Reliable, WithValidation, Category = "Social")
     void ServerPerformSocialVerb(AMythicNPCCharacter *NPC, EMythicSocialVerb Verb);
 
     UFUNCTION(Client, Reliable, Category = "Social")
     void ClientReceiveSocialReaction(AMythicNPCCharacter *NPC, EMythicSocialVerb Verb, EMythicSocialReaction Reaction, const FText &Line);
 
-    // ---- Party recruit ----
-    // Recruit a (recruitable) NPC into the local player's party. Server-authoritative (the party subsystem is
-    // server-side); routed from the NPC's primary-interact verb. Re-validates range/eligibility + dup-gates, and
-    // falls through to dialogue when the NPC is already a companion.
     UFUNCTION(Server, Reliable, WithValidation, Category = "Party")
     void ServerRecruitNpc(AMythicNPCCharacter *NPC);
 
     UFUNCTION(Client, Reliable, Category = "Party")
     void ClientReceiveRecruitResult(AMythicNPCCharacter *NPC, bool bSucceeded);
 
-    // SERVER: assign this NPC's QuestOffer (if any) to the player, range-validated + idempotent. Single source (Rule 3)
-    // for the talk AND recruit verbs so a recruitable quest-giver still hands out its quest.
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Party")
+    void ServerIssueCompanionOrder(AMythicNPCCharacter *Companion, EMythicCompanionOrder Order, AActor *OrderTarget);
+
     void OfferNpcQuestIfAny(AMythicNPCCharacter *NPC);
 
-    // ---- Gathering feedback ----
-    // Intermediate "N left" gather progress floater at the node — cosmetic + droppable, so kept OFF the reliable
-    // channel (Unreliable). Fired per hit; server (the resource manager is authority-only) → the gathering client.
     UFUNCTION(Client, Unreliable, Category = "Gathering")
     void ClientShowGatherProgress(FVector Location, int32 HitsRemaining);
 
-    // Terminal "Depleted!" gather callout — the one that matters, so delivered RELIABLY (fired once when the node yields).
     UFUNCTION(Client, Reliable, Category = "Gathering")
     void ClientShowGatherDepleted(FVector Location);
 
-    // ---- Shield combat feedback ----
-    // Float a blue "absorbed N" number (+ a "Shield Broken!" beat when bBroke) over the player when their shield eats
-    // damage. Fired from the AUTHORITY's real-damage path (MythicAttributeSet_Defense::PostGameplayEffectExecute) — a
-    // shield-absorbed hit never reaches Health (so no damage cue fires), and driving this from the server's damage
-    // branch (not a client OnRep delta) means a MaxShield re-clamp can't masquerade as absorbed damage.
     UFUNCTION(Client, Reliable, Category = "Combat")
     void ClientShowShieldAbsorbed(int32 Absorbed, bool bBroke);
 
-    // Float a "DODGE" callout over the player when their DodgeChance negates a hit. A dodge negates the hit BEFORE the
-    // damage cue runs (no number would otherwise show), so the authority damage execution pushes this to the dodging
-    // player. Mirrors the shield-absorbed callout.
     UFUNCTION(Client, Reliable, Category = "Combat")
     void ClientShowDodge();
 
-    // Float a "Winded!" / "Recovered" callout when the player enters / leaves stamina exhaustion (stamina-gated sprint).
-    // Without it the suppressed sprint speed is a silent slowdown — the player can't tell WHY they slowed. The server
-    // owns GAS.State.Exhausted and pushes this beat on the transition. bExhausted true = just winded, false = recovered.
     UFUNCTION(Client, Reliable, Category = "Combat")
     void ClientNotifyExhausted(bool bExhausted);
 
-    // ---- Progression feedback ----
-    // Float a "<Skill> Lv N" callout (+ a "<Milestone> unlocked!" beat when a key milestone is crossed) over the player
-    // on a proficiency level-up. Server (the ProficiencyComponent reward path, authority-gated) → the owning client.
     UFUNCTION(Client, Reliable, Category = "Progression")
     void ClientNotifyProficiencyLevel(const FText &ProfName, int32 NewLevel, const FText &MilestoneName);
 
-    // ---- Objective feedback ----
-    // Float "<Objective> N/M" on each step, or "Objective Complete: <Objective>" on the finishing step, over the player.
-    // Server (the ObjectiveTracker, authority-only) → the owning client. (A persistent tracker HUD is a logged follow-up.)
     UFUNCTION(Client, Reliable, Category = "Objectives")
-    void ClientNotifyObjective(const FText &DisplayText, int32 Current, int32 Required, bool bCompleted, int32 StackIndex);
+    void ClientNotifyObjective(const FText &DisplayText, int32 Current, int32 Required, bool bCompleted, int32 StackIndex,
+                               const FText &QuestTitle);
 
     UFUNCTION(Client, Reliable, Category = "Objectives")
     void ClientNotifyObjectiveResult(const FText &DisplayText, EObjectiveNotifyCategory Category, EObjectiveOfferResult OfferResult, int32 Current, int32 Required, bool bRewardSucceeded, bool bRewardDroppedNearby, int32 StackIndex);
 
-    // ---- Loot pickup feedback ----
-    // Float "+N <ItemName>" (or "<ItemName>" when N==1) over the player, tinted by item rarity, on a GENUINE pickup/add.
-    // Server (the inventory authority add path: AddItem / PickupItem) → the owning client. RarityColor is resolved
-    // server-side from UItemDefinition::GetRarityColor (single source). Mirrors ClientNotifyObjective.
     UFUNCTION(Client, Reliable, Category = "Itemization")
     void ClientNotifyLootPickup(const FText &ItemName, int32 Quantity, FLinearColor RarityColor);
 
-    // Float a vendor failure callout (e.g. "Not enough gold" / "Out of stock" / "Inventory full") over the acting
-    // client's pawn. Sent ONLY on a hard reject — a successful or partial buy/sell is already covered by the "+N"
-    // pickup callout. Server-decided reason, client-local cosmetic display. Mirrors ClientNotifyLootPickup.
+    UFUNCTION(Client, Reliable, Category = "Itemization")
+    void ClientNotifyRewardCelebration(UItemDefinition *ItemDef, int32 Quantity);
+
+    // client-side display hook for ClientNotifyRewardCelebration (BP plays the reward fanfare banner/particles/sound).
+    UFUNCTION(BlueprintImplementableEvent, Category = "Itemization")
+    void OnRewardCelebration(UItemDefinition *ItemDef, int32 Quantity);
+
+    // ---- HUD notices ----
+    /**
+     * The single stream every HUD callout arrives on. The feed, banner and objective tracker each subscribe and take
+     * the kinds they present, so adding an event to the HUD means raising a notice — not building another widget.
+     */
+    UPROPERTY(BlueprintAssignable, Category = "Mythic|HUD")
+    FMythicHudNoticeRaised OnHudNotice;
+
+    /** Raise a HUD notice on this (owning) client. Safe to call from anywhere client-side. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|HUD")
+    void RaiseHudNotice(const FMythicHudNotice &Notice);
+
+    // ---- Open container / vendor ----
+    /**
+     * The container or vendor this player most recently opened, client-side. Set on the interact that opens it, so a
+     * trade or storage screen can bind to the right actor without the Blueprint having to hand it over.
+     */
+    UPROPERTY(BlueprintReadOnly, Transient, Category = "Mythic|Interaction")
+    TWeakObjectPtr<AActor> ActiveContainer;
+
     UFUNCTION(Client, Reliable, Category = "Itemization")
     void ClientNotifyTradeResult(EMythicTradeResult Result);
 
-    // Float a durability beat over the player: broken, low warning, or repaired
     UFUNCTION(Client, Reliable, Category = "Itemization")
     void ClientNotifyItemDurability(const FText &ItemName, EMythicItemDurabilityBeat Beat);
 
-    // server: emit GAS.Event.Item.Acquired on player's ASC for objectives
     void NotifyItemAcquired(const UItemDefinition *ItemDef, int32 Quantity);
 
-    // server: emit GAS.Event.Item.Used on the player's ASC (TargetTags = ItemType) for "use N <type>" objectives. No-op
-    // off authority / on an item with no type / non-positive quantity. Called from the generic consumable ability on use.
     void NotifyItemUsed(const UItemDefinition *ItemDef, int32 Quantity);
 
-    // server: emit GAS.Event.Item.Equipped on the player's ASC (TargetTags = ItemType) for "equip N <type>" objectives.
-    // No-op off authority / on an item with no type. Called from the attack fragment on the first genuine weapon equip.
     void NotifyItemEquipped(const UItemDefinition *ItemDef);
 
-    // server: emit GAS.Event.TalkedToNPC on the player's ASC (TargetTags = NpcTag) for "talk to X" objectives. No-op on
-    // an invalid NpcTag or off authority. Called from the dialogue path.
     void NotifyTalkedToNPC(const FGameplayTag &NpcTag);
 
-    // ---- Companion loss feedback ----
-    // Float "<Name> has left your party" (grey) / "<Name> turns on you!" (red) over the departing companion — closing
-    // the asymmetry where the recruit is celebrated but the loss is silent. Server (the party subsystem) → owning client.
     UFUNCTION(Client, Reliable, Category = "Party")
     void ClientNotifyCompanionDeparted(const FText &Name, FVector Location);
 
     UFUNCTION(Client, Reliable, Category = "Party")
     void ClientNotifyCompanionBetrayed(const FText &Name, FVector Location);
 
-    // Float an amber hazard onset or grey subsidence notification over the player
     UFUNCTION(Client, Reliable, Category = "Environment")
     void ClientNotifyEnvironmentHazard(const FText &HazardName, bool bOnset);
 
-    // ---- NPC trade (barter) ----
-    // Execute one of the merchant NPC's designer-authored barter offers: server validates range + the offer +
-    // that the player has the cost items, removes the cost, and mints the reward. Item-for-item (no currency in
-    // v1). Opening the trade UI is client-local (offers are class data); only this execution round-trips.
     UFUNCTION(Server, Reliable, WithValidation, Category = "Trade")
     void ServerExecuteBarterOffer(AMythicNPCCharacter *NPC, int32 OfferIndex);
 
-    // ---- Forge: affix reroll / lock ----
-    // Drive the (iter-51) AffixesFragment reroll/lock backend behind a server-authoritative, ownership-validated
-    // verb: the item must live in one of THIS player's own inventories (same ownership model as item moves), so a
-    // player cannot reroll or lock a third party's gear. The reroll/lock themselves are also authority-gated in the
-    // fragment. Cost-gating is deferred (no currency model) — this is the no-cost Forge verb.
     UFUNCTION(Server, Reliable, WithValidation, Category = "Forge")
     void ServerRerollItemAffixes(UMythicItemInstance *Item);
 
     UFUNCTION(Server, Reliable, WithValidation, Category = "Forge")
     void ServerSetItemAffixLocked(UMythicItemInstance *Item, int32 AffixIndex, bool bLocked);
 
-    // ---- Zone-entry feedback ("Welcome to <settlement>") ----
-    // Float a "Welcome to <Name>" callout when the player crosses into a new settlement. The server polls the player's
-    // cell on a timer (a position-based check has no delegate to bind), maps cell -> governing settlement, and on a
-    // change of the stable SettlementId fires this RPC to the owning client. Implements the zone-entry detection
-    // AMythicSettlement documents (MythicSettlement.h) but that nothing ever wired.
+    static bool IsWithinStationRange(float DistSq, float RangeSq);
+
     UFUNCTION(Client, Reliable, Category = "Zone")
     void ClientNotifyZoneEntry(const FText &SettlementName);
 
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Fast Travel")
+    void ServerFastTravel(int32 SettlementId);
+
+    static bool CanFastTravel(const TSet<int32> &Discovered, int32 SettlementId, bool bBlocked);
+
+    UFUNCTION(Server, Reliable, WithValidation, Category = "Fast Travel")
+    void ServerFastTravelToPOI(int32 POIId);
+
+    UFUNCTION(Client, Reliable, Category = "Fast Travel")
+    void ClientNotifyFastTravelRefused(const FText &Reason);
+
+    // True when this player is carrying enough to be denied fast travel. Shared by BOTH travel paths so a hauler can't
+    // dodge the walk home by picking a landmark instead of a settlement. Always false when encumbrance is disabled.
+    UFUNCTION(BlueprintPure, Category = "Fast Travel")
+    bool IsOverloadedForFastTravel() const;
+
 private:
-    // checks if the player is allowed to access the given inventory
     bool CanPlayerAccessInventory(UMythicInventoryComponent *Inventory) const;
 
-    // ---- Co-op gift: the ONE pending offer THIS player has been given (server-only; not replicated — the prompt is a
-    //      one-shot Client RPC). Re-validated at accept; auto-expires after GiftOfferTimeoutSeconds. ----
     TWeakObjectPtr<AMythicPlayerController> PendingGiftGiver;
     TWeakObjectPtr<UMythicInventoryComponent> PendingGiftSourceInv;
-    TWeakObjectPtr<UMythicItemInstance> PendingGiftItem; // the exact instance offered — re-checked still-in-slot at accept
+    TWeakObjectPtr<UMythicItemInstance> PendingGiftItem;
     int32 PendingGiftSourceSlot = INDEX_NONE;
+    int32 PendingGiftQuantity = 0;
     FTimerHandle PendingGiftTimerHandle;
     bool HasPendingGift() const { return PendingGiftGiver.IsValid() && PendingGiftItem.IsValid(); }
-    void ClearPendingGift();        // drop the offer + its timeout timer
-    void OnPendingGiftExpired();    // timer callback: clear a stale offer
-    // Pawn-to-pawn distance gate shared by offer + accept (uses Settings->GiftRange).
+    void ClearPendingGift();
+    void OnPendingGiftExpired();
     bool IsWithinGiftRange(const AMythicPlayerController *Other) const;
 
-    // handles completion of async class loading for placeable deploy
     void HandleDeployClassLoaded(FSoftObjectPath ClassPath, FMythicPendingDeploy Pending);
 
-    // spawns the placeable actor and consumes the item
     void FinishDeployPlaceable(UClass *DeployedClass, const FMythicPendingDeploy &Pending);
 
-    // Pure: may this player deploy another placeable? MaxAllowed <= 0 = unlimited; else the count of this player's live
-    // placeables must be below it. Static so the per-player cap rule is unit-testable without a live world.
     static bool CanDeployMore(int32 CurrentValidCount, int32 MaxAllowed);
 
     // Per-player cap on simultaneously-deployed placeables. 0 (default) = unlimited (byte-identical to the prior
@@ -475,17 +463,17 @@ private:
     UPROPERTY(EditDefaultsOnly, Category = "Placeable")
     int32 MaxDeployedPlaceables = 0;
 
-    // SERVER: weak refs to the placeables THIS player currently has live in the world. Pruned (lazy GC) + counted at
-    // deploy time — a placeable destroyed by combat/decay/another player frees a slot without any per-actor destroy hook.
     UPROPERTY()
     TArray<TWeakObjectPtr<AActor>> DeployedPlaceables;
 
-    // Server-side per-player poll: maps the pawn's cell -> governing settlement and fires ClientNotifyZoneEntry on a
-    // change (INDEX_NONE = wilderness/none). Game thread; CopySettlementAtCell is SimulationLock-guarded (snapshot copy).
     void CheckZoneEntry();
 
     FTimerHandle ZoneCheckTimerHandle;
-    int32 LastSettlementId = INDEX_NONE; // settlement the player was last in (INDEX_NONE = wilderness / none)
+    int32 LastSettlementId = INDEX_NONE;
+
+    uint8 LastTerritoryFactionIndex = 0xFF;
+
+    TSet<int32> DiscoveredSettlements;
 
     // How often (seconds) the server re-checks which settlement the player occupies. Designer-tunable, not a magic literal.
     UPROPERTY(EditAnywhere, Category = "Zone", meta = (ClampMin = "0.1"))

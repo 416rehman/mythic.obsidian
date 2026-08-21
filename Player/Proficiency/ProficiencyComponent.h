@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -44,6 +43,21 @@ struct FProficiencySummary {
     // progress fraction towards the next level
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     float ProgressFraction = 0.0f;
+
+    // The next key milestone ahead of the current level. Empty once every milestone on the track is earned.
+    // Levelling a track is only worth doing if you can see what it is building towards, so this rides along
+    // with the summary rather than making every caller walk the generated track itself.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
+    FText NextMilestoneName;
+
+    // The level that milestone lands on. 0 when there is none left.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
+    int32 NextMilestoneLevel = 0;
+
+    // The track's mark, copied off the definition. The UI reads summaries and never the definition, so without
+    // this the icon simply cannot reach the page.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
+    TSoftObjectPtr<UTexture2D> Icon;
 };
 
 USTRUCT(BlueprintType, Blueprintable)
@@ -65,10 +79,8 @@ struct FProficiency {
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Proficiency")
     TArray<FMilestone> Track = TArray<FMilestone>();
 
-    // XP value loaded from save (staged here until BeginPlay when ASC is ready)
     float SavedXP = 0.0f;
 
-    // Cache of the max XP for this proficiency (calculated at runtime)
     float MaxXP = 0.0f;
 };
 
@@ -103,17 +115,32 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     void GrantProficiencyXP(UProficiencyDefinition *Definition, float Amount);
 
+    /**
+     * As GrantProficiencyXP, but the caller also describes WHAT the work was.
+     *
+     * ContextTags ride the emitted GAS.Event.Proficiency.Gained payload alongside the track tag, so a proc rule can
+     * gate on them via RequiredEventTags. The track tag turns one event into twelve; this turns each of those into
+     * as many as the caller can distinguish -- the station that did the work, the quality tier that came out, the
+     * kind of thing gathered.
+     *
+     * Callers already hold this information at the moment they grant XP and currently discard it. Nothing is
+     * inferred here: a caller that passes nothing produces exactly the payload it produced before.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Proficiency")
+    void GrantProficiencyXPWithContext(UProficiencyDefinition *Definition, float Amount, FGameplayTagContainer ContextTags);
+
     // server: apply death penalty to combat proficiency XP (reduces current XP by PenaltyFraction)
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     void ApplyDeathPenalty(float PenaltyFraction);
 
-    // pure death penalty math: returns XP left after losing PenaltyFraction of current progress
     static float ComputeXpAfterDeathPenalty(float CurrentXP, float PenaltyFraction);
 
-    // find the proficiency whose ProgressAttribute matches CombatProficiency
+    static float ComputeXpAfterDeathPenalty(float CurrentXP, float PenaltyFraction, float LevelFloorXP);
+
     FProficiency* FindCombatProficiency();
 
-    // check if the component is restoring loaded values
+    static float ComputeXpOverflow(float CurrentXP, float Amount, float MaxXP);
+
     bool IsRestoring() const { return bIsRestoring; }
 
     // returns a summary of the proficiency at the specified index
@@ -121,13 +148,11 @@ public:
     FProficiencySummary GetSummary(int32 Index) const;
 
 protected:
-    // When true, skip normal reward logic in OnAttributeChanged (used during restore)
     bool bIsRestoring = false;
 
     void OnAttributeChanged(const FOnAttributeChangeData &OnAttributeChangeData);
     void ConfigureProgressionAttribute(FProficiency &Proficiency);
 
-    /** Reapply only CanReapplyOnLoad rewards for levels up to given level */
     void ReapplyRewardsForLevel(FProficiency &Proficiency, int32 TargetLevel);
 
     virtual void BeginPlay() override;

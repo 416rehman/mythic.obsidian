@@ -5,10 +5,6 @@
 #include "ConsumableEffectFragment.h"
 #include "MythicEffectBlueprintLibrary.generated.h"
 
-/**
- * Blueprint library for working with Mythic Effect Display Data.
- * Allows calculating rich text values using an ASC context from Blueprints.
- */
 UCLASS()
 class MYTHIC_API UMythicEffectBlueprintLibrary : public UBlueprintFunctionLibrary {
     GENERATED_BODY()

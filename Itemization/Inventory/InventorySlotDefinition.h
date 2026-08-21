@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "Itemization/MythicTags_Inventory.h" // Assuming this exists based on previous files, or defines standard tags
+#include "Itemization/MythicTags_Inventory.h"
 #include "Itemization/MythicDataAsset.h"
 #include "InventorySlotDefinition.generated.h"
 
@@ -18,9 +18,6 @@ enum class EInventorySlotType : uint8 {
     OffHand
 };
 
-/**
- * Defines a type of inventory slot (e.g., Head, Chest, Weapon).
- */
 UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API UInventorySlotDefinition : public UMythicDataAsset {
     GENERATED_BODY()

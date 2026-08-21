@@ -6,15 +6,6 @@
 #include "GameplayCueNotify_Static.h"
 #include "MythicGameplayCue_DamageNumber.generated.h"
 
-/**
- * UMythicGameplayCue_DamageNumber
- *
- * A static (non-instanced) gameplay cue that adds damage numbers to the screen-space
- * damage number subsystem. Very lightweight - no actor spawning, just adds to a pool.
- *
- * Usage: Set the gameplay cue tag to something like "GameplayCue.Damage.Number"
- * and trigger it with the magnitude set to the damage amount.
- */
 UCLASS(Blueprintable, Category = "GameplayCueNotify", Meta = (DisplayName = "GCN Damage Number"))
 class MYTHIC_API UMythicGameplayCue_DamageNumber : public UGameplayCueNotify_Static {
     GENERATED_BODY()

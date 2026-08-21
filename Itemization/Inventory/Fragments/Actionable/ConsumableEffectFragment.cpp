@@ -1,4 +1,3 @@
-// ConsumableEffectFragment.cpp
 
 #include "ConsumableEffectFragment.h"
 #include "ConsumableEffectFragment.h"
@@ -12,7 +11,6 @@
 #include "GameplayAbilitySpec.h"
 #include "GAS/Abilities/MythicGameplayAbility.h"
 
-// Helper to access protected AttributeBasedMagnitude via reflection
 static const FAttributeBasedFloat *GetAttributeBasedFloat(const FGameplayEffectModifierMagnitude &Magnitude) {
     static FStructProperty *Prop = nullptr;
     if (!Prop) {
@@ -24,9 +22,6 @@ static const FAttributeBasedFloat *GetAttributeBasedFloat(const FGameplayEffectM
     return nullptr;
 }
 
-// ============================================================================
-// FMythicEffectModifierDisplayData
-// ============================================================================
 
 FText FMythicEffectModifierDisplayData::GetAttributeDisplayName() const {
     if (!Attribute.IsValid()) {
@@ -40,7 +35,6 @@ FText FMythicEffectModifierDisplayData::GetMagnitudeText() const {
 
     switch (MagnitudeSource) {
     case EMythicMagnitudeSource::AttributeBased: {
-        // ARPG style: "+1 per Wisdom" or "+1 per 2 Wisdom"
         if (FMath::IsNearlyEqual(BackingCoefficient, 1.0f)) {
             return FText::Format(NSLOCTEXT("Mythic", "PerAttr", "{0}1 per {1}"),
                                  FText::FromString(Sign), FText::FromString(BackingAttribute.GetName()));
@@ -50,7 +44,6 @@ FText FMythicEffectModifierDisplayData::GetMagnitudeText() const {
                                  FText::FromString(Sign), FText::AsNumber(static_cast<int32>(BackingCoefficient)),
                                  FText::FromString(BackingAttribute.GetName()));
         }
-        // Coefficient < 1: "+1 per 2 Wisdom"
         int32 Divisor = FMath::RoundToInt(1.0f / BackingCoefficient);
         return FText::Format(NSLOCTEXT("Mythic", "PerAttrDiv", "{0}1 per {1} {2}"),
                              FText::FromString(Sign), FText::AsNumber(Divisor),
@@ -59,7 +52,6 @@ FText FMythicEffectModifierDisplayData::GetMagnitudeText() const {
     case EMythicMagnitudeSource::Custom:
         return FText::FromString(TEXT("?"));
     default:
-        // Static or SetByCaller - known value
         if (bIsPercentage) {
             float DisplayValue = Magnitude;
             if (ModifierOp == EGameplayModOp::Multiplicitive ||
@@ -93,7 +85,6 @@ FText FMythicEffectModifierDisplayData::GetMagnitudeText(UAbilitySystemComponent
         return GetMagnitudeText();
     }
 
-    // Calculate actual value: coefficient × attribute value
     bool bFound = false;
     float AttrValue = ASC->GetGameplayAttributeValue(BackingAttribute, bFound);
     if (!bFound) {
@@ -105,8 +96,6 @@ FText FMythicEffectModifierDisplayData::GetMagnitudeText(UAbilitySystemComponent
 
     FText ContextText = FText::GetEmpty();
     if (bShowContext) {
-        // Format: <Context>(Coefficient * Attribute)</>
-        // e.g. <Context>(0.5 * Wisdom)</>
         ContextText = FText::Format(NSLOCTEXT("Mythic", "ScalingContext", " <Context>({0} * {1})</>"),
                                     FText::AsNumber(BackingCoefficient),
                                     FText::FromString(BackingAttribute.GetName()));
@@ -130,9 +119,6 @@ FText FMythicEffectModifierDisplayData::GetRichText(UAbilitySystemComponent *ASC
                                              *Tag, *GetMagnitudeText(ASC, bShowContext).ToString(), *GetAttributeDisplayName().ToString()));
 }
 
-// ============================================================================
-// FMythicEffectDurationDisplayData
-// ============================================================================
 
 FText FMythicEffectDurationDisplayData::GetFormattedText() const {
     switch (DurationType) {
@@ -171,7 +157,6 @@ FText FMythicEffectDurationDisplayData::GetFormattedText(UAbilitySystemComponent
         return GetFormattedText();
     }
 
-    // Calculate actual duration: coefficient × attribute value
     bool bFound = false;
     float AttrValue = ASC->GetGameplayAttributeValue(DurationBackingAttribute, bFound);
     if (!bFound) {
@@ -182,7 +167,6 @@ FText FMythicEffectDurationDisplayData::GetFormattedText(UAbilitySystemComponent
 
     FText ContextText = FText::GetEmpty();
     if (bShowContext) {
-        // Format: <Context>(Coefficient * Attribute)</>
         ContextText = FText::Format(NSLOCTEXT("Mythic", "ScalingContext", " <Context>({0} * {1})</>"),
                                     FText::AsNumber(DurationBackingCoefficient),
                                     FText::FromString(DurationBackingAttribute.GetName()));
@@ -206,9 +190,6 @@ FText FMythicEffectDurationDisplayData::GetRichText(UAbilitySystemComponent *ASC
     return Dur;
 }
 
-// ============================================================================
-// FMythicEffectStackingDisplayData
-// ============================================================================
 
 FText FMythicEffectStackingDisplayData::GetFormattedText() const {
     if (!CanStack()) {
@@ -228,27 +209,21 @@ FText FMythicEffectStackingDisplayData::GetRichText() const {
     return FText::FromString(FString::Printf(TEXT("<img id=\"Stack\"/> <Stack>%s</>"), *St.ToString()));
 }
 
-// ============================================================================
-// FMythicEffectDisplayData
-// ============================================================================
 
 FText FMythicEffectDisplayData::GetRichText() const {
     TArray<FString> Parts;
 
-    // Modifiers
     for (const auto &Mod : Modifiers) {
         Parts.Add(Mod.GetRichText().ToString());
     }
 
     FString Result = FString::Join(Parts, TEXT(", "));
 
-    // Duration
     FText Dur = Duration.GetRichText();
     if (!Dur.IsEmpty()) {
         Result += TEXT(" ") + Dur.ToString();
     }
 
-    // Stacking
     FText St = Stacking.GetRichText();
     if (!St.IsEmpty()) {
         Result += TEXT(" ") + St.ToString();
@@ -260,20 +235,17 @@ FText FMythicEffectDisplayData::GetRichText() const {
 FText FMythicEffectDisplayData::GetRichText(UAbilitySystemComponent *ASC, bool bShowContext) const {
     TArray<FString> Parts;
 
-    // Modifiers with calculated values
     for (const auto &Mod : Modifiers) {
         Parts.Add(Mod.GetRichText(ASC, bShowContext).ToString());
     }
 
     FString Result = FString::Join(Parts, TEXT(", "));
 
-    // Duration with calculated values
     FText Dur = Duration.GetRichText(ASC, bShowContext);
     if (!Dur.IsEmpty()) {
         Result += TEXT(" ") + Dur.ToString();
     }
 
-    // Stacking
     FText St = Stacking.GetRichText();
     if (!St.IsEmpty()) {
         Result += TEXT(" ") + St.ToString();
@@ -282,16 +254,11 @@ FText FMythicEffectDisplayData::GetRichText(UAbilitySystemComponent *ASC, bool b
     return FText::FromString(Result);
 }
 
-// ============================================================================
-// UConsumableEffectFragment - Lifecycle
-// ============================================================================
 
 void UConsumableEffectFragment::OnInstanced(UMythicItemInstance *ItemInstance) {
     Super::OnInstanced(ItemInstance);
     ConsumableEffectRuntimeReplicatedData.ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(ItemInstance->GetInventoryOwner());
 
-    // Grant Generic Ability to handle Input if InputTag is set
-    // Using nullptr for AbilityClass triggers the fallback to DefaultItemInputAbility in helper
     if (InputTag.IsValid()) {
         if (UMythicAbilitySystemComponent *MythicASC = Cast<UMythicAbilitySystemComponent>(ConsumableEffectRuntimeReplicatedData.ASC)) {
             ConsumableEffectRuntimeReplicatedData.AbilityHandle = GrantItemAbility(MythicASC, ItemInstance, nullptr);
@@ -348,7 +315,6 @@ void UConsumableEffectFragment::ServerApplyEffects_Implementation(UMythicItemIns
 
         FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(Entry.GameplayEffectClass, Entry.EffectLevel, Context);
         if (Spec.IsValid()) {
-            // Apply SetByCaller magnitudes
             for (const auto &Pair : Entry.SetByCallerMagnitudes) {
                 Spec.Data->SetSetByCallerMagnitude(Pair.Key, Pair.Value);
             }
@@ -392,14 +358,10 @@ bool UConsumableEffectFragment::CanBeStackedWith(const UItemFragment *Other) con
     return Super::CanBeStackedWith(Other);
 }
 
-// ============================================================================
-// GE Parsing
-// ============================================================================
 
 FMythicEffectModifierDisplayData UConsumableEffectFragment::ParseModifier(
     const FGameplayModifierInfo &Modifier,
     const TMap<FGameplayTag, float> &SetByCallerValues) {
-
     FMythicEffectModifierDisplayData Data;
     Data.Attribute = Modifier.Attribute;
     Data.ModifierOp = Modifier.ModifierOp;
@@ -409,7 +371,6 @@ FMythicEffectModifierDisplayData UConsumableEffectFragment::ParseModifier(
         Modifier.ModifierOp == EGameplayModOp::MultiplyCompound ||
         Modifier.ModifierOp == EGameplayModOp::Division);
 
-    // Determine magnitude source
     EGameplayEffectMagnitudeCalculation CalcType = Modifier.ModifierMagnitude.GetMagnitudeCalculationType();
 
     switch (CalcType) {
@@ -439,7 +400,6 @@ FMythicEffectModifierDisplayData UConsumableEffectFragment::ParseModifier(
         break;
     }
 
-    // Determine positive
     Data.bIsPositive = Data.bIsPercentage ? (Data.Magnitude >= 1.0f) : (Data.Magnitude >= 0.0f);
     if (Data.MagnitudeSource == EMythicMagnitudeSource::AttributeBased) {
         Data.bIsPositive = Data.BackingCoefficient >= 0.0f;
@@ -449,7 +409,6 @@ FMythicEffectModifierDisplayData UConsumableEffectFragment::ParseModifier(
 }
 
 FMythicEffectDurationDisplayData UConsumableEffectFragment::ParseDuration(const UGameplayEffect *GE, const TMap<FGameplayTag, float> &SetByCallerValues) {
-
     FMythicEffectDurationDisplayData Data;
     Data.DurationType = GE->DurationPolicy;
     Data.Period = GE->Period.GetValueAtLevel(1.0f);
@@ -464,7 +423,6 @@ FMythicEffectDurationDisplayData UConsumableEffectFragment::ParseDuration(const 
             break;
         case EGameplayEffectMagnitudeCalculation::SetByCaller: {
             Data.DurationSource = EMythicMagnitudeSource::SetByCaller;
-            // Lookup duration from the entered SetByCaller values
             const FSetByCallerFloat &SBC = GE->DurationMagnitude.GetSetByCallerFloat();
             const float *Val = SetByCallerValues.Find(SBC.DataTag);
             Data.Duration = Val ? *Val : 0.0f;
@@ -508,9 +466,7 @@ FMythicEffectDisplayData UConsumableEffectFragment::GetEffectDisplayDataFromEntr
 
     const UGameplayEffect *GE = Entry.GameplayEffectClass.GetDefaultObject();
 
-    // Check for display override
     if (!Entry.DisplayTextOverride.IsEmpty()) {
-        // Just return empty with the override accessible via the entry
         return Result;
     }
 

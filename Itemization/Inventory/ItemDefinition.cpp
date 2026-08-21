@@ -1,4 +1,3 @@
-// ItemDefinition.cpp
 #include "ItemDefinition.h"
 #include "Fragments/ItemFragment.h"
 #include "Itemization/MythicTags_Inventory.h"
@@ -11,7 +10,6 @@ UItemDefinition::UItemDefinition() {
 }
 
 FLinearColor UItemDefinition::GetRarityColor(EItemRarity InRarity) {
-    // Single source of truth for rarity coloring (was inline in UItemSlotVM::Initialize before centralization).
     switch (InRarity) {
     case Common:
         return FLinearColor::FromSRGBColor(FColor::FromHex("#808080"));

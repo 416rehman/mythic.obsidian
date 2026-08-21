@@ -13,10 +13,8 @@ void UItemizationSubsystem::Initialize(FSubsystemCollectionBase &Collection) {
 
     UMythicAssetManager &AssetManager = UMythicAssetManager::Get();
 
-    // Gather IDs of all item defs
     AssetManager.GetPrimaryAssetIdList(UMythicAssetManager::ItemDefinitionType, this->AllItemDefIds);
 
-    // Load all the IDs - which then calls OnAssetsLoaded where we can get the actual item defs and cache them
     AssetManager.LoadPrimaryAssets(AllItemDefIds, TArray<FName>(),
                                    FStreamableDelegate::CreateUObject(this, &UItemizationSubsystem::OnAllItemDefsLoaded));
 
@@ -33,7 +31,6 @@ void UItemizationSubsystem::OnAllItemDefsLoaded() {
 
     TSet<FPrimaryAssetId> RequiredItemAssets;
 
-    // First pass: Cache all loaded items and collect requirement asset IDs
     for (const FPrimaryAssetId &AssetId : AllItemDefIds) {
         auto UObject = AssetManager.GetPrimaryAssetObject(AssetId);
         if (!UObject) {
@@ -49,7 +46,6 @@ void UItemizationSubsystem::OnAllItemDefsLoaded() {
 
         CachedItemDefs.Add(ItemDef);
 
-        // Check for CraftableFragment and cache craftable items
         auto CraftableFragment = UCraftableFragment::GetCraftableFragmentFromDefinition(ItemDef);
         if (CraftableFragment) {
             CachedCraftableItems.Add(ItemDef);
@@ -66,21 +62,17 @@ void UItemizationSubsystem::OnAllItemDefsLoaded() {
         }
     }
 
-    // Filter out assets we've already loaded
     RequiredItemAssets = RequiredItemAssets.Difference(TSet<FPrimaryAssetId>(AllItemDefIds));
 
     if (RequiredItemAssets.Num() > 0) {
         UE_LOG(Myth, Log, TEXT("Loading %d additional crafting requirement assets"), RequiredItemAssets.Num());
 
-        // Convert to array for loading
         TArray<FPrimaryAssetId> RequiredItemArray = RequiredItemAssets.Array();
 
-        // Load the requirement assets
         AssetManager.LoadPrimaryAssets(RequiredItemArray, TArray<FName>(),
                                        FStreamableDelegate::CreateUObject(this, &UItemizationSubsystem::OnCraftingRequirementsLoaded));
     }
     else {
-        // No additional assets to load, proceed to final processing
         ProcessCraftingRequirements();
     }
 }
@@ -95,19 +87,16 @@ void UItemizationSubsystem::ProcessCraftingRequirements() {
 
     CraftingIngredientsIds.Reset();
 
-    // Process crafting requirements now that all assets should be loaded
     for (UItemDefinition *ItemDef : CachedItemDefs) {
         for (int32 i = 0; i < ItemDef->Fragments.Num(); i++) {
             if (!ItemDef->Fragments[i]) {
-                continue; // Already logged error in first pass
+                continue;
             }
 
             if (auto CraftableFragment = Cast<UCraftableFragment>(ItemDef->Fragments[i])) {
                 for (const auto &Requirement : CraftableFragment->CraftingRequirements) {
-                    // Use Get() instead of LoadSynchronous - assets should be loaded by now
                     UItemDefinition *RequirementItem = Requirement.RequiredItem.Get();
                     if (!RequirementItem) {
-                        // Try to get from asset manager as fallback
                         FPrimaryAssetId RequiredAssetId = Requirement.RequiredItem->GetPrimaryAssetId();
                         if (RequiredAssetId.IsValid()) {
                             auto RequiredObject = AssetManager.GetPrimaryAssetObject(RequiredAssetId);
@@ -134,7 +123,6 @@ void UItemizationSubsystem::ProcessCraftingRequirements() {
 void UItemizationSubsystem::Deinitialize() {
     Super::Deinitialize();
 
-    // Unload all the item defs
     UMythicAssetManager &AssetManager = UMythicAssetManager::Get();
     AssetManager.UnloadPrimaryAssets(AllItemDefIds);
 }
@@ -151,7 +139,6 @@ UItemDefinition *UItemizationSubsystem::GetItemDefinition(FPrimaryAssetId ItemId
         return nullptr;
     }
 
-    // First check cache
     auto ItemDef = CachedItemDefs.FindByPredicate([ItemId](const UItemDefinition *Item) {
         return Item && Item->GetPrimaryAssetId() == ItemId;
     });
@@ -162,7 +149,6 @@ UItemDefinition *UItemizationSubsystem::GetItemDefinition(FPrimaryAssetId ItemId
 
     UE_LOG(Myth, Log, TEXT("Item def not found in cache, trying to load it: %s"), *ItemId.ToString());
 
-    // Try loading the item def as fallback
     UMythicAssetManager &AssetManager = UMythicAssetManager::Get();
     auto ItemObject = AssetManager.GetPrimaryAssetObject(ItemId);
     if (!ItemObject) {
@@ -182,7 +168,6 @@ UItemDefinition *UItemizationSubsystem::GetItemDefinition(FPrimaryAssetId ItemId
 void UItemizationSubsystem::GetCraftableItemsByType(FGameplayTag ItemType, TArray<UItemDefinition *> &OutItems) const {
     OutItems.Reset();
 
-    // Use the cached map for efficient lookup
     if (const auto *Items = CachedCraftableItemsByType.Find(ItemType)) {
         OutItems = *Items;
     }

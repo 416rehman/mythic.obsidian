@@ -59,13 +59,9 @@ void UMythicItemInstance::Serialize(FArchive &Ar) {
 }
 
 void UMythicItemInstance::SetStackSize(const int32 newQuantity) {
-    // Authority check
     auto owner = this->GetOwningActor();
     checkf(owner->HasAuthority(), TEXT("Only the server can set the stack size of an item instance"));
 
-    // ItemDefinition is a replicated + SaveGame UPROPERTY that can resolve to null on load (an unresolvable data-asset
-    // ref); a raw deref of StackSizeMax would crash. Mirrors the null-on-load guards in AddToAnySlot / Serialize.
-    // Reachable via ConsumeItem / world-item paths where no prior def access guards line 66.
     if (!ItemDefinition) {
         UE_LOG(Myth, Error, TEXT("SetStackSize: ItemDefinition is null on %s; cannot clamp stack"), *GetName());
         return;
@@ -75,7 +71,6 @@ void UMythicItemInstance::SetStackSize(const int32 newQuantity) {
     if (newQty != Quantity) {
         Quantity = newQty;
 
-        // If the item is in an inventory
         auto inventory = this->GetInventoryComponent();
         if (!inventory) {
             UE_LOG(Myth, Verbose, TEXT("SetStackSize: ItemInstance %s is not in an inventory"), *GetName());
@@ -88,38 +83,28 @@ void UMythicItemInstance::SetStackSize(const int32 newQuantity) {
         }
 
         if (Quantity <= 0) {
-            // Remove the item from the slot if the stack is 0
-            // NOTE: Item->Destroy() should be called by the caller if full removal is intended
             inventory->SetItemInSlot(this->SlotIndex, nullptr);
         }
 
-        // Update local (server or owning client for listen-server)
         inventory->NotifyItemInstanceUpdated(this->SlotIndex);
     }
 }
 
 int32 UMythicItemInstance::ClampInitialStackQuantity(int32 Requested, int32 StackSizeMax) {
-    // Non-stackable items are always a single unit.
     if (StackSizeMax <= 1) {
         return 1;
     }
-    // A created stack must be >= 1 (Quantity's ClampMin) and <= the stack cap (mirrors SetStackSize's max clamp).
     return FMath::Clamp(Requested, 1, StackSizeMax);
 }
 
-// Sets the item definition and quantity, then instantiates fragments from the item definition.
 void UMythicItemInstance::Initialize(UItemDefinition *ItemDef, const int32 quantityIfStackable, const int32 level) {
     checkf(this->GetOwningActor()->HasAuthority(), TEXT("Only the server can initialize an item instance"));
 
     this->ItemDefinition = ItemDef;
     this->ItemLevel = level;
-    // Clamp to [1, StackSizeMax] (or a single unit for non-stackables). Previously this assigned quantityIfStackable
-    // raw when StackSizeMax > 1, so a created stack could EXCEED the cap that SetStackSize enforces (over-stacking) or
-    // be zero/negative. Single source: ClampInitialStackQuantity (unit-tested).
     this->Quantity = ClampInitialStackQuantity(quantityIfStackable, ItemDef->StackSizeMax);
     UE_LOG(Myth, Verbose, TEXT("Initialized level %d item %s"), level, *GetName());
 
-    // Create fragments for this item from the item definition
     for (int i = 0; i < ItemDef->Fragments.Num(); i++) {
         auto FragmentSource = ItemDef->Fragments[i];
         if (!FragmentSource) {
@@ -137,24 +122,13 @@ void UMythicItemInstance::AddFragment(TObjectPtr<UItemFragment> FragmentSource) 
     checkf(owner->HasAuthority(), TEXT("Only the server can add fragments to an item instance"));
 
     UItemFragment *Fragment = NewObject<UItemFragment>(this, FragmentSource->GetClass(), NAME_None, RF_NoFlags, FragmentSource);
-    Fragment->SetOwner(owner); // this object's owner will be responsible for replicating it
+    Fragment->SetOwner(owner);
 
     ItemFragments.Add(Fragment);
 
     Fragment->OnInstanced(this);
 }
 
-/*
-* Item Instance Activation Flow - Server Side
-* ------------------------------
-* 1. Called by InventorySlot when slot becomes active
-* 2. Iterates through all fragments
-* 3. Calls OnItemActivated() on each fragment
-* 4. Used for gameplay effects like:
-*    - Granting abilities
-*    - Applying stat modifiers
-*    - Triggering gameplay events
-*/
 void UMythicItemInstance::OnActiveItem() {
     for (int i = 0; i < ItemFragments.Num(); i++) {
         if (ItemFragments[i] == nullptr) { continue; }
@@ -163,23 +137,12 @@ void UMythicItemInstance::OnActiveItem() {
 }
 
 void UMythicItemInstance::OnInactiveItem() {
-    for (int i = 0; i < ItemFragments.Num(); i++) {
+    for (int i = ItemFragments.Num() - 1; i >= 0; i--) {
         if (ItemFragments[i] == nullptr) { continue; }
         ItemFragments[i]->OnItemDeactivated(this);
     }
 }
 
-/*
-* Item Instance Activation Flow - Client Side
-* ------------------------------
-* 1. Called by InventorySlot's ClientActivateSlot
-* 2. Iterates through all fragments
-* 3. Calls OnClientItemActivated() on each fragment
-* 4. Used for visual effects like:
-*    - Playing animations
-*    - Spawning particle effects
-*    - Updating UI elements
-*/
 void UMythicItemInstance::OnClientActiveItem() {
     for (int i = 0; i < ItemFragments.Num(); i++) {
         if (ItemFragments[i] == nullptr) { continue; }
@@ -187,17 +150,6 @@ void UMythicItemInstance::OnClientActiveItem() {
     }
 }
 
-/*
-* Item Instance Deactivation Flow - Client Side
-* ------------------------------
-* 1. Called by InventorySlot's ClientDeactivateSlot
-* 2. Iterates through all fragments
-* 3. Calls OnClientItemDeactivated() on each fragment
-* 4. Used for cleaning up visual effects like:
-*    - Stopping animations
-*    - Removing particle effects
-*    - Reverting UI elements
-*/
 void UMythicItemInstance::OnClientInactiveItem() {
     for (int i = 0; i < ItemFragments.Num(); i++) {
         if (ItemFragments[i] == nullptr) { continue; }
@@ -231,19 +183,16 @@ AActor *UMythicItemInstance::GetInventoryOwner() const {
 void UMythicItemInstance::AddTag(const FGameplayTag &Tag) {
     checkf(this->GetOwningActor()->HasAuthority(), TEXT("Only the server can add tags to an item instance"));
 
-    //check if the tag is already present
     if (HasTag(Tag)) {
         return;
     }
 
-    //add the tag
     ItemTags.AddTag(Tag);
 }
 
 void UMythicItemInstance::RemoveTag(const FGameplayTag &Tag) {
     checkf(this->GetOwningActor()->HasAuthority(), TEXT("Only the server can remove tags from an item instance"));
 
-    //remove the tag
     ItemTags.RemoveTag(Tag);
 }
 
@@ -273,18 +222,13 @@ void UMythicItemInstance::ServerApplyTransform(const FGameplayTag &NewItemType,
             ItemTags.AddTag(T);
         }
     }
-    // The base ItemType lives on the (shared) definition and is immutable; the effective type is the
-    // union of the definition type and the runtime tags (see GetTypeProbe), so a type change is expressed
-    // by adding the new type as a runtime tag (and/or swapping the definition below).
     if (NewItemType.IsValid() && !ItemTags.HasTag(NewItemType)) {
         ItemTags.AddTag(NewItemType);
     }
     if (OptionalNewDef) {
-        ItemDefinition = OptionalNewDef; // replicated (ReplicatedUsing=OnRep_ItemDefinition)
+        ItemDefinition = OptionalNewDef;
     }
 
-    // ItemTags has no OnRep, so a tag-only transform must explicitly drive the UI refresh. Notify exactly
-    // once when slotted; when detached (mid-route) the routing slot-insert fires the refresh instead.
     if (OwningInventory) {
         OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
     }
@@ -295,8 +239,6 @@ bool UMythicItemInstance::isStackableWith(const UMythicItemInstance *Other) cons
         return false;
     }
 
-    // Guard against null Other and fragment-count mismatch before indexing Other->ItemFragments[i].
-    // (Transformed-definition items carry a different fragment schema and are correctly non-stackable.)
     if (!Other) {
         return false;
     }
@@ -366,6 +308,24 @@ void UMythicItemInstance::OnRep_OwningInventory() {
 }
 
 void UMythicItemInstance::OnRep_SlotIndex() {
+    if (OwningInventory && SlotIndex != INDEX_NONE) {
+        OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
+    }
+}
+
+void UMythicItemInstance::OnRep_MarkedJunk() {
+    if (OwningInventory && SlotIndex != INDEX_NONE) {
+        OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
+    }
+}
+
+void UMythicItemInstance::ServerSetMarkedJunk(bool bJunk) {
+    checkf(GetOwningActor() && GetOwningActor()->HasAuthority(), TEXT("Only the server can set the junk flag on an item instance"));
+
+    if (bMarkedJunk == bJunk) {
+        return;
+    }
+    bMarkedJunk = bJunk;
     if (OwningInventory && SlotIndex != INDEX_NONE) {
         OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
     }

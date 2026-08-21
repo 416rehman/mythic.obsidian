@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -13,9 +12,6 @@ struct FTrackedDestructibleDataArray;
 class UMythicResourceManagerComponent;
 class URewardManager;
 class UWorldTierAttributes;
-/**
- * 
- */
 UCLASS(Config = Game, Abstract, Blueprintable, BlueprintType)
 class MYTHIC_API AMythicGameState : public AGameStateBase, public IAbilitySystemInterface {
     GENERATED_BODY()
@@ -122,17 +118,32 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic")
     uint8 MaxWorldTier = 4;
 
+    // Highest World Tier ever reached (monotonic — never decreases). Replicated for UI. Advanced via AdvanceWorldTier;
+    // seeded from the starting/loaded WorldTier in BeginPlay so it is never below the current tier.
+    UPROPERTY(BlueprintReadOnly, Replicated, Category = "Mythic")
+    uint8 HighestWorldTier = 0;
+
     void SetWorldTier(uint8 NewWorldTier);
+
+    static uint8 ComputeAdvancedWorldTier(uint8 CurrentTier, uint8 MaxTier) {
+        return FMath::Min<uint8>(static_cast<uint8>(CurrentTier + 1), MaxTier);
+    }
+
+    static uint8 ComputeHighestTier(uint8 PrevHighest, uint8 NewTier) { return FMath::Max(PrevHighest, NewTier); }
+
+    // SERVER: advance the world tier by one (clamped at MaxWorldTier), update the monotonic HighestWorldTier, and
+    // reapply the tier attributes effect (so ExperienceGainMultiplier etc. refresh) via SetWorldTier.
+    // NOTE: the design TRIGGER (what content raises the tier — a capstone/boss-clear reward) is NOT wired yet; this is
+    // currently only reachable via the MythAdvanceWorldTier dev console command.
+    UFUNCTION(BlueprintCallable, Category = "Mythic")
+    void AdvanceWorldTier();
 
     AMythicGameState(const FObjectInitializer &ObjectInitializer = FObjectInitializer::Get());
 
-    //~AActor interface
     virtual void PostInitializeComponents() override;
     virtual void BeginPlay() override;
 
-    //~IAbilitySystemInterface
     virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override;
-    //~End of IAbilitySystemInterface
 
     // Gets the ability system component used for game wide things
     UFUNCTION(BlueprintCallable, Category = "Mythic")
@@ -140,6 +151,5 @@ public:
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
-    // Returns array of all the tracked destructibles
     TArray<FTrackedDestructibleData> GetTrackedDestructibles() const;
 };

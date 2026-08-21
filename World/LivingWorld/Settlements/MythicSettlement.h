@@ -1,5 +1,3 @@
-// Mythic Living World — Settlement System
-// Spline-based settlement actors that seed territory and drive population spawning.
 
 #pragma once
 
@@ -16,14 +14,7 @@ class UInstancedStaticMeshComponent;
 class UStaticMesh;
 class UMaterialInterface;
 
-// ─────────────────────────────────────────────────────────────
-// Settlement Data — Runtime state for a single settlement
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Tracks a persistent point-of-interest role within a settlement (e.g., Blacksmith, Innkeeper).
- * When the NPC holding this role dies, the slot is vacated and a succession timer begins.
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicShopSlot {
     GENERATED_BODY()
@@ -53,16 +44,7 @@ struct MYTHIC_API FMythicShopSlot {
     uint8 OwningPlayerIndex = 0;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Settlement Economy — the settlement's economic TYPE
-// ─────────────────────────────────────────────────────────────
 
-/**
- * The economic character of a settlement. Drives which civilian ROLES its ambient population derives (farmers in a
- * Farming town, merchants in a Trade hub, miners/laborers in a Mining outpost, etc.). Generic = derive from the
- * governing faction's base production. Authored per-settlement in the editor; falls back to faction production when
- * left Generic. The single authoritative definition (no other slice redefines this enum).
- */
 UENUM(BlueprintType)
 enum class EMythicSettlementEconomy : uint8 {
     Generic = 0 UMETA(DisplayName = "Generic"),
@@ -74,15 +56,7 @@ enum class EMythicSettlementEconomy : uint8 {
     COUNT UMETA(Hidden)
 };
 
-// ─────────────────────────────────────────────────────────────
-// Spawn-Point Purpose — what KIND of NPC a generated spawn point hosts
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Classifies a settlement spawn point so the population spawner can place the right KIND of NPC at it (peaceful
- * townsfolk at Civilian points, town watch at Guard points, hostile occupants at Enemy points in a bandit camp). Single
- * authoritative definition (no other slice redefines this enum). Any matches a desired purpose as a fallback.
- */
 UENUM(BlueprintType)
 enum class EMythicSpawnPointPurpose : uint8 {
     Civilian = 0 UMETA(DisplayName = "Civilian"),
@@ -92,17 +66,7 @@ enum class EMythicSpawnPointPurpose : uint8 {
     COUNT UMETA(Hidden)
 };
 
-// ─────────────────────────────────────────────────────────────
-// Spawn Point — a precomputed, navmesh-valid tagged anchor
-// ─────────────────────────────────────────────────────────────
 
-/**
- * A single navmesh-validated spawn anchor inside a settlement, computed once at BeginPlay via MythicPlacement.
- * The population spawner anchors an NPC's body here (the embodiment fast-path: ActorSpawnProcessor skips the full
- * project+scatter pipeline and only re-tests occupancy). NOT serialized — these are runtime placement anchors derived
- * from the live navmesh; entity identity is the NameHash, never the position, so a save/load that regenerates them at
- * different exact positions does not break any NPC's identity.
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicSpawnPoint {
     GENERATED_BODY()
@@ -120,10 +84,6 @@ struct MYTHIC_API FMythicSpawnPoint {
     EMythicSpawnPointPurpose Purpose = EMythicSpawnPointPurpose::Civilian;
 };
 
-/**
- * Runtime data for a settlement. Populated from the settlement actor's
- * editor-configured properties + spline rasterization results.
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicSettlementData {
     GENERATED_BODY()
@@ -188,20 +148,12 @@ struct MYTHIC_API FMythicSettlementData {
     UPROPERTY(BlueprintReadOnly, Category = "Population", Transient)
     TArray<FMythicSpawnPoint> SpawnPoints;
 
-    /** Get the number of territory cells this settlement covers */
     int32 GetCellCount() const { return RasterizedCells.Num(); }
 
-    /** Get the number of generated spawn points (0 ⇒ cell-center placement fallback). */
     int32 GetSpawnPointCount() const { return SpawnPoints.Num(); }
 };
 
-// ─────────────────────────────────────────────────────────────
-// Settlement Settings — Global defaults
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Global settlement defaults. Referenced by the Living World Settings data asset.
- */
 UCLASS(BlueprintType, Const)
 class MYTHIC_API UMythicSettlementSettings : public UDataAsset {
     GENERATED_BODY()
@@ -220,21 +172,7 @@ public:
     int32 MinSettlementCells = 1;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Settlement Actor — World-placed settlement with spline boundary
-// ─────────────────────────────────────────────────────────────
 
-/**
- * A settlement placed in the world by level designers.
- *
- * The actor uses a USplineComponent to define the settlement boundary.
- * Designers draw the spline around the settlement area in the editor.
- * On BeginPlay, the spline polygon is rasterized to territory grid cells,
- * and the settlement registers with the Living World Subsystem.
- *
- * Settlements seed territory, drive population spawning, and provide
- * zone-entry detection for "Welcome to..." notifications.
- */
 UCLASS(Blueprintable, meta = (DisplayName = "Settlement"))
 class MYTHIC_API AMythicSettlement : public AActor {
     GENERATED_BODY()
@@ -242,7 +180,6 @@ class MYTHIC_API AMythicSettlement : public AActor {
 public:
     AMythicSettlement();
 
-    // ─── Editor-Configured Properties ─────────────────────
 
     /** Settlement display name shown to players */
     UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Settlement")
@@ -281,7 +218,6 @@ public:
     UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Population", meta = (ClampMin = "1"))
     int32 SpawnPointsPerCell = 4;
 
-    // ─── Editor Spawn-Cell Preview ────────────────────────
 
     /**
      * When true (default), the editor viewport shows one translucent cube per territory cell this settlement's spline
@@ -291,68 +227,28 @@ public:
     UPROPERTY(EditAnywhere, Category = "Spawn Preview")
     bool bShowSpawnCellsInEditor = true;
 
-    // ─── Runtime Access ───────────────────────────────────
 
-    /** Get the runtime settlement data (valid after BeginPlay) */
     const FMythicSettlementData &GetSettlementData() const { return SettlementData; }
 
-    /** Get the spline component defining the settlement boundary */
     USplineComponent *GetBoundarySpline() const { return BoundarySpline; }
 
-    /**
-     * Rasterize the spline boundary into territory grid cells.
-     * Called during initialization. Populates SettlementData.RasterizedCells.
-     * @param TerritoryGrid The grid to use for coordinate conversion
-     */
     void RasterizeSplineToCells(const UMythicTerritoryGrid *TerritoryGrid);
 
-    /**
-     * Pure-math rasterizer shared by the runtime path (RasterizeSplineToCells) AND the edit-time spawn preview
-     * (OnConstruction), so the editor footprint can NEVER drift from the cells PopulationSpawnerProcessor actually
-     * spawns into. Replicates UMythicTerritoryGrid::WorldToCell / CellToWorld / IsValidCoord verbatim (float casts,
-     * cell CENTER point-in-polygon, bounds-clamped AABB) using the four raw grid params instead of a grid object.
-     * Samples the closed spline every 100cm into a polygon and tests each candidate cell center. Out is reset first;
-     * a spline with <3 points yields no cells.
-     */
     static void RasterizeSplineCells(const USplineComponent *Spline, float CellWorldSize, FVector2D WorldOrigin,
                                      int32 GridWidth, int32 GridHeight, TArray<FMythicCellCoord> &OutCells);
 
-    /**
-     * Compute a settlement's center cell: the rasterized cell nearest the cells' centroid (guaranteed to be an ACTUAL
-     * settlement cell, so it's valid even for concave/L-shaped boundaries where the raw centroid could fall outside).
-     * Empty input → (0,0). Pure + static so it's unit-testable. CenterCell drives the Socialize gather-point
-     * (AIController — "converge where people are") — it was previously never assigned (always (0,0) → socializing NPCs
-     * converged on the grid's origin corner instead of the town center). (It was also the v1 save key, since replaced
-     * by SettlementTag.) RasterizeSplineToCells sets it from the rasterized cells.
-     */
     static FMythicCellCoord ComputeCenterCell(const TArray<FMythicCellCoord> &Cells);
 
-    /**
-     * Derive the purpose of the Index-th spawn point in a cell. Pure + static so it's unit-testable and deterministic.
-     * A hostile camp's points are all Enemy. Otherwise a deterministic per-(cell,index) roll picks Guard with a fixed
-     * minority share (~25%), else Civilian — so a town gets a sprinkling of watch posts among its civilian anchors
-     * without any RNG/wall-clock. Salt: (HashCombine(GetTypeHash(Cell), 0x53504E54 ^ Index) & 0xFFFFFF)/16777216.
-     * @param Cell     The cell the point lives in.
-     * @param Index    The point's index within the cell (0..PerCell-1).
-     * @param bHostile The settlement's hostility flag.
-     */
     static EMythicSpawnPointPurpose DerivePurpose(const FMythicCellCoord &Cell, int32 Index, bool bHostile);
 
-    /**
-     * Transfer this settlement to a new governing faction.
-     * Updates settlement data, does NOT re-seed territory (caller responsibility).
-     */
     void TransferToFaction(FMythicFactionId NewFaction);
 
 protected:
     virtual void BeginPlay() override;
 
-    /** Edit-time hook: re-runs whenever the actor is placed, moved, or its spline/properties change. Rebuilds the
-     *  editor spawn-cell preview so it always reflects the current spline + grid settings. */
     virtual void OnConstruction(const FTransform &Transform) override;
 
 #if WITH_EDITOR
-    /** Rebuild the preview when bShowSpawnCellsInEditor or any other property is tweaked in the details panel. */
     virtual void PostEditChangeProperty(FPropertyChangedEvent &PropertyChangedEvent) override;
 #endif
 
@@ -365,37 +261,17 @@ private:
     UPROPERTY(VisibleAnywhere, Category = "Spawn Preview")
     TObjectPtr<UInstancedStaticMeshComponent> SpawnCellsISM;
 
-    /** Unit cube + its base material, resolved in the constructor (same assets as the runtime debug actor). */
     UPROPERTY()
     TObjectPtr<UStaticMesh> PreviewCellMesh;
 
     UPROPERTY()
     TObjectPtr<UMaterialInterface> PreviewCellMaterial;
 
-    /** Runtime settlement data (populated on BeginPlay from editor properties + rasterization) */
     FMythicSettlementData SettlementData;
 
-    /** Edit-time: load the territory grid settings, rasterize this settlement's spline, and place one translucent cube
-     *  instance per covered cell at the cell's world center (sized to the cell). Clears the instances and bails on any
-     *  missing settings / no spline / 0 cells — never crashes the editor. Drawn at the CELL footprint granularity (the
-     *  spawner targets each covered cell; population spawn position is the deterministic cell center, see .cpp note). */
     void RebuildSpawnCellPreview();
 
-    /**
-     * Point-in-polygon test for the closed spline (ray casting / even-odd rule). Static + pure so it's reusable by the
-     * shared static rasterizer (no `this` needed).
-     */
     static bool IsPointInsideSpline(const FVector2D &TestPoint, const TArray<FVector2D> &SplinePolygon);
 
-    /**
-     * Generate this settlement's navmesh-validated tagged spawn points (server, BeginPlay, game thread, navmesh-ready).
-     * For each rasterized cell × SpawnPointsPerCell, calls MythicPlacement::FindValidSpawn near the cell center and, on
-     * success, stores the validated foot position + cell + a DerivePurpose-tagged purpose into SettlementData.SpawnPoints.
-     * Skips points that fail placement (navmesh not ready / fully built-over) — a sparse or empty result is fine: the
-     * population spawner falls back to the cell-center path for any cell with no matching point. Called from BeginPlay
-     * AFTER RasterizeSplineToCells (needs the rasterized cells) and BEFORE RegisterSettlement (so the registry's copy
-     * carries the points). No-op without a valid grid/world.
-     * @param Grid The territory grid (cell→world conversion + cell size for scatter radius).
-     */
     void GenerateSpawnPoints(const UMythicTerritoryGrid *Grid);
 };

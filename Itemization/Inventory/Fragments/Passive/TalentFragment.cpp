@@ -1,9 +1,9 @@
-// 
 
 #include "TalentFragment.h"
 #include "AbilitySystemComponent.h"
+#include "GAS/Abilities/MythicGameplayAbility.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
-#include "Itemization/MythicLootSettings.h" // data-driven per-rarity talent count
+#include "Itemization/MythicLootSettings.h"
 #include "System/MythicAssetManager.h"
 
 #if WITH_EDITOR
@@ -17,49 +17,89 @@ bool UTalentFragment::IsValidFragment(FText &OutErrorMessage) const {
     }
 
     for (auto TDef : Pool->TalentDefs) {
-        if (!TDef->AbilityDef.IsValid(OutErrorMessage)) {
+        if (!TDef) {
+            continue;
+        }
+
+        if (!TDef->HasAnyPayload()) {
+            OutErrorMessage = FText::FromString(FString::Printf(
+                TEXT("Talent '%s' does nothing: set AbilityDef.Ability."),
+                *TDef->Name.ToString()));
             return false;
+        }
+        if (TDef->AbilityDef.Ability && !TDef->AbilityDef.IsValid(OutErrorMessage)) {
+            return false;
+        }
+
+        if (const UMythicGameplayAbility *AbilityCDO =
+                TDef->AbilityDef.Ability ? Cast<UMythicGameplayAbility>(TDef->AbilityDef.Ability->GetDefaultObject()) : nullptr) {
+            if (AbilityCDO->GetActivationPolicy() != EMythicAbilityActivationPolicy::OnSpawn) {
+                UE_LOG(Myth, Warning,
+                       TEXT("UTalentFragment::IsValidFragment: talent ability '%s' ActivationPolicy is not OnSpawn — talents must be passive."),
+                       *GetNameSafe(TDef->AbilityDef.Ability.Get()));
+            }
         }
     }
 
     return Super::IsValidFragment(OutErrorMessage);
 }
 #endif
-void UTalentFragment::RollTalents(UTalentPool *TalentPool, int NumTalentsToRoll) {
-    // In case, there are not enough talents to add, or the item level is too low, clamp to however many affixes there are.
-    int ClampedQty = FMath::Min(NumTalentsToRoll, TalentPool->TalentDefs.Num());
+int32 UTalentFragment::ResolveTalentCount(int32 Rarity, const UMythicLootSettings *LootSettings) {
+    if (LootSettings && LootSettings->TalentCountByRarity.IsValidIndex(Rarity)) {
+        return LootSettings->TalentCountByRarity[Rarity];
+    }
+    if (Rarity >= Mythic) {
+        return 2;
+    }
+    return Rarity >= Rare ? 1 : 0;
+}
 
-    // Get ClampedQty unique random indexes
-    TArray<int> RandomIndexes;
-    TArray<int> AvailableIndexes;
+TArray<int32> UTalentFragment::SampleWithoutReplacement(const TArray<int32> &EligibleIndexes, int32 NumToPick, FRandomStream &Rng) {
+    TArray<int32> Picked;
+    const int32 ClampedQty = FMath::Clamp(NumToPick, 0, EligibleIndexes.Num());
+    if (ClampedQty <= 0) {
+        return Picked;
+    }
+    TArray<int32> Available = EligibleIndexes;
+    Picked.Reserve(ClampedQty);
+    for (int32 i = 0; i < ClampedQty && Available.Num() > 0; i++) {
+        const int32 Pos = Rng.RandRange(0, Available.Num() - 1);
+        Picked.Add(Available[Pos]);
+        Available.RemoveAtSwap(Pos);
+    }
+    return Picked;
+}
 
-    // Create array of all possible indexes
-    for (int i = 0; i < TalentPool->TalentDefs.Num(); i++) {
-        AvailableIndexes.Add(i);
+void UTalentFragment::RollTalents(UTalentPool *TalentPool, int NumTalentsToRoll, EItemRarity ItemRarity, const FGameplayTagContainer &TypeProbe) {
+    if (!TalentPool) {
+        return;
     }
 
-    // Sample without replacement
-    RandomIndexes.Reserve(ClampedQty);
-    for (int i = 0; i < ClampedQty && AvailableIndexes.Num() > 0; i++) {
-        int RandomPos = FMath::RandRange(0, AvailableIndexes.Num() - 1);
-        RandomIndexes.Add(AvailableIndexes[RandomPos]);
-        AvailableIndexes.RemoveAtSwap(RandomPos);
+    TArray<int32> EligibleIndexes;
+    EligibleIndexes.Reserve(TalentPool->TalentDefs.Num());
+    for (int32 i = 0; i < TalentPool->TalentDefs.Num(); i++) {
+        const UTalentDefinition *Def = TalentPool->TalentDefs[i];
+        if (Def && IsTalentEligible(ItemRarity, Def->MinRarity) && IsTalentAllowedOnItem(Def->AllowedItemTypes, TypeProbe)) {
+            EligibleIndexes.Add(i);
+        }
     }
 
-    for (auto RandIdx : RandomIndexes) {
+    FRandomStream Rng(FMath::Rand());
+    const TArray<int32> PickedIndexes = SampleWithoutReplacement(EligibleIndexes, NumTalentsToRoll, Rng);
+
+    for (int32 RandIdx : PickedIndexes) {
         auto TalentAtIdx = TalentPool->TalentDefs[RandIdx];
         if (!TalentAtIdx) {
             UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInstanced: Invalid talent definition."));
             continue;
         }
 
-        auto Ability = TalentAtIdx->AbilityDef.Ability;
-        if (!Ability) {
-            UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInstanced: Invalid ability definition."));
+        if (!TalentAtIdx->HasAnyPayload()) {
+            UE_LOG(Myth, Error, TEXT("UTalentFragment::OnInstanced: talent '%s' grants nothing (no ability)."),
+                   *TalentAtIdx->Name.ToString());
             continue;
         }
 
-        // Add the ability
         this->TalentRuntimeReplicatedData.RolledTalents.Add(FTalentSpec(TalentAtIdx->AbilityDef, TalentAtIdx, false));
     }
 }
@@ -73,7 +113,6 @@ void UTalentFragment::OnInstanced(UMythicItemInstance *ItemInstance) {
         return;
     }
 
-    // LoadAsync handles already-loaded case internally (immediate callback)
     UMythicAssetManager::LoadAsync(this, this->TalentBuildData.TalentPool,
                                    [this, ItemInstance](UTalentPool *TalentPool) {
                                        if (!TalentPool) {
@@ -87,16 +126,12 @@ void UTalentFragment::OnInstanced(UMythicItemInstance *ItemInstance) {
                                        }
 
                                        const int32 RarityValue = ItemInstance->GetItemDefinition()->Rarity;
-                                       // Data-driven talent count per rarity (Project Settings -> Game -> Mythic Loot
-                                       // Settings, TalentCountByRarity). GetDefault is a world-independent CDO read,
-                                       // safe in this async-load callback. Bounds-guarded fallback to the prior
-                                       // hardcoded mapping (Legendary=1, Mythic=2, else 0) for an out-of-range rarity.
                                        const UMythicLootSettings *LootSettings = GetDefault<UMythicLootSettings>();
-                                       const int32 NumTalentsToRoll =
-                                           (LootSettings && LootSettings->TalentCountByRarity.IsValidIndex(RarityValue))
-                                               ? LootSettings->TalentCountByRarity[RarityValue]
-                                               : (RarityValue == Legendary ? 1 : RarityValue == Mythic ? 2 : 0);
-                                       RollTalents(TalentPool, NumTalentsToRoll);
+                                       const int32 NumTalentsToRoll = ResolveTalentCount(RarityValue, LootSettings);
+
+                                       FGameplayTagContainer TypeProbe;
+                                       ItemInstance->GetTypeProbe(TypeProbe);
+                                       RollTalents(TalentPool, NumTalentsToRoll, static_cast<EItemRarity>(RarityValue), TypeProbe);
                                    });
 }
 
@@ -108,7 +143,6 @@ void UTalentFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
         return;
     }
 
-    // Grant the ability
     ServerHandleGrantAbility();
 }
 
@@ -120,11 +154,9 @@ void UTalentFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
         return;
     }
 
-    // Remove the ability
     ServerRemoveAbility();
 }
 
-// Items with Talents cannot be stacked
 bool UTalentFragment::CanBeStackedWith(const UItemFragment *Other) const {
     return false;
 }
@@ -133,7 +165,7 @@ void UTalentFragment::ServerRemoveAbility_Implementation() {
     for (auto &TalentSpec : this->TalentRuntimeReplicatedData.RolledTalents) {
         if (!TalentSpec.AbilitySpec.Handle.IsValid()) {
             UE_LOG(Myth, Warning, TEXT("UTalentFragment::ServerHandleInHandRemoveAbility_Implementation: No ability to remove."));
-            continue; // skip an ungranted talent, but still remove the others on a multi-talent item
+            continue;
         }
 
         if (!this->ParentItemInstance) {
@@ -150,7 +182,6 @@ void UTalentFragment::ServerRemoveAbility_Implementation() {
         ASC->ClearAbility(TalentSpec.AbilitySpec.Handle);
         UE_LOG(Myth, Warning, TEXT("UGameplayAbilityFragment::OnInactiveItem: Canceled Ability"));
 
-        // Clear the ability
         TalentSpec.AbilitySpec = FGameplayAbilitySpec();
     }
 }
@@ -181,6 +212,7 @@ void UTalentFragment::ServerHandleGrantAbility_Implementation() {
         }
 
         auto AbilityDef = TalentDefinition->AbilityDef;
+
         if (!AbilityDef.Ability) {
             UE_LOG(Myth, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Invalid ability definition."));
             continue;
@@ -196,14 +228,9 @@ void UTalentFragment::ServerHandleGrantAbility_Implementation() {
         auto NewAbilityHandle = ASC->GiveAbility(AbilitySpec);
         if (!NewAbilityHandle.IsValid()) {
             UE_LOG(Myth, Error, TEXT("UTalentFragment::ServerHandleGrantAbility_Implementation: Failed to grant ability."));
-            continue; // a failed grant must not skip the remaining talents on a multi-talent (Mythic = 2) item
+            continue;
         }
 
-        // Store the handle GiveAbility actually ASSIGNED — not the handle-less local spec (GiveAbility returns the
-        // handle, it does not back-patch the argument). Without this the stored spec's Handle stays invalid, so
-        // ServerRemoveAbility's ClearAbility no-ops (talent abilities are NEVER removed on unequip) AND re-equipping
-        // re-grants another copy each time (the IsValid() guard above never trips) — an item-swap exploit that stacks
-        // abilities on the ASC. Capturing the real handle fixes BOTH removal and the re-grant guard.
         AbilitySpec.Handle = NewAbilityHandle;
         TalentSpec.AbilitySpec = AbilitySpec;
     }

@@ -1,4 +1,3 @@
-// 
 
 
 #include "FamilyDefinition.h"
@@ -21,10 +20,8 @@ bool UFamilyDefinition::SetFamilyForNPCDef(const TSoftObjectPtr<UNPCDefinition> 
         return false;
     }
 
-    // Update reference
     LoadedMember->FamilyDef = NewFam;
 
-    // Save the modified asset
     FString PathName = LoadedMember->GetPathName();
     UPackage *Package = LoadedMember->GetOutermost();
     if (Package) {
@@ -45,11 +42,9 @@ EDataValidationResult UFamilyDefinition::IsDataValid(FDataValidationContext &Con
 
     bool bIsAlreadyInSet = false;
 
-    // If father is valid, add it to the set
     if (Father.IsValid()) {
         UniqueMembers.Add(Father.Get());
     }
-    // If mother is valid, add it to the set
     if (Mother.IsValid()) {
         UniqueMembers.Add(Mother.Get(), &bIsAlreadyInSet);
         if (bIsAlreadyInSet) {
@@ -59,7 +54,6 @@ EDataValidationResult UFamilyDefinition::IsDataValid(FDataValidationContext &Con
         }
     }
 
-    // Add all children to the set
     for (const TSoftObjectPtr<UNPCDefinition> &Child : Children) {
         UniqueMembers.Add(Child.Get(), &bIsAlreadyInSet);
         if (bIsAlreadyInSet) {
@@ -133,7 +127,6 @@ void UFamilyDefinition::ForceSetFamilyForMembers() {
     SetFamilyForUniqueMember(Father, this, UniqueMembers);
     SetFamilyForUniqueMember(Mother, this, UniqueMembers);
 
-    // Children
     for (const TSoftObjectPtr<UNPCDefinition> &MemberAsset : Children) {
         SetFamilyForNPCDef(MemberAsset, this);
     }
@@ -143,7 +136,6 @@ void UFamilyDefinition::ForceUnsetFamilyForMembers() {
     SetFamilyForNPCDef(Father, nullptr);
     SetFamilyForNPCDef(Mother, nullptr);
 
-    // Children
     for (const TSoftObjectPtr<UNPCDefinition> &MemberAsset : Children) {
         SetFamilyForNPCDef(MemberAsset, nullptr);
     }

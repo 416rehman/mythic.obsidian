@@ -10,15 +10,11 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnCooldownChanged, FGameplayTag, CooldownTag, float, TimeRemaining, float, Duration);
 
-/**
- * Blueprint node to automatically register a listener for changes (Begin and End) to an array of Cooldown tags.
- * Useful to use in UI.
- */
 UCLASS(BlueprintType, meta = (ExposedAsyncProxy = AsyncTask))
 class MYTHIC_API UAsyncTaskCooldownChanged : public UBlueprintAsyncActionBase
 {
 	GENERATED_BODY()
-	
+
 public:
 	UPROPERTY(BlueprintAssignable)
 	FOnCooldownChanged OnCooldownBegin;

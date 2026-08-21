@@ -3,41 +3,54 @@
 #include "AttributeSet.h"
 #include "Itemization/Inventory/Fragments/FragmentTypes.h"
 #include "Itemization/Inventory/Fragments/ItemFragment.h"
+#include "Itemization/Affixes/MythicAffixPoolDataAsset.h"
 #include "Net/UnrealNetwork.h"
 #include "AffixesFragment.generated.h"
+
 
 USTRUCT(BlueprintType, Blueprintable)
 struct FRolledAffix : public FRolledAttributeSpec {
     GENERATED_BODY()
 
-    // Whether the affix can be refined. By default, the Forge's "Refine" system will lock these after it has refined 1 of the affixes. 
+    // Whether the affix can be refined. By default, the Forge's "Refine" system will lock these after it has refined 1 of the affixes.
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess=true))
     bool bIsLocked = false;
 
-    // Constructor
+    // C1 — roll quality for tooltips. When this affix was rolled from a TIERED pool, TierIndex is the chosen tier's
+    // index into its def's ladder (0 = strongest rung authored first is up to the designer) and TierLabel is that
+    // tier's designer label ("Superior" / "T2"). -1 / empty for a legacy flat roll (no tier concept). Replicated with
+    // the affix (part of the default per-property struct replication) so the owning client's tooltip can show it.
+    UPROPERTY(BlueprintReadOnly)
+    int32 TierIndex = -1;
+
+    UPROPERTY(BlueprintReadOnly)
+    FText TierLabel;
+
     FRolledAffix(FGameplayAttribute Attribute, int ItemLvl, FRollDefinition &RollDef, bool IsLocked = true) : FRolledAttributeSpec(
         Attribute, ItemLvl, RollDef) {
         bIsLocked = IsLocked;
     }
 
-    // Default Constructor
     FRolledAffix() : FRolledAttributeSpec() {
         bIsLocked = false;
     }
 
-    // Custom serialization - only for save games
     bool Serialize(FArchive &Ar) {
-        // For assets, use default serialization (parent handles IsSaveGame check too)
         if (!Ar.IsSaveGame()) {
             return false;
         }
         FRolledAttributeSpec::Serialize(Ar);
         Ar << bIsLocked;
+        Ar << TierIndex;
+        FString TierLabelStr = Ar.IsSaving() ? TierLabel.ToString() : FString();
+        Ar << TierLabelStr;
+        if (Ar.IsLoading()) {
+            TierLabel = FText::FromString(TierLabelStr);
+        }
         return true;
     }
 };
 
-// Enable custom serialization for FRolledAffix
 template <>
 struct TStructOpsTypeTraits<FRolledAffix> : TStructOpsTypeTraitsBase2<FRolledAffix> {
     enum {
@@ -55,12 +68,6 @@ struct FAffixesRuntimeReplicatedData {
     UPROPERTY(BlueprintReadWrite, SaveGame)
     TArray<FRolledAffix> RolledAffixes = TArray<FRolledAffix>();
 
-    // Per-item "equip OBJECTIVE event already fired" marker for NON-weapon gear (armor/accessories). Persists via the
-    // DEFAULT tagged-property SaveGame path — it is a top-level SaveGame bool on this struct (which has NO custom
-    // serializer; only its FRolledAffix elements do), so it genuinely restores TRUE and a re-equip-on-load skips the
-    // emit (no over-count). Mirrors UAttackFragment::bEquipEventEmitted (iter-23). WARNING: do NOT move it inside
-    // FRolledAffix / FRolledAttributeSpec — those custom serializers force bIsApplied=false on load, which would make
-    // this reset every load and re-fire the equip event. Set on the first genuine non-weapon equip; cleared on unequip.
     UPROPERTY(SaveGame)
     bool bEquipEventEmitted = false;
 
@@ -69,6 +76,20 @@ struct FAffixesRuntimeReplicatedData {
     // affixes are activated/rerolled). The replicated struct then carries only the rolled affix arrays.
     UPROPERTY(NotReplicated, BlueprintReadOnly)
     UAbilitySystemComponent *ASC = nullptr;
+
+    // C4 (crafting) — PERMANENT corruption flag ("Vaal"). Once set, EVERY future craft op is refused (CanApplyCraftOp
+    // denies with Corrupted). A top-level SaveGame bool on this struct persists via the DEFAULT tagged-property path
+    // (this struct has no custom serializer — only its FRolledAffix elements do), exactly like bEquipEventEmitted, and
+    // replicates with the struct so the owning client's tooltip can show "Corrupted".
+    UPROPERTY(BlueprintReadOnly, SaveGame)
+    bool bCorrupted = false;
+
+    // C4 (crafting) — additive item-level bonus from "Elevation" (RaiseItemLevel). The item instance's own ItemLevel is
+    // immutable (no public setter), so crafting tracks its raised level here; the EFFECTIVE crafting level = base
+    // ItemLevel + this bonus (clamped to the cap). A higher effective level unlocks higher affix tiers on subsequent
+    // Add / UpgradeTier ops. Persists (SaveGame) + replicates as a top-level field of this struct.
+    UPROPERTY(BlueprintReadOnly, SaveGame)
+    int32 ItemLevelBonus = 0;
 };
 
 USTRUCT(BlueprintType)
@@ -99,13 +120,16 @@ struct FAffixesBuildData {
     // Common = 1; Rare = 2; Epic = 3; Legendary = 4; Mythic = 5;
     UPROPERTY(EditDefaultsOnly)
     TMap<FGameplayAttribute, FRollDefinition> AffixPoolMap = TMap<FGameplayAttribute, FRollDefinition>();
+
+    // C1 — OPTIONAL tiered/weighted affix pool. When set (and non-empty), RollAffixes rolls from this pool instead of
+    // the flat AffixPoolMap above: item-level-gated tiers, per-tier weights, prefix/suffix budget derived from the
+    // rarity affix count, applicability filtered by the item's TypeProbe. When NULL (the default), the legacy flat
+    // AffixPoolMap roll is used, so unconfigured content behaves EXACTLY as before.
+    UPROPERTY(EditDefaultsOnly)
+    TObjectPtr<class UMythicAffixPoolDataAsset> TieredAffixPool = nullptr;
 };
 
 
-/**
- * AffixesFragment can be used to modify attributes without any additional logic.
- * It can be used to add core stats to an item, or to add random affixes to an item.
- */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
 class MYTHIC_API UAffixesFragment : public UItemFragment {
     GENERATED_BODY()
@@ -138,22 +162,16 @@ public:
     UPROPERTY(BlueprintReadOnly)
     FAffixesRuntimeServerOnlyData AffixesRuntimeServerOnlyData = FAffixesRuntimeServerOnlyData();
 
-    // Rolls the affixes for this item
     void RollAffixes(int ItemLevel, int Qty);
 
-    // Rolls the core affixes for this item
+    void RollAffixesTiered(int ItemLevel, int TotalCount, const FGameplayTagContainer &TypeProbe,
+                           const class UMythicAffixPoolDataAsset *Pool);
+
     void RollCoreAffixes(int ItemLevel);
 
-    // Applies affixes
     static void ApplyAffixes(UAbilitySystemComponent *ASC, TArray<FRolledAffix> &InRolledAffixes);
-    // Removes applied affixes
     static void RemoveAffixes(UAbilitySystemComponent *ASC, TArray<FRolledAffix> &InRolledAffixes);
 
-    /**
-     * The value that reverses a previously-applied attribute modifier of the given op: Additive → negate; Multiplicitive
-     * / Division → reciprocal. Returns false (no reversal possible) for a (near-)zero mult/div magnitude (1/0 = inf would
-     * poison the attribute) or an unsupported op (Override). Pure + static so the reversal math is unit-testable.
-     */
     static bool ComputeReversedModValue(TEnumAsByte<EGameplayModOp::Type> Modifier, float Value, float &OutReversed);
 
     // SERVER: re-roll the value of every UNLOCKED random affix (locked affixes AND core affixes — which roll
@@ -168,13 +186,17 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Affixes")
     void SetAffixLocked(int32 AffixIndex, bool bLocked);
 
-    // Checks if an affix is already rolled
+    // C4 (crafting) — is this item permanently corrupted (blocks all crafting ops)? Read on server + owning client.
+    UFUNCTION(BlueprintPure, Category = "Affixes")
+    bool IsCorrupted() const { return AffixesRuntimeReplicatedData.bCorrupted; }
+
+
     static bool IsAffixRolled(const FGameplayAttribute &Affix, TArray<FRolledAffix> &InRolledAffixes);
 
-    // Pure: should THIS affixes fragment drive the "equip N <type>" objective event on activation? True only when it is
-    // the CANONICAL affixes fragment on the item (GetFragment<UAffixesFragment>()==this — dedups multi-affixes items),
-    // the item is NOT a weapon (weapons already emit via UAttackFragment — avoids a double count on a weapon-with-affixes),
-    // and it hasn't already fired this equip (the per-item SaveGame marker). Static → unit-testable without a live item.
+    static bool ShouldApplyAffixes(bool bBroken);
+
+    void OnDurabilityBrokenStateChanged(bool bBroken);
+
     static bool ShouldEmitArmorEquipEvent(bool bIsCanonicalAffixesFragment, bool bItemHasWeaponFragment, bool bAlreadyEmitted);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {
@@ -182,7 +204,6 @@ public:
         REP_FRAGMENT_DATA(Affixes)
     }
 
-    //~ Overrides
 #if WITH_EDITOR
     virtual bool IsValidFragment(FText &OutErrorMessage) const override;
 #endif
@@ -191,5 +212,89 @@ public:
     virtual void OnItemDeactivated(UMythicItemInstance *ItemInstance) override;
 
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
-    //~
 };
+
+inline void UAffixesFragment::RollAffixesTiered(int ItemLevel, int TotalCount, const FGameplayTagContainer &TypeProbe,
+                                                const UMythicAffixPoolDataAsset *Pool) {
+    if (!Pool || Pool->Defs.Num() == 0 || TotalCount <= 0) {
+        return;
+    }
+
+    TArray<int32> EligibleDefs;
+    EligibleDefs.Reserve(Pool->Defs.Num());
+    for (int32 i = 0; i < Pool->Defs.Num(); ++i) {
+        const FMythicTieredAffixDef &Def = Pool->Defs[i];
+        if (!Def.Attribute.IsValid()) {
+            continue;
+        }
+        if (!Def.Applicability.IsEmpty() && !Def.Applicability.Matches(TypeProbe)) {
+            continue;
+        }
+        if (FMythicAffixTierMath::SumEligibleTierWeight(ItemLevel, Def.Tiers) <= 0.0f) {
+            continue;
+        }
+        EligibleDefs.Add(i);
+    }
+    if (EligibleDefs.Num() == 0) {
+        return;
+    }
+
+    const FMythicAffixBudget Budget = FMythicAffixTierMath::ComputeAffixBudget(TotalCount);
+    int32 PrefixAdded = 0;
+    int32 SuffixAdded = 0;
+
+    const int32 TotalCap = Budget.PrefixCap + Budget.SuffixCap;
+    for (int32 Guard = 0; (PrefixAdded + SuffixAdded) < TotalCap && Guard < 256; ++Guard) {
+        TArray<float, TInlineAllocator<16>> Weights;
+        TArray<int32, TInlineAllocator<16>> Candidates;
+        for (const int32 DefIdx : EligibleDefs) {
+            const FMythicTieredAffixDef &Def = Pool->Defs[DefIdx];
+            if (IsAffixRolled(Def.Attribute, this->AffixesRuntimeReplicatedData.RolledAffixes)) {
+                continue;
+            }
+            if (!FMythicAffixTierMath::BudgetAllows(Def.Group, PrefixAdded, SuffixAdded, Budget)) {
+                continue;
+            }
+            Weights.Add(FMythicAffixTierMath::SumEligibleTierWeight(ItemLevel, Def.Tiers));
+            Candidates.Add(DefIdx);
+        }
+        if (Candidates.Num() == 0) {
+            break;
+        }
+
+        const int32 Picked = FMythicAffixTierMath::WeightedPickDef(Weights, FMath::FRand());
+        if (Picked < 0) {
+            break;
+        }
+        const FMythicTieredAffixDef &Def = Pool->Defs[Candidates[Picked]];
+
+        const int32 TierIdx = FMythicAffixTierMath::SelectTierIndex(ItemLevel, Def.Tiers, FMath::FRand());
+        if (!Def.Tiers.IsValidIndex(TierIdx)) {
+            continue;
+        }
+        const FMythicAffixTier &Tier = Def.Tiers[TierIdx];
+
+        FRollDefinition RollDef;
+        RollDef.Min = Tier.Min;
+        RollDef.Max = Tier.Max;
+        RollDef.Modifier = Def.ModOp;
+        RollDef.LevelScaling = Tier.LevelScaling;
+
+        FRolledAffix NewAffix(Def.Attribute, ItemLevel, RollDef, false);
+        NewAffix.Value = FMythicAffixTierMath::RollValueInTier(Tier, ItemLevel, FMath::FRand());
+        if ((RollDef.Modifier == EGameplayModOp::Multiplicitive || RollDef.Modifier == EGameplayModOp::Division)
+            && FMath::IsNearlyZero(NewAffix.Value)) {
+            NewAffix.Value = KINDA_SMALL_NUMBER;
+        }
+        NewAffix.TierIndex = TierIdx;
+        NewAffix.TierLabel = Tier.TierLabel;
+
+        this->AffixesRuntimeReplicatedData.RolledAffixes.Add(NewAffix);
+        if (Def.Group == EMythicAffixGroup::Prefix) {
+            ++PrefixAdded;
+        }
+        else {
+            ++SuffixAdded;
+        }
+    }
+}

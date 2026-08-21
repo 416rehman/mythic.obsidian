@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -9,10 +8,6 @@
 #include "NPCDefinition.generated.h"
 
 class UFamilyDefinition;
-/**
- * NPC Definition - This is used to pre-define a SPECIFIC non-generic/random NPC. I.e., The King of the North, because he should always stay the same.
- * As opposed to randomly generating an NPC at runtime, this is a preset of a SPECIFIC NPC.
- */
 UCLASS(Blueprintable, BlueprintType)
 class MYTHIC_API UNPCDefinition : public UDataAsset {
     GENERATED_BODY()

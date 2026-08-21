@@ -1,10 +1,10 @@
-// 
 #include "ItemReward.h"
 
 #include "Mythic.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
 #include "Itemization/Loot/MythicLootManagerSubsystem.h"
+#include "Player/MythicPlayerController.h"
 
 bool UItemReward::Give(FRewardContext &Context) const {
     FItemRewardContext *ItemContext = static_cast<FItemRewardContext *>(&Context);
@@ -12,39 +12,53 @@ bool UItemReward::Give(FRewardContext &Context) const {
 
     auto ItemDef = this->Item;
     checkf(ItemDef, TEXT("ItemDef is null"));
-    
+
     checkf(ItemContext->PlayerController, TEXT("Player is null"));
 
-    // Get the MythicLootManager Subsystem
     auto MythicLootManager = ItemContext->PlayerController->GetGameInstance()->GetSubsystem<UMythicLootManagerSubsystem>();
     checkf(MythicLootManager, TEXT("MythicLootManager not found"));
-    
+
     auto ItemLvl = ItemContext->ItemLevel;
 
-    // If the drop is private, set the target player to the player controller
     APlayerController *TargetPlayer = ItemContext->bIsPrivate ? ItemContext->PlayerController : nullptr;
 
-    ///////////////// GIVE TO INVENTORY /////////////////////
     if (ItemContext->InventoryProvider) {
-        // Create the item instance and give it to the inventory
         auto WorldItem = MythicLootManager->CreateAndGive(ItemDef, this->Quantity, ItemContext->InventoryProvider, TargetPlayer, ItemContext->ItemLevel);
         if (WorldItem) {
             UE_LOG(Myth, Error, TEXT("RewardManager::RequestLootFromSource - No room in inventory so spawned the reward as world item instead"));
         }
+        NotifyCelebration(ItemContext->PlayerController);
         return true;
     }
 
-    ///////////////// SPAWN IN WORLD /////////////////////
-    // If the spawn location is not set AND the player is not specified, error because we dont know where to spawn the item
     auto SpawnLoc = ItemContext->SpawnLocation;
     if (SpawnLoc.IsZero()) {
         auto Pawn = ItemContext->PlayerController->GetPawn();
+        if (!IsValid(Pawn)) {
+            UE_LOG(Myth, Warning,
+                   TEXT("ItemReward::Give - ZeroVector spawn location and no pawn to resolve a drop spot (recipient is "
+                        "pawn-less); skipping the world-drop of item %s."),
+                   *GetNameSafe(ItemDef));
+            return false;
+        }
         SpawnLoc = Pawn->GetActorLocation();
     }
 
-    // If inventory is not specified, drop the item as a worlditem instead
     auto WorldItem = MythicLootManager->CreateAndSpawn(ItemDef, SpawnLoc, TargetPlayer, ItemLvl, this->Quantity, 100.0f);
-    return WorldItem != nullptr;
+    const bool bGranted = WorldItem != nullptr;
+    if (bGranted) {
+        NotifyCelebration(ItemContext->PlayerController);
+    }
+    return bGranted;
+}
+
+void UItemReward::NotifyCelebration(APlayerController *PC) const {
+    if (!bCelebrate || !Item) {
+        return;
+    }
+    if (AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(PC)) {
+        MythicPC->ClientNotifyRewardCelebration(Item, this->Quantity);
+    }
 }
 
 bool UItemReward::GiveItemReward(UItemReward *Reward, FItemRewardContext Context) {

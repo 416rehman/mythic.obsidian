@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -9,7 +8,6 @@
 #include "InventoryVM.generated.h"
 
 
-// inventory selection vm
 UCLASS()
 class MYTHIC_API UInventorySelectionVM : public UMVVMViewModelBase {
     GENERATED_BODY()
@@ -35,7 +33,6 @@ public:
 };
 
 
-// a vm representing a single inventory tab with all its slots
 UCLASS()
 class MYTHIC_API UInventoryTabVM : public UMVVMViewModelBase {
     GENERATED_BODY()
@@ -168,7 +165,6 @@ protected:
     void SetTotalSlots(int32 InTotalSlots);
     int32 GetTotalSlots() const;
 
-    // prefer using InitializeFromInventory() to set this
     void SetOwningInventoryComponent(UMythicInventoryComponent *InOwningInventoryComponent);
 
     void Clear();
@@ -184,13 +180,11 @@ public:
     UFUNCTION(BlueprintCallable, Category="Mythic|Inventory|VM")
     void RefreshAllItemsFromInventory(class UMythicInventoryComponent *Inventory);
 
-    // maps absolute slot indices to their SlotVM instances for fast lookup
     UPROPERTY(Transient)
     TArray<TObjectPtr<UItemSlotVM>> AbsoluteIndexToSlotVM;
 
 private:
     TArray<TObjectPtr<UInventoryTabVM>> CreateVMs(const TArray<FMythicInventorySlotEntry> &allSlots, TSet<int32> InventoryIndices);
 
-    // handles client-side timeout of transaction lock state
     FTimerHandle TransactionLockTimerHandle;
 };

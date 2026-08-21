@@ -5,17 +5,12 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "MythicDataAsset.generated.h"
 
-/**
- * Base class for all Mythic Data Assets.
- * Provides generic JSON import/export functionality using DataConfig.
- */
 UCLASS(Abstract)
 class MYTHIC_API UMythicDataAsset : public UPrimaryDataAsset {
     GENERATED_BODY()
 
 public:
 #if WITH_EDITOR
-    // Export to JSON
     void ExportAsJSONString(FString &OutJsonString) const;
 
     UFUNCTION(CallInEditor, Category = "MythicDataAsset")
@@ -24,7 +19,6 @@ public:
     UFUNCTION(CallInEditor, Category = "MythicDataAsset")
     void CopyJSONToClipboard() const;
 
-    // Import from JSON
     UFUNCTION(CallInEditor, Category = "MythicDataAsset")
     void ImportFromJSON();
 

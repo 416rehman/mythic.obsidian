@@ -1,4 +1,3 @@
-// Mythic Living World — Action Event Subsystem Implementation
 
 #include "World/LivingWorld/Events/ActionEventSubsystem.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h"
@@ -7,7 +6,8 @@
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "AI/Cognition/CognitiveBrainComponent.h" // ResolveActorFaction reads the NPC faction from the brain
+#include "AI/Cognition/CognitiveBrainComponent.h"
+#include "Player/MythicCharacter.h"
 #include "Engine/GameInstance.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMythActionEvent, Log, All);
@@ -18,7 +18,6 @@ bool UMythicActionEventSubsystem::ShouldCreateSubsystem(UObject *Outer) const {
         return false;
     }
 
-    // Server-only — event pipeline runs on dedicated/listen server, not clients
     const ENetMode NetMode = World->GetNetMode();
     return NetMode != NM_Client;
 }
@@ -26,16 +25,8 @@ bool UMythicActionEventSubsystem::ShouldCreateSubsystem(UObject *Outer) const {
 void UMythicActionEventSubsystem::Initialize(FSubsystemCollectionBase &Collection) {
     Super::Initialize(Collection);
 
-    // Cache the GameInstance-level living world subsystem
-    if (const UGameInstance *GI = GetWorld()->GetGameInstance()) {
-        LivingWorldSubsystem = GI->GetSubsystem<UMythicLivingWorldSubsystem>();
-    }
+    ResolveLivingWorld();
 
-    if (!LivingWorldSubsystem) {
-        UE_LOG(LogMythActionEvent, Warning, TEXT("ActionEventSubsystem initialized but LivingWorldSubsystem not available — events will be discarded"));
-    }
-
-    // Pre-allocate typical frame budget worth of events to avoid per-frame allocation
     PendingEvents.Reserve(16);
     PendingWitnessResults.Reserve(64);
 }
@@ -43,15 +34,13 @@ void UMythicActionEventSubsystem::Initialize(FSubsystemCollectionBase &Collectio
 void UMythicActionEventSubsystem::SubmitAction(const FMythicActionEvent &Action) {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicActionEvent_Submit);
 
-    if (!LivingWorldSubsystem || !LivingWorldSubsystem->IsSystemActive()) {
+    if (const UMythicLivingWorldSubsystem *LW = ResolveLivingWorld(); !LW || !LW->IsSystemActive()) {
         return;
     }
 
-    // Resolve actor references to pure data
     const AActor *PerpActor = Action.Perpetrator.Get();
     const AActor *VictimActor = Action.Victim.Get();
 
-    // Determine cell — use override if valid, otherwise derive from perpetrator position
     FMythicCellCoord EventCell;
     if (Action.OverrideCell.X >= 0) {
         EventCell = Action.OverrideCell;
@@ -64,7 +53,6 @@ void UMythicActionEventSubsystem::SubmitAction(const FMythicActionEvent &Action)
         return;
     }
 
-    // Resolve factions — prefer the submit-site override (which knows the real faction) over the stub resolver.
     const FMythicFactionId PerpFaction = Action.PerpFactionOverride.IsValid()
         ? Action.PerpFactionOverride
         : (PerpActor ? ResolveActorFaction(PerpActor) : FMythicFactionId());
@@ -72,7 +60,6 @@ void UMythicActionEventSubsystem::SubmitAction(const FMythicActionEvent &Action)
         ? Action.VictimFactionOverride
         : (VictimActor ? ResolveActorFaction(VictimActor) : FMythicFactionId());
 
-    // Build the world event for the causal fabric
     FMythicWorldEvent WorldEvent;
     WorldEvent.WorldTime = GetWorld()->GetTimeSeconds();
     WorldEvent.Cell = EventCell;
@@ -83,15 +70,23 @@ void UMythicActionEventSubsystem::SubmitAction(const FMythicActionEvent &Action)
     WorldEvent.Significance = Action.Significance;
     WorldEvent.CategoryFlags = Action.CategoryFlags;
     WorldEvent.ActionCategory = Action.ActionCategory;
+    WorldEvent.VisibilityGroup = Action.VisibilityGroup;
 
-    // Submit to causal fabric (buffered write — background thread commits later)
-    LivingWorldSubsystem->SubmitWorldEvent(WorldEvent);
+    float StealthScale = Action.StealthPerceptionScale;
+    if (const AMythicCharacter *PerpChar = Cast<AMythicCharacter>(PerpActor)) {
+        StealthScale = FMath::Min(StealthScale, PerpChar->GetStealthPerceptionScale());
+    }
 
-    // Queue a pending event for the witness perception processor
+    if (UMythicLivingWorldSubsystem *LW = ResolveLivingWorld()) {
+        LW->SubmitWorldEvent(WorldEvent);
+    }
+
     FMythicPendingActionEvent PendingEvent;
     PendingEvent.WorldEvent = WorldEvent;
     PendingEvent.WitnessesProcessed = 0;
     PendingEvent.bFullyProcessed = false;
+    PendingEvent.PerpPlayerKey = Action.PerpPlayerKey;
+    PendingEvent.StealthPerceptionScale = StealthScale;
     PendingEvents.Add(MoveTemp(PendingEvent));
 
     UE_LOG(LogMythActionEvent, Verbose, TEXT("Action submitted: Tag=%s Cell=%s Significance=%.2f"),
@@ -99,7 +94,6 @@ void UMythicActionEventSubsystem::SubmitAction(const FMythicActionEvent &Action)
 }
 
 void UMythicActionEventSubsystem::FlushProcessedEvents() {
-    // Remove events that the witness processor has fully consumed
     PendingEvents.RemoveAll([](const FMythicPendingActionEvent &Evt) { return Evt.bFullyProcessed; });
 }
 
@@ -108,11 +102,11 @@ void UMythicActionEventSubsystem::FlushProcessedWitnessResults() {
 }
 
 FMythicCellCoord UMythicActionEventSubsystem::ResolveActorCell(const AActor *Actor) const {
-    if (!Actor || !LivingWorldSubsystem) {
+    if (!Actor || !ResolveLivingWorld()) {
         return FMythicCellCoord(0, 0);
     }
 
-    const UMythicTerritoryGrid *Grid = LivingWorldSubsystem->GetTerritoryGrid();
+    const UMythicTerritoryGrid *Grid = ResolveLivingWorld()->GetTerritoryGrid();
     if (!Grid) {
         return FMythicCellCoord(0, 0);
     }
@@ -121,10 +115,6 @@ FMythicCellCoord UMythicActionEventSubsystem::ResolveActorCell(const AActor *Act
 }
 
 FMythicFactionId UMythicActionEventSubsystem::ResolveActorFaction(const AActor *Actor) const {
-    // Resolve an actor's faction from its cognitive brain — the canonical NPC faction source (the same one the kill
-    // submit site reads). Players carry no NPC-style faction membership (their allegiance is the per-faction standing
-    // on the PlayerState), so they resolve to invalid, and callers needing a player "faction" pass an explicit
-    // override (PerpFactionOverride / VictimFactionOverride). Replaces the Phase-4 stub that always returned invalid.
     if (!Actor) {
         return FMythicFactionId();
     }
@@ -132,4 +122,17 @@ FMythicFactionId UMythicActionEventSubsystem::ResolveActorFaction(const AActor *
         return Brain->GetFaction();
     }
     return FMythicFactionId();
+}
+
+UMythicLivingWorldSubsystem *UMythicActionEventSubsystem::ResolveLivingWorld() const {
+    if (LivingWorldSubsystem) {
+        return LivingWorldSubsystem;
+    }
+    UMythicActionEventSubsystem *Self = const_cast<UMythicActionEventSubsystem *>(this);
+    if (const UWorld *World = GetWorld()) {
+        if (const UGameInstance *GI = World->GetGameInstance()) {
+            Self->LivingWorldSubsystem = GI->GetSubsystem<UMythicLivingWorldSubsystem>();
+        }
+    }
+    return LivingWorldSubsystem;
 }

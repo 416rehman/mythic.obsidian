@@ -15,7 +15,6 @@ class AController;
 class UTexture2D;
 struct FConversionJobEntry;
 
-/** One ingredient row of a recipe (have / need / catalyst flag). */
 UCLASS(BlueprintType)
 class MYTHIC_API UConversionIngredientVM : public UMVVMViewModelBase {
     GENERATED_BODY()
@@ -52,7 +51,6 @@ public:
     FText GetHaveNeedRichText() const { return HaveNeedRichText; }
 };
 
-/** One output row of a recipe. */
 UCLASS(BlueprintType)
 class MYTHIC_API UConversionOutputVM : public UMVVMViewModelBase {
     GENERATED_BODY()
@@ -81,7 +79,6 @@ public:
     FText GetTooltipName() const { return TooltipName; }
 };
 
-/** One recipe row in the station's recipe list. */
 UCLASS(BlueprintType)
 class MYTHIC_API UConversionRecipeVM : public UMVVMViewModelBase {
     GENERATED_BODY()
@@ -125,11 +122,9 @@ public:
     void SetOutputs(TArray<TObjectPtr<UConversionOutputVM>> In);
     TArray<TObjectPtr<UConversionOutputVM>> GetOutputs() const { return Outputs; }
 
-    // Rebuild from the recipe + station + interactor (eligibility, have/need counts).
     void RefreshFor(UConversionRecipe *Recipe, UConversionStationComponent *Component, AActor *Interactor);
 };
 
-/** One active/queued job row, with live progress. */
 UCLASS(BlueprintType)
 class MYTHIC_API UConversionJobVM : public UMVVMViewModelBase {
     GENERATED_BODY()
@@ -184,7 +179,6 @@ public:
     void TickProgress(double NowServerTime);
 };
 
-/** Root station ViewModel: recipe list, job list, fuel gauge, and player-intent wrappers. */
 UCLASS(BlueprintType)
 class MYTHIC_API UConversionStationVM : public UMVVMViewModelBase {
     GENERATED_BODY()

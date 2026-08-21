@@ -1,7 +1,3 @@
-// Mythic — toggleable world interactable (door / gate / lever / switch)
-// A server-authoritative on/off world object: interacting flips its state (server), which replicates (dormant until
-// it changes) and persists (SaveGame). A lever can drive remote targets via LinkedToggleables so a switch here opens
-// a gate there. The visual (mesh swap / open animation / sound) is a cosmetic Blueprint reaction — never replicated.
 
 #pragma once
 
@@ -16,17 +12,16 @@ class UStaticMeshComponent;
 class USceneComponent;
 class UCommonGenericInputActionDataTable;
 class UMythicItemInstance;
+class UProficiencyDefinition;
 
-/** Pure outcome of a toggle interaction (what the state should become, and whether it changed). */
 struct FMythicToggleOutcome {
-    bool bChanged = false; // did the on/off state actually change → replicate + persist + propagate
-    bool bNewIsOn = false; // the resulting state
+    bool bChanged = false;
+    bool bNewIsOn = false;
 };
 
-/** Pure outcome of a keyed-unlock attempt (should the lock open, and should the key be consumed). */
 struct FMythicUnlockOutcome {
-    bool bUnlock = false;     // the lock should open
-    bool bConsumeKey = false; // the matching key should be consumed (single-use key)
+    bool bUnlock = false;
+    bool bConsumeKey = false;
 };
 
 UCLASS()
@@ -36,7 +31,6 @@ class MYTHIC_API AMythicToggleable : public AActor, public IMythicInteractable, 
 public:
     AMythicToggleable();
 
-    //~ IMythicInteractable
     virtual void OnPrimaryInteract_Implementation(AActor *Interactor) override;
     virtual void OnSecondaryInteract_Implementation(AActor *Interactor) override;
     virtual USceneComponent *GetWidgetAttachmentComponent_Implementation() const override;
@@ -47,25 +41,18 @@ public:
     UFUNCTION(BlueprintPure, Category = "Toggleable")
     bool IsOn() const { return bIsOn; }
 
-    // SERVER: apply a toggle interaction (respects lock / one-shot), then mirror the new state to LinkedToggleables.
-    // Public so a lever-link or a debug command can drive it; no-op off authority.
     void ServerToggle(AActor *Interactor);
 
-    // Pure toggle decision — locked → no change; one-shot already fired → no change; one-shot fresh → turn ON;
-    // otherwise flip. Static + no engine state so the rule is unit-testable without a live actor.
     static FMythicToggleOutcome ResolveToggle(bool bCurrentlyOn, bool bLocked, bool bOneShot, bool bHasActivated);
 
-    // Pure: a key opens a lock iff the lock requires a VALID key tag and the key item's effective type-probe ({def
-    // ItemType} ∪ ItemTags) contains it. An empty RequiredKeyTag never matches (a quest-gate lock no key opens).
     static bool DoesKeyOpenLock(const FGameplayTagContainer &KeyTypeProbe, const FGameplayTag &RequiredKeyTag);
 
-    // Pure unlock decision: a LOCKED object with a matching key unlocks (and consumes the key iff bConsumeKey). An
-    // already-unlocked object, or a locked one without a matching key, → no unlock. Static + unit-testable.
     static FMythicUnlockOutcome PlanKeyedUnlock(bool bLocked, bool bHasMatchingKey, bool bConsumeKey);
 
-    //~ IMythicSaveableActor — no nested UObjects, but this guaranteed post-restore hook (called after the SaveGame
-    //  properties are deserialized) reconciles the replicated + cosmetic state: the raw restore of bIsOn/bLocked neither
-    //  wakes this DORM_DormantAll actor nor re-fires the BP visuals, so do that here.
+    static float ComputePickSuccessChance(int32 SkillLevel, int32 LockDifficulty);
+
+    static bool ResolvePickLock(int32 SkillLevel, int32 LockDifficulty, float Roll01);
+
     virtual void DeserializeCustomData(const TArray<uint8> &InCustomData) override;
 
 protected:
@@ -98,7 +85,6 @@ protected:
     UPROPERTY(ReplicatedUsing = OnRep_IsOn, SaveGame, BlueprintReadOnly, Category = "Toggleable")
     bool bIsOn = false;
 
-    // Whether a one-shot has already fired (server logic; persisted so a fired one-shot stays fired across save/load).
     UPROPERTY(SaveGame)
     bool bHasActivated = false;
 
@@ -127,6 +113,22 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Toggleable")
     bool bOneShot = false;
 
+    // ── Lockpicking ──
+    // If true, a LOCKED object without a matching key can be PICKED (a skill roll) on interact. Picking an OWNED lock (a
+    // stamped UMythicOwnershipComponent) is a WITNESSED theft crime — submitted for the ATTEMPT, success or not. DEFAULT
+    // FALSE → a lock stays key-only and no pick/crime path ever runs (byte-identical to before).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Toggleable|Lock")
+    bool bLockPickable = false;
+
+    // Difficulty subtracted from the picker's lockpick level in the success roll. Higher = harder. Only read when
+    // bLockPickable is true.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Toggleable|Lock", meta = (ClampMin = "0"))
+    int32 LockpickDifficulty = 0;
+
+    // Optional lockpick proficiency track whose level feeds the pick roll. Unset = skill level 0 (base chance only).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Toggleable|Lock")
+    TObjectPtr<UProficiencyDefinition> LockpickProficiency;
+
     // Remote toggleables this one drives (a lever → its gates). On a state change each is mirrored to THIS object's
     // new state (one hop, no cascade — a linked target's own lock is bypassed; that's the lever's authority).
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Toggleable")
@@ -140,16 +142,13 @@ protected:
     FName PrimaryInteractionName = FName("Use");
 
 private:
-    // SERVER: set the replicated state, fire the visual, wake dormancy so the change replicates. Used by the self
-    // toggle and by link propagation.
     void ApplyState(bool bNewIsOn);
 
-    // SERVER: if locked, attempt to unlock using a matching key the Interactor holds (clears bLocked, persists +
-    // replicates, consumes the key iff bConsumeKeyOnUnlock). Returns true if the object is unlocked afterwards (either
-    // it just unlocked, or it was never locked). No-op / false off authority or with no matching key.
     bool ServerTryUnlockWithKey(AActor *Interactor);
 
-    // Scan the Interactor's inventories for the first item whose type-probe opens this lock (RequiredKeyTag). nullptr
-    // if none / no inventory provider. O(slots), run once per unlock interaction (not a hot path).
     UMythicItemInstance *FindMatchingKey(AActor *Interactor) const;
+
+    bool ServerTryPickLock(AActor *Interactor);
+
+    int32 ResolveLockpickLevel(AActor *Interactor) const;
 };

@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -7,10 +6,6 @@
 #include "GAS/AttributeSets/MythicAttributeSet.h"
 #include "MythicAttributeSet_Offense.generated.h"
 
-/**
- * Offensive attributes
- * These attributes should be used to calculate the damage in the DamageCalculationEffect.
- */
 UCLASS()
 class MYTHIC_API UMythicAttributeSet_Offense : public UMythicAttributeSet {
     GENERATED_BODY()
@@ -139,10 +134,10 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, OutgoingDamageMultiplier);
 
-    // clamp probability attributes to range
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
-    // check if attribute represents a probability
+    virtual void PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const override;
+
     static bool IsProbabilityAttribute(const FGameplayAttribute &Attribute);
 
     UFUNCTION()

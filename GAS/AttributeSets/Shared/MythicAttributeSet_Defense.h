@@ -1,16 +1,12 @@
-// 
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "AbilitySystemComponent.h"
 #include "GAS/AttributeSets/MythicAttributeSet.h"
+#include "GAS/Effects/MythicCrowdControl.h"
 
 #include "MythicAttributeSet_Defense.generated.h"
-/**
- * Defensive attributes
- * These attributes should be used to resist status effects and reduce incoming damage in the DamageApplicationEffect, after the damage has been calculated in the DamageCalculationEffect. 
- */
 UCLASS()
 class MYTHIC_API UMythicAttributeSet_Defense : public UMythicAttributeSet {
     GENERATED_BODY()
@@ -40,27 +36,27 @@ protected:
     // Reduces chance to be stunned - Cannot move or attack
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_StunResistance)
     FGameplayAttributeData StunResistance;
-    
+
     // Tracks current buildup towards Burn
     UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_BurnBuildup)
     FGameplayAttributeData BurnBuildup;
-    
+
     // Tracks current buildup towards Bleed
     UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_BleedBuildup)
     FGameplayAttributeData BleedBuildup;
-    
+
     // Tracks current buildup towards Poison
     UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_PoisonBuildup)
     FGameplayAttributeData PoisonBuildup;
-    
+
     // Tracks current buildup towards Slow
     UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_SlowBuildup)
     FGameplayAttributeData SlowBuildup;
-    
+
     // Tracks current buildup towards Freeze
     UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_FreezeBuildup)
     FGameplayAttributeData FreezeBuildup;
-    
+
     // Tracks current buildup towards Stun
     UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_StunBuildup)
     FGameplayAttributeData StunBuildup;
@@ -70,7 +66,7 @@ protected:
     FGameplayAttributeData DecreasedDamageFromEnemiesUnderStatusEffects;
 
     // Health Regen Rate is the rate at which life.health regenerates per second.
-    // Life is its own AttributeSet due to its common use. 
+    // Life is its own AttributeSet due to its common use.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_HealthRegenRate)
     FGameplayAttributeData HealthRegenRate;
 
@@ -124,18 +120,16 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, LifePerKill);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, IncomingDamageMultiplier);
 
-    // ── Status buildup decay ──
-    // Buildup remaining after one decay step: Cur − DecayPerSecond×DeltaSeconds, clamped to >= 0 (inputs clamped
-    // non-negative). Pure + static for unit testing. Closes the "sub-threshold buildup persists forever" gap — without
-    // decay, scattered status hits accumulate buildup across unrelated encounters and never fall off.
     static float ComputeBuildupAfterDecay(float Cur, float DecayPerSecond, float DeltaSeconds);
 
-    // SERVER (authority-gated by the caller): decay all six status buildups (Burn/Bleed/Poison/Slow/Freeze/Stun) on ASC's
-    // Defense set toward 0 by DecayPerSecond over DeltaSeconds. No-op when DecayPerSecond <= 0 (the default) or a buildup
-    // is already 0 (so an unafflicted entity costs only six reads). Driven from the existing LifeComponent regen tick.
     static void DecayAllBuildups(UAbilitySystemComponent *ASC, float DecayPerSecond, float DeltaSeconds);
 
-    // replication
+    static float ComputeBuildupThreshold(float Resistance);
+
+    static bool BuildupCrossesThreshold(float NewBuildup, float Resistance);
+
+    void ResetCcAndBuildupState();
+
     UFUNCTION()
     virtual void OnRep_Armor(const FGameplayAttributeData &OldArmor);
     UFUNCTION()
@@ -183,13 +177,12 @@ public:
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
-    // clamp shield to range, and armor, dodge chance, and resistances to non-negative
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
-    // reclamp shield when max shield drops below current shield
     virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) override;
 
 private:
-    // shield value before changes cached in PreAttributeChange to compute exact damage absorbed
     float ShieldBeforeChange = 0.0f;
+
+    TMap<FGameplayTag, FMythicCcTrackState> CcHardTrackStates;
 };

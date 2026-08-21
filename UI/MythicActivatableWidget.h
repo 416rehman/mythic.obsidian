@@ -1,4 +1,4 @@
-﻿// 
+﻿
 
 #pragma once
 #include "CommonActivatableWidget.h"
@@ -13,7 +13,7 @@ USTRUCT(BlueprintType)
 struct FInputActionBindingHandle
 {
 	GENERATED_BODY()
-	
+
 public:
 	FUIActionBindingHandle Handle;
 };
@@ -27,15 +27,13 @@ enum class EMythicWidgetInputMode : uint8
     Menu
 };
 
-/**
- * Extends UCommonActivatableWidget with Blueprint-visible functions for registering additional input action bindings.
- */
 UCLASS(Blueprintable)
 class MYTHIC_API UMythicActivatableWidget : public UCommonActivatableWidget
 {
     GENERATED_BODY()
-    
+
 protected:
+    virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 
 public:
@@ -47,19 +45,17 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = MythicActivatableWidget)
 	void UnregisterAllBindings();
-    
-    //~UCommonActivatableWidget interface
+
     virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override;
-    //~End of UCommonActivatableWidget interface
 
 private:
     UPROPERTY()
 	TArray<FUIActionBindingHandle> BindingHandles;
-    
+
 #if WITH_EDITOR
     virtual void ValidateCompiledWidgetTree(const UWidgetTree& BlueprintWidgetTree, class IWidgetCompilerLog& CompileLog) const override;
 #endif
-	
+
 protected:
     /** The desired input mode to use while this UI is activated, for example do you want key presses to still reach the game/player controller? */
     UPROPERTY(EditDefaultsOnly, Category = Input)

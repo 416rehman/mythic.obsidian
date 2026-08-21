@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -7,10 +6,6 @@
 #include "Engine/DataAsset.h"
 #include "FamilyDefinition.generated.h"
 
-/**
- * Family Definition - This is used to pre-define a SPECIFIC family of NPCs. i,e. The Starks, because they should always stay the same.
- * The members of the family will automatically set their FamilyDefinition to this on save.
- */
 UCLASS()
 class MYTHIC_API UFamilyDefinition : public UDataAsset {
     GENERATED_BODY()
@@ -30,7 +25,6 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Family Definition")
     TArray<TSoftObjectPtr<UNPCDefinition>> Children;
 
-    // On saving this asset, set the FamilyDefinition of all children to this.
 #if WITH_EDITOR
     TSoftObjectPtr<UNPCDefinition> PreviousFather;
     TSoftObjectPtr<UNPCDefinition> PreviousMother;
@@ -52,7 +46,6 @@ public:
 };
 
 
-// Family Instance
 USTRUCT(BlueprintType)
 struct FFamilySpec {
     GENERATED_BODY()

@@ -14,7 +14,6 @@ void UMythicAssetManager::StartInitialLoading() {
 
     UAbilitySystemGlobals::Get().InitGlobalData();
 
-    // Preload startup assets from developer settings
     TArray<FSoftObjectPath> StartupPaths;
     if (const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>()) {
         Settings->GetStartupAssetPaths(StartupPaths);
@@ -45,7 +44,7 @@ UMythicAssetManager &UMythicAssetManager::Get() {
     }
     else {
         UE_LOG(Myth, Fatal, TEXT("Invalid AssetManager in DefaultEngine.ini, must be MythicAssetManager!"));
-        return *NewObject<UMythicAssetManager>(); // never calls this
+        return *NewObject<UMythicAssetManager>();
     }
 }
 
@@ -65,13 +64,11 @@ void UMythicAssetManager::LoadAssetInternal(
         return;
     }
 
-    // Check if already loaded
     if (UObject *LoadedAsset = AssetPath.ResolveObject()) {
         OnLoaded(LoadedAsset);
         return;
     }
 
-    // Async load
     FSoftObjectPath PathCopy = AssetPath;
     TSharedPtr<FStreamableHandle> Handle = GetStreamableManager().RequestAsyncLoad(
         AssetPath,
@@ -101,7 +98,6 @@ void UMythicAssetManager::LoadAssetsInternal(
         return;
     }
 
-    // Filter to only paths that need loading
     TArray<FSoftObjectPath> PathsToLoad;
     TArray<FSoftObjectPath> AllPaths = AssetPaths;
 
@@ -111,7 +107,6 @@ void UMythicAssetManager::LoadAssetsInternal(
         }
     }
 
-    // If everything is already loaded, callback immediately
     if (PathsToLoad.IsEmpty()) {
         TArray<UObject *> Results;
         Results.Reserve(AssetPaths.Num());
@@ -122,7 +117,6 @@ void UMythicAssetManager::LoadAssetsInternal(
         return;
     }
 
-    // Async load the batch
     TSharedPtr<FStreamableHandle> Handle = GetStreamableManager().RequestAsyncLoad(
         PathsToLoad,
         FStreamableDelegate::CreateLambda([AllPaths, OnLoaded = MoveTemp(OnLoaded)]() {

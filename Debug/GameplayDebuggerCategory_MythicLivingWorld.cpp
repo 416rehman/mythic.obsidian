@@ -10,7 +10,7 @@
 #include "Engine/HitResult.h"
 #include "CollisionQueryParams.h"
 #include "Engine/GameInstance.h"
-#include "EngineUtils.h" // TActorIterator
+#include "EngineUtils.h"
 #include "Components/SplineComponent.h"
 
 #include "MassEntitySubsystem.h"
@@ -19,7 +19,7 @@
 #include "Mass/EntityHandle.h"
 #include "Mass/Fragments/MythicMassFragments.h"
 #include "Mass/Tags/MythicMassTags.h"
-#include "Mass/Processors/TerritoryPatrolSpawnerProcessor.h" // static garrison-target helpers (read-only re-derivation)
+#include "Mass/Processors/TerritoryPatrolSpawnerProcessor.h"
 
 #include "World/LivingWorld/LivingWorldSubsystem.h"
 #include "World/LivingWorld/LivingWorldSettings.h"
@@ -47,10 +47,10 @@
 #include "AI/NPCs/MythicAIController.h"
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "AI/NPCs/MythicNPCManager.h"
-#include "AI/NPCs/MythicSocialVerbs.h"                       // EMythicSocialVerb / EMythicSocialReaction (per-NPC last-reaction surface)
-#include "World/LivingWorld/Activities/ActivityTypes.h"     // GetCurrentActivityTag display (per-NPC activity surface)
-#include "World/LivingWorld/Appearance/AppearanceTypes.h"   // FMythicAppearance descriptor summary
-#include "World/LivingWorld/Factions/FactionColor.h"        // MythicFactionColor::GetFactionColor (appearance/faction swatch)
+#include "AI/NPCs/MythicSocialVerbs.h"
+#include "World/LivingWorld/Activities/ActivityTypes.h"
+#include "World/LivingWorld/Appearance/AppearanceTypes.h"
+#include "World/LivingWorld/Factions/FactionColor.h"
 #include "AI/Cognition/CognitiveBrainComponent.h"
 #include "AI/Cognition/CognitiveTypes.h"
 #include "Player/MythicPlayerRegistrySubsystem.h"
@@ -69,10 +69,9 @@
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "GameModes/Attributes/WorldAttributes.h"
 #include "Resources/MythicResourceManagerComponent.h"
-#include "UI/MythicFeedbackSubsystem.h"
+#include "UI/MythicDamageNumberSubsystem.h"
 #include "Engine/LocalPlayer.h"
 
-// Pane 8 (Cognition) / Pane 9 (Crime/History) / Pane 10 (World State) — all verified-present systems.
 #include "World/LivingWorld/Events/ActionEventSubsystem.h"
 #include "World/LivingWorld/Events/ActionEventTypes.h"
 #include "World/LivingWorld/Crime/CrimeTypes.h"
@@ -82,25 +81,19 @@
 #include "Subsystem/SaveSystem/MythicSaveGameSubsystem.h"
 #include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
 
-// Pane 10 (World State) — Living World FINAL cluster: designer spawner (server) + war-map (client).
-#include "World/LivingWorld/Spawn/MythicDesignerSpawner.h"       // AMythicDesignerSpawner (placed, server logic)
-#include "World/LivingWorld/Spawn/DesignerSpawnerRegistry.h"     // UMythicDesignerSpawnerRegistry (authoritative state)
-#include "World/LivingWorld/Spawn/DesignerSpawnerTypes.h"        // FMythicDesignerSpawnerState
-#include "UI/WarMap/MythicWarMapSubsystem.h"                     // UMythicWarMapSubsystem (client texture/legend view)
-#include "UI/WarMap/MythicWarMapTypes.h"                         // FMythicWarMapLegendEntry
+#include "World/LivingWorld/Spawn/MythicDesignerSpawner.h"
+#include "World/LivingWorld/Spawn/DesignerSpawnerRegistry.h"
+#include "World/LivingWorld/Spawn/DesignerSpawnerTypes.h"
+#include "UI/WarMap/MythicWarMapSubsystem.h"
+#include "UI/WarMap/MythicWarMapTypes.h"
 
-// ─────────────────────────────────────────────────────────────
-// File-local helpers
-// ─────────────────────────────────────────────────────────────
 
 namespace {
+const int32 GMaxShapes = 600;
 
-const int32 GMaxShapes = 600; // global world-shape budget shared across all layers
-
-// Deterministic faction color from the uint8 index (no engine-provided faction color API exists).
 FColor FactionColor(const FMythicFactionId Id) {
     if (!Id.IsValid()) {
-        return FColor(60, 60, 60); // unclaimed / invalid = dark grey
+        return FColor(60, 60, 60);
     }
     static const FColor Palette[] = {
         FColor::Red, FColor::Blue, FColor::Green, FColor::Orange,
@@ -149,7 +142,6 @@ const TCHAR *PhaseToString(EMythicSchedulePhase P) {
     }
 }
 
-// Display name for a biome (parallel to EMythicBiome, COUNT excluded). Mirrors SeasonToString/PhaseToString.
 const TCHAR *BiomeToString(EMythicBiome B) {
     switch (B) {
     case EMythicBiome::Plains:
@@ -169,8 +161,6 @@ const TCHAR *BiomeToString(EMythicBiome B) {
     }
 }
 
-// Resolve a creature SpeciesId to its display name via the code-default species set (the spawner's unauthored
-// fallback; an authored DataTable reuses the same ids). Returns "spN" when the id is not a known default.
 FString SpeciesIdToName(uint8 SpeciesId) {
     if (SpeciesId != 0) {
         for (const FMythicCreatureSpeciesRow &Row : MythicCreatureDefaults::GetCodeDefaultSpecies()) {
@@ -187,14 +177,12 @@ const TCHAR *PressureChannelName(int32 Idx) {
     return (Idx >= 0 && Idx < PressureChannelCount) ? Names[Idx] : TEXT("?");
 }
 
-// Display name for a vent channel (parallel to EMythicVentChannel, COUNT excluded). Mirrors PressureChannelName.
 const TCHAR *VentChannelName(int32 Idx) {
     static const TCHAR *Names[] = {TEXT("Fight"), TEXT("Flee"), TEXT("Enforce"), TEXT("Report"),
                                    TEXT("Exploit"), TEXT("Tend"), TEXT("Rally"), TEXT("Submit")};
     return (Idx >= 0 && Idx < VentChannelCount) ? Names[Idx] : TEXT("?");
 }
 
-// Display name for a BDI desire type (parallel to the EMythicDesireType enumerators, COUNT excluded).
 const TCHAR *DesireTypeName(EMythicDesireType T) {
     static const TCHAR *Names[] = {
         TEXT("Survive"), TEXT("Defend"), TEXT("Avenge"), TEXT("Patrol"), TEXT("Trade"), TEXT("Socialize"),
@@ -203,13 +191,11 @@ const TCHAR *DesireTypeName(EMythicDesireType T) {
     return (i >= 0 && i < DesireTypeCount) ? Names[i] : TEXT("?");
 }
 
-// Is a desire an ACUTE (red-tinted) survival/threat response vs a routine one?
 bool IsAcuteDesire(EMythicDesireType T) {
     return T == EMythicDesireType::Survive || T == EMythicDesireType::Flee ||
            T == EMythicDesireType::Defend || T == EMythicDesireType::Avenge;
 }
 
-// Marker color for a witnessed-crime severity.
 FColor MoralSeverityColor(EMythicMoralSeverity S) {
     switch (S) {
     case EMythicMoralSeverity::Hostile:
@@ -219,11 +205,10 @@ FColor MoralSeverityColor(EMythicMoralSeverity S) {
     case EMythicMoralSeverity::Disapprove:
         return FColor::Yellow;
     default:
-        return FColor(150, 150, 150); // Ignore — grey
+        return FColor(150, 150, 150);
     }
 }
 
-// Color tint string for a witnessed-crime severity (text pane).
 const TCHAR *MoralSeverityTint(EMythicMoralSeverity S) {
     switch (S) {
     case EMythicMoralSeverity::Hostile:
@@ -250,7 +235,6 @@ const TCHAR *MoralSeverityName(EMythicMoralSeverity S) {
     }
 }
 
-// Display name for a player→NPC social verb (parallel to EMythicSocialVerb, COUNT excluded). Mirrors PhaseToString.
 const TCHAR *SocialVerbName(EMythicSocialVerb V) {
     switch (V) {
     case EMythicSocialVerb::Greet:
@@ -268,7 +252,6 @@ const TCHAR *SocialVerbName(EMythicSocialVerb V) {
     }
 }
 
-// Display name for an NPC's social reaction band (parallel to EMythicSocialReaction, COUNT excluded).
 const TCHAR *SocialReactionName(EMythicSocialReaction R) {
     switch (R) {
     case EMythicSocialReaction::Warm:
@@ -288,7 +271,6 @@ const TCHAR *SocialReactionName(EMythicSocialReaction R) {
     }
 }
 
-// Color tint string for a social reaction (text pane): warm=green, cold/intimidated=grey/yellow, angered/guards=red.
 const TCHAR *SocialReactionTint(EMythicSocialReaction R) {
     switch (R) {
     case EMythicSocialReaction::Warm:
@@ -305,8 +287,6 @@ const TCHAR *SocialReactionTint(EMythicSocialReaction R) {
     }
 }
 
-// Leaf-only name of an FName tag path (strip everything up to + including the last '.'), keeping debug lines tight.
-// Shared by the role/group activity tallies (which key TMaps on FGameplayTag::GetTagName()).
 FString TagNameLeaf(const FName &TagName) {
     FString Full = TagName.ToString();
     int32 DotIdx = INDEX_NONE;
@@ -315,18 +295,12 @@ FString TagNameLeaf(const FName &TagName) {
     }
     return Full;
 }
+}
 
-} // namespace
-
-// ─────────────────────────────────────────────────────────────
-// Construction / registration plumbing
-// ─────────────────────────────────────────────────────────────
 
 FGameplayDebuggerCategory_MythicLivingWorld::FGameplayDebuggerCategory_MythicLivingWorld() {
     SetDataPackReplication<FRepData>(&DataPack);
 
-    // All toggles MUST be Replicated: they flip authority-side members that CollectData reads. A Replicated handler
-    // pressed on a non-authority client RPCs the server, which re-dispatches on the authority category instance.
     const EGameplayDebuggerInputMode Rep = EGameplayDebuggerInputMode::Replicated;
     BindKeyPress(TEXT("J"), this, &FGameplayDebuggerCategory_MythicLivingWorld::OnToggleEntities, Rep);
     BindKeyPress(TEXT("K"), this, &FGameplayDebuggerCategory_MythicLivingWorld::OnToggleTerritory, Rep);
@@ -347,9 +321,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::FRepData::Serialize(FArchive &
     Ar << ShapesDrawn;
 }
 
-// ─────────────────────────────────────────────────────────────
-// CollectData — server-side, game thread
-// ─────────────────────────────────────────────────────────────
 
 void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController *OwnerPC, AActor *DebugActor) {
     UWorld *World = OwnerPC ? OwnerPC->GetWorld() : nullptr;
@@ -386,12 +357,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         bHasPlayerCell = true;
     }
 
-    // ─── Ground-conform debug shapes (drape on the terrain like the navmesh overlay, not the flat Z=0 sky plane) ───
-    // Grid->CellToWorld returns a flat Z=0, so raw cell markers float far above/below the island's actual terrain (the
-    // "look up at the sky" problem). GroundCell line-traces each cell's XY down to the world surface — anchored around the
-    // viewer's height so it finds ground near the player regardless of where the island sits relative to the world origin
-    // — and caches the result per cell for this CollectData pass (so a cell hit by multiple layers traces once). The
-    // existing per-shape +Z offsets then lift each marker a readable amount ABOVE the ground instead of above Z=0.
     const float GroundTraceAnchorZ = (OwnerPC && OwnerPC->GetPawn()) ? OwnerPC->GetPawn()->GetActorLocation().Z : 0.0f;
     TMap<FMythicCellCoord, float> GroundZCache;
     auto GroundCell = [World, Grid, GroundTraceAnchorZ, &GroundZCache](const FMythicCellCoord &Cell) -> FVector {
@@ -400,13 +365,13 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             P.Z = *Cached;
             return P;
         }
-        float GroundZ = GroundTraceAnchorZ; // fallback: viewer height (keeps markers near the player, never the Z=0 sky)
+        float GroundZ = GroundTraceAnchorZ;
         if (World) {
             FHitResult Hit;
             const FVector Start(P.X, P.Y, GroundTraceAnchorZ + 50000.0f);
             const FVector End(P.X, P.Y, GroundTraceAnchorZ - 50000.0f);
             static const FName GroundTraceTag(TEXT("MythicLWDebugGround"));
-            FCollisionQueryParams Q(GroundTraceTag, /*bTraceComplex*/ false);
+            FCollisionQueryParams Q(GroundTraceTag, false);
             if (World->LineTraceSingleByChannel(Hit, Start, End, ECC_WorldStatic, Q)) {
                 GroundZ = Hit.ImpactPoint.Z;
             }
@@ -416,16 +381,14 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         return P;
     };
 
-    // Single non-owning aliasing pointer + execution-context entity manager, reused by every MASS pass.
     FMassEntityManager &EM = MassSub->GetMutableEntityManager();
     TSharedPtr<FMassEntityManager> EMPtr = TSharedPtr<FMassEntityManager>(&EM, [](FMassEntityManager *) {});
 
-    int32 ShapesDrawn = 0; // global budget shared across L1/L2/L3/L4
+    int32 ShapesDrawn = 0;
 
     FString Header;
     FString Detail;
 
-    // ═══════════════════════ HEADER (always on) ═══════════════════════
     Header += TEXT("{white}=== LIVING WORLD (server sim) ===\n");
     Header += FString::Printf(TEXT("{white}System: %s   "), LW->IsSystemActive() ? TEXT("{green}ACTIVE{white}") : TEXT("{red}inactive{white}"));
     if (const UMythicCausalFabric *Fabric = LW->GetCausalFabric()) {
@@ -436,7 +399,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
     }
     Header += TEXT("\n");
 
-    // Environment one-liner (game-thread timer-driven; no lock).
     if (UMythicEnvironmentSubsystem *Env = OwnerPC->GetGameInstance() ? OwnerPC->GetGameInstance()->GetSubsystem<UMythicEnvironmentSubsystem>() : nullptr) {
         if (AMythicEnvironmentController *Ctrl = Env->GetEnvironmentController()) {
             const FTimespan Ts = Ctrl->GetTimespan();
@@ -448,20 +410,15 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
     }
 
-    // ── MASS Pass A: NPC counts + tier/phase tally + L1 tier markers ──
     int32 Tier[4] = {};
     int32 Phase[5] = {};
     int32 Dirty = 0;
     float MaxAmbient = 0.0f;
-    int32 SpyCount = 0;       // Identity.IsSpy() — undercover NPCs (Faction != TrueFaction)
-    int32 VisGroupCount = 0;  // Identity.VisibilityGroup != 0 — entities in a non-default LOS group
-    uint32 SumRelevantEvents = 0; // Σ Significance.RelevantEventCount — causal-event density feeding rescore
-    // Role-from-context tally across all ambient/embodied NPCs (Identity.RoleTag stamped by the population /
-    // territory-patrol / traveler spawners). Folded into the SAME Pass A loop — no extra query/iteration.
+    int32 SpyCount = 0;
+    int32 VisGroupCount = 0;
+    uint32 SumRelevantEvents = 0;
     TMap<FName, int32> RoleCounts;
-    // Built ONCE here, reused by L4 social-edge resolution (handle -> cell).
     TMap<FMassEntityHandle, FMythicCellCoord> EntityCellMap;
-    // Nearest hydrated NPCs for the Social detail pane (resolved in Pass B).
     {
         FMassEntityQuery Q(EMPtr);
         Q.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
@@ -499,10 +456,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
 
                 if (bShowEntities && ShapesDrawn < GMaxShapes) {
                     const FColor Col = (Ti >= 2) ? FColor::Green : (Ti == 1) ? FColor::Yellow : FColor(140, 140, 140);
-                    // Embodied (Tier2) NPCs MOVE — anchor the marker to the LIVE actor position so it FOLLOWS the walking
-                    // NPC. Identity.Cell only updates at cell-boundary crossings and GroundCell snaps to the cell centre,
-                    // so a cell-based marker sits frozen at the spawn cell while the actor walks off. Ambient/reactive
-                    // (Tier0/1) entities have no actor and fall back to the grounded cell.
                     const AMythicNPCCharacter *EmbodiedActor = (Ti >= 2) ? LW->FindEmbodiedActor(C.GetEntity(i)) : nullptr;
                     const FVector WorldLoc = EmbodiedActor
                         ? EmbodiedActor->GetActorLocation() + FVector(0.0f, 0.0f, 120.0f)
@@ -516,9 +469,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         });
     }
 
-    // ── MASS counts: creatures (+species buckets) + hydrated ──
-    // CreatureCount + per-species tally come from ONE chunk pass over the creature archetype (the count that was
-    // structurally always 0 before the spawner existed). uint8 SpeciesId -> [0,255], so a fixed bucket is bounds-safe.
     int32 CreatureCount = 0;
     int32 HydratedCount = 0;
     int32 SpeciesCounts[256] = {};
@@ -543,13 +493,9 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         HydratedCount = Q.GetNumMatchingEntities();
     }
 
-    // ── KIND tallies: territory soldiers + inter-settlement travelers (the two new sim-derived population kinds).
-    //    SoldierCount + a per-faction soldier breakdown come from one chunk pass (Identity.Faction); TravelerCount is
-    //    a cheap match count. Both tags ALSO carry FMythicNPCTag, so these are already folded into TotalNPC above —
-    //    these counts split that total by KIND. ──
     int32 SoldierCount = 0;
     int32 TravelerCount = 0;
-    TMap<uint8, int32> SoldiersByFaction; // Faction.Index -> soldier count (controlled-territory garrisons)
+    TMap<uint8, int32> SoldiersByFaction;
     {
         FMassEntityQuery Q(EMPtr);
         Q.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
@@ -572,14 +518,10 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         TravelerCount = Q.GetNumMatchingEntities();
     }
 
-    // ── GROUP tally: clustered-spawn members (a noble's retinue, a merchant barter party, a friend trio). Group members
-    //    ALSO carry FMythicNPCTag (so they're already folded into TotalNPC) + the data-bearing FMythicGroupFragment. One
-    //    chunk pass over the group archetype gives the member total, leader count, the set of distinct active GroupIds
-    //    (vs the MaxActiveGroups cap), and a per-activity-tag breakdown. ──
     int32 GroupMemberCount = 0;
     int32 GroupLeaderCount = 0;
-    TSet<uint32> ActiveGroupIds;            // distinct GroupId == active group count (the despawner culls a group's members together)
-    TMap<FName, int32> GroupMembersByActivity; // ActivityTag leaf -> member count
+    TSet<uint32> ActiveGroupIds;
+    TMap<FName, int32> GroupMembersByActivity;
     {
         FMassEntityQuery Q(EMPtr);
         Q.AddRequirement<FMythicGroupFragment>(EMassFragmentAccess::ReadOnly);
@@ -605,8 +547,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
     const int32 ActiveGroupCount = ActiveGroupIds.Num();
     const int32 MaxActiveGroups = Settings ? Settings->MaxActiveGroups : 0;
 
-    // ── MASS tag tallies (cheap GetNumMatchingEntities — same pattern as above). A standing nonzero spawn/despawn
-    //    backlog signals ActorSpawnProcessor starvation; Cognitive cross-checks the AIController iterator in pane 5. ──
     int32 CognitiveTagCount = 0;
     int32 EncOwnedTagCount = 0;
     int32 SpawnReqTagCount = 0;
@@ -632,7 +572,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         DespawnReqTagCount = Q.GetNumMatchingEntities();
     }
 
-    // ── MASS Pass B: hydrated pressure bloom shapes + nearest list (for Social pane) ──
     struct FNearbyHydrated {
         FMassEntityHandle Handle;
         FMythicCellCoord Cell;
@@ -642,7 +581,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         int32 DomChannel = 0;
         float DomValue = 0.0f;
         bool bDespaired = false;
-        // #8 personality vent routing + #36 in-fragment social (captured from the hydrated archetype).
         int32 DomVent = 0;
         float DomVentValue = 0.0f;
         int32 FragEdges = 0;
@@ -651,14 +589,14 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         double LastEventTime = 0.0;
     };
     TArray<FNearbyHydrated> NearbyHydrated;
-    int32 DespairedCount = 0;       // Psychodynamic.bDespaired across all hydrated entities
-    int32 MobOnPlayerCount = 0;     // hydrated entities whose FightTargetEntity points at a valid handle
+    int32 DespairedCount = 0;
+    int32 MobOnPlayerCount = 0;
     {
         FMassEntityQuery Q(EMPtr);
         Q.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
         Q.AddRequirement<FMythicSignificanceFragment>(EMassFragmentAccess::ReadOnly);
         Q.AddRequirement<FMythicPsychodynamicFragment>(EMassFragmentAccess::ReadOnly);
-        Q.AddRequirement<FMythicPersonalityFragment>(EMassFragmentAccess::ReadOnly); // #8 VentWeights / #36 social handled in pane 3
+        Q.AddRequirement<FMythicPersonalityFragment>(EMassFragmentAccess::ReadOnly);
         Q.AddRequirement<FMythicSocialFragment>(EMassFragmentAccess::ReadOnly);
         Q.AddTagRequirement<FMythicHydratedTag>(EMassFragmentPresence::All);
         FMassExecutionContext Ctx(EM);
@@ -705,7 +643,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                     NH.DomChannel = Dom;
                     NH.DomValue = PsyView[i].Pressure[Dom];
                     NH.bDespaired = PsyView[i].bDespaired;
-                    // #8 dominant vent channel from personality VentWeights.
                     int32 DomV = 0;
                     for (int32 v = 1; v < VentChannelCount; ++v) {
                         if (PerView[i].VentWeights[v] > PerView[i].VentWeights[DomV]) {
@@ -714,10 +651,8 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                     }
                     NH.DomVent = DomV;
                     NH.DomVentValue = PerView[i].VentWeights[DomV];
-                    // #36 in-fragment social.
                     NH.FragEdges = SocView[i].EdgeCount;
                     NH.bHasMetPlayer = SocView[i].bHasMetPlayer;
-                    // #34 mob fight target + agitation recency.
                     NH.FightTarget = PsyView[i].FightTargetEntity;
                     NH.LastEventTime = PsyView[i].LastEventTime;
                     NearbyHydrated.Add(NH);
@@ -729,25 +664,21 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
     const int32 TotalNPC = Tier[0] + Tier[1] + Tier[2] + Tier[3];
     const bool bGateBroken = (ProxW < PromoteT0);
 
-    // Cheap header counts from the self-locking getters.
     int32 SocialEntities = 0;
     int32 SocialEdges = 0;
     if (const UMythicSocialGraph *G = LW->GetSocialGraph()) {
         SocialEntities = G->GetEntityCount();
         SocialEdges = G->GetTotalEdgeCount();
     }
-    // Scheme snapshot (copy under SchemeLock) — fetched once, reused by header + Schemes/Events panes.
     TArray<FMythicScheme> Schemes;
     if (UMythicSchemeEngine *SE = LW->GetSchemeEngine()) {
         Schemes = SE->GetActiveSchemes();
     }
-    // SimulationLock-guarded count: the raw registry getter walks the Settlements TMap the sim thread rehashes.
     const int32 SettlementCount = LW->GetSettlementCountSafe();
     uint32 TotalEvents = 0;
     if (const UMythicCausalFabric *Fabric = LW->GetCausalFabric()) {
         TotalEvents = Fabric->GetTotalEventCount();
     }
-    // Encounter Director (a WorldSubsystem — game-thread; mirrors MythicCheatManager's access). Active count + cap.
     int32 EncounterCount = 0;
     int32 EncounterCap = 0;
     UMythicEncounterDirector *Director = World->GetSubsystem<UMythicEncounterDirector>();
@@ -755,7 +686,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         EncounterCount = Director->GetActiveEncounterCount();
         EncounterCap = Director->GetMaxActiveEncounters();
     }
-    // Persistent permadeath ledger (Tier 2-3) — owned by the LWS, game-thread only.
     int32 DeathCount = 0;
     if (const UMythicPersistentNPCRegistry *Deaths = LW->GetPersistentNPCRegistry()) {
         DeathCount = Deaths->GetDeathCount();
@@ -782,13 +712,10 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         CognitiveTagCount, EncOwnedTagCount, SpawnReqTagCount, DespawnReqTagCount,
         SpyCount, VisGroupCount, DespairedCount, MobOnPlayerCount, SumRelevantEvents);
 
-    // ── DYNAMIC-POPULATION COVERAGE (biome / kinds / roles / species) ──
-    // (A) Biome at the player's cell — pure, lock-free Grid read (Plains fallback out-of-bounds / pre-Initialize).
     if (bHasPlayerCell) {
         Header += FString::Printf(TEXT("{white}PlayerCell ({yellow}%d,%d{white}) Biome: {green}%s{white}\n"),
                                   PlayerCell.X, PlayerCell.Y, BiomeToString(Grid->GetBiomeAtCell(PlayerCell)));
     }
-    // (B) Population KINDS split out of TotalNPC (soldiers/travelers also carry NPCTag), + per-faction soldier garrison.
     {
         FString SoldierByFacStr;
         if (SoldiersByFaction.Num() > 0) {
@@ -801,7 +728,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         Header += FString::Printf(TEXT("{white}Kinds: Soldiers {yellow}%d{white}%s  Travelers {yellow}%d{white}  Creatures {grey}%d{white}\n"),
                                   SoldierCount, *SoldierByFacStr, TravelerCount, CreatureCount);
     }
-    // (B2) GROUP population (clustered spawns) — active groups vs cap, member/leader tally, per-activity breakdown.
     if (GroupMemberCount > 0 || ActiveGroupCount > 0) {
         FString GroupByActStr;
         if (GroupMembersByActivity.Num() > 0) {
@@ -821,7 +747,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         Header += FString::Printf(TEXT("{white}Groups: active %s%d{white}/{grey}%d{white} members {yellow}%d{white} leaders {yellow}%d{white}%s\n"),
                                   GroupCapTint, ActiveGroupCount, MaxActiveGroups, GroupMemberCount, GroupLeaderCount, *GroupByActStr);
     }
-    // (C) Role-from-context tally (Identity.RoleTag) — capped at 10 distinct roles to keep the line bounded.
     if (RoleCounts.Num() > 0) {
         FString RoleStr;
         int32 ShownRoles = 0;
@@ -831,7 +756,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 break;
             }
             ++ShownRoles;
-            // Leaf-only role name (strip the "NPC.Role." prefix) to keep the line tight.
             FString Leaf = Pair.Key.ToString();
             int32 DotIdx = INDEX_NONE;
             if (Leaf.FindLastChar(TEXT('.'), DotIdx)) {
@@ -843,7 +767,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
     } else if (TotalNPC > 0) {
         Header += TEXT("{white}Roles: {grey}(none stamped - RoleTag empty on all NPCs){white}\n");
     }
-    // (D) Creature species tally (non-zero buckets only) — name-resolved via the code-default species set.
     if (CreatureCount > 0) {
         FString SpeciesStr;
         int32 ShownSpecies = 0;
@@ -861,28 +784,23 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         Header += FString::Printf(TEXT("{white}Species:%s\n"), *SpeciesStr);
     }
 
-    // #9 NPC MANAGER ROSTER (game-instance subsystem; active/cached/family/pool sizes — server authoritative).
     if (const UMythicNPCManager *NpcMgr = OwnerPC->GetGameInstance() ? OwnerPC->GetGameInstance()->GetSubsystem<UMythicNPCManager>() : nullptr) {
         Header += FString::Printf(
             TEXT("{white}NPCs(mgr): active {yellow}%d{white} cached {grey}%d{white} families {grey}%d{white}/{grey}%d{white} pooled {grey}%d{white}\n"),
             NpcMgr->GetActiveNPCCount(), NpcMgr->GetCachedNPCCount(),
             NpcMgr->GetActiveFamilyCount(), NpcMgr->GetCachedFamilyCount(), NpcMgr->GetPooledNPCCount());
     }
-    // #10 GAME DIRECTOR STREAMING (a LocalPlayerSubsystem — viewing client only; null-guarded).
     if (const ULocalPlayer *LP = OwnerPC->GetLocalPlayer()) {
         if (const UMythicGameDirectorSubsystem *GD = LP->GetSubsystem<UMythicGameDirectorSubsystem>()) {
             Header += FString::Printf(TEXT("{white}World streaming: spawned {yellow}%d{white} levels cached {grey}%d{white}\n"),
                                       GD->SpawnedActors.Num(), GD->CachedLevelActorData.Num());
         }
     }
-    // #15 DAMAGE NUMBERS (world subsystem; active pool size).
-    if (const UMythicFeedbackSubsystem *DN = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
+    if (const UMythicDamageNumberSubsystem *DN = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
         Header += FString::Printf(TEXT("{white}DmgNumbers active: {yellow}%d{white}\n"), DN->GetActiveDamageNumberCount());
     }
 
-    // ═══════════════════════ LAYER SHAPES (independent of detail pane) ═══════════════════════
 
-    // ── L2: Territory cells (NxN window quads tinted by faction, brightness-scaled by influence) ──
     if (bShowTerritory) {
         const int32 Window = 11;
         const int32 Half = Window / 2;
@@ -897,7 +815,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 if (!Grid->IsValidCoord(Coord)) {
                     continue;
                 }
-                const FMythicTerritoryCell Cell = Grid->GetCell(Coord); // SnapshotLock copy-out
+                const FMythicTerritoryCell Cell = Grid->GetCell(Coord);
                 const FColor Base = FactionColor(Cell.DominantFaction);
                 const float Bright = FMath::Clamp(0.25f + 0.75f * Cell.Influence, 0.0f, 1.0f);
                 const FColor Shown = (FLinearColor(Base) * Bright).ToFColor(false);
@@ -920,11 +838,8 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
     }
 
-    // ── L3: Settlement boundary outlines (spline-sampled, colored by governing faction) ──
     if (bShowSettlements) {
         {
-            // Enumerate IDs + resolve the spline actor through the SimulationLock-guarded subsystem helpers — the raw
-            // registry getters (GetAllSettlementIds / GetSettlementActor) walk TMaps the sim thread rehashes.
             TArray<int32> Ids;
             LW->CopyAllSettlementIds(Ids);
             for (const int32 Id : Ids) {
@@ -933,11 +848,9 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 }
                 FMythicSettlementData Data;
                 if (!LW->CopySettlementById(Id, Data)) {
-                    continue; // SimulationLock copy-out
+                    continue;
                 }
                 const FColor FacCol = FactionColor(Data.GoverningFaction);
-                // Resolve the actor under the lock; a World-Partition-streamed / pending-kill settlement resolves to a
-                // stale weak ptr (null) or an invalid actor — skip it.
                 AMythicSettlement *Actor = LW->GetSettlementActorSafe(Id);
                 if (!IsValid(Actor)) {
                     continue;
@@ -950,8 +863,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 if (NumPts < 3) {
                     continue;
                 }
-                // Sample the boundary by CONTROL POINT (raw point positions) — simple + bounds the vert count to NumPts.
-                // (This is NOT what caused the [L] crash; the crash was the self-referential Verts.Add(Verts[0]) below.)
                 TArray<FVector> Verts;
                 Verts.Reserve(NumPts + 1);
                 for (int32 p = 0; p < NumPts; ++p) {
@@ -959,21 +870,17 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                     P.Z += 50.0f;
                     Verts.Add(P);
                 }
-                const FVector First = Verts[0]; // copy out first — Verts[0] aliases Verts' storage, and
-                                                // TArray::Add(const T&) calls CheckAddress(&Item), which check()s on a
-                                                // self-referential element (Array.h:2196) regardless of Reserve/slack.
-                Verts.Add(First);               // close the loop; First is on the stack, so CheckAddress passes.
+                const FVector First = Verts[0];
+                Verts.Add(First);
                 AddShape(FGameplayDebuggerShape::MakeSegmentList(Verts, 4.0f, FacCol, Data.DisplayName.ToString()));
                 ++ShapesDrawn;
             }
         }
     }
 
-    // ── L4: Causal-event points + scheme links + social edges ──
     if (bShowEvents) {
-        // Causal events.
         if (UMythicCausalFabric *Fabric = LW->GetCausalFabric()) {
-            const TArray<FMythicWorldEvent> Recent = Fabric->GetRecentEvents(20); // copy under FabricLock
+            const TArray<FMythicWorldEvent> Recent = Fabric->GetRecentEvents(20);
             for (const FMythicWorldEvent &Ev : Recent) {
                 if (ShapesDrawn >= GMaxShapes) {
                     break;
@@ -990,7 +897,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
         }
 
-        // Scheme territorial links (TargetCell valid -> draw target marker + origin->target line).
         static const FColor SchemeShapeColor[] = {
             FColor::Red, FColor::Cyan, FColor::Yellow, FColor(160, 80, 200), FColor(160, 80, 200), FColor::Orange, FColor::Blue};
         for (const FMythicScheme &S : Schemes) {
@@ -998,7 +904,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 break;
             }
             if (S.TargetCell.X == 0 && S.TargetCell.Y == 0) {
-                continue; // non-territorial / default cell — text-only
+                continue;
             }
             const int32 Ti = FMath::Clamp(static_cast<int32>(S.Type), 0, SchemeTypeCount - 1);
             const FVector TargetW = GroundCell(S.TargetCell) + FVector(0.0f, 0.0f, 150.0f);
@@ -1013,7 +919,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
         }
 
-        // Social edges for nearby hydrated NPCs (segment to target only when the target's cell is known this frame).
         if (const UMythicSocialGraph *G = LW->GetSocialGraph()) {
             static const FColor RelCol[] = {FColor::Green, FColor::Cyan, FColor::Red, FColor(255, 140, 0), FColor::Yellow, FColor::White};
             for (const FNearbyHydrated &Src : NearbyHydrated) {
@@ -1021,7 +926,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                     break;
                 }
                 TArray<FMythicSocialEdge> Edges;
-                G->GetEdges(Src.Handle, WorldTime, Edges); // read-lock copy-out
+                G->GetEdges(Src.Handle, WorldTime, Edges);
                 const FVector SrcPos = GroundCell(Src.Cell) + FVector(0.0f, 0.0f, 140.0f);
                 for (const FMythicSocialEdge &E : Edges) {
                     if (ShapesDrawn >= GMaxShapes) {
@@ -1036,14 +941,13 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
         }
 
-        // Active encounters — a point at each encounter's cell, colored by lifecycle state (game-thread WorldSubsystem).
         if (Director) {
             static const FColor EncStateColor[] = {
-                FColor(160, 160, 160), // Pending  — grey
-                FColor::Yellow,        // Spawning — yellow
-                FColor::Red,           // Active   — red
-                FColor::Orange,        // Completing
-                FColor(80, 80, 80)};   // Completed — dark grey
+                FColor(160, 160, 160),
+                FColor::Yellow,
+                FColor::Red,
+                FColor::Orange,
+                FColor(80, 80, 80)};
             for (const FMythicActiveEncounter &Enc : Director->GetActiveEncounters()) {
                 if (ShapesDrawn >= GMaxShapes) {
                     break;
@@ -1057,7 +961,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
         }
 
-        // Recent permadeaths (Tier 2-3) — grey skull markers at each DeathCell (newest few records).
         if (const UMythicPersistentNPCRegistry *Deaths = LW->GetPersistentNPCRegistry()) {
             const TArray<FMythicPersistentDeathRecord> &Records = Deaths->GetDeathRecords();
             const int32 Start = FMath::Max(0, Records.Num() - 12);
@@ -1074,7 +977,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
         }
 
-        // Creature den markers + aggression tint (#35). One ForEachEntityChunk over the creature archetype.
         {
             FMassEntityQuery Q(EMPtr);
             Q.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
@@ -1089,19 +991,17 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                     if (ShapesDrawn >= GMaxShapes) {
                         break;
                     }
-                    // Only draw creatures near the player's cell (the den ring is cell-scaled, so bound the spam).
                     const int32 Dist = FMath::Abs(IdView[i].Cell.X - PlayerCell.X) + FMath::Abs(IdView[i].Cell.Y - PlayerCell.Y);
                     if (Dist > 8) {
                         continue;
                     }
                     const float Aggr = FMath::Clamp(CrView[i].CurrentAggression, 0.0f, 1.0f);
-                    const FColor AggrCol = FLinearColor(Aggr, 1.0f - Aggr, 0.0f).ToFColor(false); // green->red by aggression
+                    const FColor AggrCol = FLinearColor(Aggr, 1.0f - Aggr, 0.0f).ToFColor(false);
                     const FVector Pos = GroundCell(IdView[i].Cell) + FVector(0.0f, 0.0f, 130.0f);
                     AddShape(FGameplayDebuggerShape::MakePoint(
                         Pos, 22.0f, AggrCol,
                         FString::Printf(TEXT("%s pk%d aggr %.2f"), *SpeciesIdToName(CrView[i].SpeciesId), CrView[i].PackId, Aggr)));
                     ++ShapesDrawn;
-                    // Den marker + territorial-radius ring (drawn as a square outline scaled by the radius in cells).
                     if (ShapesDrawn < GMaxShapes) {
                         const float CellSize = Grid->GetCellSize();
                         const float R = FMath::Max(1, static_cast<int32>(CrView[i].TerritorialRadius)) * CellSize;
@@ -1121,10 +1021,8 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
     }
 
-    // ── L5: Crime markers ([C] toggle) — server-only ActionEventSubsystem crime report queue ──
     if (bShowCrime) {
         if (const UMythicActionEventSubsystem *AE = World->GetSubsystem<UMythicActionEventSubsystem>()) {
-            // GetCrimeReportQueue returns a non-const ref (for processors); we read it ONLY — never mutate/drain.
             const FMythicCrimeReportQueue &Queue = const_cast<UMythicActionEventSubsystem *>(AE)->GetCrimeReportQueue();
             for (const FMythicCrimeRecord &Cr : Queue.PendingReports) {
                 if (ShapesDrawn >= GMaxShapes) {
@@ -1139,9 +1037,8 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
     }
 
-    // ═══════════════════════ DETAIL PANE (exactly one) ═══════════════════════
     switch (ActiveDetail) {
-    case 0: { // Factions + Economy
+    case 0: {
         Detail += TEXT("{white}=== DETAIL: FACTIONS + ECONOMY ===\n");
         if (!FDB) {
             Detail += TEXT("{red}Faction DB not available.\n");
@@ -1176,14 +1073,13 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         });
         break;
     }
-    case 1: { // Diplomacy matrix
+    case 1: {
         Detail += TEXT("{white}=== DETAIL: DIPLOMACY ===\n");
         if (!FDB) {
             Detail += TEXT("{red}Faction DB not available.\n");
             break;
         }
         Detail += TEXT("{white}Legend: {green}A=Allied/F=Friendly {white}N=Neutral {yellow}u=Unfriendly {red}H=Hostile\n");
-        // Pass 1: collect ids+names WITHOUT nesting a second DB read (SnapshotLock held across this callback).
         struct FFac {
             FMythicFactionId Id;
             FString Name;
@@ -1192,7 +1088,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         FDB->ForEachAliveFaction([&Facs](FMythicFactionId Id, const FMythicFactionData &D) { Facs.Add({Id, D.DisplayName.ToString()}); });
         static const TCHAR *RelGlyph[] = {TEXT("A"), TEXT("F"), TEXT("N"), TEXT("u"), TEXT("H")};
         static const TCHAR *RelColor[] = {TEXT("{green}"), TEXT("{green}"), TEXT("{white}"), TEXT("{yellow}"), TEXT("{red}")};
-        // Pass 2: build the matrix (each GetRelationship locks independently — no nesting).
         for (int32 r = 0; r < Facs.Num(); ++r) {
             FString Row = FString::Printf(TEXT("{white}[%d] %s : "), Facs[r].Id.Index, *Facs[r].Name);
             int32 Allies = 0;
@@ -1216,7 +1111,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
         break;
     }
-    case 2: { // Schemes
+    case 2: {
         Detail += FString::Printf(TEXT("{white}=== DETAIL: SCHEMES ({yellow}%d{white}) ===\n"), Schemes.Num());
         static const TCHAR *TypeName[] = {TEXT("Assassination"), TEXT("TradeDisruption"), TEXT("TerritoryReclaim"),
                                           TEXT("SpyInfiltration"), TEXT("CompanionRecruitment"), TEXT("MilitaryRaid"), TEXT("DiplomaticPressure")};
@@ -1250,7 +1145,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
         break;
     }
-    case 3: { // Social graph + nearby relationships
+    case 3: {
         Detail += FString::Printf(TEXT("{white}=== DETAIL: SOCIAL (ent {yellow}%d{white} edges {yellow}%d{white}) ===\n"), SocialEntities, SocialEdges);
         if (const UMythicSocialGraph *G = LW->GetSocialGraph()) {
             static const TCHAR *RelName[] = {TEXT("Friend"), TEXT("Family"), TEXT("Rival"), TEXT("Debt"), TEXT("Associate"), TEXT("Subordinate")};
@@ -1262,7 +1157,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 ++ShownNpcs;
                 TArray<FMythicSocialEdge> Edges;
                 const int32 NumE = G->GetEdges(Src.Handle, WorldTime, Edges);
-                // NPC header line — now also carries personality vent routing (#8) + in-fragment social (#36) + mob/agitation (#34).
                 const double Agit = WorldTime - Src.LastEventTime;
                 Detail += FString::Printf(TEXT("{white}NPC i:%d (%d,%d) T%d %.2f %s: {green}%d gEdges{white} {grey}frag %d met:%s{white} vent {yellow}%s %.2f{white}%s\n"),
                                           Src.Handle.Index, Src.Cell.X, Src.Cell.Y, static_cast<int32>(Src.Tier), Src.Score, *Src.Role, NumE,
@@ -1283,11 +1177,9 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
         break;
     }
-    case 4: { // Settlements list
+    case 4: {
         Detail += TEXT("{white}=== DETAIL: SETTLEMENTS ===\n");
         if (LW->GetSettlementRegistry()) {
-            // Enumerate + count through the SimulationLock-guarded subsystem helpers (the raw registry getters walk the
-            // Settlements TMap the sim thread rehashes); per-settlement DATA is still snapshotted via CopySettlementById.
             TArray<int32> Ids;
             LW->CopyAllSettlementIds(Ids);
             Detail += FString::Printf(TEXT("{white}Settlements: {yellow}%d{white}\n"), LW->GetSettlementCountSafe());
@@ -1320,7 +1212,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
         break;
     }
-    case 5: { // Party / Companions / Players
+    case 5: {
         Detail += TEXT("{white}=== DETAIL: COMPANIONS & PLAYERS ===\n");
         UMythicPartySubsystem *PartySys = World->GetSubsystem<UMythicPartySubsystem>();
         UMythicPlayerRegistrySubsystem *Reg = World->GetSubsystem<UMythicPlayerRegistrySubsystem>();
@@ -1341,14 +1233,12 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             if (!Leader && PS->GetPlayerController()) {
                 Leader = PS->GetPlayerController()->GetPawn();
             }
-            TArray<FMythicPartyMember> Members; // by-value snapshot — safe, no lock
+            TArray<FMythicPartyMember> Members;
             const int32 N = PartySys->GetPartyMembers(Key, Members);
-            // #4 persistent character id appended to the player row ("<unsaved>" until a character is loaded).
             const FString PersistId = PS->GetPersistentCharacterId();
             Detail += FString::Printf(TEXT("{white}Player {yellow}%s{white} | Party: {yellow}%d{white}/4 | id {grey}%s{white}\n"),
                                       *Key, N, PersistId.IsEmpty() ? TEXT("<unsaved>") : *PersistId);
 
-            // #1 FACTION STANDING — per-player standing toward each faction (non-zero only), tinted by tier.
             if (const UMythicFactionStandingComponent *Standing = PS->GetFactionStanding()) {
                 const TArray<FMythicFactionStandingEntry> &Entries = Standing->GetStandings();
                 FString StandLine;
@@ -1380,7 +1270,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 }
             }
 
-            // #2/#3 PROFICIENCY/LEVEL + OBJECTIVES — via the resolved AMythicPlayerController.
             if (AMythicPlayerController *MPC = Cast<AMythicPlayerController>(PS->GetPlayerController())) {
                 Detail += FString::Printf(TEXT("    {white}Lvl {yellow}%d{white} ({yellow}%.0f%%{white})\n"),
                                           MPC->GetPlayerLevel(), MPC->GetPlayerLevelProgress() * 100.0f);
@@ -1394,7 +1283,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                     Detail += FString::Printf(TEXT("      %s L{yellow}%d{white} {grey}%.0f/%.0f{white} ({yellow}%.0f%%{white})\n"),
                                               *P.Name.ToString(), P.Level, P.CurrentXP, P.LevelXPEnd, P.ProgressFraction * 100.0f);
                 }
-                // #3 OBJECTIVES.
                 if (const UObjectiveTracker *Obj = MPC->GetObjectiveTracker()) {
                     Detail += FString::Printf(TEXT("    {white}Objectives: {yellow}%d{white} active / {green}%d{white} done\n"),
                                               Obj->GetActiveCount(), Obj->GetCompletedCount());
@@ -1412,7 +1300,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 }
             }
 
-            // #12 player life/downed on the resolved leader pawn (co-op down state, currently invisible).
             if (Leader) {
                 if (UMythicLifeComponent *Life = UMythicLifeComponent::FindHealthComponent(Leader)) {
                     Detail += FString::Printf(TEXT("    {white}HP {yellow}%.0f{white}/{yellow}%.0f{white} %s\n"),
@@ -1456,7 +1343,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                                 AddShape(FGameplayDebuggerShape::MakeSegment(Loc, Tgt->GetActorLocation(), 2.0f, FColor::Red, TEXT("aggro")));
                                 ++ShapesDrawn;
                             }
-                            // #37 leash ring around the engage anchor when leashed (LeashRange > 0).
                             FMythicAIDebugState Dbg;
                             AICon->CopyAIDebugState(Dbg);
                             if (Dbg.LeashRange > 0.0f && ShapesDrawn < GMaxShapes) {
@@ -1472,7 +1358,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                                 ++ShapesDrawn;
                             }
                         } else {
-                            // #37 non-combat runtime: idle/patrol/flee/companion-follow.
                             FMythicAIDebugState Dbg;
                             AICon->CopyAIDebugState(Dbg);
                             const TCHAR *Mode = Dbg.bCompanionFollowActive ? TEXT("{cyan}follow") : (Dbg.bFleeingMove ? TEXT("{red}flee") : TEXT("{grey}idle"));
@@ -1487,7 +1372,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 Detail += TEXT("  {grey}(no companions)\n");
             }
         }
-        // Nearby non-party embodied NPCs.
         int32 NearbyEmbodied = 0;
         int32 NearbyWithTarget = 0;
         for (TActorIterator<AMythicAIController> It(World); It; ++It) {
@@ -1503,14 +1387,14 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         Detail += FString::Printf(TEXT("{white}Embodied AI controllers: {yellow}%d{white} | with a hostile target: {red}%d{white}\n"), NearbyEmbodied, NearbyWithTarget);
         break;
     }
-    case 6: { // Causal events (recent log)
+    case 6: {
         Detail += TEXT("{white}=== DETAIL: CAUSAL EVENTS ===\n");
         if (UMythicCausalFabric *Fabric = LW->GetCausalFabric()) {
             const int32 MaxRecent = 14;
-            const TArray<FMythicWorldEvent> Recent = Fabric->GetRecentEvents(MaxRecent); // copy under FabricLock, oldest-first
+            const TArray<FMythicWorldEvent> Recent = Fabric->GetRecentEvents(MaxRecent);
             Detail += FString::Printf(TEXT("{white}Total ever: {yellow}%u{white}  capacity: {yellow}%d{white}  showing last {yellow}%d{white}\n"),
                                       Fabric->GetTotalEventCount(), Fabric->GetCapacity(), Recent.Num());
-            for (int32 i = Recent.Num() - 1; i >= 0; --i) { // print newest first
+            for (int32 i = Recent.Num() - 1; i >= 0; --i) {
                 const FMythicWorldEvent &Ev = Recent[i];
                 const bool bHostile = (Ev.CategoryFlags & (EMythicEventCategory::Combat | EMythicEventCategory::Death | EMythicEventCategory::Crime)) != 0;
                 const bool bDiplo = (Ev.CategoryFlags & (EMythicEventCategory::Diplomacy | EMythicEventCategory::Trade)) != 0;
@@ -1527,7 +1411,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             Detail += TEXT("{red}Causal fabric not available.\n");
         }
 
-        // ── Active encounters sub-section (EncounterDirector — game-thread WorldSubsystem) ──
         Detail += FString::Printf(TEXT("{white}--- ENCOUNTERS ({yellow}%d{white}/{grey}%d{white}) ---\n"), EncounterCount, EncounterCap);
         if (Director) {
             static const TCHAR *EncStateName[] = {TEXT("Pending"), TEXT("Spawning"), TEXT("Active"), TEXT("Completing"), TEXT("Completed")};
@@ -1546,12 +1429,11 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             Detail += TEXT("{grey}(encounter director not available)\n");
         }
 
-        // ── Recent permadeaths sub-section (Tier 2-3 ledger from the PersistentNPCRegistry) ──
         if (const UMythicPersistentNPCRegistry *Deaths = LW->GetPersistentNPCRegistry()) {
             const TArray<FMythicPersistentDeathRecord> &Records = Deaths->GetDeathRecords();
             Detail += FString::Printf(TEXT("{white}--- PERMADEATHS (T2-3, total {yellow}%d{white}) ---\n"), Deaths->GetDeathCount());
             const int32 Start = FMath::Max(0, Records.Num() - 10);
-            for (int32 i = Records.Num() - 1; i >= Start; --i) { // newest first
+            for (int32 i = Records.Num() - 1; i >= Start; --i) {
                 const FMythicPersistentDeathRecord &Rec = Records[i];
                 const double Age = WorldTime - Rec.DeathTime;
                 Detail += FString::Printf(TEXT("  {grey}[X]{white} %s F%d @ (%d,%d) {grey}%.0fs ago{white}\n"),
@@ -1563,7 +1445,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
         break;
     }
-    case 7: { // Environment (full)
+    case 7: {
         Detail += TEXT("{white}=== DETAIL: ENVIRONMENT ===\n");
         UMythicEnvironmentSubsystem *Env = OwnerPC->GetGameInstance() ? OwnerPC->GetGameInstance()->GetSubsystem<UMythicEnvironmentSubsystem>() : nullptr;
         AMythicEnvironmentController *Ctrl = Env ? Env->GetEnvironmentController() : nullptr;
@@ -1581,20 +1463,17 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         Detail += FString::Printf(TEXT("{white}Weather: {yellow}%s{white}  cycle: %s\n"),
                                   WeatherTag.IsValid() ? *WeatherTag.ToString() : TEXT("(none)"), bPaused ? TEXT("{red}PAUSED{white}") : TEXT("{green}running{white}"));
         Detail += FString::Printf(TEXT("{white}Sun yaw: {yellow}%.1f deg{grey} (0=18h 90=00h 180=06h 270=12h){white}\n"), SunYaw);
-        // Current weather type + the active "guaranteed" transition goal (the next transitions chain toward it).
         const UWeatherType *CurWeather = Ctrl->GetCurrentWeather();
         const UWeatherType *GoalWeather = Ctrl->GetGuaranteedTargetWeather();
         Detail += FString::Printf(TEXT("{white}Current type: {yellow}%s{white}  guaranteed goal: %s\n"),
                                   CurWeather && CurWeather->Tag.IsValid() ? *CurWeather->Tag.ToString() : TEXT("(none)"),
                                   GoalWeather && GoalWeather->Tag.IsValid() ? *FString::Printf(TEXT("{yellow}%s{white}"), *GoalWeather->Tag.ToString()) : TEXT("{grey}(stable - no pending goal){white}"));
-        // The action-event subsystem owns the weather/time perception multiplier (server-only — null on clients).
         FString PercStr = TEXT("{grey}n/a (client){white}");
         if (const UMythicActionEventSubsystem *AE = World->GetSubsystem<UMythicActionEventSubsystem>()) {
             PercStr = FString::Printf(TEXT("{yellow}x%.2f{white}"), AE->GetPerceptionMultiplier());
         }
         Detail += FString::Printf(TEXT("{white}Weather types registered: {yellow}%d{white}  perception mult: %s\n"),
                                   Ctrl->GetWeatherTypes().Num(), *PercStr);
-        // #5 WEATHER TRANSITION DETAIL — replaces the goal-only line with live transition progress.
         {
             bool bActive = false;
             FGameplayTag TgtTag;
@@ -1609,7 +1488,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 Detail += TEXT("{white}Transition: {grey}(stable - no transition in progress){white}\n");
             }
         }
-        // #6 ENVIRONMENT HAZARDS ON THE PLAYER — the per-player hazard component on the OWNING PC.
         if (UMythicEnvironmentHazardComponent *Haz = OwnerPC->FindComponentByClass<UMythicEnvironmentHazardComponent>()) {
             TArray<int32> HazIdx;
             TArray<FString> HazNames;
@@ -1624,7 +1502,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
         break;
     }
-    case 8: { // Cognition / BDI
+    case 8: {
         Detail += TEXT("{white}=== DETAIL: COGNITION / BDI ===\n");
         int32 Shown = 0;
         for (TActorIterator<AMythicNPCCharacter> It(World); It && Shown < 12; ++It) {
@@ -1634,7 +1512,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 continue;
             }
             ++Shown;
-            const FMythicIntention &Intent = B->GetCurrentIntention(); // game-thread written (OnAsyncThinkCompleted)
+            const FMythicIntention &Intent = B->GetCurrentIntention();
             const FMythicCellCoord Home = B->GetHomeCell();
             const FMythicCellCoord Work = B->GetCachedWorkCell();
             Detail += FString::Printf(TEXT("{white}%s F%d%s role %s phase %s home(%d,%d) work(%d,%d)\n"),
@@ -1650,7 +1528,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             } else {
                 Detail += TEXT("  Intention: {grey}(none committed)\n");
             }
-            // #5 top beliefs by confidence (LOCKED copy).
             TArray<FMythicBelief> Beliefs = B->GetBeliefsCopy();
             Beliefs.Sort([](const FMythicBelief &A, const FMythicBelief &C) { return A.Confidence > C.Confidence; });
             const int32 NB = FMath::Min(Beliefs.Num(), 4);
@@ -1659,7 +1536,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 Detail += FString::Printf(TEXT("    bel %s @(%d,%d) conf {yellow}%.2f{white} hops %d\n"),
                                           *Bel.EventTag.ToString(), Bel.Cell.X, Bel.Cell.Y, Bel.Confidence, Bel.PropagationHops);
             }
-            // #6 top desires by utility (LOCKED copy).
             TArray<FMythicDesire> Desires = B->GetLastDesiresCopy();
             Desires.Sort([](const FMythicDesire &A, const FMythicDesire &C) { return A.Utility > C.Utility; });
             const int32 ND = FMath::Min(Desires.Num(), 3);
@@ -1671,10 +1547,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 Detail += DLine + TEXT("\n");
             }
 
-            // ── Step 5 per-NPC SOCIAL/ACTIVITY/APPEARANCE surface (all server-side, safe-read getters) ──
-            // (a) Current ambient activity tag (context-driven activity catalog, Step 3 — server-side authoritative).
             const FGameplayTag ActivityTag = NPC->GetCurrentActivityTag();
-            // (b) Last player→NPC social verb + reaction (Step 2 — server-side cache; only after a verb was applied).
             EMythicSocialVerb LastVerb = EMythicSocialVerb::Greet;
             EMythicSocialReaction LastReact = EMythicSocialReaction::Neutral;
             double LastReactTime = 0.0;
@@ -1690,8 +1563,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                                        : TEXT("{grey}(none yet){white}");
                 Detail += FString::Printf(TEXT("    activity %s  lastReact %s\n"), *ActStr, *ReactStr);
             }
-            // (c) Appearance descriptor summary (Step 4 — replicated, server reads its own assigned value). Faction color
-            //     resolved via the SAME override-aware accessor the resolver/war-map use (snapshot copy-out, null-tolerant).
             {
                 const FMythicAppearance &App = NPC->Appearance;
                 const FMythicFactionId Fac = B->GetFaction();
@@ -1702,8 +1573,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                         FacCol = MythicFactionColor::GetFactionColor(FData, Fac.Index);
                     }
                 }
-                // NOTE: the gameplay-debugger canvas color parser only understands NAMED {color} tokens (not hex), so the
-                // faction/primary colors are surfaced as RGB hex DIGITS (not a tinted swatch) to stay render-safe.
                 Detail += FString::Printf(
                     TEXT("    look outfit {yellow}%d{white} body %d age %d %s skin %d hair %d parts[H%d/T%d/L%d/F%d] facCol #%02X%02X%02X prim #%02X%02X%02X\n"),
                     App.OutfitSetId, App.BodyType, App.AgeBracket, App.bIsFemale ? TEXT("F") : TEXT("M"),
@@ -1716,15 +1585,15 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
         break;
     }
-    case 9: { // World History — witnessed-crime / witness pipeline (server-only)
+    case 9: {
         Detail += TEXT("{white}=== DETAIL: WORLD HISTORY (crime / witness) ===\n");
         if (UMythicActionEventSubsystem *AE = World->GetSubsystem<UMythicActionEventSubsystem>()) {
-            FMythicCrimeReportQueue &Queue = AE->GetCrimeReportQueue(); // read-only use — never mutate/drain
+            FMythicCrimeReportQueue &Queue = AE->GetCrimeReportQueue();
             Detail += FString::Printf(TEXT("{white}Pipeline: pending {yellow}%d{white} witnessResults {yellow}%d{white} crimeReports {yellow}%d{white}/%d perc {yellow}x%.2f{white}\n"),
                                       AE->GetPendingEvents().Num(), AE->GetPendingWitnessResults().Num(),
                                       Queue.PendingReports.Num(), FMythicCrimeReportQueue::MaxQueuedReports, AE->GetPerceptionMultiplier());
             const int32 Start = FMath::Max(0, Queue.PendingReports.Num() - 16);
-            for (int32 i = Queue.PendingReports.Num() - 1; i >= Start; --i) { // newest first
+            for (int32 i = Queue.PendingReports.Num() - 1; i >= Start; --i) {
                 const FMythicCrimeRecord &Cr = Queue.PendingReports[i];
                 const double Age = WorldTime - Cr.WorldTime;
                 Detail += FString::Printf(TEXT("  %s%s{white} F%d>F%d @(%d,%d) wit %d hops %d conf {yellow}%.2f{white} %s {grey}%.0fs ago{white}\n"),
@@ -1741,12 +1610,10 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
         break;
     }
-    case 10: { // World State / Save
+    case 10: {
         Detail += TEXT("{white}=== DETAIL: WORLD STATE / SAVE ===\n");
-        // World tier (publicly readable on the game state).
         if (const AMythicGameState *MGS = World->GetGameState<AMythicGameState>()) {
             Detail += FString::Printf(TEXT("{white}World Tier {yellow}%d{white}/{grey}%d{white}\n"), MGS->WorldTier, MGS->MaxWorldTier);
-            // #7 WORLD TIER MULTIPLIERS — the per-tier reward/difficulty scalars (ATTRIBUTE_ACCESSORS getters).
             if (const UWorldTierAttributes *WTA = MGS->WorldTierAttributes) {
                 Detail += FString::Printf(
                     TEXT("  {white}Mult: gold {yellow}%.2f{white} xp {yellow}%.2f{white} legend {yellow}%.2f{white} mythic {yellow}%.2f{white} | enemyHP {yellow}%.2f{white} enemyDmg {yellow}%.2f{white}\n"),
@@ -1754,7 +1621,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                     WTA->GetLegendaryDropRateMultiplier(), WTA->GetMythicDropRateMultiplier(),
                     WTA->GetEnemyHealthMultiplier(), WTA->GetEnemyDamageMultiplier());
             }
-            // #8 RESOURCES / HARVEST — partially-mined (tracked) + depleted nodes + soonest respawn.
             const TArray<FTrackedDestructibleData> Tracked = MGS->GetTrackedDestructibles();
             int32 Depleted = 0;
             double NextRespawn = TNumericLimits<double>::Max();
@@ -1778,7 +1644,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         } else {
             Detail += TEXT("{grey}(no AMythicGameState - wrong game mode?)\n");
         }
-        // #12 TOGGLEABLES tally (iterate-and-count: doors / gates / levers, with on-count).
         {
             int32 ToggN = 0;
             int32 ToggOn = 0;
@@ -1792,7 +1657,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
             Detail += FString::Printf(TEXT("{white}Toggleables: {yellow}%d{white} (on {green}%d{white})\n"), ToggN, ToggOn);
         }
-        // #14 STORAGE CONTAINERS tally (count only).
         {
             int32 ContN = 0;
             for (TActorIterator<AMythicStorageContainer> It(World); It; ++It) {
@@ -1802,7 +1666,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
             Detail += FString::Printf(TEXT("{white}Containers: {yellow}%d{white}\n"), ContN);
         }
-        // #13 CONVERSION STATIONS — nearest few with job/fuel state.
         {
             int32 StationN = 0;
             int32 ShownStation = 0;
@@ -1832,7 +1695,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 Detail += FString::Printf(TEXT("{white}Conversion stations: {yellow}%d{white}\n"), StationN);
             }
         }
-        // #18 background sim thread diagnostics (SimulationLock-guarded copy-out).
         uint64 SimTick = 0;
         float SimInterval = 0.0f;
         bool bSimRunning = false;
@@ -1843,12 +1705,10 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         } else {
             Detail += TEXT("{grey}(no background sim thread)\n");
         }
-        // #16 save ops (game-instance subsystem; present on server + clients).
         if (const UMythicSaveGameSubsystem *SG = OwnerPC->GetGameInstance() ? OwnerPC->GetGameInstance()->GetSubsystem<UMythicSaveGameSubsystem>() : nullptr) {
             Detail += FString::Printf(TEXT("{white}Save: in-flight writes {yellow}%d{white}  pending loads {yellow}%d{white}\n"),
                                       SG->GetInFlightSaveCount(), SG->GetPendingLoadCount());
         }
-        // #17 autosave countdown + pending respawns (server-only).
         if (const AMythicGameMode *GM = World->GetAuthGameMode<AMythicGameMode>()) {
             const float Remain = GM->GetAutosaveTimeRemaining();
             if (Remain >= 0.0f) {
@@ -1859,10 +1719,8 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         } else {
             Detail += TEXT("{grey}(autosave/respawn - client, N/A)\n");
         }
-        // #19 replicated proxies (the sole faction/encounter source on clients; second-order copies on the server).
         Detail += FString::Printf(TEXT("{white}Replicated proxies: factions {yellow}%d{white} encounters {yellow}%d{white}\n"),
                                   LW->GetAllFactionProxies().Num(), LW->GetAllEncounterProxies().Num());
-        // #35 creatures sub-section — nearest few with species/pack/aggression/den.
         Detail += TEXT("{white}--- CREATURES (nearest) ---\n");
         {
             int32 ShownCr = 0;
@@ -1891,13 +1749,8 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
         }
 
-        // #FINAL DESIGNER SPAWNERS (server-authoritative placed actors + the authoritative registry).
-        //   Per live spawner: DesignerId, live/cooldown state, spawns-remaining (Max - SpawnsEver), perma-dead, conditions-met.
-        //   The registry section below also lists DesignerIds with persisted state whose actor isn't currently loaded
-        //   (e.g. streamed-out level) so the save state is visible even when the actor is absent.
         {
             Detail += TEXT("{white}--- DESIGNER SPAWNERS (server) ---\n");
-            // Track which DesignerIds have a loaded actor so the registry pass can skip them (avoid double-listing).
             TSet<FName> ShownIds;
             int32 SpawnerN = 0;
             int32 ShownSpawner = 0;
@@ -1908,7 +1761,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 }
                 ++SpawnerN;
                 ShownIds.Add(Sp->DesignerId);
-                if (ShownSpawner >= 16) { // bound the listing; the count line below still reports the total
+                if (ShownSpawner >= 16) {
                     continue;
                 }
                 ++ShownSpawner;
@@ -1917,9 +1770,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 const int32 Ever = Sp->GetSpawnsEver();
                 const int32 Remaining = FMath::Max(0, Sp->MaxSpawnsEver - Ever);
                 const bool bPerma = Sp->IsPermaDead();
-                // AreConditionsMet re-gathers inputs (server-only meaningful). bMet is only suggestive on a client mirror.
                 const bool bMet = Sp->AreConditionsMet();
-                // Cooldown remaining is derived from the registry's LastDeathTime (authoritative) + the actor's RespawnCooldownSeconds.
                 double CooldownLeft = 0.0;
                 if (const UMythicDesignerSpawnerRegistry *Reg = LW->GetDesignerSpawnerRegistry()) {
                     if (const FMythicDesignerSpawnerState *St = Reg->Find(Sp->DesignerId)) {
@@ -1927,7 +1778,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                     }
                 }
                 const bool bAtCap = Live >= Sp->MaxConcurrent;
-                // State word: terminal perma-death > exhausted (no remaining) > on cooldown > at-concurrency-cap > live > idle.
                 const TCHAR *StateWord =
                     bPerma                         ? TEXT("{red}PERMADEAD{white}")
                     : (Remaining == 0)             ? TEXT("{grey}EXHAUSTED{white}")
@@ -1946,14 +1796,13 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 Detail += FString::Printf(TEXT("  {grey}... %d more loaded spawner(s){white}\n"), SpawnerN - ShownSpawner);
             }
 
-            // Registry-only entries (persisted DesignerId whose actor isn't currently loaded) — proves save state survives.
             if (const UMythicDesignerSpawnerRegistry *Reg = LW->GetDesignerSpawnerRegistry()) {
                 TArray<FName> RegIds;
                 Reg->GetAllDesignerIds(RegIds);
                 int32 ShownReg = 0;
                 for (const FName &Id : RegIds) {
                     if (ShownIds.Contains(Id)) {
-                        continue; // already shown via its loaded actor
+                        continue;
                     }
                     if (ShownReg >= 8) {
                         Detail += TEXT("  {grey}... (more persisted, no actor){white}\n");
@@ -1972,10 +1821,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
         }
 
-        // #FINAL WAR-MAP (CLIENT view) — the war-map texture/legend live on the LOCAL player subsystem, not the server.
-        //   Grid dims, accumulated claimed-cell count (delta accumulator), last-refresh marker/legend counts, and the
-        //   per-faction cell breakdown from the legend ("cells per faction"). Server PIE instances have no local-player
-        //   war-map subsystem — this prints (client-only) there.
         {
             Detail += TEXT("{white}--- WAR-MAP (client) ---\n");
             const ULocalPlayer *LP = OwnerPC->GetLocalPlayer();
@@ -1986,7 +1831,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                     WarMap->GetGridWidth(), WarMap->GetGridHeight(), WarMap->GetAccumulatedClaimedCellCount(),
                     WarMap->GetLastSettlementMarkerCount(), WarMap->GetLastEncounterMarkerCount(),
                     WarMap->GetLastLegendEntryCount());
-                // Cells per faction (from the legend; bounded by the active faction count).
                 TArray<FMythicWarMapLegendEntry> Legend;
                 WarMap->GetLegendEntries(Legend);
                 if (Legend.Num() > 0) {
@@ -2013,12 +1857,12 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
         break;
     }
-    case 11: { // Chronicle / News — the world-news feed (GameInstance subsystem; server + relayed clients)
+    case 11: {
         Detail += TEXT("{white}=== DETAIL: CHRONICLE / NEWS ===\n");
         if (const UMythicWorldChronicleSubsystem *Chron = OwnerPC->GetGameInstance() ? OwnerPC->GetGameInstance()->GetSubsystem<UMythicWorldChronicleSubsystem>() : nullptr) {
-            const TArray<FMythicChronicleEntry> Recent = Chron->GetRecentChronicle(8); // by-value copy, oldest-first
+            const TArray<FMythicChronicleEntry> Recent = Chron->GetRecentChronicle(8);
             Detail += FString::Printf(TEXT("{white}Chronicle: {yellow}%d{white} recent entries\n"), Recent.Num());
-            for (int32 i = Recent.Num() - 1; i >= 0; --i) { // newest first
+            for (int32 i = Recent.Num() - 1; i >= 0; --i) {
                 const FMythicChronicleEntry &E = Recent[i];
                 const FString Readable = UMythicWorldChronicleSubsystem::EventTagToReadable(E.EventTag);
                 const TCHAR *Tint = (E.Significance >= 0.85f) ? TEXT("{red}") : (E.Significance >= 0.65f) ? TEXT("{yellow}") : TEXT("{grey}");
@@ -2033,11 +1877,9 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         }
         break;
     }
-    case 12: { // Population — sim-driven WHO spawns + group/garrison/spawn-point/kill-feedback coverage
+    case 12: {
         Detail += TEXT("{white}=== DETAIL: POPULATION (who spawns) ===\n");
 
-        // ── (1) ARCHETYPE / ROLE MIX — full RoleCounts breakdown (the header line is capped at 10; this is the complete
-        //    sorted-by-count list of the role tags the population/territory/group spawners stamped onto Identity.RoleTag). ──
         {
             Detail += FString::Printf(TEXT("{white}--- ROLE MIX ({yellow}%d{white} distinct over {yellow}%d{white} NPCs) ---\n"),
                                       RoleCounts.Num(), TotalNPC);
@@ -2059,26 +1901,20 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
         }
 
-        // ── (2) CONTESTED-BORDER GARRISON TARGETS — re-derive, read-only, the per-cell soldier target the patrol spawner
-        //    computes (ownership×influence×biome, then the at-war contested-border boost) over a small window around the
-        //    player so a war's frontline thickening is visible. Mirrors TerritoryPatrolSpawnerProcessor's probe EXACTLY:
-        //    lock-free GetCell value-copies + GetRelationship (SnapshotLock) + the SAME static helpers it spawns from. We
-        //    do NOT spawn — pure surfacing. Bounded to a 7x7 window, contested cells reported first. ──
         if (bHasPlayerCell && FDB) {
             static const FMythicCellCoord NeighborOffsets[4] = {
                 FMythicCellCoord(1, 0), FMythicCellCoord(-1, 0), FMythicCellCoord(0, 1), FMythicCellCoord(0, -1)};
-            const int32 Half = 3; // 7x7 window
+            const int32 Half = 3;
             int32 ContestedCells = 0;
             int32 ShownGarrison = 0;
             FString GarrisonLines;
             for (int32 dy = -Half; dy <= Half; ++dy) {
                 for (int32 dx = -Half; dx <= Half; ++dx) {
                     const FMythicCellCoord Coord(PlayerCell.X + dx, PlayerCell.Y + dy);
-                    const FMythicTerritoryCell TC = Grid->GetCell(Coord); // lock-free value-copy
+                    const FMythicTerritoryCell TC = Grid->GetCell(Coord);
                     if (!TC.DominantFaction.IsValid() || TC.bPlayerOwned) {
-                        continue; // wilderness / player property: no faction garrison here
+                        continue;
                     }
-                    // Skip settlement cells (owned by the ambient/group spawners, not the patrol garrison path).
                     FMythicSettlementData SettlementScratch;
                     if (LW->CopySettlementAtCell(Coord, SettlementScratch)) {
                         continue;
@@ -2095,7 +1931,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                         FacData.MilitaryStrength, TC.Influence, MaxSoldiers, MaxPerCell);
                     int32 SoldierTarget = FMath::CeilToInt(static_cast<float>(BaseTarget) * BiomeMod);
                     SoldierTarget = FMath::Clamp(SoldierTarget, 0, FMath::Min(MaxSoldiers, MaxPerCell));
-                    // 4-neighbor at-war probe (identical adjacency + Hostile test to the spawner).
                     bool bContested = false;
                     for (const FMythicCellCoord &Offset : NeighborOffsets) {
                         const FMythicCellCoord NCell(Coord.X + Offset.X, Coord.Y + Offset.Y);
@@ -2114,8 +1949,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                     if (bContested) {
                         ++ContestedCells;
                     }
-                    // Report contested cells (the interesting frontline ones) up to a bound; skip quiet interior cells with
-                    // no garrison to keep the pane tight.
                     if (bContested && ShownGarrison < 12) {
                         ++ShownGarrison;
                         GarrisonLines += FString::Printf(TEXT("  {red}FRONT{white} (%d,%d) F%d {grey}%s{white} base {yellow}%d{white} -> boosted {red}%d{white}\n"),
@@ -2132,7 +1965,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
         }
 
-        // ── (3) SETTLEMENT SPAWN POINTS by purpose + hostile-camp flag (one-time BeginPlay-generated navmesh anchors). ──
         {
             Detail += TEXT("{white}--- SETTLEMENT SPAWN POINTS (by purpose) ---\n");
             TArray<int32> Ids;
@@ -2142,9 +1974,8 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             for (const int32 Id : Ids) {
                 FMythicSettlementData Data;
                 if (!LW->CopySettlementById(Id, Data)) {
-                    continue; // SimulationLock copy-out
+                    continue;
                 }
-                // Tally this settlement's points by purpose (COUNT excluded; index-safe).
                 int32 ByPurpose[static_cast<int32>(EMythicSpawnPointPurpose::COUNT)] = {};
                 for (const FMythicSpawnPoint &SP : Data.SpawnPoints) {
                     const int32 Pi = FMath::Clamp(static_cast<int32>(SP.Purpose), 0, static_cast<int32>(EMythicSpawnPointPurpose::COUNT) - 1);
@@ -2152,7 +1983,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                 }
                 TotalPoints += Data.SpawnPoints.Num();
                 if (Shown >= 24) {
-                    continue; // keep counting TotalPoints but stop printing
+                    continue;
                 }
                 ++Shown;
                 Detail += FString::Printf(TEXT("  {white}[%d] %s %spts {yellow}%d{white} {grey}(Civ %d Guard %d Enemy %d Any %d){white}\n"),
@@ -2171,8 +2002,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
         }
 
-        // ── (4) ACTIVE GROUPS — distinct GroupIds vs the MaxActiveGroups cap + per-activity-tag member breakdown
-        //    (tallied lock-free in the group MASS pass above). ──
         {
             const TCHAR *CapTint = (MaxActiveGroups > 0 && ActiveGroupCount >= MaxActiveGroups) ? TEXT("{red}") : TEXT("{yellow}");
             Detail += FString::Printf(TEXT("{white}--- GROUPS (active %s%d{white}/{grey}%d{white}, members {yellow}%d{white}, leaders {yellow}%d{white}) ---\n"),
@@ -2186,10 +2015,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             }
         }
 
-        // ── (5) KILL-FEEDBACK READOUT — per-faction Population / Reserves.Arms / MilitaryStrength. A player kill durably
-        //    lowers Population (delta-applied baseline → fewer future spawns) and, for armed roles, Reserves.Arms (the
-        //    durable source MilitaryStrength is recomputed from each tick). These three columns are exactly what
-        //    UMythicLivingWorldSubsystem::ReportNpcDeath moves, so this surfaces the world-sim feedback loop directly. ──
         {
             Detail += TEXT("{white}--- KILL FEEDBACK (faction Pop / Arms / Mil) ---\n");
             if (FDB) {
@@ -2210,7 +2035,6 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
         break;
     }
 
-    // ═══════════════════════ FOOTER LEGEND ═══════════════════════
     static const TCHAR *DetailNames[] = {TEXT("Factions"), TEXT("Diplomacy"), TEXT("Schemes"), TEXT("Social"),
                                          TEXT("Settlements"), TEXT("Party"), TEXT("Events"), TEXT("Environment"),
                                          TEXT("Cognition"), TEXT("History"), TEXT("WorldState"), TEXT("Chronicle"),
@@ -2232,8 +2056,7 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
 }
 
 void FGameplayDebuggerCategory_MythicLivingWorld::DrawData(APlayerController *OwnerPC, FGameplayDebuggerCanvasContext &CanvasContext) {
-    // The verbatim server-built text overview (header + active detail pane + toggle footer).
     CanvasContext.Printf(TEXT("%s"), *DataPack.Summary);
 }
 
-#endif // WITH_GAMEPLAY_DEBUGGER
+#endif

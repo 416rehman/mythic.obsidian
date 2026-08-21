@@ -3,11 +3,6 @@
 #include "CoreMinimal.h"
 #include "SavedObjective.generated.h"
 
-/**
- * One persisted objective: the definition asset (soft path) + this player's progress toward it. Mirrors
- * FSerializedProficiencyData. The UObjectiveTracker serializes/restores these itself (it also re-subscribes the
- * restored objectives' trigger tags on load), so there is no separate helper here.
- */
 USTRUCT(BlueprintType)
 struct FSerializedObjectiveData {
     GENERATED_BODY()

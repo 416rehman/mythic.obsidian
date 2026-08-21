@@ -17,10 +17,6 @@ enum EItemRarity {
 
 class UItemFragment;
 
-/**
- * Base class for all item definitions.
- * Use the buttons in "Set Category" to auto-configure ItemType and required fragments.
- */
 UCLASS(Blueprintable, BlueprintType, EditInlineNew)
 class MYTHIC_API UItemDefinition : public UMythicDataAsset {
     GENERATED_BODY()
@@ -101,53 +97,40 @@ public:
     static FLinearColor GetRarityColor(EItemRarity InRarity);
 
 #if WITH_EDITOR
-    //~ Set Category - Auto-configure this item for a specific category
 
-    /** Sets ItemType to Weapon and adds AttackFragment */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Weapon();
 
-    /** Sets ItemType to Tool and adds AttackFragment */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Tool();
 
-    /** Sets ItemType to Gear and adds AffixesFragment */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Gear();
 
-    /** Sets ItemType to Accessory and adds AffixesFragment */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Accessory();
 
-    /** Sets ItemType to Artifact and adds AffixesFragment */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Artifact();
 
-    /** Sets ItemType to Consumable and adds ConsumableActionFragment */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Consumable();
 
-    /** Sets ItemType to Learning and adds ConsumableActionFragment */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Learning();
 
-    /** Sets ItemType to Farming */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Farming();
 
-    /** Sets ItemType to Mining */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Mining();
 
-    /** Sets ItemType to Placable */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Placable();
 
-    /** Sets ItemType to Exploration */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Exploration();
 
-    /** Sets ItemType to Misc */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Misc();
 

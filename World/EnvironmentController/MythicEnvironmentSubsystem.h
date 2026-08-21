@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -9,25 +8,17 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "MythicEnvironmentSubsystem.generated.h"
 
-// Delegate that is called when the Environment controller is registered
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEnvironmentControllerRegistered, AMythicEnvironmentController *, EnvironmentController);
 
-/**
- * The environment subsystem provides an easy interface for managing the environment of the game world.
- * This includes weather, time of day, and other environmental factors.
- */
 UCLASS()
 class MYTHIC_API UMythicEnvironmentSubsystem : public UGameInstanceSubsystem {
     GENERATED_BODY()
 
 private:
-    // This is the environment controller that will be used to manage the environment
-    // Can be registered via the SetEnvironmentController method
     UPROPERTY()
     AMythicEnvironmentController *EnvironmentController;
 
 public:
-    /// Getters ---------------------------------------------------------------
 
     void SetEnvironmentController(AMythicEnvironmentController *Controller);
 
@@ -67,8 +58,6 @@ public:
     UFUNCTION(BlueprintCallable, Category="Environment")
     bool IsWeatherPaused();
 
-
-    /// Setters ---------------------------------------------------------------
 
     // Set the target weather type to transition to. Will influence the weather processing to eventually transition to the target weather type
     // The OnTargetWeatherReached event is called when the target weather is reached

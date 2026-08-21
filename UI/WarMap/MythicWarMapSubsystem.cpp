@@ -1,5 +1,3 @@
-// Mythic Living World — War-Map Texture Subsystem (implementation)
-// Client-only. Reads replicated proxies + client-loaded settings; builds a per-cell BGRA8 texture event-driven.
 
 #include "MythicWarMapSubsystem.h"
 
@@ -15,15 +13,15 @@
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/LivingWorldReplication.h"
 #include "World/LivingWorld/Factions/FactionColor.h"
+#include "Objectives/ObjectiveDefinition.h"
+#include "Objectives/ObjectiveTracker.h"
+#include "Player/MythicPlayerController.h"
+#include "World/POI/MythicPOIDiscoverySubsystem.h"
+#include "World/POI/MythicPOIReplicator.h"
 
-// ─────────────────────────────────────────────────────────────
-// Lifecycle
-// ─────────────────────────────────────────────────────────────
 
 void UMythicWarMapSubsystem::Initialize(FSubsystemCollectionBase& Collection) {
     Super::Initialize(Collection);
-    // Grid + texture are resolved lazily on first use (the living-world subsystem / replicator may not exist yet at
-    // local-player-subsystem init). Bind to the proxy-change delegate the first time we can reach the subsystem.
 }
 
 void UMythicWarMapSubsystem::Deinitialize() {
@@ -40,9 +38,6 @@ void UMythicWarMapSubsystem::Deinitialize() {
     Super::Deinitialize();
 }
 
-// ─────────────────────────────────────────────────────────────
-// Subsystem / grid resolution
-// ─────────────────────────────────────────────────────────────
 
 UMythicLivingWorldSubsystem* UMythicWarMapSubsystem::GetLivingWorld() const {
     if (const ULocalPlayer* LP = GetLocalPlayer()) {
@@ -63,7 +58,6 @@ bool UMythicWarMapSubsystem::EnsureGridResolved() {
         return false;
     }
 
-    // Bind to proxy changes the first time we can reach the subsystem (idempotent).
     if (!bBoundToProxies) {
         LWS->OnLivingWorldProxiesChanged.AddDynamic(this, &UMythicWarMapSubsystem::HandleProxiesChanged);
         bBoundToProxies = true;
@@ -74,7 +68,6 @@ bool UMythicWarMapSubsystem::EnsureGridResolved() {
         return false;
     }
 
-    // Territory dims/origin/cell-size (client-loaded, not replicated). TSoftObjectPtr -> sync load on the client.
     const UMythicTerritoryGridSettings* TerritorySettings = LWSettings->TerritorySettings.LoadSynchronous();
     if (!TerritorySettings) {
         return false;
@@ -90,13 +83,11 @@ bool UMythicWarMapSubsystem::EnsureGridResolved() {
         return false;
     }
 
-    // Faction definitions (color + name). Optional — a missing list just means deterministic colors + empty names.
     CachedInitialFactions.Reset();
     if (const UMythicFactionDatabaseSettings* FactionSettings = LWSettings->FactionSettings.LoadSynchronous()) {
         CachedInitialFactions = FactionSettings->InitialFactions;
     }
 
-    // Size the CPU buffers. DominantByCell starts fully unclaimed (0xFF); it accumulates as delta proxies arrive.
     const int32 Count = GridW * GridH;
     DominantByCell.Init(0xFF, Count);
     PixelBuffer.Init(Style.UnclaimedColor, Count);
@@ -108,9 +99,6 @@ FColor UMythicWarMapSubsystem::ResolveColor(uint8 FactionIndex) const {
     return MythicWarMap::ResolveFactionColorForId(FactionIndex, CachedInitialFactions);
 }
 
-// ─────────────────────────────────────────────────────────────
-// Texture create + upload
-// ─────────────────────────────────────────────────────────────
 
 void UMythicWarMapSubsystem::EnsureTexture() {
     if (WarMapTexture || GridW <= 0 || GridH <= 0) {
@@ -121,10 +109,9 @@ void UMythicWarMapSubsystem::EnsureTexture() {
     if (!WarMapTexture) {
         return;
     }
-    WarMapTexture->SRGB = false;                       // raw color data, no gamma
-    WarMapTexture->Filter = TextureFilter::TF_Nearest; // crisp per-cell blocks
+    WarMapTexture->SRGB = false;
+    WarMapTexture->Filter = TextureFilter::TF_Bilinear;
     WarMapTexture->NeverStream = true;
-    // No AddToRoot needed — WarMapTexture is a UPROPERTY(Transient) on this subsystem, so it is GC-reachable.
     WarMapTexture->UpdateResource();
 }
 
@@ -154,15 +141,11 @@ UTexture2D* UMythicWarMapSubsystem::GetWarMapTexture() {
     }
     EnsureTexture();
     if (PixelBuffer.Num() != GridW * GridH) {
-        // First access before any refresh — build once so the texture isn't blank garbage.
         RefreshNow();
     }
     return WarMapTexture;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Refresh — accumulate deltas, rebuild pixels, upload, broadcast
-// ─────────────────────────────────────────────────────────────
 
 void UMythicWarMapSubsystem::HandleProxiesChanged() {
     RefreshNow();
@@ -187,8 +170,6 @@ void UMythicWarMapSubsystem::RefreshNow() {
         return;
     }
 
-    // 1) Accumulate the replicated territory deltas into DominantByCell. Proxies are delta-only — the server sends a
-    //    cell once when its dominant faction flips, so we keep the persistent accumulator and overwrite touched cells.
     for (const FMythicTerritoryProxyItem& Item : LWS->GetAllTerritoryProxies()) {
         const int32 X = Item.Cell.X;
         const int32 Y = Item.Cell.Y;
@@ -200,7 +181,6 @@ void UMythicWarMapSubsystem::RefreshNow() {
 
     const FMythicWarMapStyle PODStyle = Style.ToPOD();
 
-    // Neighbor lookup seam for the border pass (reads the accumulator directly).
     auto FactionAt = [this](int32 X, int32 Y) -> uint8 {
         return DominantByCell[MythicWarMap::CoordToTexelIndex(X, Y, GridW)];
     };
@@ -208,14 +188,13 @@ void UMythicWarMapSubsystem::RefreshNow() {
         return ResolveColor(Idx);
     };
 
-    // 2) Base fill, then border darken on claimed border texels.
     for (int32 Y = 0; Y < GridH; ++Y) {
         for (int32 X = 0; X < GridW; ++X) {
             const int32 Idx = MythicWarMap::CoordToTexelIndex(X, Y, GridW);
 
             FMythicWarMapCell Cell;
             Cell.FactionIndex = DominantByCell[Idx];
-            Cell.bPlayerOwned = false; // bPlayerOwned isn't carried on the territory proxy yet (half-wired upstream)
+            Cell.bPlayerOwned = false;
 
             FColor Px = MythicWarMap::CellToColor(Cell, ColorFor, PODStyle);
 
@@ -230,7 +209,6 @@ void UMythicWarMapSubsystem::RefreshNow() {
 
     UploadTexture();
 
-    // Cache marker/legend counts for the debugger (cheap recompute).
     {
         TArray<FMythicWarMapMarker> Markers;
         GetMarkers(Markers);
@@ -240,7 +218,7 @@ void UMythicWarMapSubsystem::RefreshNow() {
             if (M.Kind == EMythicWarMapMarkerKind::Encounter) {
                 ++LastEncounterMarkerCount;
             } else {
-                ++LastSettlementMarkerCount; // Settlement + Capital
+                ++LastSettlementMarkerCount;
             }
         }
         TArray<FMythicWarMapLegendEntry> Legend;
@@ -251,9 +229,6 @@ void UMythicWarMapSubsystem::RefreshNow() {
     OnWarMapChanged.Broadcast();
 }
 
-// ─────────────────────────────────────────────────────────────
-// Map data API
-// ─────────────────────────────────────────────────────────────
 
 void UMythicWarMapSubsystem::GetLegendEntries(TArray<FMythicWarMapLegendEntry>& Out) const {
     Out.Reset();
@@ -261,7 +236,6 @@ void UMythicWarMapSubsystem::GetLegendEntries(TArray<FMythicWarMapLegendEntry>& 
         return;
     }
 
-    // Tally controlled cells per faction index from the client accumulator.
     TMap<uint8, int32> CountByIndex;
     for (const uint8 Idx : DominantByCell) {
         if (Idx != 0xFF) {
@@ -281,10 +255,18 @@ void UMythicWarMapSubsystem::GetLegendEntries(TArray<FMythicWarMapLegendEntry>& 
         Out.Add(Entry);
     }
 
-    // Stable ordering: highest cell count first (the dominant power leads the legend).
     Out.Sort([](const FMythicWarMapLegendEntry& A, const FMythicWarMapLegendEntry& B) {
         return A.ControlledCellCount > B.ControlledCellCount;
     });
+}
+
+bool UMythicWarMapSubsystem::GetMarkerWorldXY(const FMythicWarMapMarker& Marker, FVector2D& OutWorldXY) const {
+    if (CellWorldSize <= 0.0f || GridW <= 0 || GridH <= 0) {
+        OutWorldXY = FVector2D::ZeroVector;
+        return false;
+    }
+    OutWorldXY = MythicWarMap::NormalizedToWorld(Marker.NormalizedPos, WorldOrigin, CellWorldSize, GridW, GridH);
+    return true;
 }
 
 void UMythicWarMapSubsystem::GetMarkers(TArray<FMythicWarMapMarker>& Out) const {
@@ -298,7 +280,6 @@ void UMythicWarMapSubsystem::GetMarkers(TArray<FMythicWarMapMarker>& Out) const 
         return;
     }
 
-    // Settlements (proxy carries center cell, governing faction, display name, capital flag).
     for (const FMythicSettlementProxyItem& S : LWS->GetAllSettlementProxies()) {
         FMythicWarMapMarker M;
         M.NormalizedPos = MythicWarMap::CellToNormalized(S.CenterCell.X, S.CenterCell.Y, GridW, GridH);
@@ -309,13 +290,54 @@ void UMythicWarMapSubsystem::GetMarkers(TArray<FMythicWarMapMarker>& Out) const 
         Out.Add(M);
     }
 
-    // Active encounters.
     for (const FMythicEncounterProxyItem& E : LWS->GetAllEncounterProxies()) {
         FMythicWarMapMarker M;
         M.NormalizedPos = MythicWarMap::CellToNormalized(E.Cell.X, E.Cell.Y, GridW, GridH);
         M.Color = ResolveColor(E.OriginFaction.Index);
         M.Kind = EMythicWarMapMarkerKind::Encounter;
         Out.Add(M);
+    }
+
+    if (CellWorldSize > 0.0f) {
+        if (const ULocalPlayer* LP = GetLocalPlayer()) {
+            if (const AMythicPlayerController* PC = Cast<AMythicPlayerController>(LP->GetPlayerController(LP->GetWorld()))) {
+                if (const UObjectiveTracker* Tracker = PC->GetObjectiveTracker()) {
+                    for (const FObjectiveProgress& Prog : Tracker->GetActiveObjectives()) {
+                        const UObjectiveDefinition* Def = Prog.Definition;
+                        if (!Def || Prog.bCompleted || !Def->bShowOnMap || Def->WorldMarkerLocation.IsZero()) {
+                            continue;
+                        }
+                        FMythicWarMapMarker M;
+                        M.NormalizedPos = MythicWarMap::WorldToNormalized(
+                            FVector2D(Def->WorldMarkerLocation.X, Def->WorldMarkerLocation.Y), WorldOrigin,
+                            CellWorldSize, GridW, GridH);
+                        M.Color = Style.ObjectiveColor;
+                        M.Label = Def->DisplayText;
+                        M.Kind = EMythicWarMapMarkerKind::Objective;
+                        Out.Add(M);
+                    }
+                }
+            }
+        }
+    }
+
+    if (CellWorldSize > 0.0f) {
+        if (const UGameInstance* GI = GetLocalPlayer() ? GetLocalPlayer()->GetGameInstance() : nullptr) {
+            if (UMythicPOIDiscoverySubsystem* POI = GI->GetSubsystem<UMythicPOIDiscoverySubsystem>()) {
+                TArray<FMythicPOIProxyItem> POIs;
+                POI->GetReplicatedPOIs(POIs);
+                for (const FMythicPOIProxyItem& P : POIs) {
+                    FMythicWarMapMarker M;
+                    M.NormalizedPos = MythicWarMap::WorldToNormalized(FVector2D(P.Anchor.X, P.Anchor.Y), WorldOrigin,
+                                                                      CellWorldSize, GridW, GridH);
+                    M.Color = Style.WaypointColor;
+                    M.Label = P.DisplayName;
+                    M.Kind = EMythicWarMapMarkerKind::Waypoint;
+                    M.SourceId = P.POIId;
+                    Out.Add(M);
+                }
+            }
+        }
     }
 }
 

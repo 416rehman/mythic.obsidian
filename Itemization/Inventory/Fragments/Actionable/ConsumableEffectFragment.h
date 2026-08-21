@@ -1,5 +1,3 @@
-// ConsumableEffectFragment.h
-// Fragment for consumable items that apply gameplay effects with full UI display support
 
 #pragma once
 
@@ -9,16 +7,14 @@
 #include "GameplayTagContainer.h"
 #include "ConsumableEffectFragment.generated.h"
 
-// How the magnitude value is calculated
 UENUM(BlueprintType)
 enum class EMythicMagnitudeSource : uint8 {
-    Static, // ScalableFloat - known value
-    SetByCaller, // From fragment config
-    AttributeBased, // Scales with an attribute
-    Custom // Custom calculation - use override text
+    Static,
+    SetByCaller,
+    AttributeBased,
+    Custom
 };
 
-// Structured modifier info for UI display
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicEffectModifierDisplayData {
     GENERATED_BODY()
@@ -52,17 +48,14 @@ struct MYTHIC_API FMythicEffectModifierDisplayData {
     UPROPERTY(BlueprintReadOnly, Category = "Effect")
     bool bIsPositive = true;
 
-    // C++ helpers
     FText GetAttributeDisplayName() const;
     FText GetMagnitudeText() const;
     FText GetFormattedText() const;
     FText GetRichText() const;
-    // With ASC: calculates actual magnitude for attribute-backed modifiers
     FText GetMagnitudeText(UAbilitySystemComponent *ASC, bool bShowContext = false) const;
     FText GetRichText(UAbilitySystemComponent *ASC, bool bShowContext = false) const;
 };
 
-// Duration info for UI display
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicEffectDurationDisplayData {
     GENERATED_BODY()
@@ -88,12 +81,10 @@ struct MYTHIC_API FMythicEffectDurationDisplayData {
     bool IsPeriodic() const { return Period > 0.0f && DurationType != EGameplayEffectDurationType::Instant; }
     FText GetFormattedText() const;
     FText GetRichText() const;
-    // With ASC: calculates actual duration for attribute-backed duration
     FText GetFormattedText(UAbilitySystemComponent *ASC, bool bShowContext = false) const;
     FText GetRichText(UAbilitySystemComponent *ASC, bool bShowContext = false) const;
 };
 
-// Stacking info
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicEffectStackingDisplayData {
     GENERATED_BODY()
@@ -109,7 +100,6 @@ struct MYTHIC_API FMythicEffectStackingDisplayData {
     FText GetRichText() const;
 };
 
-// Combined display data for a single GE
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicEffectDisplayData {
     GENERATED_BODY()
@@ -123,12 +113,10 @@ struct MYTHIC_API FMythicEffectDisplayData {
     UPROPERTY(BlueprintReadOnly, Category = "Effect")
     FMythicEffectStackingDisplayData Stacking;
 
-    // Full rich text for entire effect
     FText GetRichText() const;
     FText GetRichText(UAbilitySystemComponent *ASC, bool bShowContext = false) const;
 };
 
-// Runtime data
 USTRUCT(BlueprintType)
 struct FConsumableEffectRuntimeReplicatedData {
     GENERATED_BODY()
@@ -140,7 +128,6 @@ struct FConsumableEffectRuntimeReplicatedData {
     FGameplayAbilitySpecHandle AbilityHandle;
 };
 
-// Entry for a single gameplay effect with SetByCaller support
 USTRUCT(BlueprintType)
 struct FConsumableEffectEntry {
     GENERATED_BODY()
@@ -168,10 +155,6 @@ struct FConsumableEffectConfig {
     TArray<FConsumableEffectEntry> Effects;
 };
 
-/**
- * Fragment for consumable items that apply gameplay effects.
- * Supports full UI display with SetByCaller, attribute-backed, stacking, and rich text.
- */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
 class MYTHIC_API UConsumableEffectFragment : public UActionableItemFragment {
     GENERATED_BODY()
@@ -199,7 +182,6 @@ public:
         DOREPLIFETIME_CONDITION(ThisClass, ConsumableEffectConfig, COND_InitialOrOwner);
     }
 
-    // ========== UI INTROSPECTION ==========
 
     // Get display data for an effect entry
     UFUNCTION(BlueprintPure, Category = "Mythic|Consumable")

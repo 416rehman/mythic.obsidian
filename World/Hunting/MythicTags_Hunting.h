@@ -1,0 +1,9 @@
+#pragma once
+
+#include "NativeGameplayTags.h"
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_FieldActivity_ReadTracks);
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_GameplayCue_Hunting_Spoor_Revealed);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_GameplayCue_Hunting_Spoor_Faded);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_GameplayCue_Hunting_Spoor_TrailEnd);

@@ -5,15 +5,17 @@
 #include "Itemization/InventoryProviderInterface.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Mythic/Itemization/Inventory/MythicInventoryComponent.h"
+#include "Settings/MythicDeveloperSettings.h"
+#include "NiagaraComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
 
 UMythicItemInstance *UMythicLootManagerSubsystem::Create(UItemDefinition *item_def, int32 quantity_if_stackable, AController *TargetRecipient, int32 level) {
-    // Check if the item definition is valid
     if (!item_def) {
         UE_LOG(Myth, Warning, TEXT("Item definition is null"));
         return nullptr;
     }
 
-    // Construct a new item instance
     UMythicItemInstance *ItemInstance = NewObject<UMythicItemInstance>();
     if (!ItemInstance) {
         UE_LOG(Myth, Warning, TEXT("Failed to create item instance"));
@@ -49,17 +51,14 @@ AMythicWorldItem *UMythicLootManagerSubsystem::CreateAndSpawn(UItemDefinition *i
 
 AMythicWorldItem *UMythicLootManagerSubsystem::CreateAndGive(UItemDefinition *ItemDef, int32 QtyIfStackable, TScriptInterface<IInventoryProviderInterface> InventoryProvider,
                                                              AController *TargetRecipient, int32 Lvl) {
-    // Make sure the inventory is valid
     if (!InventoryProvider) {
         UE_LOG(Myth, Warning, TEXT("InventoryProvider is null"));
         return nullptr;
     }
-    // Make sure the item definition is valid
     if (!ItemDef) {
         UE_LOG(Myth, Warning, TEXT("Item definition is null"));
         return nullptr;
     }
-    // Make sure the default world item class is set and the item instance is valid
     if (!DefaultWorldItemClass) {
         UE_LOG(Myth, Warning, TEXT("Default world item class is not set - Use SetDefaultWorldItemClass to set it."));
         return nullptr;
@@ -68,18 +67,15 @@ AMythicWorldItem *UMythicLootManagerSubsystem::CreateAndGive(UItemDefinition *It
     auto Inventory = InventoryProvider.GetInterface()->GetInventoryForItemDefinition(ItemDef);
     if (!Inventory) {
         UE_LOG(Myth, Warning, TEXT("InventoryProvider does not have an inventory for item definition %s"), *ItemDef->GetName());
-        return nullptr;        
+        return nullptr;
     }
 
-    // Create a new item instance
     UMythicItemInstance *ItemInstance = Create(ItemDef, QtyIfStackable, TargetRecipient, Lvl);
 
-    // Give the item to the player
     return Inventory->AddItem(ItemInstance, TargetRecipient);
 }
 
 AMythicWorldItem *UMythicLootManagerSubsystem::Spawn(UMythicItemInstance *item, const FVector &location, float radius, AController *TargetRecipient) {
-    // Make sure the default world item class is set and the item instance is valid
     if (!DefaultWorldItemClass) {
         UE_LOG(Myth, Warning, TEXT("Default world item class is not set - Use SetDefaultWorldItemClass to set it."));
         return nullptr;
@@ -89,13 +85,10 @@ AMythicWorldItem *UMythicLootManagerSubsystem::Spawn(UMythicItemInstance *item, 
         return nullptr;
     }
 
-    // Warn if location is not set
     if (location == FVector::ZeroVector) {
         UE_LOG(Myth, Error, TEXT("Location for the drop is not set"));
     }
 
-    // Create and spawn an actor from the default world item class
-    // Construct a new world item and set its RelevantPlayerController then spawn it
     FVector start_location = location + FVector(0, 0, 50);
     auto spawn_params = FActorSpawnParameters();
     if (TargetRecipient) {
@@ -113,13 +106,11 @@ AMythicWorldItem *UMythicLootManagerSubsystem::Spawn(UMythicItemInstance *item, 
 
     AMythicWorldItem *WorldItem = GetWorld()->SpawnActor<AMythicWorldItem>(DefaultWorldItemClass, start_location, FRotator::ZeroRotator, spawn_params);
 
-    // If the world item is null, return null
     if (!WorldItem) {
         UE_LOG(Myth, Warning, TEXT("SpawnActor failed"));
         return nullptr;
     }
 
-    // if TargetRecipient is set, only the owner will see the item
     WorldItem->bOnlyRelevantToOwner = TargetRecipient != nullptr;
     WorldItem->SetTargetRecipient(TargetRecipient);
 
@@ -127,8 +118,130 @@ AMythicWorldItem *UMythicLootManagerSubsystem::Spawn(UMythicItemInstance *item, 
 
     WorldItem->EmulateDropPhysics(start_location, radius);
 
-    // Return the spawned world item
+    LiveWorldItems.Add(WorldItem);
+    if (WorldItemLifetimeSeconds > 0.0f) {
+        WorldItem->SetLifeSpan(WorldItemLifetimeSeconds);
+    }
+    EnforceWorldItemBudget();
+    UpdateWorldItemFXTimer();
+
     return WorldItem;
+}
+
+void UMythicLootManagerSubsystem::EnforceWorldItemBudget() {
+    LiveWorldItems.RemoveAll([](const TWeakObjectPtr<AMythicWorldItem> &Item) {
+        return !Item.IsValid();
+    });
+
+    if (MaxLiveWorldItems <= 0 || LiveWorldItems.Num() <= MaxLiveWorldItems) {
+        return;
+    }
+
+    const int32 ToEvict = LiveWorldItems.Num() - MaxLiveWorldItems;
+    int32 Evicted = 0;
+    while (Evicted < ToEvict && LiveWorldItems.Num() > 0) {
+        if (AMythicWorldItem *Oldest = LiveWorldItems[0].Get()) {
+            Oldest->Destroy();
+        }
+        LiveWorldItems.RemoveAt(0);
+        ++Evicted;
+    }
+
+    UE_LOG(Myth, Log, TEXT("Loot budget: despawned %d oldest dropped item(s); %d live (cap %d)."),
+           Evicted, LiveWorldItems.Num(), MaxLiveWorldItems);
+}
+
+void UMythicLootManagerSubsystem::UpdateWorldItemFXTimer() {
+    UWorld *World = GetWorld();
+    if (!World || WorldItemFXDistance <= 0.0f) {
+        return;
+    }
+
+    const bool bWantTimer = LiveWorldItems.Num() > 0;
+    const bool bHaveTimer = World->GetTimerManager().IsTimerActive(WorldItemFXTimer);
+
+    if (bWantTimer && !bHaveTimer) {
+        World->GetTimerManager().SetTimer(WorldItemFXTimer, this, &UMythicLootManagerSubsystem::RunWorldItemFXPass,
+                                          FMath::Max(0.05f, WorldItemFXInterval), true);
+    }
+    else if (!bWantTimer && bHaveTimer) {
+        World->GetTimerManager().ClearTimer(WorldItemFXTimer);
+    }
+}
+
+void UMythicLootManagerSubsystem::RunWorldItemFXPass() {
+    UWorld *World = GetWorld();
+    if (!World) {
+        return;
+    }
+
+    LiveWorldItems.RemoveAll([](const TWeakObjectPtr<AMythicWorldItem> &Item) {
+        return !Item.IsValid();
+    });
+    if (LiveWorldItems.Num() == 0) {
+        UpdateWorldItemFXTimer();
+        return;
+    }
+
+    TArray<FVector, TInlineAllocator<4>> ViewPoints;
+    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It) {
+        const APlayerController *PC = It->Get();
+        if (!PC || !PC->IsLocalController()) {
+            continue;
+        }
+        FVector ViewLocation;
+        FRotator ViewRotation;
+        PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
+        ViewPoints.Add(ViewLocation);
+    }
+
+    const float CullSq = WorldItemFXDistance * WorldItemFXDistance;
+    for (const TWeakObjectPtr<AMythicWorldItem> &WeakItem : LiveWorldItems) {
+        AMythicWorldItem *Item = WeakItem.Get();
+        if (!Item) {
+            continue;
+        }
+        UNiagaraComponent *FX = Item->FindComponentByClass<UNiagaraComponent>();
+        if (!FX) {
+            continue;
+        }
+
+        const FVector ItemLocation = Item->GetActorLocation();
+        bool bNear = false;
+        for (const FVector &View : ViewPoints) {
+            if (FVector::DistSquared(View, ItemLocation) <= CullSq) {
+                bNear = true;
+                break;
+            }
+        }
+
+        if (bNear && !FX->IsActive()) {
+            FX->Activate();
+        }
+        else if (!bNear && FX->IsActive()) {
+            FX->Deactivate();
+        }
+    }
+}
+
+void UMythicLootManagerSubsystem::Initialize(FSubsystemCollectionBase &Collection) {
+    Super::Initialize(Collection);
+
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    if (!Settings || Settings->DefaultWorldItemClass.IsNull()) {
+        UE_LOG(Myth, Warning,
+               TEXT("LootManager: DefaultWorldItemClass is not set in project settings (Mythic > Loot). Loot will "
+                    "only work in worlds whose game mode assigns it."));
+        return;
+    }
+
+    DefaultWorldItemClass = Settings->DefaultWorldItemClass.LoadSynchronous();
+    if (!DefaultWorldItemClass) {
+        UE_LOG(Myth, Error, TEXT("LootManager: failed to load DefaultWorldItemClass '%s'."),
+               *Settings->DefaultWorldItemClass.ToString());
+        return;
+    }
+    UE_LOG(Myth, Log, TEXT("LootManager: world-item class resolved to %s."), *DefaultWorldItemClass->GetName());
 }
 
 void UMythicLootManagerSubsystem::SetDefaultWorldItemClass(const TSubclassOf<AMythicWorldItem> &NewDefaultWorldItemClass) {
@@ -147,7 +260,6 @@ void UMythicLootManagerSubsystem::DestroyWorldItem(AMythicWorldItem *WorldItem, 
     }
 
 
-    // If WorldItem has no target recipient, anyone can destroy it
     if (!WorldItem->GetTargetRecipient() || WorldItem->GetTargetRecipient() == Controller) {
         WorldItem->Destroy();
     }
@@ -157,10 +269,9 @@ void UMythicLootManagerSubsystem::DestroyWorldItem(AMythicWorldItem *WorldItem, 
 }
 
 bool UMythicLootManagerSubsystem::ShouldCreateSubsystem(UObject *Outer) const {
-    // Should only create the subsystem on the server
     UWorld *World = Outer->GetWorld();
     if (World->WorldType != EWorldType::None && World->GetNetMode() < NM_Client) {
-        UE_LOG(Myth, Warning, TEXT("LootManager created on server"));
+        UE_LOG(Myth, Log, TEXT("LootManager created on server"));
         return true;
     }
 

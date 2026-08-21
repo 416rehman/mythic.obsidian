@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -22,6 +21,17 @@ public:
     // the icon to display for this item slot
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     UTexture2D *Icon;
+
+    /**
+     * The GHOST icon: what this slot is FOR, shown only while it is empty.
+     *
+     * Every UInventorySlotDefinition has carried an authored Icon since it was written — a sword for the weapon
+     * slot, a helm for the head slot, a potion for the pouch — and nothing ever drew it. The result was a page of
+     * identical dark squares where you could not tell a weapon slot from a boot slot without reading the header.
+     * Null the moment a real item lands, so it can never fight the item's own icon.
+     */
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    UTexture2D *EmptySlotIcon = nullptr;
 
     // is marked junk
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
@@ -109,6 +119,9 @@ public:
 
     void SetIcon(UTexture2D *InIcon);
     UTexture2D *GetIcon() const;
+
+    void SetEmptySlotIcon(UTexture2D *InIcon);
+    UTexture2D *GetEmptySlotIcon() const;
     void SetIsJunk(bool bInIsJunk);
     bool GetIsJunk() const;
     void SetBackgroundColor(FSlateColor InBackgroundColor);

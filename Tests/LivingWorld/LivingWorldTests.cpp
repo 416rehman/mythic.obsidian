@@ -1,7 +1,3 @@
-// Mythic Living World — Unit Tests
-// Covers: CausalFabric, TerritoryGrid, FactionDatabase, MoralSignature, SettlementRegistry, WorldSimThread,
-//         SocialGraph, SchemeEngine
-// Run via: Session Frontend → Automation → Mythic.LivingWorld
 
 #include "Misc/AutomationTest.h"
 #include "Serialization/MemoryWriter.h"
@@ -12,7 +8,7 @@
 #include "World/LivingWorld/Morality/MoralSignature.h"
 #include "World/LivingWorld/Settlements/SettlementRegistry.h"
 #include "World/LivingWorld/MythicTags_LivingWorld.h"
-#include "GAS/MythicTags_GAS.h" // GAS_STATE_DEAD / GAS_STATE_DOWNED (stand-in registered tags for tag-identity tests)
+#include "GAS/MythicTags_GAS.h"
 #include "World/LivingWorld/Simulation/WorldSimThread.h"
 #include "World/LivingWorld/Social/SocialGraph.h"
 #include "World/LivingWorld/Simulation/SchemeEngine.h"
@@ -28,19 +24,19 @@
 #include "AI/Cognition/CognitiveBrainComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Objectives/ObjectiveDefinition.h"
-#include "Objectives/ObjectiveTracker.h" // UObjectiveTracker::ComputeObjectiveProgress
+#include "Objectives/ObjectiveTracker.h"
 #include "Mass/Processors/PressureProcessor.h"
 #include "Mass/Processors/SignificanceProcessor.h"
 #include "Mass/Processors/ScheduleTransitionProcessor.h"
 #include "Mass/Processors/CreatureEcologyProcessor.h"
 #include "Mass/Processors/PopulationSpawnerProcessor.h"
-#include "Mass/Processors/TerritoryPatrolSpawnerProcessor.h" // UMythicTerritoryPatrolSpawnerProcessor::ApplyContestedBorderBoost
-#include "World/LivingWorld/Roles/ArchetypeTypes.h" // UMythicArchetypeCatalog + weighted archetype draw
-#include "World/LivingWorld/Settlements/MythicSettlement.h" // EMythicSettlementEconomy (for archetype context)
-#include "World/LivingWorld/Territory/MythicBiome.h"        // EMythicBiome (for archetype context)
+#include "Mass/Processors/TerritoryPatrolSpawnerProcessor.h"
+#include "World/LivingWorld/Roles/ArchetypeTypes.h"
+#include "World/LivingWorld/Settlements/MythicSettlement.h"
+#include "World/LivingWorld/Territory/MythicBiome.h"
 #include "World/LivingWorld/LivingWorldReplication.h"
 #include "GAS/Executions/MythicCombatRoll.h"
-#include "GAS/Executions/MythicDamageApplication.h" // ShouldNegateFriendlyFire
+#include "GAS/Executions/MythicDamageApplication.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
@@ -48,28 +44,25 @@
 #include "Player/Proficiency/ProficiencyDefinition.h"
 #include "Rewards/LootReward.h"
 #include "World/LivingWorld/Dialogue/DialogueSelector.h"
-#include "World/LivingWorld/Dialogue/MythicDialogueTypes.h" // FMythicDialogueTemplate + UMythicDialogueDatabase
-#include "World/LivingWorld/Chronicle/MythicWorldChronicleSubsystem.h" // EventTagToReadable
+#include "World/LivingWorld/Dialogue/MythicDialogueTypes.h"
+#include "World/LivingWorld/Chronicle/MythicWorldChronicleSubsystem.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/Fragments/Passive/AffixesFragment.h"
 #include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h"
 #include "World/EnvironmentController/MythicEnvironmentController.h"
-#include "World/EnvironmentController/EnvironmentTypes.h" // UWeatherType::CanTransitionTo
+#include "World/EnvironmentController/EnvironmentTypes.h"
 #include "Subsystem/SaveSystem/Character/SavedInventory.h"
 #include "Resources/MythicResourceManagerComponent.h"
 #include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
 #include "Player/MythicCharacter.h"
-#include "Player/MythicPlayerState.h" // ResolveCanonicalPlayerKey
-#include "Player/MythicPlayerRegistrySubsystem.h" // ResolveRegisteredKey
+#include "Player/MythicPlayerState.h"
+#include "Player/MythicPlayerRegistrySubsystem.h"
 #include "Player/Proficiency/ProficiencyComponent.h"
-#include "Itemization/Inventory/MythicEncumbrance.h" // ComputeTier / SpeedMultiplierForTier
-#include "Itemization/Inventory/MythicInventoryComponent.h" // ComputeSlotWeight
-#include "Itemization/Inventory/MythicCurrency.h" // CanAfford / ComputeBalanceAfterSpend / ComputeSalePrice
+#include "Itemization/Inventory/MythicEncumbrance.h"
+#include "Itemization/Inventory/MythicInventoryComponent.h"
+#include "Itemization/Inventory/MythicCurrency.h"
 #include "Mass/EntityHandle.h"
 
-// ═══════════════════════════════════════════════════════════════
-// Helper: Create in-memory FactionDatabaseSettings
-// ═══════════════════════════════════════════════════════════════
 
 namespace LivingWorldTestHelpers {
     UMythicFactionDatabaseSettings *CreateFactionSettings(int32 MaxFactions = 20, int32 InitialCount = 3) {
@@ -92,7 +85,6 @@ namespace LivingWorldTestHelpers {
             F.BaseProduction.Materials = 0.5f;
         }
 
-        // Give faction 0 territory
         Settings->InitialFactions[0].ControlledCellCount = 10;
 
         return Settings;
@@ -123,9 +115,6 @@ namespace LivingWorldTestHelpers {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  CAUSAL FABRIC TESTS
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldCausalFabricInitTest,
@@ -137,7 +126,7 @@ bool FLivingWorldCausalFabricInitTest::RunTest(const FString &Parameters) {
     Fabric->Initialize(128);
 
     TestEqual(TEXT("Capacity should match"), Fabric->GetCapacity(), 128);
-    TestEqual(TEXT("Event count starts at zero"), (int32)Fabric->GetTotalEventCount(), 1); // NextEventId starts at 1
+    TestEqual(TEXT("Event count starts at zero"), (int32)Fabric->GetTotalEventCount(), 1);
 
     auto RecentEvents = Fabric->GetRecentEvents(10);
     TestEqual(TEXT("No events in fresh fabric"), RecentEvents.Num(), 0);
@@ -190,23 +179,20 @@ bool FLivingWorldCausalFabricRingWrapTest::RunTest(const FString &Parameters) {
     auto *Fabric = NewObject<UMythicCausalFabric>();
     Fabric->Initialize(Capacity);
 
-    // Fill beyond capacity — first events should be overwritten
     TArray<uint32> EventIds;
     for (int32 i = 0; i < Capacity + 4; ++i) {
         FMythicWorldEvent Event;
-        Event.WorldTime = static_cast<double>(i + 1); // 1-based: WorldTime 0 now means "unset" (AppendEvent stamps it)
+        Event.WorldTime = static_cast<double>(i + 1);
         Event.Cell = FMythicCellCoord(i, 0);
         EventIds.Add(Fabric->AppendEvent(Event));
     }
     Fabric->CommitWrites();
 
-    // Oldest events (0-3) should be overwritten
     for (int32 i = 0; i < 4; ++i) {
         const FMythicWorldEvent *Old = Fabric->GetEvent(EventIds[i]);
         TestNull(TEXT("Overwritten event should be null"), Old);
     }
 
-    // Newest events (4-11) should still be accessible
     for (int32 i = 4; i < Capacity + 4; ++i) {
         const FMythicWorldEvent *Current = Fabric->GetEvent(EventIds[i]);
         TestNotNull(TEXT("Recent event should exist"), Current);
@@ -224,10 +210,9 @@ bool FLivingWorldCausalFabricQueryByCellTest::RunTest(const FString &Parameters)
     auto *Fabric = NewObject<UMythicCausalFabric>();
     Fabric->Initialize(64);
 
-    // Append events in different cells
     for (int32 i = 0; i < 5; ++i) {
         FMythicWorldEvent Event;
-        Event.WorldTime = static_cast<double>(i + 1); // 1-based: WorldTime 0 now means "unset" (AppendEvent stamps it)
+        Event.WorldTime = static_cast<double>(i + 1);
         Event.Cell = FMythicCellCoord(0, 0);
         Event.CategoryFlags = EMythicEventCategory::Combat;
         Fabric->AppendEvent(Event);
@@ -265,15 +250,13 @@ bool FLivingWorldCausalFabricQueryByCategoryTest::RunTest(const FString &Paramet
     auto *Fabric = NewObject<UMythicCausalFabric>();
     Fabric->Initialize(64);
 
-    // Combat events
     for (int32 i = 0; i < 4; ++i) {
         FMythicWorldEvent Event;
-        Event.WorldTime = static_cast<double>(i + 1); // 1-based: WorldTime 0 now means "unset" (AppendEvent stamps it)
+        Event.WorldTime = static_cast<double>(i + 1);
         Event.Cell = FMythicCellCoord(0, 0);
         Event.CategoryFlags = EMythicEventCategory::Combat;
         Fabric->AppendEvent(Event);
     }
-    // Crime events
     for (int32 i = 0; i < 2; ++i) {
         FMythicWorldEvent Event;
         Event.WorldTime = static_cast<double>(i + 4);
@@ -281,7 +264,6 @@ bool FLivingWorldCausalFabricQueryByCategoryTest::RunTest(const FString &Paramet
         Event.CategoryFlags = EMythicEventCategory::Crime;
         Fabric->AppendEvent(Event);
     }
-    // Combined category event
     {
         FMythicWorldEvent Event;
         Event.WorldTime = 6.0;
@@ -306,9 +288,6 @@ bool FLivingWorldCausalFabricQueryByCategoryTest::RunTest(const FString &Paramet
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  TERRITORY GRID TESTS
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldTerritoryGridInitTest,
@@ -322,7 +301,6 @@ bool FLivingWorldTerritoryGridInitTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("Width should match"), Grid->GetWidth(), 32);
     TestEqual(TEXT("Height should match"), Grid->GetHeight(), 32);
 
-    // Default cell should be uncontrolled
     FMythicTerritoryCell Cell = Grid->GetCell(FMythicCellCoord(0, 0));
     TestFalse(TEXT("Default cell should have no valid faction"), Cell.DominantFaction.IsValid());
     TestNearlyEqual(TEXT("Default influence should be 0"), Cell.Influence, 0.0f);
@@ -330,9 +308,6 @@ bool FLivingWorldTerritoryGridInitTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// FMythicCellSpatialIndex — broad-phase cell->entity range query
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldSpatialIndexQueryTest,
@@ -342,11 +317,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FLivingWorldSpatialIndexQueryTest::RunTest(const FString &Parameters) {
     FMythicCellSpatialIndex Index;
 
-    // (Index, SerialNumber) are arbitrary identities for the test; only the cell placement matters here.
-    const FMassEntityHandle E1(1, 1); // cell (5,5)
-    const FMassEntityHandle E2(2, 1); // cell (5,6)
-    const FMassEntityHandle E3(3, 1); // cell (6,5)
-    const FMassEntityHandle E4(4, 1); // cell (9,9) — outside a radius-1 box around (5,5)
+    const FMassEntityHandle E1(1, 1);
+    const FMassEntityHandle E2(2, 1);
+    const FMassEntityHandle E3(3, 1);
+    const FMassEntityHandle E4(4, 1);
     Index.Insert(FMythicCellCoord(5, 5), E1);
     Index.Insert(FMythicCellCoord(5, 6), E2);
     Index.Insert(FMythicCellCoord(6, 5), E3);
@@ -356,7 +330,6 @@ bool FLivingWorldSpatialIndexQueryTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("Per-cell count (5,5)"), Index.GetCellCount(FMythicCellCoord(5, 5)), 1);
     TestEqual(TEXT("Per-cell count empty"), Index.GetCellCount(FMythicCellCoord(0, 0)), 0);
 
-    // Radius-1 (Chebyshev) box around (5,5) covers x,y in [4..6] → E1,E2,E3 but NOT the far E4 (9,9).
     TArray<FMassEntityHandle> R1;
     Index.QueryRange(FMythicCellCoord(5, 5), 1, R1);
     TestEqual(TEXT("r=1 returns 3 candidates"), R1.Num(), 3);
@@ -365,23 +338,19 @@ bool FLivingWorldSpatialIndexQueryTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("r=1 contains E3"), R1.Contains(E3));
     TestFalse(TEXT("r=1 excludes far E4"), R1.Contains(E4));
 
-    // Radius 0 → only the center cell.
     TArray<FMassEntityHandle> R0;
     Index.QueryRange(FMythicCellCoord(5, 5), 0, R0);
     TestEqual(TEXT("r=0 returns 1"), R0.Num(), 1);
     TestTrue(TEXT("r=0 is E1"), R0.Contains(E1));
 
-    // Negative radius → no-op (does not clear/append).
     TArray<FMassEntityHandle> RNeg;
     Index.QueryRange(FMythicCellCoord(5, 5), -1, RNeg);
     TestEqual(TEXT("negative radius no-op"), RNeg.Num(), 0);
 
-    // Large radius pulls in everything including the far entity.
     TArray<FMassEntityHandle> RBig;
     Index.QueryRange(FMythicCellCoord(5, 5), 8, RBig);
     TestEqual(TEXT("r=8 returns all 4"), RBig.Num(), 4);
 
-    // Reset clears counts; the structure stays reusable (next rebuild starts empty).
     Index.Reset();
     TestEqual(TEXT("Num after reset"), Index.Num(), 0);
     TestEqual(TEXT("Per-cell count after reset"), Index.GetCellCount(FMythicCellCoord(5, 5)), 0);
@@ -392,9 +361,6 @@ bool FLivingWorldSpatialIndexQueryTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// PersistentNPCRegistry — perma-death set + save/load round-trip (incl. the v2 monotonic spawn serial, R18-M7)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldPersistentNPCRegistryTest,
@@ -404,9 +370,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FLivingWorldPersistentNPCRegistryTest::RunTest(const FString &Parameters) {
     auto *Registry = NewObject<UMythicPersistentNPCRegistry>();
 
-    // OwningLWS = nullptr is safe by construction: RegisterDeath adds to the death set + records FIRST, then guards
-    // the world-event + settlement-succession side effects on (OwningLWS). So the registry's own state is exercisable
-    // without a world/subsystem.
     const FMythicFactionId F0 = LivingWorldTestHelpers::MakeFactionId(0);
     const FGameplayTag NoRole = FGameplayTag::EmptyTag;
     Registry->RegisterDeath(1001u, F0, NoRole, FMythicCellCoord(3, 4), 100.0, nullptr);
@@ -417,18 +380,15 @@ bool FLivingWorldPersistentNPCRegistryTest::RunTest(const FString &Parameters) {
     TestFalse(TEXT("9999 is not perma-dead"), Registry->IsPermaDead(9999u));
     TestEqual(TEXT("death count == 2"), Registry->GetDeathCount(), 2);
 
-    // Duplicate registration is a no-op (the dup-guard prevents double-counting a re-reported death).
     Registry->RegisterDeath(1001u, F0, NoRole, FMythicCellCoord(3, 4), 150.0, nullptr);
     TestEqual(TEXT("duplicate register is a no-op"), Registry->GetDeathCount(), 2);
 
-    // Spawn serial is monotonic + never reused (R18-M7 collision-free identity).
     const int32 Serial0 = Registry->AllocateSpawnSerial();
     const int32 Serial1 = Registry->AllocateSpawnSerial();
     const int32 Serial2 = Registry->AllocateSpawnSerial();
     TestEqual(TEXT("spawn serial increments (1)"), Serial1, Serial0 + 1);
     TestEqual(TEXT("spawn serial increments (2)"), Serial2, Serial1 + 1);
 
-    // Save → load into a FRESH registry → state preserved.
     TArray<uint8> Bytes;
     {
         FMemoryWriter Writer(Bytes);
@@ -446,12 +406,8 @@ bool FLivingWorldPersistentNPCRegistryTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("loaded: death count == 2"), Loaded->GetDeathCount(), 2);
     TestEqual(TEXT("loaded: 2 death records"), Loaded->GetDeathRecords().Num(), 2);
 
-    // The persisted monotonic spawn serial MUST survive load (a reset to 0 would regenerate NameHashes already in the
-    // dead set and wrongly perma-dead fresh NPCs — R18-M7). After 3 allocations NextSpawnSerial==3, so the loaded
-    // registry's NEXT allocation must be Serial2+1, NOT 0.
     TestEqual(TEXT("loaded: spawn serial persisted (not reset to 0)"), Loaded->AllocateSpawnSerial(), Serial2 + 1);
 
-    // Field round-trip: locate the 1001 record and verify its non-tag fields survived intact.
     const TArray<FMythicPersistentDeathRecord> &Records = Loaded->GetDeathRecords();
     const FMythicPersistentDeathRecord *Rec1001 = Records.FindByPredicate(
         [](const FMythicPersistentDeathRecord &R) { return R.NameHash == 1001u; });
@@ -466,9 +422,6 @@ bool FLivingWorldPersistentNPCRegistryTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// CausalFabric — event-log save/load round-trip + corrupted-stream crash guard
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldCausalFabricSerializeTest,
@@ -498,7 +451,6 @@ bool FLivingWorldCausalFabricSerializeTest::RunTest(const FString &Parameters) {
 
     Fabric->CommitWrites();
 
-    // Save → load into a FRESH fabric.
     TArray<uint8> Bytes;
     {
         FMemoryWriter Writer(Bytes);
@@ -513,7 +465,6 @@ bool FLivingWorldCausalFabricSerializeTest::RunTest(const FString &Parameters) {
 
     TestEqual(TEXT("loaded capacity preserved"), Loaded->GetCapacity(), 16);
 
-    // Events survive the round-trip (serialized fields), and are resolvable by id post-load (CommitWrites ran on load).
     const FMythicWorldEvent *G1 = Loaded->GetEvent(Id1);
     TestNotNull(TEXT("loaded: event 1 found by id"), G1);
     if (G1) {
@@ -534,12 +485,10 @@ bool FLivingWorldCausalFabricSerializeTest::RunTest(const FString &Parameters) {
                   static_cast<int32>(EMythicEventCategory::Crime));
     }
 
-    // The spatial index is rebuilt on load → cell queries work against the restored buffer.
     TArray<FMythicWorldEvent> CellEvents;
     Loaded->QueryEventsByCell(FMythicCellCoord(3, 4), 0.0, 1000.0, 16, CellEvents);
     TestEqual(TEXT("loaded: one event in cell (3,4)"), CellEvents.Num(), 1);
 
-    // Corrupted-stream guard: a garbage Capacity must SetError, NOT SetNum(garbage) → OOM/crash.
     TArray<uint8> BadBytes;
     {
         FMemoryWriter Writer(BadBytes);
@@ -558,9 +507,6 @@ bool FLivingWorldCausalFabricSerializeTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// TerritoryGrid — influence-grid save/load round-trip + corrupted-dimensions crash guard
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldTerritoryGridSerializeTest,
@@ -574,8 +520,6 @@ bool FLivingWorldTerritoryGridSerializeTest::RunTest(const FString &Parameters) 
     Grid->SetCellInfluence(FMythicCellCoord(10, 5), LivingWorldTestHelpers::MakeFactionId(1), 0.6f);
     Grid->CommitWrites();
 
-    // Save → load into a FRESH grid. The fresh grid is Initialize'd first so its per-faction cell lists are sized
-    // before the load's CommitWrites rebuilds them (the load restores cell state + dimensions over the top).
     TArray<uint8> Bytes;
     {
         FMemoryWriter Writer(Bytes);
@@ -602,11 +546,9 @@ bool FLivingWorldTerritoryGridSerializeTest::RunTest(const FString &Parameters) 
     const FMythicTerritoryCell CEmpty = Loaded->GetCell(FMythicCellCoord(0, 0));
     TestFalse(TEXT("(0,0) uncontrolled"), CEmpty.DominantFaction.IsValid());
 
-    // Corrupted-stream guard: patch the serialized Width (offset 4, just after the int32 Version) to a huge value →
-    // SetError, NOT an int32 overflow / SetNum(garbage) → OOM/crash.
-    TArray<uint8> BadBytes = Bytes; // copy a valid save
+    TArray<uint8> BadBytes = Bytes;
     if (BadBytes.Num() >= 8) {
-        BadBytes[4] = 0xFF; // Width = 0x7FFFFFFF (little-endian)
+        BadBytes[4] = 0xFF;
         BadBytes[5] = 0xFF;
         BadBytes[6] = 0xFF;
         BadBytes[7] = 0x7F;
@@ -622,9 +564,6 @@ bool FLivingWorldTerritoryGridSerializeTest::RunTest(const FString &Parameters) 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Serialize corrupted-stream guards — FactionDatabase + SettlementRegistry
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldFactionDatabaseSerializeGuardTest,
@@ -632,12 +571,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FLivingWorldFactionDatabaseSerializeGuardTest::RunTest(const FString &Parameters) {
-    // A corrupted save with a garbage MaxFactions must SetError, NOT SetNum(MaxFactions*MaxFactions) → int32 overflow/OOM.
     TArray<uint8> BadBytes;
     {
         FMemoryWriter Writer(BadBytes);
         int32 Version = 3;
-        int32 GarbageMaxFactions = 100000; // 100000^2 overflows int32 and is a ~1e10-element allocation
+        int32 GarbageMaxFactions = 100000;
         int32 RegCount = 0;
         Writer << Version;
         Writer << GarbageMaxFactions;
@@ -658,7 +596,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FLivingWorldSettlementRegistrySerializeGuardTest::RunTest(const FString &Parameters) {
-    // A valid empty-override stream loads cleanly (the guard must not reject valid saves).
     {
         TArray<uint8> Bytes;
         {
@@ -674,13 +611,12 @@ bool FLivingWorldSettlementRegistrySerializeGuardTest::RunTest(const FString &Pa
         TestFalse(TEXT("valid empty override stream loads without error"), Reader.IsError());
     }
 
-    // A garbage Count must SetError, NOT spin a multi-billion-iteration loop (hang/OOM).
     {
         TArray<uint8> BadBytes;
         {
             FMemoryWriter Writer(BadBytes);
             int32 Version = 2;
-            int32 GarbageCount = 2000000000; // 2e9
+            int32 GarbageCount = 2000000000;
             Writer << Version;
             Writer << GarbageCount;
         }
@@ -692,10 +628,6 @@ bool FLivingWorldSettlementRegistrySerializeGuardTest::RunTest(const FString &Pa
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Belief propagation hop cap — UMythicPartySubsystem::ShouldShareBelief
-// (pure predicate; the gossip loop's single eligibility gate)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldBeliefHopCapTest,
@@ -705,7 +637,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FLivingWorldBeliefHopCapTest::RunTest(const FString &Parameters) {
     const int32 MaxHops = 3;
 
-    // Confidence gate (preserves the prior 0.3 prune): weak beliefs are never shared, regardless of hop count.
     {
         FMythicBelief Weak;
         Weak.Confidence = 0.29f;
@@ -714,7 +645,6 @@ bool FLivingWorldBeliefHopCapTest::RunTest(const FString &Parameters) {
                   UMythicPartySubsystem::ShouldShareBelief(Weak, MaxHops));
     }
 
-    // A strong, freshly-witnessed belief (hop 0) is shared.
     {
         FMythicBelief Fresh;
         Fresh.Confidence = 0.9f;
@@ -723,24 +653,22 @@ bool FLivingWorldBeliefHopCapTest::RunTest(const FString &Parameters) {
                  UMythicPartySubsystem::ShouldShareBelief(Fresh, MaxHops));
     }
 
-    // Hop cap: a strong belief still propagates while below MaxHops, and stops once it reaches/exceeds it — this is
-    // what makes the designer's MaxBeliefPropagationHops actually bound the spread (the bug being fixed: it was dead).
     {
         FMythicBelief BelowCap;
         BelowCap.Confidence = 0.9f;
-        BelowCap.PropagationHops = 2; // < 3 → still shared (becomes hop-3 on the target, which then stops)
+        BelowCap.PropagationHops = 2;
         TestTrue(TEXT("hops below MaxHops → shared"),
                  UMythicPartySubsystem::ShouldShareBelief(BelowCap, MaxHops));
 
         FMythicBelief AtCap;
         AtCap.Confidence = 0.9f;
-        AtCap.PropagationHops = 3; // == MaxHops → cap reached, not shared
+        AtCap.PropagationHops = 3;
         TestFalse(TEXT("hops == MaxHops → not shared (cap reached)"),
                   UMythicPartySubsystem::ShouldShareBelief(AtCap, MaxHops));
 
         FMythicBelief PastCap;
         PastCap.Confidence = 0.9f;
-        PastCap.PropagationHops = 5; // > MaxHops → not shared
+        PastCap.PropagationHops = 5;
         TestFalse(TEXT("hops beyond MaxHops → not shared"),
                   UMythicPartySubsystem::ShouldShareBelief(PastCap, MaxHops));
     }
@@ -748,10 +676,6 @@ bool FLivingWorldBeliefHopCapTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Belief save/load field round-trip — UMythicPartySubsystem::SerializeBelief
-// (the v3 fix: companion beliefs now persist full state incl. PropagationHops + Cell)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldBeliefSerializeTest,
@@ -768,8 +692,6 @@ bool FLivingWorldBeliefSerializeTest::RunTest(const FString &Parameters) {
     Original.PropagationHops = 2;
     Original.SourceEventId = 42;
 
-    // v3 round-trip: the full semantic state must survive (this is the fix — beliefs used to drop everything but
-    // EventTag/Confidence/FormationTime, so the now-live hop cap and threat localization were lost on load).
     {
         TArray<uint8> Bytes;
         {
@@ -791,8 +713,6 @@ bool FLivingWorldBeliefSerializeTest::RunTest(const FString &Parameters) {
         TestTrue(TEXT("FormationTime round-trips"), FMath::IsNearlyEqual(Loaded.FormationTime, 123.5));
     }
 
-    // Legacy (v2) layout: only the original 3 fields are written/read; the v3 fields stay at their defaults and there
-    // is no over-read. Confirms the version gate keeps old saves byte-aligned.
     {
         TArray<uint8> LegacyBytes;
         {
@@ -812,10 +732,6 @@ bool FLivingWorldBeliefSerializeTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Routine-desire utility cap — UMythicCognitiveBrainComponent::ScoreRoutineDesire
-// (Rally/Report were unbounded → could outscore the daily schedule)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldRoutineDesireCapTest,
@@ -825,32 +741,24 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FLivingWorldRoutineDesireCapTest::RunTest(const FString &Parameters) {
     const float Ceiling = UMythicCognitiveBrainComponent::RoutineDesireCeiling;
 
-    // High weight × pressure (the unbounded-Rally/Report bug) must cap at the ceiling, not outscore the schedule.
     TestEqual(TEXT("high-injustice Rally caps at ceiling"),
               UMythicCognitiveBrainComponent::ScoreRoutineDesire(0.8f, 5.0f, 1.5f), Ceiling);
     TestEqual(TEXT("high-injustice Report caps at ceiling"),
               UMythicCognitiveBrainComponent::ScoreRoutineDesire(0.8f, 5.0f, 1.2f), Ceiling);
 
-    // Low routine values pass through unclamped (the desire still varies below the ceiling).
-    const float Low = UMythicCognitiveBrainComponent::ScoreRoutineDesire(0.2f, 0.5f, 1.2f); // 0.12
+    const float Low = UMythicCognitiveBrainComponent::ScoreRoutineDesire(0.2f, 0.5f, 1.2f);
     TestTrue(TEXT("low routine value passes through below the ceiling"),
              Low < Ceiling && FMath::IsNearlyEqual(Low, 0.12f));
 
-    // A value exactly at the ceiling is preserved (boundary).
     TestEqual(TEXT("value at ceiling preserved"),
               UMythicCognitiveBrainComponent::ScoreRoutineDesire(Ceiling, 1.0f, 1.0f), Ceiling);
 
-    // Defensive: a negative product can never yield a negative desire utility.
     TestEqual(TEXT("negative product floored at 0"),
               UMythicCognitiveBrainComponent::ScoreRoutineDesire(-1.0f, 1.0f, 1.0f), 0.0f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Belief confidence decay — UMythicCognitiveBrainComponent::DecayBeliefConfidence
-// (telescoping property: N steps == 1 step over the summed time)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldBeliefDecayTest,
@@ -860,8 +768,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FLivingWorldBeliefDecayTest::RunTest(const FString &Parameters) {
     const float Rate = 0.005f;
 
-    // Telescoping: decaying in two steps (120s + 180s) equals one step over the summed delta (300s). This is the
-    // property whose ABSENCE (decaying by the full age each tick) made beliefs evaporate in tens of seconds — guard it.
     {
         const float OneStep = UMythicCognitiveBrainComponent::DecayBeliefConfidence(1.0f, Rate, 300.0);
         const float StepA = UMythicCognitiveBrainComponent::DecayBeliefConfidence(1.0f, Rate, 120.0);
@@ -869,19 +775,16 @@ bool FLivingWorldBeliefDecayTest::RunTest(const FString &Parameters) {
         TestTrue(TEXT("decay telescopes: 120s + 180s == 300s"), FMath::IsNearlyEqual(OneStep, TwoStep, 1e-4f));
     }
 
-    // Negative delta (clock skew / out-of-order LastDecayTime) must NOT amplify confidence — clamped to a no-op.
     {
         const float Result = UMythicCognitiveBrainComponent::DecayBeliefConfidence(0.8f, Rate, -100.0);
         TestEqual(TEXT("negative delta is a no-op (no amplification)"), Result, 0.8f);
     }
 
-    // Zero rate = no decay regardless of elapsed time.
     {
         const float Result = UMythicCognitiveBrainComponent::DecayBeliefConfidence(0.8f, 0.0f, 9999.0);
         TestEqual(TEXT("zero rate preserves confidence"), Result, 0.8f);
     }
 
-    // Positive rate over positive time strictly reduces confidence (but stays positive).
     {
         const float Result = UMythicCognitiveBrainComponent::DecayBeliefConfidence(1.0f, Rate, 100.0);
         TestTrue(TEXT("positive decay reduces confidence below the original"), Result < 1.0f && Result > 0.0f);
@@ -890,10 +793,6 @@ bool FLivingWorldBeliefDecayTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Moral trajectory arc — FMythicMoralSignature::TrajectoryAngle / ComputeMoralTrajectoryAngle
-// (was declared + serialized but NEVER computed — always 0)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldMoralTrajectoryTest,
@@ -901,22 +800,21 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FLivingWorldMoralTrajectoryTest::RunTest(const FString &Parameters) {
-    // Pure angle helper: aligned → 0, opposite → PI, orthogonal → PI/2, degenerate → 0.
     {
         float A[MoralAxisCount] = {};
         float B[MoralAxisCount] = {};
         A[0] = 1.0f;
-        B[0] = 1.0f; // aligned
+        B[0] = 1.0f;
         TestTrue(TEXT("aligned vectors → angle ~0"),
                  FMath::IsNearlyZero(FMythicMoralSignature::ComputeMoralTrajectoryAngle(A, B), 1e-3f));
-        B[0] = -1.0f; // opposite
+        B[0] = -1.0f;
         TestTrue(TEXT("opposite vectors → angle ~PI"),
                  FMath::IsNearlyEqual(FMythicMoralSignature::ComputeMoralTrajectoryAngle(A, B), PI, 1e-3f));
         if (MoralAxisCount >= 2) {
             float C[MoralAxisCount] = {};
             float D[MoralAxisCount] = {};
             C[0] = 1.0f;
-            D[1] = 1.0f; // orthogonal
+            D[1] = 1.0f;
             TestTrue(TEXT("orthogonal vectors → angle ~PI/2"),
                      FMath::IsNearlyEqual(FMythicMoralSignature::ComputeMoralTrajectoryAngle(C, D), HALF_PI, 1e-3f));
         }
@@ -925,8 +823,6 @@ bool FLivingWorldMoralTrajectoryTest::RunTest(const FString &Parameters) {
                   FMythicMoralSignature::ComputeMoralTrajectoryAngle(A, Z), 0.0f);
     }
 
-    // Integration: consistent behavior keeps the trajectory ~0; a sharp reversal opens it up (a corruption arc) — this
-    // is the field that used to be hardcoded 0 forever.
     {
         FMythicMoralSignature Sig;
         FMythicMoralAction Good;
@@ -938,7 +834,7 @@ bool FLivingWorldMoralTrajectoryTest::RunTest(const FString &Parameters) {
         TestTrue(TEXT("consistent behavior → small trajectory angle"), ConsistentAngle < 0.2f);
 
         FMythicMoralAction Bad;
-        Bad.AxisValues[0] = -1.0f; // reversal
+        Bad.AxisValues[0] = -1.0f;
         for (int32 k = 0; k < 6; ++k) {
             Sig.AccumulateAction(Bad);
         }
@@ -950,10 +846,6 @@ bool FLivingWorldMoralTrajectoryTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Intention-commit hysteresis — UMythicCognitiveBrainComponent::ShouldOverrideIntention
-// (DesireHysteresis setting was dead — CommitIntention hardcoded 0.2)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldIntentionHysteresisTest,
@@ -963,34 +855,20 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FLivingWorldIntentionHysteresisTest::RunTest(const FString &Parameters) {
     const float Hys = 0.2f;
 
-    // A marginal improvement (below the margin) does NOT override — this is the anti-flicker the setting controls.
     TestFalse(TEXT("tiny improvement within margin → keep current"),
               UMythicCognitiveBrainComponent::ShouldOverrideIntention(0.55f, 0.50f, Hys));
-    // An improvement at exactly the margin DOES override (>=).
     TestTrue(TEXT("improvement at exactly the margin → override"),
              UMythicCognitiveBrainComponent::ShouldOverrideIntention(0.70f, 0.50f, Hys));
-    // A large improvement overrides.
     TestTrue(TEXT("large improvement → override"),
              UMythicCognitiveBrainComponent::ShouldOverrideIntention(0.95f, 0.50f, Hys));
-    // A lower-utility desire never overrides.
     TestFalse(TEXT("lower utility → keep current"),
               UMythicCognitiveBrainComponent::ShouldOverrideIntention(0.40f, 0.50f, Hys));
-    // Zero hysteresis: an equal-or-better utility overrides (no stickiness).
     TestTrue(TEXT("zero hysteresis: equal utility overrides"),
              UMythicCognitiveBrainComponent::ShouldOverrideIntention(0.50f, 0.50f, 0.0f));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Resistance restoration — UMythicFactionDatabase::RestoreResistanceToFaction (REQ-FAC-004)
-// (the Resistance status was terminal — nothing ever restored it to a full faction)
-// ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
-// Objective callout text selection — UObjectiveDefinition::GetCalloutText
-// (CompletedText was declared "shown on completion" but never read)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldObjectiveCalloutTextTest,
@@ -1002,14 +880,11 @@ bool FLivingWorldObjectiveCalloutTextTest::RunTest(const FString &Parameters) {
     Def->DisplayText = FText::FromString(TEXT("Slay 5 wolves"));
     Def->CompletedText = FText::FromString(TEXT("The pack is broken"));
 
-    // In-progress callout uses the progress line.
     TestEqual(TEXT("in-progress → DisplayText"),
               Def->GetCalloutText(false).ToString(), FString(TEXT("Slay 5 wolves")));
-    // Completion callout uses the authored completion line (the bug: this was never shown).
     TestEqual(TEXT("completed → CompletedText"),
               Def->GetCalloutText(true).ToString(), FString(TEXT("The pack is broken")));
 
-    // With no authored completion line, completion falls back to DisplayText (prior behaviour preserved).
     Def->CompletedText = FText::GetEmpty();
     TestEqual(TEXT("completed with empty CompletedText → DisplayText fallback"),
               Def->GetCalloutText(true).ToString(), FString(TEXT("Slay 5 wolves")));
@@ -1017,10 +892,6 @@ bool FLivingWorldObjectiveCalloutTextTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Objective progression arithmetic — UObjectiveTracker::ComputeObjectiveProgress
-// (advance +1 by occurrence OR by rounded event magnitude floored at 1; completion threshold; overshoot clamp)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicObjectiveProgressTest,
@@ -1034,30 +905,24 @@ bool FMythicObjectiveProgressTest::RunTest(const FString &Parameters) {
         UObjectiveTracker::ComputeObjectiveProgress(Cur, bByMag, Mag, Req, NewCount, bComplete);
     };
 
-    // Occurrence count (+1), still in progress.
     Step(0, false, 0.0f, 3);
     TestEqual(TEXT("occurrence: 0→1"), NewCount, 1);
     TestFalse(TEXT("occurrence: not complete at 1/3"), bComplete);
 
-    // Occurrence count completing exactly.
     Step(2, false, 0.0f, 3);
     TestEqual(TEXT("occurrence: 2→3"), NewCount, 3);
     TestTrue(TEXT("occurrence: complete at 3/3"), bComplete);
 
-    // Occurrence count IGNORES magnitude (always +1).
     Step(0, false, 99.0f, 3);
     TestEqual(TEXT("occurrence ignores magnitude → +1"), NewCount, 1);
 
-    // Count-by-magnitude: rounded magnitude added.
     Step(0, true, 5.4f, 10);
     TestEqual(TEXT("magnitude 5.4 → round 5"), NewCount, 5);
     TestFalse(TEXT("magnitude: not complete at 5/10"), bComplete);
 
-    // Magnitude floored at 1 (a tiny magnitude still advances by 1, never 0).
     Step(0, true, 0.2f, 3);
     TestEqual(TEXT("magnitude 0.2 floored to 1"), NewCount, 1);
 
-    // Overshoot clamped to RequiredCount on completion (clean N/N display).
     Step(8, true, 5.0f, 10);
     TestEqual(TEXT("overshoot 13 clamped to 10"), NewCount, 10);
     TestTrue(TEXT("overshoot completes"), bComplete);
@@ -1065,10 +930,6 @@ bool FMythicObjectiveProgressTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Turn-in / deliver consume arithmetic — UObjectiveTracker::ComputeDeliverConsumeCount
-// (consume the remaining needed, clamped to what the player carries; never over-consume / over-credit)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicObjectiveDeliverConsumeTest,
@@ -1080,30 +941,18 @@ bool FMythicObjectiveDeliverConsumeTest::RunTest(const FString &Parameters) {
         return UObjectiveTracker::ComputeDeliverConsumeCount(Cur, Req, Avail);
     };
 
-    // Enough on hand to finish in one turn-in: need 5, carry 8 → consume exactly the 5 remaining (leave 3).
     TestEqual(TEXT("carry more than needed → consume the remaining only"), Consume(0, 5, 8), 5);
-    // Partial: need 5, carry 3 → consume all 3 (objective advances 0→3, player returns later).
     TestEqual(TEXT("carry fewer than needed → consume all carried"), Consume(0, 5, 3), 3);
-    // Mid-progress: 2/5 done, carry 10 → consume the 3 still needed.
     TestEqual(TEXT("mid-progress consumes only the shortfall"), Consume(2, 5, 10), 3);
-    // Already satisfied: 5/5 → consume nothing even if carrying more.
     TestEqual(TEXT("already complete → consume 0"), Consume(5, 5, 4), 0);
-    // Carry none → consume 0 (no free advance).
     TestEqual(TEXT("empty inventory → consume 0"), Consume(0, 5, 0), 0);
-    // Defensive: over-complete (current > required) never returns negative.
     TestEqual(TEXT("over-complete floors at 0"), Consume(7, 5, 9), 0);
-    // Defensive: negative available (degenerate) floors at 0.
     TestEqual(TEXT("negative available floors at 0"), Consume(0, 5, -3), 0);
-    // Exact: need 1, carry 1 → consume 1.
     TestEqual(TEXT("single-item turn-in"), Consume(0, 1, 1), 1);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Utility reduction-fraction clamp membership — UMythicAttributeSet_Utility::IsReductionFractionAttribute
-// (StaminaCostReduction + CooldownReduction clamp to [0,1]; CooldownReduction was previously unclamped)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicObjectiveOfferResultStatesTest,
@@ -1203,11 +1052,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicUtilityReductionFractionClampTest::RunTest(const FString &Parameters) {
     using U = UMythicAttributeSet_Utility;
 
-    // Reduction fractions → clamped [0,1].
     TestTrue(TEXT("StaminaCostReduction is a reduction fraction"), U::IsReductionFractionAttribute(U::GetStaminaCostReductionAttribute()));
     TestTrue(TEXT("CooldownReduction is a reduction fraction (the fix)"), U::IsReductionFractionAttribute(U::GetCooldownReductionAttribute()));
 
-    // Everything else → NOT clamped to [0,1] (different ranges: stamina pools, regen rate, multiplier, dormant speed).
     TestFalse(TEXT("CurrentStamina is not a reduction fraction"), U::IsReductionFractionAttribute(U::GetCurrentStaminaAttribute()));
     TestFalse(TEXT("MaxStamina is not a reduction fraction"), U::IsReductionFractionAttribute(U::GetMaxStaminaAttribute()));
     TestFalse(TEXT("StaminaRegenRate is not a reduction fraction"), U::IsReductionFractionAttribute(U::GetStaminaRegenRateAttribute()));
@@ -1217,10 +1064,6 @@ bool FMythicUtilityReductionFractionClampTest::RunTest(const FString &Parameters
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Moral signature core — FMythicMoralSignature (Welford online mean/variance + kill-vector sign + severity tiers)
-// Welford is a classic subtly-breakable algorithm; the kill vector's sign is comment-guarded as drift-prone.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicMoralSignatureCoreTest,
@@ -1228,7 +1071,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicMoralSignatureCoreTest::RunTest(const FString &Parameters) {
-    // Welford online mean/variance over the known sequence [1, 2, 3] on every axis.
     FMythicMoralSignature Sig;
     for (float V : {1.0f, 2.0f, 3.0f}) {
         FMythicMoralAction A;
@@ -1239,46 +1081,50 @@ bool FMythicMoralSignatureCoreTest::RunTest(const FString &Parameters) {
     }
     TestEqual(TEXT("TotalActions == 3"), Sig.TotalActions, 3);
     TestTrue(TEXT("Welford mean of [1,2,3] == 2"), FMath::IsNearlyEqual(Sig.Axes[0].Mean, 2.0f, 1e-4f));
-    // Population variance of [1,2,3] = ((1-2)^2+(2-2)^2+(3-2)^2)/3 = 2/3.
     TestTrue(TEXT("Welford variance == 2/3"), FMath::IsNearlyEqual(Sig.Axes[0].GetVariance(), 2.0f / 3.0f, 1e-4f));
-    // ContradictionScore = mean of per-axis variances; all axes saw the same sequence → 2/3.
     TestTrue(TEXT("ContradictionScore == 2/3"), FMath::IsNearlyEqual(Sig.ContradictionScore, 2.0f / 3.0f, 1e-4f));
-    // A fresh signature accumulating consistent behavior reads no trajectory arc.
     TestTrue(TEXT("consistent behavior → ~0 trajectory angle"), Sig.TrajectoryAngle < 1e-3f);
 
-    // DominantAxis = the axis with the largest |mean|.
     FMythicMoralSignature Sig2;
     FMythicMoralAction Dom;
     Dom.AxisValues[static_cast<int32>(EMythicMoralAxis::Violence)] = 0.9f;
     Sig2.AccumulateAction(Dom);
     TestEqual(TEXT("dominant axis = Violence"), static_cast<int32>(Sig2.DominantAxis), static_cast<int32>(EMythicMoralAxis::Violence));
 
-    // Kill-vector sign convention (single-source; comment-guarded against drift): Violence POSITIVE, Mercy NEGATIVE.
     const FMythicMoralAction Kill = FMythicMoralSignature::MakeKillActionMoralVector();
     TestTrue(TEXT("kill vector: Violence > 0"), Kill.AxisValues[static_cast<int32>(EMythicMoralAxis::Violence)] > 0.0f);
     TestTrue(TEXT("kill vector: Mercy < 0"), Kill.AxisValues[static_cast<int32>(EMythicMoralAxis::Mercy)] < 0.0f);
 
-    // EvaluateActionSeverity: a kill judged by an anti-violence (pacifist) faction → opposed → high severity.
     FMythicIdeologyProfile Pacifist;
-    Pacifist.GetAxisMutable(EMythicMoralAxis::Violence) = -1.0f; // glorifies pacifism
+    Pacifist.GetAxisMutable(EMythicMoralAxis::Violence) = -1.0f;
     const EMythicMoralSeverity Sev = FMythicMoralSignature::EvaluateActionSeverity(
-        Kill, Pacifist, /*Disapprove*/ 0.2f, /*Condemn*/ 0.5f, /*Hostile*/ 0.8f);
-    // DotProduct = 0.9 * -1.0 = -0.9 → Severity = +0.9 → >= Hostile(0.8).
+        Kill, Pacifist, 0.2f, 0.5f, 0.8f);
     TestEqual(TEXT("kill vs pacifist → Hostile severity"), static_cast<int32>(Sev), static_cast<int32>(EMythicMoralSeverity::Hostile));
-    // The same kill judged by a violence-glorifying faction → aligned → not condemned.
     FMythicIdeologyProfile Warlike;
     Warlike.GetAxisMutable(EMythicMoralAxis::Violence) = 1.0f;
     const EMythicMoralSeverity SevW = FMythicMoralSignature::EvaluateActionSeverity(
         Kill, Warlike, 0.2f, 0.5f, 0.8f);
     TestEqual(TEXT("kill vs warlike → Ignore"), static_cast<int32>(SevW), static_cast<int32>(EMythicMoralSeverity::Ignore));
 
+    const FMythicMoralAction Mercy = FMythicMoralSignature::MakeMercyActionMoralVector();
+    TestTrue(TEXT("mercy vector: Mercy > 0"), Mercy.AxisValues[static_cast<int32>(EMythicMoralAxis::Mercy)] > 0.0f);
+    TestTrue(TEXT("mercy vector: Violence < 0"), Mercy.AxisValues[static_cast<int32>(EMythicMoralAxis::Violence)] < 0.0f);
+
+    FMythicIdeologyProfile Compassionate;
+    Compassionate.GetAxisMutable(EMythicMoralAxis::Mercy) = 1.0f;
+    const EMythicMoralSeverity SevMercy = FMythicMoralSignature::EvaluateActionSeverity(
+        Mercy, Compassionate, 0.2f, 0.5f, 0.8f);
+    TestEqual(TEXT("mercy vs compassionate → Ignore"), static_cast<int32>(SevMercy), static_cast<int32>(EMythicMoralSeverity::Ignore));
+
+    FMythicIdeologyProfile Cruel;
+    Cruel.GetAxisMutable(EMythicMoralAxis::Mercy) = -1.0f;
+    const EMythicMoralSeverity SevCruel = FMythicMoralSignature::EvaluateActionSeverity(
+        Mercy, Cruel, 0.2f, 0.5f, 0.8f);
+    TestEqual(TEXT("mercy vs cruel → Hostile"), static_cast<int32>(SevCruel), static_cast<int32>(EMythicMoralSeverity::Hostile));
+
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Population spawn density — UMythicPopulationSpawnerProcessor::ComputeTargetDensity
-// min(settlement, system) cap × clamp(pop/capacity) fill-ratio, ceil; 0 with no capacity. Governs world NPC density.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicPopulationDensityTest,
@@ -1287,30 +1133,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicPopulationDensityTest::RunTest(const FString &Parameters) {
     using P = UMythicPopulationSpawnerProcessor;
-    // Full faction (pop == capacity) → full effective density.
     TestEqual(TEXT("full faction → min(10,5)=5 density"), P::ComputeTargetDensity(10, 5, 1000, 1000), 5);
-    // Half-full faction → half density (ceil): 5 * 0.5 = 2.5 → 3.
     TestEqual(TEXT("half faction → ceil(2.5)=3"), P::ComputeTargetDensity(10, 5, 500, 1000), 3);
-    // Settlement density is the tighter cap.
     TestEqual(TEXT("settlement cap dominates (3)"), P::ComputeTargetDensity(3, 5, 1000, 1000), 3);
-    // System cap is the tighter cap.
     TestEqual(TEXT("system cap dominates (5)"), P::ComputeTargetDensity(100, 5, 1000, 1000), 5);
-    // No capacity (territoryless faction) → 0, never a divide-by-zero.
     TestEqual(TEXT("zero capacity → 0"), P::ComputeTargetDensity(5, 5, 100, 0), 0);
-    // Dead faction (0 population) → 0.
     TestEqual(TEXT("zero population → 0"), P::ComputeTargetDensity(5, 5, 0, 1000), 0);
-    // A barely-alive faction still seeds at least 1 (ceil of a positive ratio).
     TestEqual(TEXT("tiny pop → ceil ≥ 1"), P::ComputeTargetDensity(5, 5, 1, 1000), 1);
-    // Over-capacity population clamps the fill-ratio to 1 (no over-spawn).
     TestEqual(TEXT("over-capacity clamps to full density"), P::ComputeTargetDensity(5, 5, 5000, 1000), 5);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Creature territorial aggression — UMythicCreatureEcologyProcessor::ComputeTerritorialAggression
-// Boost near den (clamped to 1), bare base away; recomputed from the authored base (idempotent — no ratchet).
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicTerritorialAggressionTest,
@@ -1319,26 +1153,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicTerritorialAggressionTest::RunTest(const FString &Parameters) {
     using E = UMythicCreatureEcologyProcessor;
-    // Near den → base + boost.
     TestEqual(TEXT("near den: 0.5 + 0.3 = 0.8"), E::ComputeTerritorialAggression(0.5f, true, 0.3f), 0.8f);
-    // Near den → clamped to 1.
     TestEqual(TEXT("near den clamps to 1.0"), E::ComputeTerritorialAggression(0.9f, true, 0.3f), 1.0f);
-    // Away from den → bare authored base (relaxed).
     TestEqual(TEXT("away: bare base 0.5"), E::ComputeTerritorialAggression(0.5f, false, 0.3f), 0.5f);
     TestEqual(TEXT("away: bare base 0.9"), E::ComputeTerritorialAggression(0.9f, false, 0.3f), 0.9f);
-    // THE FIX — IDEMPOTENT: calling repeatedly with the same authored base never accumulates (old code ratcheted).
     const float First = E::ComputeTerritorialAggression(0.5f, true, 0.3f);
-    const float Second = E::ComputeTerritorialAggression(0.5f, true, 0.3f); // same base again — must be identical
+    const float Second = E::ComputeTerritorialAggression(0.5f, true, 0.3f);
     TestEqual(TEXT("idempotent near-den (no ratchet)"), Second, First);
     TestEqual(TEXT("idempotent value stays 0.8"), Second, 0.8f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Interaction focus priority — UMythicInteractionComponent::SelectFocusedInteractable
-// In-range → best forward-alignment (highest Dot); else closest out-of-range; in-range always wins.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicInteractionFocusTest,
@@ -1349,55 +1175,47 @@ bool FMythicInteractionFocusTest::RunTest(const FString &Parameters) {
     using C = FMythicInteractCandidate;
     using I = UMythicInteractionComponent;
 
-    // No candidates → INDEX_NONE.
     TestEqual(TEXT("empty → none"), I::SelectFocusedInteractable({}), (int32)INDEX_NONE);
 
-    // Among in-range, highest Dot (best forward-alignment) wins — regardless of distance.
     {
         TArray<C> Cands = {
-            C{/*inRange*/ true, /*dot*/ 0.2f, /*dist*/ 50.0f},
-            C{true, 0.9f, 180.0f}, // better aligned, even though farther
+            C{ true, 0.2f, 50.0f},
+            C{true, 0.9f, 180.0f},
             C{true, 0.5f, 30.0f},
         };
         TestEqual(TEXT("in-range: highest dot wins"), I::SelectFocusedInteractable(Cands), 1);
     }
-    // In-range always beats out-of-range, even a poorly-aligned in-range vs a close out-of-range.
     {
         TArray<C> Cands = {
-            C{false, 1.0f, 250.0f}, // out of range, perfectly aligned, but origin beyond range
-            C{true, -0.3f, 199.0f}, // in range, behind-ish — still wins (in-range priority)
+            C{false, 1.0f, 250.0f},
+            C{true, -0.3f, 199.0f},
         };
         TestEqual(TEXT("in-range beats out-of-range"), I::SelectFocusedInteractable(Cands), 1);
     }
-    // Only out-of-range candidates → closest by origin distance.
     {
         TArray<C> Cands = {
             C{false, 0.9f, 400.0f},
-            C{false, 0.1f, 220.0f}, // closest origin
+            C{false, 0.1f, 220.0f},
             C{false, 0.8f, 300.0f},
         };
         TestEqual(TEXT("all out-of-range: closest wins"), I::SelectFocusedInteractable(Cands), 1);
     }
-    // Forward-cone gate (MinDot): default -1 admits the full sphere (unchanged); a positive MinDot excludes
-    // candidates the player isn't facing, across BOTH tiers (in-range priority AND out-of-range fallback).
     {
         TArray<C> Cands = {
-            C{true, 0.8f, 100.0f},  // in front
-            C{true, -0.5f, 40.0f},  // behind, even though closer
+            C{true, 0.8f, 100.0f},
+            C{true, -0.5f, 40.0f},
         };
         TestEqual(TEXT("cone -1 (full sphere): front wins"), I::SelectFocusedInteractable(Cands, -1.0f), 0);
         TestEqual(TEXT("cone 0 (front hemisphere): behind excluded, front wins"), I::SelectFocusedInteractable(Cands, 0.0f), 0);
     }
     {
-        // Everything is behind the cone → nothing focusable.
         TArray<C> Cands = {C{true, -0.3f, 40.0f}, C{true, -0.8f, 30.0f}};
         TestEqual(TEXT("cone 0: all behind → none"), I::SelectFocusedInteractable(Cands, 0.0f), (int32)INDEX_NONE);
     }
     {
-        // The cone gates the fallback too: an in-range-but-behind is excluded, an out-of-range-but-in-cone is picked.
         TArray<C> Cands = {
-            C{true, -0.9f, 40.0f},   // in range but behind → excluded by the cone
-            C{false, 0.5f, 300.0f},  // out of range but within the cone → eligible fallback
+            C{true, -0.9f, 40.0f},
+            C{false, 0.5f, 300.0f},
         };
         TestEqual(TEXT("cone 0: in-range-behind excluded, out-of-range-in-cone picked"),
                   I::SelectFocusedInteractable(Cands, 0.0f), 1);
@@ -1406,10 +1224,6 @@ bool FMythicInteractionFocusTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// AI patrol ring — AMythicAIController::GetPatrolCell
-// Cardinal ring (E,N,W,S) around the home anchor, leg index wrapping; TickIdleBehavior bounds-checks + skips off-grid.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicPatrolRingTest,
@@ -1420,23 +1234,16 @@ bool FMythicPatrolRingTest::RunTest(const FString &Parameters) {
     const FMythicCellCoord A(10, 10);
     auto Leg = [&](int32 i) { return AMythicAIController::GetPatrolCell(A, i); };
 
-    // Cardinal ring: E, N, W, S.
     TestEqual(TEXT("leg 0 = East (X+1)"), Leg(0).X, 11);  TestEqual(TEXT("leg 0 Y"), Leg(0).Y, 10);
     TestEqual(TEXT("leg 1 = North (Y+1)"), Leg(1).Y, 11); TestEqual(TEXT("leg 1 X"), Leg(1).X, 10);
     TestEqual(TEXT("leg 2 = West (X-1)"), Leg(2).X, 9);   TestEqual(TEXT("leg 2 Y"), Leg(2).Y, 10);
     TestEqual(TEXT("leg 3 = South (Y-1)"), Leg(3).Y, 9);  TestEqual(TEXT("leg 3 X"), Leg(3).X, 10);
-    // Wrap: leg 4 == leg 0.
     TestEqual(TEXT("leg 4 wraps to East X"), Leg(4).X, 11); TestEqual(TEXT("leg 4 wraps to East Y"), Leg(4).Y, 10);
-    // Defensive negative leg: -1 → leg 3 (South).
     TestEqual(TEXT("leg -1 → South X"), Leg(-1).X, 10); TestEqual(TEXT("leg -1 → South Y"), Leg(-1).Y, 9);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Ideology drift/bleed — FMythicWorldSimThread::DriftTowardClamped
-// Exponential approach toward a target, clamped to the [-1,1] axis range (shared by event-drift + faction bleed).
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicIdeologyDriftTest,
@@ -1445,27 +1252,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicIdeologyDriftTest::RunTest(const FString &Parameters) {
     using W = FMythicWorldSimThread;
-    // Halfway approach.
     TestEqual(TEXT("0 → 1 @ rate 0.5 = 0.5"), W::DriftTowardClamped(0.0f, 1.0f, 0.5f), 0.5f);
-    // Rate 0 → no change.
     TestEqual(TEXT("rate 0 → unchanged"), W::DriftTowardClamped(0.3f, 1.0f, 0.0f), 0.3f);
-    // Rate 1 → jumps to (in-range) target.
     TestEqual(TEXT("rate 1 → jumps to target"), W::DriftTowardClamped(0.3f, 0.9f, 1.0f), 0.9f);
-    // Drift toward a negative target.
     TestEqual(TEXT("0.5 → -0.5 @ 0.5 = 0.0"), W::DriftTowardClamped(0.5f, -0.5f, 0.5f), 0.0f);
-    // Already at target → unchanged.
     TestEqual(TEXT("at target → unchanged"), W::DriftTowardClamped(0.4f, 0.4f, 0.5f), 0.4f);
-    // CLAMP: an out-of-range target (or rate) can never push the axis past [-1, 1].
     TestEqual(TEXT("clamp high: target 2.0 @ rate 1 → 1.0"), W::DriftTowardClamped(0.9f, 2.0f, 1.0f), 1.0f);
     TestEqual(TEXT("clamp low: target -2.0 @ rate 1 → -1.0"), W::DriftTowardClamped(-0.9f, -2.0f, 1.0f), -1.0f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Faction schism trigger — FMythicWorldSimThread::ShouldFactionSchism
-// (ideological divergence OR geographic fragmentation) AND population >= 2× MinSchismPopulation (both halves viable).
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicFactionSchismTriggerTest,
@@ -1474,26 +1271,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicFactionSchismTriggerTest::RunTest(const FString &Parameters) {
     using W = FMythicWorldSimThread;
-    // High ideological divergence + ample population → schism.
     TestTrue(TEXT("divergence > threshold, pop ok → schism"), W::ShouldFactionSchism(0.9f, 0.5f, false, 100, 30));
-    // Geographic fragmentation alone (low divergence) + ample population → schism.
     TestTrue(TEXT("geographic fragmentation, pop ok → schism"), W::ShouldFactionSchism(0.1f, 0.5f, true, 100, 30));
-    // Neither destabilizing signal → no schism regardless of population.
     TestFalse(TEXT("no signal → no schism"), W::ShouldFactionSchism(0.1f, 0.5f, false, 100, 30));
-    // THE VIABILITY GATE: a destabilized but too-small faction must NOT schism (a half would be < MinSchismPopulation).
     TestFalse(TEXT("destabilized but pop < 2x → no stillborn splinter"), W::ShouldFactionSchism(0.9f, 0.5f, false, 50, 30));
-    // Exactly 2× MinSchismPopulation → viable, schisms.
     TestTrue(TEXT("pop exactly 2x threshold → schism"), W::ShouldFactionSchism(0.9f, 0.5f, false, 60, 30));
-    // Divergence exactly AT threshold → not destabilized (strict >), no geographic → no schism.
     TestFalse(TEXT("divergence == threshold (strict >) → no schism"), W::ShouldFactionSchism(0.5f, 0.5f, false, 100, 30));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Creature spawn-population cap — FMythicWorldSimThread::ComputeCappedSpawnPopulation
-// Bounds the per-tick spawn growth at carrying capacity (cells*PopPerCell) without forcing decline below current.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicSpawnPopulationCapTest,
@@ -1502,25 +1289,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicSpawnPopulationCapTest::RunTest(const FString &Parameters) {
     using W = FMythicWorldSimThread;
-    // Capacity = cells*PopPerCell = 5*100 = 500; growth = cells*spawnRate = 5*2 = 10.
-    // Under capacity → grows by the full step.
     TestEqual(TEXT("under capacity grows by step"), W::ComputeCappedSpawnPopulation(10, 5, 2, 100), 20);
-    // Near capacity → clamps to capacity (no overshoot).
     TestEqual(TEXT("near capacity clamps to 500"), W::ComputeCappedSpawnPopulation(495, 5, 2, 100), 500);
-    // At capacity → no growth.
     TestEqual(TEXT("at capacity stays"), W::ComputeCappedSpawnPopulation(500, 5, 2, 100), 500);
-    // ABOVE capacity (legacy over-grown save, or shrunk territory) → no growth, but NOT forced to decline.
     TestEqual(TEXT("above capacity: no growth, no forced decline"), W::ComputeCappedSpawnPopulation(800, 5, 2, 100), 800);
-    // Zero cells (lost all territory) → capacity 0, growth 0; population is LEFT ALONE (not zeroed → no wrong annihilation).
     TestEqual(TEXT("zero cells leaves population untouched"), W::ComputeCappedSpawnPopulation(50, 0, 2, 100), 50);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Regen step — UMythicLifeComponent::ComputeRegenTarget (shared by Health/Shield/Stamina regen)
-// Cur + Rate*Delta clamped to Max; rate<=0 or already-full → unchanged (so caller's `result > Cur` skips a redundant set).
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicRegenStepTest,
@@ -1529,29 +1306,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicRegenStepTest::RunTest(const FString &Parameters) {
     using L = UMythicLifeComponent;
-    // Partial regen toward max.
     TestEqual(TEXT("50 + 10/s*1s → 60"), L::ComputeRegenTarget(50.0f, 100.0f, 10.0f, 1.0f), 60.0f);
-    // Sub-interval delta scales.
     TestEqual(TEXT("50 + 10/s*0.5s → 55"), L::ComputeRegenTarget(50.0f, 100.0f, 10.0f, 0.5f), 55.0f);
-    // Recharge from 0 (shield/stamina).
     TestEqual(TEXT("0 + 10 → 10"), L::ComputeRegenTarget(0.0f, 100.0f, 10.0f, 1.0f), 10.0f);
-    // CLAMP: a big step never overshoots max.
     TestEqual(TEXT("95 + 10 clamps to 100 (no overshoot)"), L::ComputeRegenTarget(95.0f, 100.0f, 10.0f, 1.0f), 100.0f);
-    // Already at max → unchanged (caller skips the set).
     TestEqual(TEXT("at max → unchanged"), L::ComputeRegenTarget(100.0f, 100.0f, 10.0f, 1.0f), 100.0f);
-    // Above max (defensive) → unchanged, never pulled DOWN.
     TestEqual(TEXT("above max → unchanged (no down-pull)"), L::ComputeRegenTarget(110.0f, 100.0f, 10.0f, 1.0f), 110.0f);
-    // Zero/negative rate → unchanged (a non-positive regen rate never DRAINS).
     TestEqual(TEXT("zero rate → unchanged"), L::ComputeRegenTarget(50.0f, 100.0f, 0.0f, 1.0f), 50.0f);
     TestEqual(TEXT("negative rate → unchanged (no drain)"), L::ComputeRegenTarget(50.0f, 100.0f, -5.0f, 1.0f), 50.0f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Stagger trigger — UMythicLifeComponent::IsHeavyHit + IsStaggerImmune
-// Heavy-hit threshold scales with MaxHealth; immunity window prevents stun-lock but never suppresses the FIRST hit.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicStaggerTriggerTest,
@@ -1560,33 +1326,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicStaggerTriggerTest::RunTest(const FString &Parameters) {
     using L = UMythicLifeComponent;
-    // Heavy-hit threshold = 15% of MaxHealth. Use values clearly above/below the round number to avoid float-boundary
-    // ambiguity (0.15f * MaxHealth is NOT exactly the round value — 0.15f*1000 ≈ 150.000006).
     TestTrue(TEXT("200 dmg vs 1000 HP @ 0.15 → heavy"), L::IsHeavyHit(200.0f, 1000.0f, 0.15f));
     TestFalse(TEXT("100 dmg vs 1000 HP → chip, no stagger"), L::IsHeavyHit(100.0f, 1000.0f, 0.15f));
-    // Boundary: a magnitude exactly equal to the COMPUTED threshold staggers (>=), tested with the same float math.
     TestTrue(TEXT("exactly the computed threshold → heavy (>=)"), L::IsHeavyHit(0.15f * 1000.0f, 1000.0f, 0.15f));
-    // Scales with the entity: a small mob staggers at a proportionally small hit.
     TestTrue(TEXT("scales down: 20 dmg vs 100 HP → heavy"), L::IsHeavyHit(20.0f, 100.0f, 0.15f));
     TestFalse(TEXT("10 dmg vs 100 HP → chip"), L::IsHeavyHit(10.0f, 100.0f, 0.15f));
     TestFalse(TEXT("zero MaxHealth never staggers"), L::IsHeavyHit(500.0f, 0.0f, 0.15f));
     TestFalse(TEXT("negative MaxHealth never staggers"), L::IsHeavyHit(500.0f, -100.0f, 0.15f));
 
-    // Immunity: a prior stagger within the window blocks re-stagger; outside it allows.
-    TestTrue(TEXT("within window → immune"), L::IsStaggerImmune(/*Now*/ 5.5, /*Last*/ 5.0, /*Window*/ 1.5f));
+    TestTrue(TEXT("within window → immune"), L::IsStaggerImmune( 5.5, 5.0, 1.5f));
     TestFalse(TEXT("exactly at window edge → not immune"), L::IsStaggerImmune(6.5, 5.0, 1.5f));
     TestFalse(TEXT("past window → not immune"), L::IsStaggerImmune(7.0, 5.0, 1.5f));
-    // THE FIX: never-staggered sentinel (Last<=0) is NOT immune even when Now < Window (load-into-combat arena).
     TestFalse(TEXT("first hit early (Now=1.0 < Window, Last=0) → NOT immune"), L::IsStaggerImmune(1.0, 0.0, 1.5f));
     TestFalse(TEXT("never-staggered at Now=0.2 → NOT immune"), L::IsStaggerImmune(0.2, 0.0, 1.5f));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Stamina cost reduction — UMythicLifeComponent::EffectiveStaminaCost
-// Single source for CanSpendStamina (affordability) + TrySpendStamina (deduction): RawCost*(1-Clamp(Reduction,0,1)).
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicEffectiveStaminaCostTest,
@@ -1595,26 +1351,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicEffectiveStaminaCostTest::RunTest(const FString &Parameters) {
     using L = UMythicLifeComponent;
-    // No reduction → full cost.
     TestEqual(TEXT("0% reduction → full cost"), L::EffectiveStaminaCost(10.0f, 0.0f), 10.0f);
-    // Half reduction → half cost.
     TestEqual(TEXT("50% reduction → half cost"), L::EffectiveStaminaCost(10.0f, 0.5f), 5.0f);
-    // Full reduction → free.
     TestEqual(TEXT("100% reduction → free"), L::EffectiveStaminaCost(10.0f, 1.0f), 0.0f);
-    // Over-range reduction clamps to 1.0 → free, NOT negative (would otherwise REFUND stamina).
     TestEqual(TEXT(">100% reduction clamps to free (no negative cost)"), L::EffectiveStaminaCost(10.0f, 1.5f), 0.0f);
-    // Negative reduction clamps to 0 → full cost, NOT amplified.
     TestEqual(TEXT("negative reduction clamps to full cost"), L::EffectiveStaminaCost(10.0f, -0.5f), 10.0f);
-    // Zero raw cost stays zero regardless of reduction.
     TestEqual(TEXT("zero raw cost stays zero"), L::EffectiveStaminaCost(0.0f, 0.5f), 0.0f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Resource respawn gate — UMythicResourceManagerComponent::ShouldRespawnDestructible
-// Destroyed (hits<=0) + real respawn time (>0) + delay elapsed (now>=RespawnTime). Core of the harvest respawn loop.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicResourceRespawnGateTest,
@@ -1623,26 +1369,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicResourceRespawnGateTest::RunTest(const FString &Parameters) {
     using R = UMythicResourceManagerComponent;
-    // Destroyed + valid respawn time + delay elapsed → respawn.
     TestTrue(TEXT("destroyed, elapsed → respawn"), R::ShouldRespawnDestructible(0, 100.0f, 150.0f));
-    // Exactly at the respawn time (boundary) → respawn.
     TestTrue(TEXT("destroyed, exactly at time → respawn"), R::ShouldRespawnDestructible(0, 100.0f, 100.0f));
-    // Destroyed but delay NOT elapsed → wait.
     TestFalse(TEXT("destroyed, not elapsed → wait"), R::ShouldRespawnDestructible(0, 100.0f, 50.0f));
-    // Not destroyed (still has hits) → never respawn (shouldn't be in the destroyed list anyway; defensive).
     TestFalse(TEXT("not destroyed → no respawn"), R::ShouldRespawnDestructible(5, 100.0f, 150.0f));
-    // Uninitialized respawn time (0) → never respawn at world-time 0 (the >0 guard).
     TestFalse(TEXT("zero respawn time → no respawn"), R::ShouldRespawnDestructible(0, 0.0f, 150.0f));
-    // Negative respawn time → never respawn.
     TestFalse(TEXT("negative respawn time → no respawn"), R::ShouldRespawnDestructible(0, -1.0f, 150.0f));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Significance LOD tier hysteresis — QualifiesForPromotion / QualifiesForDemotion
-// The promote (>= Thr+H) / demote (<= Thr-H) gates form the dead-band that prevents tier oscillation.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicSignificanceHysteresisTest,
@@ -1651,35 +1387,25 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicSignificanceHysteresisTest::RunTest(const FString &Parameters) {
     using S = UMythicSignificanceProcessor;
-    // Promotion gate: score must clear Threshold by the full Hysteresis margin (Thr=0.7, H=0.1 → gate at 0.8).
     TestTrue(TEXT("promote: 0.85 >= 0.8"), S::QualifiesForPromotion(0.85f, 0.7f, 0.1f));
     TestTrue(TEXT("promote: exact 0.80 boundary promotes"), S::QualifiesForPromotion(0.80f, 0.7f, 0.1f));
     TestFalse(TEXT("promote: 0.75 < 0.8 does not"), S::QualifiesForPromotion(0.75f, 0.7f, 0.1f));
-    // Zero-hysteresis gate (Tier2 spawn threshold) promotes exactly at the threshold.
     TestTrue(TEXT("promote H=0: 0.80 >= 0.80"), S::QualifiesForPromotion(0.80f, 0.80f, 0.0f));
     TestFalse(TEXT("promote H=0: 0.79 < 0.80"), S::QualifiesForPromotion(0.79f, 0.80f, 0.0f));
 
-    // Demotion gate: score must fall the full Hysteresis margin below Threshold (Thr=0.3, H=0.1 → gate at 0.2).
     TestTrue(TEXT("demote: 0.15 <= 0.2"), S::QualifiesForDemotion(0.15f, 0.3f, 0.1f));
     TestTrue(TEXT("demote: exact 0.20 boundary demotes"), S::QualifiesForDemotion(0.20f, 0.3f, 0.1f));
     TestFalse(TEXT("demote: 0.25 > 0.2 does not"), S::QualifiesForDemotion(0.25f, 0.3f, 0.1f));
 
-    // THE ANTI-OSCILLATION CONTRACT: a score inside the dead-band (Thr_demote-H, Thr_promote+H) = (0.2, 0.8)
-    // qualifies for NEITHER promotion nor demotion, so the entity holds its tier instead of flickering.
     const float Mid = 0.5f;
     TestFalse(TEXT("dead-band: no promote"), S::QualifiesForPromotion(Mid, 0.7f, 0.1f));
     TestFalse(TEXT("dead-band: no demote"), S::QualifiesForDemotion(Mid, 0.3f, 0.1f));
-    // Just inside each edge of the band also holds.
     TestFalse(TEXT("dead-band edge 0.79: no promote"), S::QualifiesForPromotion(0.79f, 0.7f, 0.1f));
     TestFalse(TEXT("dead-band edge 0.21: no demote"), S::QualifiesForDemotion(0.21f, 0.3f, 0.1f));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Save/load inventory slot-restore mapping — FSerializedInventoryData::ComputeSlotRestoreMapping
-// Index-stable match → definition fallback → no double-map → unmatched = INDEX_NONE (layout-change migration).
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicSlotRestoreMappingTest,
@@ -1692,27 +1418,23 @@ bool FMythicSlotRestoreMappingTest::RunTest(const FString &Parameters) {
     const FSoftObjectPath C(TEXT("/Game/Slots/Ring.Ring"));
     using F = FSerializedInventoryData;
 
-    // Identical layout → identity mapping.
     {
         TArray<int32> M = F::ComputeSlotRestoreMapping({A, B, C}, {A, B, C});
         TestEqual(TEXT("identical: 0->0"), M[0], 0);
         TestEqual(TEXT("identical: 1->1"), M[1], 1);
         TestEqual(TEXT("identical: 2->2"), M[2], 2);
     }
-    // Reordered same defs → fallback finds each by definition, no double-map.
     {
         TArray<int32> M = F::ComputeSlotRestoreMapping({A, B}, {B, A});
         TestEqual(TEXT("reordered: A->target1"), M[0], 1);
         TestEqual(TEXT("reordered: B->target0"), M[1], 0);
     }
-    // A slot inserted at the front (layout change) → index-stable fails for shifted slots, fallback recovers them.
     {
         TArray<int32> M = F::ComputeSlotRestoreMapping({A, B, C}, {B, A, C});
         TestEqual(TEXT("insert: A->1 (fallback)"), M[0], 1);
         TestEqual(TEXT("insert: B->0 (fallback)"), M[1], 0);
         TestEqual(TEXT("insert: C->2 (index-stable)"), M[2], 2);
     }
-    // Save has MORE slots than the target layout (slots removed) → extras map to INDEX_NONE, never OOB.
     {
         TArray<int32> M = F::ComputeSlotRestoreMapping({A, B, C, A}, {A, B});
         TestEqual(TEXT("more-saved: A->0"), M[0], 0);
@@ -1720,13 +1442,11 @@ bool FMythicSlotRestoreMappingTest::RunTest(const FString &Parameters) {
         TestEqual(TEXT("more-saved: C unmatched"), M[2], (int32)INDEX_NONE);
         TestEqual(TEXT("more-saved: 2nd A unmatched (target claimed)"), M[3], (int32)INDEX_NONE);
     }
-    // No double-map: two saved slots of the same def, one target of that def → first claims, second unmatched.
     {
         TArray<int32> M = F::ComputeSlotRestoreMapping({A, A}, {A});
         TestEqual(TEXT("dup: first A->0"), M[0], 0);
         TestEqual(TEXT("dup: second A unmatched"), M[1], (int32)INDEX_NONE);
     }
-    // Empty target layout → everything unmatched, no crash.
     {
         TArray<int32> M = F::ComputeSlotRestoreMapping({A}, {});
         TestEqual(TEXT("empty-target: unmatched"), M[0], (int32)INDEX_NONE);
@@ -1735,10 +1455,6 @@ bool FMythicSlotRestoreMappingTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Weather transition progress — AMythicEnvironmentController::ComputeWeatherTransitionProgress
-// Clamped [0,1] (the consuming FMath::Lerp is UNCLAMPED) + div-by-zero guard for non-positive duration.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicWeatherTransitionProgressTest,
@@ -1748,31 +1464,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicWeatherTransitionProgressTest::RunTest(const FString &Parameters) {
     using E = AMythicEnvironmentController;
 
-    // Instant transition → fully complete regardless of elapsed/duration.
     TestEqual(TEXT("instant = 1.0"), E::ComputeWeatherTransitionProgress(true, 0.0, 30.0f), 1.0f);
-    // Midpoint.
     TestEqual(TEXT("half elapsed = 0.5"), E::ComputeWeatherTransitionProgress(false, 15.0, 30.0f), 0.5f);
-    // Start.
     TestEqual(TEXT("zero elapsed = 0.0"), E::ComputeWeatherTransitionProgress(false, 0.0, 30.0f), 0.0f);
-    // THE BUG: over-duration must CLAMP to 1.0, not overshoot (FMath::Lerp is unclamped).
     TestEqual(TEXT("over-duration clamps to 1.0 (no overshoot)"), E::ComputeWeatherTransitionProgress(false, 45.0, 30.0f), 1.0f);
-    // Clock rewind (Time < TransitionStartedAt → negative elapsed) clamps to 0, not a negative undershoot.
     TestEqual(TEXT("negative elapsed clamps to 0.0"), E::ComputeWeatherTransitionProgress(false, -5.0, 30.0f), 0.0f);
-    // Div-by-zero guard: zero / negative duration → 1.0 (no inf/NaN), not a crashy lerp alpha.
     TestEqual(TEXT("zero duration = 1.0 (no div-by-zero)"), E::ComputeWeatherTransitionProgress(false, 5.0, 0.0f), 1.0f);
     TestEqual(TEXT("negative duration = 1.0"), E::ComputeWeatherTransitionProgress(false, 5.0, -10.0f), 1.0f);
-    // And the result is always finite in the guarded cases.
     TestTrue(TEXT("zero-duration result is finite"), FMath::IsFinite(E::ComputeWeatherTransitionProgress(false, 5.0, 0.0f)));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Weather transition VALIDITY gate — UWeatherType::CanTransitionTo
-// The per-edge gate of the weather state machine (the BFS pathfinder relies on it): a post-weather lock
-// (OnlyAllowTransitionToWeather) pins the only legal next state and takes precedence over a target's pre-weather
-// lock (OnlyAllowTransitionFromWeather); with neither lock, any transition is allowed.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicWeatherCanTransitionTest,
@@ -1780,7 +1483,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicWeatherCanTransitionTest::RunTest(const FString &Parameters) {
-    // CanTransitionTo only compares tag IDENTITY, so any two distinct registered tags stand in for weather states.
     const FGameplayTag TagA = GAS_STATE_DEAD;
     const FGameplayTag TagB = GAS_STATE_DOWNED;
     TestTrue(TEXT("test tags resolve + differ (prerequisite)"), TagA.IsValid() && TagB.IsValid() && TagA != TagB);
@@ -1793,35 +1495,26 @@ bool FMythicWeatherCanTransitionTest::RunTest(const FString &Parameters) {
     A->Tag = TagA;
     B->Tag = TagB;
 
-    // 1. Neither lock → any transition allowed.
     TestTrue(TEXT("unrestricted → allowed"), A->CanTransitionTo(*B));
 
-    // 2. Post-weather lock on A: only the matching target is legal.
     A->OnlyAllowTransitionToWeather = TagB;
     TestTrue(TEXT("post-lock: matching target allowed"), A->CanTransitionTo(*B));
-    A->OnlyAllowTransitionToWeather = TagA; // B.Tag (TagB) != TagA
+    A->OnlyAllowTransitionToWeather = TagA;
     TestFalse(TEXT("post-lock: non-matching target blocked"), A->CanTransitionTo(*B));
-    A->OnlyAllowTransitionToWeather = FGameplayTag(); // clear
+    A->OnlyAllowTransitionToWeather = FGameplayTag();
 
-    // 3. Pre-weather lock on the target B: only the matching current is legal.
-    B->OnlyAllowTransitionFromWeather = TagA; // A.Tag == TagA
+    B->OnlyAllowTransitionFromWeather = TagA;
     TestTrue(TEXT("pre-lock: matching current allowed"), A->CanTransitionTo(*B));
-    B->OnlyAllowTransitionFromWeather = TagB; // A.Tag (TagA) != TagB
+    B->OnlyAllowTransitionFromWeather = TagB;
     TestFalse(TEXT("pre-lock: non-matching current blocked"), A->CanTransitionTo(*B));
 
-    // 4. A's post-lock takes PRECEDENCE over B's pre-lock (checked first).
-    A->OnlyAllowTransitionToWeather = TagB;     // would allow (B.Tag == TagB)
-    B->OnlyAllowTransitionFromWeather = TagB;   // would block (A.Tag TagA != TagB)
+    A->OnlyAllowTransitionToWeather = TagB;
+    B->OnlyAllowTransitionFromWeather = TagB;
     TestTrue(TEXT("post-lock precedence over pre-lock"), A->CanTransitionTo(*B));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Attack fragment activation plan — UAttackFragment::PlanAttackActivation
-// Damage application and ability grant are INDEPENDENTLY idempotent. The key case: damage already applied but NO
-// live ability (a failed/lost first grant) must STILL grant — the old single early-return on bIsApplied skipped it.
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicAttackActivationPlanTest,
@@ -1829,40 +1522,29 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicAttackActivationPlanTest::RunTest(const FString &Parameters) {
-    // Fresh activation: apply damage + grant ability.
-    FAttackActivationPlan Plan = UAttackFragment::PlanAttackActivation(/*bDamageApplied*/ false, /*bAbilityHandleValid*/ false);
+    FAttackActivationPlan Plan = UAttackFragment::PlanAttackActivation( false, false);
     TestTrue(TEXT("fresh: apply damage"), Plan.bApplyDamage);
     TestTrue(TEXT("fresh: grant ability"), Plan.bGrantAbility);
 
-    // THE BUG CASE: damage already applied but ability not live → must still grant (old code skipped it).
     Plan = UAttackFragment::PlanAttackActivation(true, false);
     TestFalse(TEXT("damage applied: do NOT re-apply"), Plan.bApplyDamage);
     TestTrue(TEXT("damage applied but no ability: still GRANT"), Plan.bGrantAbility);
 
-    // Both already done (steady equipped state): no-op, matches the old early-return.
     Plan = UAttackFragment::PlanAttackActivation(true, true);
     TestFalse(TEXT("both done: no apply"), Plan.bApplyDamage);
     TestFalse(TEXT("both done: no grant"), Plan.bGrantAbility);
 
-    // Ability live but damage not applied: apply damage, do NOT double-grant.
     Plan = UAttackFragment::PlanAttackActivation(false, true);
     TestTrue(TEXT("ability live, damage missing: apply damage"), Plan.bApplyDamage);
     TestFalse(TEXT("ability live: do NOT double-grant"), Plan.bGrantAbility);
 
-    // Re-equip cycle: OnItemDeactivated now resets the member handle to invalid (it previously left a stale valid handle
-    // after ClearAbility, so a re-equipped weapon read bAbilityHandleValid==true and never re-granted its ability). After a
-    // clean deactivate, re-activating the same weapon must look like a fresh equip again — grant the ability + re-apply damage.
-    Plan = UAttackFragment::PlanAttackActivation(/*bDamageApplied (reset on deactivate)*/ false, /*bAbilityHandleValid (reset on deactivate)*/ false);
+    Plan = UAttackFragment::PlanAttackActivation( false, false);
     TestTrue(TEXT("re-equip after a clean deactivate: GRANT the ability again"), Plan.bGrantAbility);
     TestTrue(TEXT("re-equip after a clean deactivate: re-apply the damage attribute"), Plan.bApplyDamage);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Armor / accessory equip-objective gate — UAffixesFragment::ShouldEmitArmorEquipEvent
-// (the canonical NON-weapon affixes fragment fires the equip event once; weapons emit via UAttackFragment instead)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicArmorEquipEventGateTest,
@@ -1874,25 +1556,28 @@ bool FMythicArmorEquipEventGateTest::RunTest(const FString &Parameters) {
         return UAffixesFragment::ShouldEmitArmorEquipEvent(bCanonical, bHasWeapon, bAlready);
     };
 
-    // Armor: canonical affixes fragment, no weapon fragment, not yet emitted → FIRE once.
     TestTrue(TEXT("armor first equip: canonical, no weapon, not emitted → fire"), Gate(true, false, false));
-    // Weapon-with-affixes: the AttackFragment already emits → affixes must NOT double-count.
     TestFalse(TEXT("weapon-with-affixes: suppressed (weapon emits via AttackFragment)"), Gate(true, true, false));
-    // Non-canonical affixes fragment on a multi-affixes item → only the canonical one fires.
     TestFalse(TEXT("non-canonical affixes fragment: suppressed (dedup)"), Gate(false, false, false));
-    // Already emitted this equip (re-activation / save-restore restored marker==true) → no re-emit.
     TestFalse(TEXT("already emitted this equip → no re-fire"), Gate(true, false, true));
-    // Belt-and-suspenders: non-canonical AND weapon AND already → still false.
     TestFalse(TEXT("all suppressors set → false"), Gate(false, true, true));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Time-of-day mapping — HourAsDayTime (drives GetDayTime + GetDayTimeTag, consumed by hazards + encounter gating)
-// Locks the ACTUAL boundaries (Morning 7-11, Afternoon 12-16, Evening 17-19, Night 20-6) so the EnvironmentTags
-// annotations stay accurate and any future shift (e.g. aligning Morning to the 06:00 schedule day-start) is deliberate.
-// ═══════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicAffixesBrokenGateTest,
+    "Mythic.Itemization.Affixes.BrokenGate",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicAffixesBrokenGateTest::RunTest(const FString &Parameters) {
+    TestTrue(TEXT("working item applies affixes"), UAffixesFragment::ShouldApplyAffixes(false));
+    TestFalse(TEXT("broken item suppresses affixes"), UAffixesFragment::ShouldApplyAffixes(true));
+
+    return true;
+}
+
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicHourAsDayTimeTest,
@@ -1900,29 +1585,20 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicHourAsDayTimeTest::RunTest(const FString &Parameters) {
-    // Night runs 20:00 through 06:59 (wraps midnight) — the pre-dawn hours and 6am are Night, NOT Morning.
     TestEqual(TEXT("00:00 = Night"), HourAsDayTime(0), Night);
     TestEqual(TEXT("06:00 = Night (Morning starts at 07:00)"), HourAsDayTime(6), Night);
-    // Morning 07:00-11:59.
     TestEqual(TEXT("07:00 = Morning (lower boundary)"), HourAsDayTime(7), Morning);
     TestEqual(TEXT("11:00 = Morning (upper boundary)"), HourAsDayTime(11), Morning);
-    // Afternoon 12:00-16:59.
     TestEqual(TEXT("12:00 = Afternoon (lower boundary)"), HourAsDayTime(12), Afternoon);
     TestEqual(TEXT("16:00 = Afternoon (upper boundary)"), HourAsDayTime(16), Afternoon);
-    // Evening 17:00-19:59.
     TestEqual(TEXT("17:00 = Evening (lower boundary)"), HourAsDayTime(17), Evening);
     TestEqual(TEXT("19:00 = Evening (upper boundary)"), HourAsDayTime(19), Evening);
-    // Night 20:00 onward.
     TestEqual(TEXT("20:00 = Night (lower boundary)"), HourAsDayTime(20), Night);
     TestEqual(TEXT("23:00 = Night"), HourAsDayTime(23), Night);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Affix modifier reversal — UAffixesFragment::ComputeReversedModValue
-// (Additive→negate, Mult/Div→reciprocal, zero mult/div + Override → not reversible)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicAffixReversalTest,
@@ -1933,28 +1609,19 @@ bool FMythicAffixReversalTest::RunTest(const FString &Parameters) {
     using A = UAffixesFragment;
     float Out = 0.0f;
 
-    // Additive → negate (apply +50 reversed by -50).
     TestTrue(TEXT("additive reversible"), A::ComputeReversedModValue(EGameplayModOp::Additive, 50.0f, Out));
     TestEqual(TEXT("additive reversal = -value"), Out, -50.0f);
-    // Multiplicitive → reciprocal (×2 reversed by ×0.5).
     TestTrue(TEXT("multiplicitive reversible"), A::ComputeReversedModValue(EGameplayModOp::Multiplicitive, 2.0f, Out));
     TestEqual(TEXT("mult reversal = 1/value"), Out, 0.5f);
-    // Division → reciprocal (÷4 reversed by ÷0.25 == ×4).
     TestTrue(TEXT("division reversible"), A::ComputeReversedModValue(EGameplayModOp::Division, 4.0f, Out));
     TestEqual(TEXT("div reversal = 1/value"), Out, 0.25f);
-    // Zero mult/div → NOT reversible (1/0 = inf would poison the attribute).
     TestFalse(TEXT("zero multiplicitive not reversible"), A::ComputeReversedModValue(EGameplayModOp::Multiplicitive, 0.0f, Out));
     TestFalse(TEXT("zero division not reversible"), A::ComputeReversedModValue(EGameplayModOp::Division, 0.0f, Out));
-    // Override → not reversible by a single mod.
     TestFalse(TEXT("override not reversible"), A::ComputeReversedModValue(EGameplayModOp::Override, 5.0f, Out));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Party cross-party duplicate guard — UMythicPartySubsystem::AnyPartyContainsNameHash
-// (co-op: an NPC already in ANY player's party can't be recruited again)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicPartyCrossPartyDuplicateTest,
@@ -1963,22 +1630,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicPartyCrossPartyDuplicateTest::RunTest(const FString &Parameters) {
     using P = UMythicPartySubsystem;
-    TMap<FString, TArray<FMythicPartyMember>> Parties; // keyed by canonical player key (FString)
+    TMap<FString, TArray<FMythicPartyMember>> Parties;
 
-    // Empty → never matches.
     TestFalse(TEXT("empty parties → no match"), P::AnyPartyContainsNameHash(Parties, 12345u));
 
-    // Player 1 has a member with NameHash 100.
     FMythicPartyMember M1;
     M1.PersistedNameHash = 100;
     Parties.Add(TEXT("char-p1"), {M1});
 
     TestTrue(TEXT("hash 100 in P1 → match (re-recruit blocked)"), P::AnyPartyContainsNameHash(Parties, 100u));
     TestFalse(TEXT("hash 200 absent → no match"), P::AnyPartyContainsNameHash(Parties, 200u));
-    // NameHash 0 (no captured identity) never matches, even with members present.
     TestFalse(TEXT("hash 0 → never matches"), P::AnyPartyContainsNameHash(Parties, 0u));
 
-    // Player 2 recruits a different NPC (hash 200); querying 200 now matches in ANOTHER player's party.
     FMythicPartyMember M2;
     M2.PersistedNameHash = 200;
     Parties.Add(TEXT("char-p2"), {M2});
@@ -1988,10 +1651,6 @@ bool FMythicPartyCrossPartyDuplicateTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Party save-key migration — UMythicPartySubsystem::MakeLegacyPartyKey
-// (a pre-v4 int32 party key migrates to the canonical session-fallback key form — single source)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicPartyLegacyKeyMigrationTest,
@@ -1999,23 +1658,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicPartyLegacyKeyMigrationTest::RunTest(const FString &Parameters) {
-    // The migrated key uses the SAME form as the canonical session fallback (single source of truth), so a legacy
-    // slice-1 key (0) migrates to "session:0" rather than colliding with a real persistent CharacterID.
     TestEqual(TEXT("legacy 0 → session:0"), UMythicPartySubsystem::MakeLegacyPartyKey(0), FString(TEXT("session:0")));
     TestEqual(TEXT("legacy key == canonical session fallback (same rule)"),
               UMythicPartySubsystem::MakeLegacyPartyKey(5),
               AMythicPlayerState::ResolveCanonicalPlayerKey(FString(), 5));
-    // A migrated legacy key never equals a persistent CharacterID (so legacy data can't hijack a real save slot).
     TestNotEqual(TEXT("legacy key ≠ a persistent CharacterID"),
                  UMythicPartySubsystem::MakeLegacyPartyKey(0), FString(TEXT("char-guid-abc")));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Party save-KEY byte round-trip — UMythicPartySubsystem::SerializePartyKey (through a real FArchive)
-// (v4 FString key round-trips; a legacy v3 int32 key field is consumed byte-aligned + migrated)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicPartySaveKeyRoundTripTest,
@@ -2025,7 +1677,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicPartySaveKeyRoundTripTest::RunTest(const FString &Parameters) {
     using P = UMythicPartySubsystem;
 
-    // v4 round-trip through a real FArchive: write the canonical key, read it back identically + consume all bytes.
     {
         TArray<uint8> Bytes;
         FString Key = TEXT("char-guid-xyz");
@@ -2038,8 +1689,6 @@ bool FMythicPartySaveKeyRoundTripTest::RunTest(const FString &Parameters) {
         TestTrue(TEXT("v4 read consumed exactly the written bytes"), Reader.Tell() == Bytes.Num() && !Reader.IsError());
     }
 
-    // Legacy (v3) read path: a v3 save wrote an int32 key field (slice-1 always 0). Writing that int32 then reading via
-    // the v<4 branch must consume the 4-byte int32 (byte-alignment, so later fields don't desync) + migrate the key.
     {
         TArray<uint8> Bytes;
         int32 LegacyId = 0;
@@ -2055,10 +1704,6 @@ bool FMythicPartySaveKeyRoundTripTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Death penalty — UMythicAttributeSet_Exp::ComputeXpAfterDeathPenalty
-// (on full death, lose a fraction of current-LEVEL XP progress; default 0 = off; never de-levels)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicDeathXpPenaltyTest,
@@ -2068,25 +1713,21 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicDeathXpPenaltyTest::RunTest(const FString &Parameters) {
     using E = UProficiencyComponent;
 
-    // Default (fraction 0) = NO penalty: XP unchanged (preserves today's consequence-free respawn).
     TestEqual(TEXT("fraction 0 → XP unchanged"), E::ComputeXpAfterDeathPenalty(800.0f, 0.0f), 800.0f);
-    // A 25% penalty removes a quarter of current-level progress.
     TestEqual(TEXT("25% penalty"), E::ComputeXpAfterDeathPenalty(800.0f, 0.25f), 600.0f);
-    // Full (1.0) wipes current-level progress back to the level floor (0) — never below, never de-levels.
     TestEqual(TEXT("100% penalty → 0 progress"), E::ComputeXpAfterDeathPenalty(800.0f, 1.0f), 0.0f);
-    // Just-leveled (0 progress) → nothing to lose.
     TestEqual(TEXT("0 XP → stays 0"), E::ComputeXpAfterDeathPenalty(0.0f, 0.5f), 0.0f);
-    // Fraction clamps: >1 behaves as full, <0 behaves as none — never amplifies loss or GRANTS xp.
     TestEqual(TEXT("fraction >1 clamps to full"), E::ComputeXpAfterDeathPenalty(500.0f, 2.0f), 0.0f);
     TestEqual(TEXT("fraction <0 clamps to none"), E::ComputeXpAfterDeathPenalty(500.0f, -1.0f), 500.0f);
+
+    TestEqual(TEXT("floor: full penalty stops at the level floor (no de-level)"), E::ComputeXpAfterDeathPenalty(800.0f, 1.0f, 500.0f), 500.0f);
+    TestEqual(TEXT("floor: a partial penalty above the floor is untouched"), E::ComputeXpAfterDeathPenalty(800.0f, 0.25f, 500.0f), 600.0f);
+    TestEqual(TEXT("floor: a penalty below the floor is raised to the floor"), E::ComputeXpAfterDeathPenalty(800.0f, 0.9f, 500.0f), 500.0f);
+    TestEqual(TEXT("floor 0 still floors at 0"), E::ComputeXpAfterDeathPenalty(800.0f, 2.0f, 0.0f), 0.0f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Encumbrance — MythicEncumbrance::ComputeTier / SpeedMultiplierForTier
-// (carried weight vs soft/hard capacity → tier → move-speed multiplier; default-off via zero caps)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicEncumbranceTest,
@@ -2096,32 +1737,24 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicEncumbranceTest::RunTest(const FString &Parameters) {
     using ET = EMythicEncumbranceTier;
 
-    // Tiers against soft=100, hard=150.
     TestTrue(TEXT("under soft → Unencumbered"), MythicEncumbrance::ComputeTier(50.0f, 100.0f, 150.0f) == ET::Unencumbered);
     TestTrue(TEXT("at soft → Unencumbered (boundary inclusive)"), MythicEncumbrance::ComputeTier(100.0f, 100.0f, 150.0f) == ET::Unencumbered);
     TestTrue(TEXT("over soft, under hard → Heavy"), MythicEncumbrance::ComputeTier(120.0f, 100.0f, 150.0f) == ET::Heavy);
     TestTrue(TEXT("at hard → Heavy (boundary inclusive)"), MythicEncumbrance::ComputeTier(150.0f, 100.0f, 150.0f) == ET::Heavy);
     TestTrue(TEXT("over hard → Overloaded"), MythicEncumbrance::ComputeTier(151.0f, 100.0f, 150.0f) == ET::Overloaded);
 
-    // Default-off: non-positive caps disable that threshold (a huge load is still Unencumbered with caps unset).
     TestTrue(TEXT("zero caps → always Unencumbered"), MythicEncumbrance::ComputeTier(9999.0f, 0.0f, 0.0f) == ET::Unencumbered);
-    // Hard disabled but soft set → can reach Heavy, never Overloaded.
     TestTrue(TEXT("soft set, hard off → Heavy not Overloaded"), MythicEncumbrance::ComputeTier(9999.0f, 100.0f, 0.0f) == ET::Heavy);
 
-    // Speed multipliers per tier, with clamping.
     TestEqual(TEXT("Unencumbered → full speed"), MythicEncumbrance::SpeedMultiplierForTier(ET::Unencumbered, 0.7f, 0.3f), 1.0f);
     TestEqual(TEXT("Heavy → HeavyMult"), MythicEncumbrance::SpeedMultiplierForTier(ET::Heavy, 0.7f, 0.3f), 0.7f);
     TestEqual(TEXT("Overloaded → OverloadedMult"), MythicEncumbrance::SpeedMultiplierForTier(ET::Overloaded, 0.7f, 0.3f), 0.3f);
-    // A multiplier >1 is clamped (encumbrance never speeds you up); a negative one floors at 0.
     TestEqual(TEXT("Heavy mult >1 clamps to 1"), MythicEncumbrance::SpeedMultiplierForTier(ET::Heavy, 1.5f, 0.3f), 1.0f);
     TestEqual(TEXT("Overloaded mult <0 floors at 0"), MythicEncumbrance::SpeedMultiplierForTier(ET::Overloaded, 0.7f, -1.0f), 0.0f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Carry-weight aggregation — UMythicInventoryComponent::ComputeSlotWeight (per-slot weight contribution)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicCarriedWeightTest,
@@ -2131,25 +1764,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicCarriedWeightTest::RunTest(const FString &Parameters) {
     using I = UMythicInventoryComponent;
 
-    // Normal: weight × stack.
     TestEqual(TEXT("2.5 × 4 = 10"), I::ComputeSlotWeight(2.5f, 4), 10.0f);
-    // A single unit.
     TestEqual(TEXT("3 × 1 = 3"), I::ComputeSlotWeight(3.0f, 1), 3.0f);
-    // Weightless item contributes 0 regardless of stack (the default → encumbrance-neutral world).
     TestEqual(TEXT("0 weight → 0"), I::ComputeSlotWeight(0.0f, 99), 0.0f);
-    // Empty stack contributes 0.
     TestEqual(TEXT("0 stack → 0"), I::ComputeSlotWeight(5.0f, 0), 0.0f);
-    // Malformed negatives never produce a negative (which would WRONGLY lighten the load).
     TestEqual(TEXT("negative weight → 0"), I::ComputeSlotWeight(-5.0f, 3), 0.0f);
     TestEqual(TEXT("negative stack → 0"), I::ComputeSlotWeight(5.0f, -3), 0.0f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Aggro / threat targeting — AMythicAIController::SelectHighestThreatIndex / ComputeThreatDelta
-// (highest-threat target selection + per-action threat accrual; INDEX_NONE = no threat → caller uses closest)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicThreatTargetingTest,
@@ -2159,31 +1783,21 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicThreatTargetingTest::RunTest(const FString &Parameters) {
     using A = AMythicAIController;
 
-    // SelectHighestThreatIndex
     { TArray<float> T = {1.0f, 5.0f, 3.0f}; TestEqual(TEXT("picks the max threat"), A::SelectHighestThreatIndex(T), 1); }
-    // All-zero (or empty) threat → INDEX_NONE so the caller falls back to the closest-target policy.
     { TArray<float> T = {0.0f, 0.0f}; TestEqual(TEXT("all-zero threat → NONE (fall back to closest)"), A::SelectHighestThreatIndex(T), (int32)INDEX_NONE); }
     TestEqual(TEXT("empty → NONE"), A::SelectHighestThreatIndex(TArray<float>()), (int32)INDEX_NONE);
-    // Ties resolve to the first (lowest-index) max, matching SelectClosestHostileIndex.
     { TArray<float> T = {4.0f, 4.0f, 2.0f}; TestEqual(TEXT("tie → first max"), A::SelectHighestThreatIndex(T), 0); }
-    // A negative entry never wins; a positive one does.
     { TArray<float> T = {-1.0f, 0.5f}; TestEqual(TEXT("negative ignored, positive wins"), A::SelectHighestThreatIndex(T), 1); }
 
-    // ComputeThreatDelta = Damage × ThreatPerDamage + BonusThreat, all inputs clamped non-negative.
     TestEqual(TEXT("damage × multiplier"), A::ComputeThreatDelta(10.0f, 1.5f, 0.0f), 15.0f);
     TestEqual(TEXT("+ flat bonus (taunt)"), A::ComputeThreatDelta(10.0f, 1.0f, 100.0f), 110.0f);
     TestEqual(TEXT("bonus-only (zero damage)"), A::ComputeThreatDelta(0.0f, 2.0f, 50.0f), 50.0f);
-    // Negative inputs never SUBTRACT threat (a heal mis-tagged negative, or a bad multiplier, can't lower aggro).
     TestEqual(TEXT("negative damage → no contribution"), A::ComputeThreatDelta(-10.0f, 2.0f, 5.0f), 5.0f);
     TestEqual(TEXT("negative multiplier → no contribution"), A::ComputeThreatDelta(10.0f, -2.0f, 5.0f), 5.0f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Currency / wallet — MythicCurrency::CanAfford / ComputeBalanceAfterSpend / ComputeSalePrice
-// (currency = stackable currency-type items; these are the pure money-transaction rules)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicCurrencyTest,
@@ -2191,20 +1805,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicCurrencyTest::RunTest(const FString &Parameters) {
-    // CanAfford
     TestTrue(TEXT("exact balance affords"), MythicCurrency::CanAfford(100, 100));
     TestTrue(TEXT("surplus affords"), MythicCurrency::CanAfford(150, 100));
     TestFalse(TEXT("short cannot afford"), MythicCurrency::CanAfford(50, 100));
     TestTrue(TEXT("free (price 0) always affordable"), MythicCurrency::CanAfford(0, 0));
     TestTrue(TEXT("negative price → free"), MythicCurrency::CanAfford(0, -10));
 
-    // ComputeBalanceAfterSpend — never negative, no-op when unaffordable / non-positive.
     TestEqual(TEXT("spend deducts"), MythicCurrency::ComputeBalanceAfterSpend(100, 30), 70);
     TestEqual(TEXT("exact spend → 0"), MythicCurrency::ComputeBalanceAfterSpend(100, 100), 0);
     TestEqual(TEXT("unaffordable → unchanged (caller must gate on CanAfford)"), MythicCurrency::ComputeBalanceAfterSpend(20, 100), 20);
     TestEqual(TEXT("non-positive price → no-op (no free money)"), MythicCurrency::ComputeBalanceAfterSpend(100, 0), 100);
 
-    // ComputeSalePrice = floor(UnitValue × Quantity × clamp(SellRate,0,1)).
     TestEqual(TEXT("value×qty×rate"), MythicCurrency::ComputeSalePrice(10, 3, 0.5f), 15);
     TestEqual(TEXT("floors fractional coins"), MythicCurrency::ComputeSalePrice(10, 1, 0.55f), 5);
     TestEqual(TEXT("rate>1 clamps to full value"), MythicCurrency::ComputeSalePrice(10, 2, 2.0f), 20);
@@ -2214,10 +1825,6 @@ bool FMythicCurrencyTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Inventory stack-merge gate — UMythicInventoryComponent::ShouldAttemptStackMerge
-// (merge into partials for any STACKABLE type, regardless of the incoming's fullness — was `Max > IncomingStacks`)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicInventoryStackMergeGateTest,
@@ -2226,21 +1833,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicInventoryStackMergeGateTest::RunTest(const FString &Parameters) {
     using I = UMythicInventoryComponent;
-    // A stackable type (StackSizeMax > 1) always attempts merge — including a FULL incoming stack (the fix: the old
-    // `Max > IncomingStacks` gate skipped a full incoming, so it never topped off existing partial stacks).
     TestTrue(TEXT("stackable (max 100) → attempt merge"), I::ShouldAttemptStackMerge(100));
     TestTrue(TEXT("stackable (max 2, the minimum stackable) → attempt merge"), I::ShouldAttemptStackMerge(2));
-    // A non-stackable type (max 1) never merges; degenerate 0 also skips.
     TestFalse(TEXT("non-stackable (max 1) → no merge"), I::ShouldAttemptStackMerge(1));
     TestFalse(TEXT("degenerate (max 0) → no merge"), I::ShouldAttemptStackMerge(0));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Initial stack-quantity clamp — UMythicItemInstance::ClampInitialStackQuantity
-// (a created stack is always >= 1 and <= StackSizeMax; non-stackable / degenerate max <= 1 → a single unit)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicItemInitialStackClampTest,
@@ -2250,32 +1850,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicItemInitialStackClampTest::RunTest(const FString &Parameters) {
     using I = UMythicItemInstance;
 
-    // Non-stackable (max 1) → always a single unit, whatever was requested.
     TestEqual(TEXT("non-stackable: 5 requested → 1"), I::ClampInitialStackQuantity(5, 1), 1);
     TestEqual(TEXT("non-stackable: 0 requested → 1"), I::ClampInitialStackQuantity(0, 1), 1);
 
-    // Degenerate stack max (0 / negative) → treated as non-stackable, a single unit (never 0 or negative).
     TestEqual(TEXT("degenerate max 0 → 1"), I::ClampInitialStackQuantity(5, 0), 1);
     TestEqual(TEXT("degenerate max -2 → 1"), I::ClampInitialStackQuantity(3, -2), 1);
 
-    // Stackable normal range → requested kept.
     TestEqual(TEXT("stackable: 5 of 100 → 5"), I::ClampInitialStackQuantity(5, 100), 5);
     TestEqual(TEXT("stackable: exactly max → max"), I::ClampInitialStackQuantity(100, 100), 100);
 
-    // Over-stack request clamped down to the cap.
     TestEqual(TEXT("over-stack 150 of 100 → 100"), I::ClampInitialStackQuantity(150, 100), 100);
 
-    // Zero / negative request floored to 1 (never a zero/negative created stack).
     TestEqual(TEXT("zero request → 1"), I::ClampInitialStackQuantity(0, 100), 1);
     TestEqual(TEXT("negative request → 1"), I::ClampInitialStackQuantity(-3, 100), 1);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Dialogue severity constraint — FMythicDialogueSelector::TemplateConstrainsSeverity
-// (a template hard-filters by severity iff it tightened EITHER bound; default Min=0/Max=0xFF = unconstrained)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicDialogueSeverityConstraintTest,
@@ -2284,22 +1875,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicDialogueSeverityConstraintTest::RunTest(const FString &Parameters) {
     using S = FMythicDialogueSelector;
-    // Defaults (Min=0, Max=0xFF) → unconstrained → never hard-filters on severity.
     TestFalse(TEXT("default Min0/Max255 → unconstrained"), S::TemplateConstrainsSeverity(0, 0xFF));
-    // Min raised → constrained (already worked before).
     TestTrue(TEXT("Min raised → constrained"), S::TemplateConstrainsSeverity(2, 0xFF));
-    // Max lowered with Min at default 0 → constrained (THE FIX — previously treated as unconstrained, ignoring Max).
     TestTrue(TEXT("Max lowered (Min default 0) → constrained (the fix)"), S::TemplateConstrainsSeverity(0, 2));
-    // Both bounds tightened → constrained.
     TestTrue(TEXT("both bounds tightened → constrained"), S::TemplateConstrainsSeverity(1, 3));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Dialogue variable substitution — FMythicDialogueSelector::ResolveVariables
-// (named {placeholders} → live values; replace-all; unknown placeholders left untouched; empty value blanks out)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicDialogueResolveVariablesTest,
@@ -2311,7 +1894,6 @@ bool FMythicDialogueResolveVariablesTest::RunTest(const FString &Parameters) {
     FMythicDialogueVariables V;
     V.NPCName = TEXT("Garrick");
     V.FactionName = TEXT("Ironhold");
-    // V.TargetName left empty (default) to exercise the blank-out case.
 
     auto R = [&](const TCHAR *Template) {
         return DS::ResolveVariables(FText::FromString(Template), V).ToString();
@@ -2319,22 +1901,14 @@ bool FMythicDialogueResolveVariablesTest::RunTest(const FString &Parameters) {
 
     TestEqual(TEXT("single placeholder"), R(TEXT("Hello {npc_name}")), FString(TEXT("Hello Garrick")));
     TestEqual(TEXT("two distinct placeholders"), R(TEXT("{npc_name} of {faction_name}")), FString(TEXT("Garrick of Ironhold")));
-    // ReplaceInline replaces ALL occurrences.
     TestEqual(TEXT("repeated placeholder → replace-all"), R(TEXT("{npc_name} & {npc_name}")), FString(TEXT("Garrick & Garrick")));
-    // An unrecognised placeholder is left verbatim (no substitution table entry).
     TestEqual(TEXT("unknown placeholder untouched"), R(TEXT("Hi {unknown_var}")), FString(TEXT("Hi {unknown_var}")));
-    // No placeholders → text unchanged.
     TestEqual(TEXT("plain text unchanged"), R(TEXT("nothing to fill")), FString(TEXT("nothing to fill")));
-    // An empty live value blanks the placeholder out.
     TestEqual(TEXT("empty value blanks out"), R(TEXT("end{target_name}.")), FString(TEXT("end.")));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Dialogue template selection — FMythicDialogueSelector::SelectTemplate
-// (highest total score wins; role/faction/situation are hard-filters; role match +20; priority added)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicDialogueSelectTemplateTest,
@@ -2344,7 +1918,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicDialogueSelectTemplateTest::RunTest(const FString &Parameters) {
     using DS = FMythicDialogueSelector;
 
-    // Null / empty database → no template selected.
     {
         FMythicDialogueContext Ctx;
         TestTrue(TEXT("null DB → no template"), DS::SelectTemplate(nullptr, Ctx).Template == nullptr);
@@ -2352,7 +1925,6 @@ bool FMythicDialogueSelectTemplateTest::RunTest(const FString &Parameters) {
         TestTrue(TEXT("empty DB → no template"), DS::SelectTemplate(Empty, Ctx).Template == nullptr);
     }
 
-    // Highest total score wins — here by Priority, all else equal (both bare templates also get +5 in-range severity).
     {
         UMythicDialogueDatabase *DB = NewObject<UMythicDialogueDatabase>();
         FMythicDialogueTemplate Lo;
@@ -2369,12 +1941,10 @@ bool FMythicDialogueSelectTemplateTest::RunTest(const FString &Parameters) {
         TestEqual(TEXT("higher priority wins"), R.ResolvedText.ToString(), FString(TEXT("hi")));
     }
 
-    // Two distinct REGISTERED tags stand in for role tags (MatchesTag compares hierarchy, not the editor category).
     const FGameplayTag RoleX = GAS_STATE_DEAD;
     const FGameplayTag RoleY = GAS_STATE_DOWNED;
     TestTrue(TEXT("stand-in role tags resolve + differ"), RoleX.IsValid() && RoleY.IsValid() && RoleX != RoleY);
     if (RoleX.IsValid() && RoleY.IsValid() && RoleX != RoleY) {
-        // Role hard-filter: a role-gated template is SKIPPED when the context role doesn't match → nothing selected.
         {
             UMythicDialogueDatabase *DB = NewObject<UMythicDialogueDatabase>();
             FMythicDialogueTemplate Gated;
@@ -2383,10 +1953,9 @@ bool FMythicDialogueSelectTemplateTest::RunTest(const FString &Parameters) {
             Gated.DialogueText = FText::FromString(TEXT("gated"));
             DB->Templates.Add(Gated);
             FMythicDialogueContext Ctx;
-            Ctx.RoleTag = RoleY; // mismatch
+            Ctx.RoleTag = RoleY;
             TestTrue(TEXT("role mismatch → template skipped"), DS::SelectTemplate(DB, Ctx).Template == nullptr);
         }
-        // Role match (+20) beats a generic template of EQUAL priority.
         {
             UMythicDialogueDatabase *DB = NewObject<UMythicDialogueDatabase>();
             FMythicDialogueTemplate Generic;
@@ -2408,10 +1977,6 @@ bool FMythicDialogueSelectTemplateTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Role-from-context — UMythicPopulationSpawnerProcessor::ResolveEconomy / DeriveArchetype
-// (sim-driven weighted archetype draw: faction wealth/military × settlement economy × biome × time-of-day; deterministic)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicRoleFromContextTest,
@@ -2421,14 +1986,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicRoleFromContextTest::RunTest(const FString &Parameters) {
     using P = UMythicPopulationSpawnerProcessor;
 
-    // ─── ResolveEconomy ───
     {
-        // Authored non-Generic always wins, regardless of production.
-        FMythicResourceStock Prod; Prod.Food = 5.0f; // would derive Farming
+        FMythicResourceStock Prod; Prod.Food = 5.0f;
         TestEqual(TEXT("authored Trade overrides derived"),
                   (int32)P::ResolveEconomy(EMythicSettlementEconomy::Trade, Prod), (int32)EMythicSettlementEconomy::Trade);
 
-        // Generic derives from the dominant base-production resource.
         FMythicResourceStock Farm; Farm.Food = 1.0f; Farm.Materials = 0.3f;
         TestEqual(TEXT("Food-dominant → Farming"),
                   (int32)P::ResolveEconomy(EMythicSettlementEconomy::Generic, Farm), (int32)EMythicSettlementEconomy::Farming);
@@ -2445,29 +2007,26 @@ bool FMythicRoleFromContextTest::RunTest(const FString &Parameters) {
         TestEqual(TEXT("Wealth-dominant → Trade"),
                   (int32)P::ResolveEconomy(EMythicSettlementEconomy::Generic, Coin), (int32)EMythicSettlementEconomy::Trade);
 
-        FMythicResourceStock Empty; // bandits produce nothing
+        FMythicResourceStock Empty;
         TestEqual(TEXT("all-zero production → Generic"),
                   (int32)P::ResolveEconomy(EMythicSettlementEconomy::Generic, Empty), (int32)EMythicSettlementEconomy::Generic);
     }
 
-    // ─── DeriveArchetype — sim-driven weighted role draw over the code-default catalog ───
     {
         const TConstArrayView<FMythicArchetypeRow> Catalog = MythicArchetypeDefaults::GetCodeDefaultArchetypes();
         TestTrue(TEXT("code-default catalog is non-empty"), Catalog.Num() > 0);
 
-        // Helper: a baseline daytime, mid-context settlement draw.
         auto MakeCtx = [](EMythicSettlementEconomy Eco, float Wealth, float Military) {
             FMythicArchetypeContext Ctx;
             Ctx.Economy = Eco;
             Ctx.Biome = EMythicBiome::Plains;
             Ctx.WealthNorm = Wealth;
             Ctx.Military = Military;
-            Ctx.DayFactor = 1.0f; // midday
+            Ctx.DayFactor = 1.0f;
             Ctx.bWildernessContext = false;
             return Ctx;
         };
 
-        // Determinism: same (catalog, context, hash) → same role.
         {
             FMythicArchetypeContext Ctx = MakeCtx(EMythicSettlementEconomy::Farming, 0.5f, 0.0f);
             const FMythicArchetypeRow *RA = nullptr; const FMythicArchetypeRow *RB = nullptr;
@@ -2477,19 +2036,15 @@ bool FMythicRoleFromContextTest::RunTest(const FString &Parameters) {
             TestTrue(TEXT("DeriveArchetype returns a valid role"), A.IsValid());
         }
 
-        // Empty catalog → always-safe civilian fallback, null OutChosen.
         {
             FMythicArchetypeContext Ctx = MakeCtx(EMythicSettlementEconomy::Generic, 0.5f, 0.0f);
-            FMythicArchetypeRow Sentinel; // non-null starting value so we prove OutChosen is actively cleared
+            FMythicArchetypeRow Sentinel;
             const FMythicArchetypeRow *Chosen = &Sentinel;
             const FGameplayTag R = P::DeriveArchetype(TConstArrayView<FMythicArchetypeRow>(), Ctx, 777u, Chosen);
             TestTrue(TEXT("empty catalog → Civilian fallback"), R == TAG_NPC_ROLE_CIVILIAN);
             TestNull(TEXT("empty catalog → null OutChosen"), Chosen);
         }
 
-        // Economy mix: a zero-military farming town is dominated by farmers over a large sample (Farming row has a 4x
-        // economy multiplier; soldier/guard rows collapse to base with zero military). It need not be exclusive (the
-        // always-eligible civilian row + traveler keep some non-farmer mass), but farmers must be the plurality.
         {
             FMythicArchetypeContext Ctx = MakeCtx(EMythicSettlementEconomy::Farming, 0.4f, 0.0f);
             int32 Farmers = 0; int32 Soldiers = 0; const int32 Samples = 2000;
@@ -2503,8 +2058,6 @@ bool FMythicRoleFromContextTest::RunTest(const FString &Parameters) {
             TestTrue(TEXT("zero-military town → near-zero armed share"), Soldiers < Samples / 20);
         }
 
-        // Military axis: a strong-military Military-economy fortress yields a large armed (soldier/guard) share — the
-        // MilitaryFavor + economy multipliers on the soldier/guard rows dominate.
         {
             FMythicArchetypeContext Ctx = MakeCtx(EMythicSettlementEconomy::Military, 0.5f, 1.0f);
             int32 Armed = 0; const int32 Samples = 2000;
@@ -2516,8 +2069,6 @@ bool FMythicRoleFromContextTest::RunTest(const FString &Parameters) {
             TestTrue(TEXT("strong military fortress → armed majority"), Armed > Samples / 2);
         }
 
-        // Wealth axis: a poor town surfaces beggars (poverty-favored, settlement-only) that a rich town never does at
-        // the same hash sweep — the WealthDisfavor/WealthFavor lerps flip the beggar weight by an order of magnitude.
         {
             FMythicArchetypeContext Poor = MakeCtx(EMythicSettlementEconomy::Generic, 0.0f, 0.0f);
             FMythicArchetypeContext Rich = MakeCtx(EMythicSettlementEconomy::Generic, 1.0f, 0.0f);
@@ -2530,8 +2081,6 @@ bool FMythicRoleFromContextTest::RunTest(const FString &Parameters) {
             TestTrue(TEXT("poor town surfaces more beggars than a rich town"), PoorBeggars > RichBeggars);
         }
 
-        // Wilderness gate: in a wilderness context, settlement-only (beggar/socialite/noble) and group-only (noble)
-        // archetypes are excluded entirely — they must never be drawn for a lone open-road spawn.
         {
             FMythicArchetypeContext Wild = MakeCtx(EMythicSettlementEconomy::Generic, 1.0f, 0.0f);
             Wild.bWildernessContext = true;
@@ -2546,19 +2095,16 @@ bool FMythicRoleFromContextTest::RunTest(const FString &Parameters) {
             TestTrue(TEXT("wilderness context excludes settlement-only / group-only archetypes"), bNoSettlementOnly);
         }
 
-        // RequiredFactionTags gate: a row with an unmet faction requirement is removed from the draw. Build a tiny
-        // catalog of two rows — one civilian (no requirement) + one gated soldier — and confirm a faction that fails
-        // the gate never draws the soldier.
         {
             FMythicArchetypeRow Civ;
             Civ.RoleTag = TAG_NPC_ROLE_CIVILIAN; Civ.BaseWeight = 1.0f;
             FMythicArchetypeRow Sol;
-            Sol.RoleTag = TAG_NPC_ROLE_SOLDIER; Sol.BaseWeight = 100.0f; // would dominate if eligible
-            Sol.RequiredFactionTags.AddTag(TAG_NPC_ROLE_GUARD); // arbitrary registered tag used as a requirement marker
+            Sol.RoleTag = TAG_NPC_ROLE_SOLDIER; Sol.BaseWeight = 100.0f;
+            Sol.RequiredFactionTags.AddTag(TAG_NPC_ROLE_GUARD);
             TArray<FMythicArchetypeRow> Mini = { Civ, Sol };
 
             FMythicArchetypeContext Ctx = MakeCtx(EMythicSettlementEconomy::Generic, 0.5f, 1.0f);
-            Ctx.FactionTag = TAG_NPC_ROLE_FARMER; // does NOT satisfy the soldier's requirement
+            Ctx.FactionTag = TAG_NPC_ROLE_FARMER;
             bool bNeverSoldier = true;
             for (int32 i = 0; i < 500; ++i) {
                 const FMythicArchetypeRow *Chosen = nullptr;
@@ -2568,7 +2114,6 @@ bool FMythicRoleFromContextTest::RunTest(const FString &Parameters) {
             }
             TestTrue(TEXT("unmet RequiredFactionTags removes the row from the draw"), bNeverSoldier);
 
-            // And when the faction DOES satisfy the requirement, the heavy soldier row dominates.
             Ctx.FactionTag = TAG_NPC_ROLE_GUARD;
             int32 SoldierHits = 0;
             for (int32 i = 0; i < 500; ++i) {
@@ -2584,10 +2129,6 @@ bool FMythicRoleFromContextTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// World Chronicle event-tag formatting — UMythicWorldChronicleSubsystem::EventTagToReadable
-// (player-facing news + NPC {recent_event}: last two tag segments as "Parent Leaf"; invalid → safe default)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicChronicleEventReadableTest,
@@ -2597,11 +2138,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicChronicleEventReadableTest::RunTest(const FString &Parameters) {
     using C = UMythicWorldChronicleSubsystem;
 
-    // Invalid tag → safe default (never an empty news line).
     TestEqual(TEXT("invalid tag → 'World Event'"), C::EventTagToReadable(FGameplayTag()), FString(TEXT("World Event")));
 
-    // Dominant path: render the last TWO segments ("Parent Leaf") so the category survives. Any registered
-    // multi-segment tag exercises the formatting — semantics aside, GAS.State.Dead → "State Dead".
     const FGameplayTag Dead = GAS_STATE_DEAD;
     const FGameplayTag Downed = GAS_STATE_DOWNED;
     TestTrue(TEXT("stand-in tags registered (prereq)"), Dead.IsValid() && Downed.IsValid());
@@ -2615,10 +2153,6 @@ bool FMythicChronicleEventReadableTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Loot entry drop-chance resolution — ULootReward::ResolveEntryDropChance
-// (override-wins / per-rarity weight / SKIP on out-of-range rarity — no OOB read of the fixed weights array)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicLootDropChanceResolveTest,
@@ -2627,33 +2161,26 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicLootDropChanceResolveTest::RunTest(const FString &Parameters) {
     using L = ULootReward;
-    const float Weights[] = {0.5f, 0.3f, 0.2f, 0.1f, 0.05f}; // Common..Mythic
+    const float Weights[] = {0.5f, 0.3f, 0.2f, 0.1f, 0.05f};
     const TConstArrayView<float> W(Weights, 5);
     float Out = -1.0f;
 
-    // Override > 0 wins (ignores rarity/weight), even for an out-of-range rarity.
     TestTrue(TEXT("override wins"), L::ResolveEntryDropChance(0.8f, 2, W, Out));
     TestEqual(TEXT("override value used"), Out, 0.8f);
     TestTrue(TEXT("override wins even for out-of-range rarity"), L::ResolveEntryDropChance(0.8f, 99, W, Out));
     TestEqual(TEXT("override value used (oor rarity)"), Out, 0.8f);
 
-    // No override → per-rarity weight by index.
     TestTrue(TEXT("rarity 0 → weight"), L::ResolveEntryDropChance(0.0f, 0, W, Out));
     TestEqual(TEXT("rarity 0 weight"), Out, 0.5f);
     TestTrue(TEXT("rarity 4 (Mythic) → weight"), L::ResolveEntryDropChance(0.0f, 4, W, Out));
     TestEqual(TEXT("rarity 4 weight"), Out, 0.05f);
 
-    // Out-of-range rarity with NO override → SKIP (false), no OOB read. (The bug fix.)
     TestFalse(TEXT("rarity 5 (out of range), no override → skip"), L::ResolveEntryDropChance(0.0f, 5, W, Out));
     TestFalse(TEXT("negative rarity, no override → skip"), L::ResolveEntryDropChance(0.0f, -1, W, Out));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Proficiency level-at-XP — UProficiencyDefinition::CalcLevelAtXP
-// (robust capped walk: exact at boundaries, clamps to MaxLevel — was a float-fragile log inversion w/ no cap)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicProficiencyLevelAtXPTest,
@@ -2663,12 +2190,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicProficiencyLevelAtXPTest::RunTest(const FString &Parameters) {
     using D = UProficiencyDefinition;
 
-    // null def → level 1 (safe default). The null path logs an Error by design; whitelist it so the harness doesn't
-    // treat the deliberate diagnostic as a test failure.
     AddExpectedError(TEXT("CalcLevelAtXP: Def is null"), EAutomationExpectedErrorFlags::Contains, 1);
     TestEqual(TEXT("null def → 1"), D::CalcLevelAtXP(500.0f, nullptr), 1);
 
-    // Geometric track: STARTING_XP=100, GrowthRate=2 → Cumulative(L)=100*(2^(L-1)-1): 0,100,300,700,1500.
     UProficiencyDefinition *Def = NewObject<UProficiencyDefinition>();
     Def->GrowthRate = 2.0f;
     Def->MaxLevel = 5;
@@ -2681,14 +2205,11 @@ bool FMythicProficiencyLevelAtXPTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("1500 XP → 5 (max boundary)"), D::CalcLevelAtXP(1500.0f, Def), 5);
     TestEqual(TEXT("huge overshoot → clamped to MaxLevel"), D::CalcLevelAtXP(1.0e6f, Def), 5);
 
-    // Round-trip: CalcLevelAtXP(Cumulative(L)) == L for every level (would FAIL under the old float-fragile inversion
-    // at a boundary that rounded down).
     for (int32 L = 1; L <= Def->MaxLevel; ++L) {
         const float CumXP = D::CalcCumulativeXPForLevel(L, Def);
         TestEqual(*FString::Printf(TEXT("round-trip level %d"), L), D::CalcLevelAtXP(CumXP, Def), L);
     }
 
-    // Linear track (GrowthRate≈1): Cumulative(L)=100*(L-1).
     UProficiencyDefinition *Lin = NewObject<UProficiencyDefinition>();
     Lin->GrowthRate = 1.0f;
     Lin->MaxLevel = 10;
@@ -2698,10 +2219,6 @@ bool FMythicProficiencyLevelAtXPTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Proficiency XP curve — UProficiencyDefinition::CalcXPCostForLevelUp + CalcXPRemainingForLevel
-// (the two siblings of CalcLevelAtXP/CalcCumulativeXPForLevel that were untested: per-level cost + XP-to-target)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicProficiencyXPCurveTest,
@@ -2711,20 +2228,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicProficiencyXPCurveTest::RunTest(const FString &Parameters) {
     using D = UProficiencyDefinition;
 
-    // Same geometric track as the LevelAtXP test: STARTING_XP=100, GrowthRate=2 → per-level cost = 100*2^(L-1);
-    // cumulative(L) = 100*(2^(L-1)-1) → L2=100, L3=300, L4=700, L5=1500.
     UProficiencyDefinition *Def = NewObject<UProficiencyDefinition>();
     Def->GrowthRate = 2.0f;
     Def->MaxLevel = 5;
 
-    // CalcXPCostForLevelUp: cost from L→L+1 = 100*2^(L-1) (geometric; not MaxLevel-clamped in this function).
     TestEqual(TEXT("cost L1→L2 = 100"), D::CalcXPCostForLevelUp(1, Def), 100.0f);
     TestEqual(TEXT("cost L2→L3 = 200"), D::CalcXPCostForLevelUp(2, Def), 200.0f);
     TestEqual(TEXT("cost L3→L4 = 400"), D::CalcXPCostForLevelUp(3, Def), 400.0f);
     TestEqual(TEXT("cost L4→L5 = 800"), D::CalcXPCostForLevelUp(4, Def), 800.0f);
     TestEqual(TEXT("cost level<1 → 0"), D::CalcXPCostForLevelUp(0, Def), 0.0f);
 
-    // CalcXPRemainingForLevel: max(cumulative(target) - currentXP, 0); 0 once already at/past the target level.
     TestEqual(TEXT("remaining 0 XP → L3 = 300"), D::CalcXPRemainingForLevel(0.0f, 3, Def), 300.0f);
     TestEqual(TEXT("remaining 150 XP → L3 = 150"), D::CalcXPRemainingForLevel(150.0f, 3, Def), 150.0f);
     TestEqual(TEXT("remaining 0 XP → L2 = 100"), D::CalcXPRemainingForLevel(0.0f, 2, Def), 100.0f);
@@ -2734,10 +2247,6 @@ bool FMythicProficiencyXPCurveTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Conversion product level — UConversionStationComponent::ResolveProductLevel
-// (InheritStationLevel was hard-stubbed to 1; now driven by the station's configured StationLevel)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicConversionProductLevelTest,
@@ -2746,23 +2255,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicConversionProductLevelTest::RunTest(const FString &Parameters) {
     using C = UConversionStationComponent;
-    // Args: (LevelMode, InputLevel, StationLevel, FixedLevel)
-    // FixedLevel → the recipe's fixed level (ignores input/station).
     TestEqual(TEXT("FixedLevel → FixedLevel"), C::ResolveProductLevel(EProductLevelMode::FixedLevel, 7, 4, 9), 9);
-    // InheritInputLevel → the snapshotted input level.
     TestEqual(TEXT("InheritInputLevel → input level"), C::ResolveProductLevel(EProductLevelMode::InheritInputLevel, 7, 4, 9), 7);
-    // InheritStationLevel → the station level (the fix — was hard-stubbed to 1).
     TestEqual(TEXT("InheritStationLevel → station level (the fix)"), C::ResolveProductLevel(EProductLevelMode::InheritStationLevel, 7, 4, 9), 4);
-    // Regression guard: a station level above 1 is honored, not collapsed to 1.
     TestEqual(TEXT("InheritStationLevel honors station level > 1"), C::ResolveProductLevel(EProductLevelMode::InheritStationLevel, 2, 5, 1), 5);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Settlement center cell — AMythicSettlement::ComputeCenterCell
-// (the Socialize gather-point — was never assigned → always (0,0) → NPCs socialized at the grid origin corner)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicSettlementCenterCellTest,
@@ -2772,19 +2272,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicSettlementCenterCellTest::RunTest(const FString &Parameters) {
     using S = AMythicSettlement;
 
-    // Empty → (0,0) fallback (degenerate; MinSettlementCells should prevent it).
     {
         const TArray<FMythicCellCoord> Empty;
         const FMythicCellCoord C = S::ComputeCenterCell(Empty);
         TestTrue(TEXT("empty → (0,0)"), C.X == 0 && C.Y == 0);
     }
-    // Single cell → that cell.
     {
         const TArray<FMythicCellCoord> One = {FMythicCellCoord(40, 50)};
         const FMythicCellCoord C = S::ComputeCenterCell(One);
         TestTrue(TEXT("single cell → itself"), C.X == 40 && C.Y == 50);
     }
-    // 3×3 block at 40..42 → centroid (41,41), which IS a member → (41,41); crucially NOT the (0,0) default (the bug).
     {
         TArray<FMythicCellCoord> Block;
         for (int32 Y = 40; Y <= 42; ++Y) {
@@ -2796,7 +2293,6 @@ bool FMythicSettlementCenterCellTest::RunTest(const FString &Parameters) {
         TestTrue(TEXT("3x3 block → center (41,41)"), C.X == 41 && C.Y == 41);
         TestFalse(TEXT("center is NOT the (0,0) default"), C.X == 0 && C.Y == 0);
     }
-    // The result is always an ACTUAL input cell (nearest-centroid guarantee), incl. for an offset/sparse set.
     {
         const TArray<FMythicCellCoord> Cells = {
             FMythicCellCoord(10, 10), FMythicCellCoord(10, 11), FMythicCellCoord(11, 10), FMythicCellCoord(100, 100)};
@@ -2807,10 +2303,6 @@ bool FMythicSettlementCenterCellTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Shop claim eligibility — UMythicSettlementRegistry::CanClaimShop
-// (the PRODUCER half of the shop-ownership lifecycle: which vacant slots a role-bearing NPC may claim)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicShopClaimEligibilityTest,
@@ -2818,7 +2310,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicShopClaimEligibilityTest::RunTest(const FString &Parameters) {
-    // Two distinct, guaranteed-registered native tags stand in for NPC role tags (the matcher is role-agnostic).
     const FGameplayTag RoleA = TAG_LIVINGWORLD_EVENT_FACTION_RESTORATION;
     const FGameplayTag RoleB = TAG_LIVINGWORLD_EVENT_FACTION_SCHISM;
 
@@ -2832,33 +2323,26 @@ bool FMythicShopClaimEligibilityTest::RunTest(const FString &Parameters) {
     };
     using Reg = UMythicSettlementRegistry;
 
-    // Claimable: unowned + ready (VacatedTime 0) + role matches.
     TestTrue(TEXT("matching role on a ready slot is claimable"), Reg::CanClaimShop(MakeShop(RoleA), RoleA));
-    // Role mismatch → not claimable.
     TestFalse(TEXT("non-matching role cannot claim"), Reg::CanClaimShop(MakeShop(RoleA), RoleB));
-    // Already owned → not claimable.
     {
         FMythicShopSlot S = MakeShop(RoleA);
         S.OwnerEntityId = 42;
         TestFalse(TEXT("owned slot not claimable"), Reg::CanClaimShop(S, RoleA));
     }
-    // Player-owned → not claimable (player ownership overrides NPC succession).
     {
         FMythicShopSlot S = MakeShop(RoleA);
         S.bPlayerOwned = true;
         TestFalse(TEXT("player-owned slot not claimable"), Reg::CanClaimShop(S, RoleA));
     }
-    // Mid-succession (VacatedTime > 0, delay not yet elapsed) → not claimable.
     {
         FMythicShopSlot S = MakeShop(RoleA);
         S.VacatedTime = 123.0;
         TestFalse(TEXT("mid-succession slot not claimable"), Reg::CanClaimShop(S, RoleA));
     }
-    // Invalid claimant / shop role → not claimable.
     TestFalse(TEXT("invalid claimant role cannot claim"), Reg::CanClaimShop(MakeShop(RoleA), FGameplayTag()));
     TestFalse(TEXT("slot with no required role is not claimable"), Reg::CanClaimShop(MakeShop(FGameplayTag()), RoleA));
 
-    // Hierarchy: a more-specific claimant satisfies a parent requirement; a parent claimant does NOT satisfy a child req.
     const FGameplayTag ParentRole = RoleA.RequestDirectParent();
     if (ParentRole.IsValid()) {
         TestTrue(TEXT("child role satisfies parent requirement"), Reg::CanClaimShop(MakeShop(ParentRole), RoleA));
@@ -2868,10 +2352,6 @@ bool FMythicShopClaimEligibilityTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Offense probability-clamp membership — UMythicAttributeSet_Offense::IsProbabilityAttribute
-// (crit chance + 8 on-hit proc chances clamp to [0,1]; multipliers/base values do NOT)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicOffenseProbabilityClampTest,
@@ -2881,7 +2361,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicOffenseProbabilityClampTest::RunTest(const FString &Parameters) {
     using O = UMythicAttributeSet_Offense;
 
-    // Probabilities → clamped (member of the [0,1] set).
     TestTrue(TEXT("CriticalHitChance is a probability"), O::IsProbabilityAttribute(O::GetCriticalHitChanceAttribute()));
     TestTrue(TEXT("ApplyBurnOnHitChance is a probability"), O::IsProbabilityAttribute(O::GetApplyBurnOnHitChanceAttribute()));
     TestTrue(TEXT("ApplyBleedOnHitChance is a probability"), O::IsProbabilityAttribute(O::GetApplyBleedOnHitChanceAttribute()));
@@ -2892,7 +2371,6 @@ bool FMythicOffenseProbabilityClampTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("ApplyWeakenOnHitChance is a probability"), O::IsProbabilityAttribute(O::GetApplyWeakenOnHitChanceAttribute()));
     TestTrue(TEXT("ApplyTerrifyOnHitChance is a probability"), O::IsProbabilityAttribute(O::GetApplyTerrifyOnHitChanceAttribute()));
 
-    // Multipliers / base values → NOT clamped (must keep their full range; clamping would remove design headroom).
     TestFalse(TEXT("CriticalHitDamage is NOT a probability (multiplier)"), O::IsProbabilityAttribute(O::GetCriticalHitDamageAttribute()));
     TestFalse(TEXT("Power is NOT a probability"), O::IsProbabilityAttribute(O::GetPowerAttribute()));
     TestFalse(TEXT("DamagePerHit is NOT a probability"), O::IsProbabilityAttribute(O::GetDamagePerHitAttribute()));
@@ -2902,10 +2380,46 @@ bool FMythicOffenseProbabilityClampTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Death-latch rule — UMythicAttributeSet_Life::ComputeOutOfHealthLatch
-// (the latch must track health after EVERY mutation; a restoring heal clears it)
-// ═══════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicOffenseProbabilityBaseClampTest,
+    "Mythic.GAS.Offense.ProbabilityBaseClamp",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicOffenseProbabilityBaseClampTest::RunTest(const FString &Parameters) {
+    using O = UMythicAttributeSet_Offense;
+
+    O *Set = NewObject<O>(GetTransientPackage());
+    TestNotNull(TEXT("attribute set constructed"), Set);
+    if (!Set) {
+        return false;
+    }
+
+    struct FCase {
+        const TCHAR *Label;
+        float In;
+        float Want;
+    };
+    const FCase Cases[] = {
+        {TEXT("over the cap clamps to 1"), 2.179f, 1.0f},
+        {TEXT("at the cap stays"), 1.0f, 1.0f},
+        {TEXT("in range passes through"), 0.35f, 0.35f},
+        {TEXT("negative clamps to 0"), -0.5f, 0.0f},
+    };
+
+    for (const FCase &C : Cases) {
+        float Value = C.In;
+        Set->PreAttributeBaseChange(O::GetCriticalHitChanceAttribute(), Value);
+        TestEqual(FString::Printf(TEXT("crit base %s"), C.Label), Value, C.Want);
+    }
+
+    float CritDamage = 3.5f;
+    Set->PreAttributeBaseChange(O::GetCriticalHitDamageAttribute(), CritDamage);
+    TestEqual(TEXT("crit damage base is not clamped"), CritDamage, 3.5f);
+
+    return true;
+}
+
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicLifeOutOfHealthLatchTest,
@@ -2913,21 +2427,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicLifeOutOfHealthLatchTest::RunTest(const FString &Parameters) {
-    // At/below zero → out of health (death latch SET).
     TestTrue(TEXT("health 0 → out of health"), UMythicAttributeSet_Life::ComputeOutOfHealthLatch(0.0f));
     TestTrue(TEXT("health negative → out of health"), UMythicAttributeSet_Life::ComputeOutOfHealthLatch(-5.0f));
-    // Above zero → NOT out of health — the case the Healing-path fix relies on (a restoring heal clears the latch),
-    // and the recovery transition the direct-Health path already used.
     TestFalse(TEXT("health 50 → not out of health"), UMythicAttributeSet_Life::ComputeOutOfHealthLatch(50.0f));
     TestFalse(TEXT("health 0.01 → not out of health (heal-from-0 clears latch)"),
               UMythicAttributeSet_Life::ComputeOutOfHealthLatch(0.01f));
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Lethal-outcome rule — UMythicAttributeSet_Life::ResolveLethalOutcome
-// (foundation of co-op down/revive: down-vs-die gate, default-off so behavior is unchanged)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicLethalOutcomeTest,
@@ -2938,29 +2445,20 @@ bool FMythicLethalOutcomeTest::RunTest(const FString &Parameters) {
     using EOut = EMythicLethalOutcome;
     auto Resolve = &UMythicAttributeSet_Life::ResolveLethalOutcome;
 
-    // Non-lethal always survives, regardless of policy/state flags.
     TestEqual(TEXT("non-lethal survives (down off)"), Resolve(false, false, false, false), EOut::Survive);
     TestEqual(TEXT("non-lethal survives (down on, revivable)"), Resolve(false, true, false, true), EOut::Survive);
 
-    // Lethal + down DISABLED → dies (current behavior preserved — the default).
     TestEqual(TEXT("lethal + down disabled → die"), Resolve(true, false, false, true), EOut::Die);
 
-    // Lethal + down enabled, but NOT a revivable pawn (NPC/creature) → dies outright.
     TestEqual(TEXT("lethal + down on + non-revivable → die"), Resolve(true, true, false, false), EOut::Die);
 
-    // Lethal + down enabled + revivable + ALREADY downed → finished off (dies).
     TestEqual(TEXT("lethal + down on + already downed → die (finished off)"), Resolve(true, true, true, true), EOut::Die);
 
-    // Lethal + down enabled + revivable + not yet downed → enters the downed state (the new co-op path).
     TestEqual(TEXT("lethal + down on + revivable + first hit → downed"), Resolve(true, true, false, true), EOut::EnterDownState);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Revive-eligibility gate — UMythicLifeComponent::CanReviveTarget
-// (only a non-downed reviver can revive a downed target)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicReviveGateTest,
@@ -2968,24 +2466,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicReviveGateTest::RunTest(const FString &Parameters) {
-    auto CanRevive = &UMythicLifeComponent::CanReviveTarget; // (bTargetDowned, bReviverDowned)
+    auto CanRevive = &UMythicLifeComponent::CanReviveTarget;
 
-    // The only valid case: a downed target + a reviver who isn't downed.
     TestTrue(TEXT("downed target + healthy reviver → can revive"), CanRevive(true, false));
-    // Target not downed → nothing to revive.
     TestFalse(TEXT("non-downed target → cannot revive"), CanRevive(false, false));
-    // A downed reviver can't revive anyone (can't act).
     TestFalse(TEXT("downed reviver → cannot revive"), CanRevive(true, true));
-    // Both invalid.
     TestFalse(TEXT("non-downed target + downed reviver → cannot revive"), CanRevive(false, true));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Equip-requirement gate — UMythicInventoryComponent::MeetsEquipRequirement
-// (an item with a RequiredEquipTag may only be equipped by an owner who owns it; empty = no requirement)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicEquipRequirementTest,
@@ -2995,7 +2485,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicEquipRequirementTest::RunTest(const FString &Parameters) {
     auto Meets = &UMythicInventoryComponent::MeetsEquipRequirement;
 
-    // No requirement (invalid tag) → always equippable, regardless of owner tags (the default — non-breaking).
     FGameplayTagContainer NoTags;
     TestTrue(TEXT("empty requirement passes with no owner tags"), Meets(FGameplayTag(), NoTags));
 
@@ -3004,21 +2493,14 @@ bool FMythicEquipRequirementTest::RunTest(const FString &Parameters) {
     if (Req.IsValid()) {
         FGameplayTagContainer HasReq;
         HasReq.AddTag(Req);
-        // Empty requirement still passes even when the owner has tags.
         TestTrue(TEXT("empty requirement passes even with owner tags"), Meets(FGameplayTag(), HasReq));
-        // Owner owns the required tag → equippable.
         TestTrue(TEXT("owner has required tag → equippable"), Meets(Req, HasReq));
-        // Owner lacks the required tag → blocked.
         TestFalse(TEXT("owner lacks required tag → blocked"), Meets(Req, NoTags));
     }
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// AI sight sanitiser — AMythicAIController::SanitizePerception
-// (lose-sight must be ≥ sight else instant target loss; angle clamped [0,180]; radii ≥ 0)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicAISightSanitizeTest,
@@ -3026,7 +2508,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicAISightSanitizeTest::RunTest(const FString &Parameters) {
-    // A sane config is left unchanged.
     {
         float S = 1500.0f, L = 2000.0f, A = 90.0f;
         AMythicAIController::SanitizePerception(S, L, A);
@@ -3034,13 +2515,11 @@ bool FMythicAISightSanitizeTest::RunTest(const FString &Parameters) {
         TestEqual(TEXT("sane lose-sight kept"), L, 2000.0f);
         TestEqual(TEXT("sane angle kept"), A, 90.0f);
     }
-    // Lose-sight below sight is bumped up to the sight radius (prevents sensed-then-instantly-lost).
     {
         float S = 1500.0f, L = 1000.0f, A = 90.0f;
         AMythicAIController::SanitizePerception(S, L, A);
         TestEqual(TEXT("lose-sight clamped up to sight"), L, 1500.0f);
     }
-    // Peripheral angle clamped to [0,180].
     {
         float S = 1000.0f, L = 1000.0f, A = 270.0f;
         AMythicAIController::SanitizePerception(S, L, A);
@@ -3051,7 +2530,6 @@ bool FMythicAISightSanitizeTest::RunTest(const FString &Parameters) {
         AMythicAIController::SanitizePerception(S, L, A);
         TestEqual(TEXT("negative angle clamped to 0"), A, 0.0f);
     }
-    // Negative sight clamped to 0, and lose-sight stays ≥ sight.
     {
         float S = -100.0f, L = -50.0f, A = 90.0f;
         AMythicAIController::SanitizePerception(S, L, A);
@@ -3062,10 +2540,6 @@ bool FMythicAISightSanitizeTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// AI closest-hostile acquisition — AMythicAIController::SelectClosestHostileIndex
-// (engage the nearest perceived hostile by squared distance; empty → none; ties → first)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicAIClosestHostileTest,
@@ -3075,20 +2549,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicAIClosestHostileTest::RunTest(const FString &Parameters) {
     using A = AMythicAIController;
 
-    // No candidates → INDEX_NONE.
     TestEqual(TEXT("empty → none"), A::SelectClosestHostileIndex({}), (int32)INDEX_NONE);
 
-    // Single candidate → index 0.
     {
         const float D[] = {400.0f};
         TestEqual(TEXT("single → 0"), A::SelectClosestHostileIndex(D), 0);
     }
-    // Nearest (smallest squared distance) wins, wherever it sits.
     {
-        const float D[] = {900.0f, 100.0f, 625.0f}; // index 1 is closest
+        const float D[] = {900.0f, 100.0f, 625.0f};
         TestEqual(TEXT("nearest wins"), A::SelectClosestHostileIndex(D), 1);
     }
-    // Ties resolve to the first.
     {
         const float D[] = {250.0f, 250.0f, 800.0f};
         TestEqual(TEXT("tie → first"), A::SelectClosestHostileIndex(D), 0);
@@ -3097,10 +2567,6 @@ bool FMythicAIClosestHostileTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// AI pursuit leash — AMythicAIController::ShouldReleaseLeash
-// (drop the target when pulled beyond the leash range from the engage anchor; range <= 0 disables — infinite pursuit)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicAILeashTest,
@@ -3110,24 +2576,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicAILeashTest::RunTest(const FString &Parameters) {
     using A = AMythicAIController;
 
-    // Disabled (range 0 / negative) → never leashes, however far the NPC is pulled (prior infinite-pursuit default).
-    TestFalse(TEXT("range 0 → no leash even far away"), A::ShouldReleaseLeash(/*distSq*/ 9.9e8f, /*rangeSq*/ 0.0f));
+    TestFalse(TEXT("range 0 → no leash even far away"), A::ShouldReleaseLeash( 9.9e8f, 0.0f));
     TestFalse(TEXT("range negative → no leash"), A::ShouldReleaseLeash(9.9e8f, -1.0f));
 
-    // Within the leash → stays engaged.
-    TestFalse(TEXT("within leash → stay"), A::ShouldReleaseLeash(/*distSq*/ 10000.0f, /*rangeSq*/ 40000.0f));
-    // Exactly at the boundary → stays (strict >).
+    TestFalse(TEXT("within leash → stay"), A::ShouldReleaseLeash( 10000.0f, 40000.0f));
     TestFalse(TEXT("exactly at leash → stay"), A::ShouldReleaseLeash(40000.0f, 40000.0f));
-    // Beyond the leash → release.
     TestTrue(TEXT("beyond leash → release"), A::ShouldReleaseLeash(50000.0f, 40000.0f));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Fall-damage curve — AMythicCharacter::ComputeFallDamage
-// (0 at/below the safe impact speed; linear above; capped at max; max<=0 = uncapped)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicFallDamageTest,
@@ -3137,29 +2595,20 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicFallDamageTest::RunTest(const FString &Parameters) {
     auto Compute = &AMythicCharacter::ComputeFallDamage;
 
-    // Below and at the safe impact speed → no damage.
     TestEqual(TEXT("below safe speed → 0"), Compute(1000.0f, 1200.0f, 0.05f, 100.0f), 0.0f);
     TestEqual(TEXT("exactly safe speed → 0"), Compute(1200.0f, 1200.0f, 0.05f, 100.0f), 0.0f);
 
-    // Above safe → linear in the excess: (2000-1200)*0.05 = 40.
     TestEqual(TEXT("above safe → linear"), Compute(2000.0f, 1200.0f, 0.05f, 100.0f), 40.0f);
 
-    // Capped: (5000-1200)*0.05 = 190 → clamped to MaxDamage 100.
     TestEqual(TEXT("damage capped at max"), Compute(5000.0f, 1200.0f, 0.05f, 100.0f), 100.0f);
 
-    // MaxDamage <= 0 means uncapped → full 190.
     TestEqual(TEXT("max<=0 → uncapped"), Compute(5000.0f, 1200.0f, 0.05f, 0.0f), 190.0f);
 
-    // A non-positive damage-per-speed is inert (a safety guard, never negative damage).
     TestEqual(TEXT("zero scale → 0"), Compute(5000.0f, 1200.0f, 0.0f, 100.0f), 0.0f);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Friendly-fire gate — UMythicDamageApplication::ShouldNegateFriendlyFire
-// (negate ONLY a distinct player→player hit while FF is off; never self-damage; never any hit involving an NPC)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicFriendlyFireGateTest,
@@ -3168,15 +2617,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicFriendlyFireGateTest::RunTest(const FString &Parameters) {
     auto FF = &UMythicDamageApplication::ShouldNegateFriendlyFire;
-    // args: (bSourceIsPlayer, bTargetIsPlayer, bSameActor, bFriendlyFireEnabled)
 
-    // Distinct player → player, FF OFF → NEGATE (the default co-op behaviour).
     TestTrue(TEXT("player→other-player, FF off → negate"), FF(true, true, false, false));
-    // Same hit but FF ON → allowed.
     TestFalse(TEXT("player→other-player, FF on → allowed"), FF(true, true, false, true));
-    // Self-damage (same actor) is NEVER negated, even FF off (fall damage / env hazard / self-DoT).
     TestFalse(TEXT("self-damage (same actor) → never negated"), FF(true, true, true, false));
-    // PvE: any hit involving an NPC is never negated.
     TestFalse(TEXT("player→NPC → not negated"), FF(true, false, false, false));
     TestFalse(TEXT("NPC→player → not negated"), FF(false, true, false, false));
     TestFalse(TEXT("NPC→NPC → not negated"), FF(false, false, false, false));
@@ -3184,11 +2628,6 @@ bool FMythicFriendlyFireGateTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Canonical player key — AMythicPlayerState::ResolveCanonicalPlayerKey
-// (persistent CharacterID wins when set; else a session-stable "session:<id>" fallback — the cross-session key the
-//  party/companion + player-registry systems address a player by)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicCanonicalPlayerKeyTest,
@@ -3198,22 +2637,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicCanonicalPlayerKeyTest::RunTest(const FString &Parameters) {
     using PS = AMythicPlayerState;
 
-    // A loaded character → its persistent save-slot CharacterID is the key (stable across sessions; session id ignored).
     TestEqual(TEXT("persistent id wins"), PS::ResolveCanonicalPlayerKey(TEXT("char-guid-abc"), 256), FString(TEXT("char-guid-abc")));
-    // No persistent id yet → session-stable fallback, distinct per session player id.
     TestEqual(TEXT("empty → session fallback"), PS::ResolveCanonicalPlayerKey(TEXT(""), 256), FString(TEXT("session:256")));
     TestEqual(TEXT("empty → session fallback (other id)"), PS::ResolveCanonicalPlayerKey(TEXT(""), 7), FString(TEXT("session:7")));
-    // Two unsaved players get DIFFERENT keys (no collision within a session).
     TestNotEqual(TEXT("distinct sessions → distinct keys"),
                  PS::ResolveCanonicalPlayerKey(TEXT(""), 1), PS::ResolveCanonicalPlayerKey(TEXT(""), 2));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Player registry resolution — UMythicPlayerRegistrySubsystem::ResolveRegisteredKey
-// (canonical key → live PlayerState; empty key / no entry / stale weak ref → nullptr)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicPlayerRegistryResolveTest,
@@ -3229,23 +2661,15 @@ bool FMythicPlayerRegistryResolveTest::RunTest(const FString &Parameters) {
     TMap<FString, TWeakObjectPtr<AMythicPlayerState>> Map;
     Map.Add(TEXT("char-guid-1"), PS);
 
-    // Registered key resolves to its PlayerState.
     TestTrue(TEXT("registered key resolves"), R::ResolveRegisteredKey(Map, TEXT("char-guid-1")) == PS);
-    // Unregistered key → nullptr.
     TestTrue(TEXT("unregistered key → null"), R::ResolveRegisteredKey(Map, TEXT("char-guid-2")) == nullptr);
-    // Empty key → nullptr (never resolves the empty string).
     TestTrue(TEXT("empty key → null"), R::ResolveRegisteredKey(Map, TEXT("")) == nullptr);
-    // A stale / null weak entry → nullptr (departed player without unregister).
     Map.Add(TEXT("stale"), TWeakObjectPtr<AMythicPlayerState>(nullptr));
     TestTrue(TEXT("stale weak entry → null"), R::ResolveRegisteredKey(Map, TEXT("stale")) == nullptr);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// NPC schedule — UMythicScheduleTransitionProcessor::GetPhaseForHour + ComputeStaggeredHour
-// (phase-by-hour boundaries + the per-NPC stagger that breaks lockstep town routines)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicSchedulePhaseStaggerTest,
@@ -3255,7 +2679,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicSchedulePhaseStaggerTest::RunTest(const FString &Parameters) {
     using P = UMythicScheduleTransitionProcessor;
 
-    // Null settings → Rest (safe default).
     TestTrue(TEXT("null settings → Rest"), P::GetPhaseForHour(10.0f, nullptr) == EMythicSchedulePhase::Rest);
 
     UMythicLivingWorldSettings *Settings = NewObject<UMythicLivingWorldSettings>();
@@ -3275,12 +2698,9 @@ bool FMythicSchedulePhaseStaggerTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("hour 18.5 (social→home) → Travel"), P::GetPhaseForHour(18.5f, Settings) == EMythicSchedulePhase::Travel);
     TestTrue(TEXT("hour 22 (night) → Rest"), P::GetPhaseForHour(22.0f, Settings) == EMythicSchedulePhase::Rest);
 
-    // ComputeStaggeredHour: disabled (0) → unchanged.
     TestEqual(TEXT("stagger 0 → unchanged"), P::ComputeStaggeredHour(12.0f, 12345u, 0.0f), 12.0f);
-    // Deterministic for a given NameHash.
     TestEqual(TEXT("deterministic per NameHash"),
               P::ComputeStaggeredHour(12.0f, 777u, 2.0f), P::ComputeStaggeredHour(12.0f, 777u, 2.0f));
-    // Always wraps into [0,24), including near the day boundaries.
     const uint32 Hashes[] = {0u, 1u, 7u, 99u, 4242u, 100002u, 999999u};
     const float Hours[] = {0.0f, 0.5f, 12.0f, 23.5f};
     for (uint32 H : Hashes) {
@@ -3289,17 +2709,12 @@ bool FMythicSchedulePhaseStaggerTest::RunTest(const FString &Parameters) {
             TestTrue(TEXT("staggered hour stays in [0,24)"), R >= 0.0f && R < 24.0f);
         }
     }
-    // A mid-day hour (away from wrap) stays within ±MaxStagger.
     TestTrue(TEXT("mid-day stagger within ±2h"),
              FMath::Abs(P::ComputeStaggeredHour(12.0f, 4242u, 2.0f) - 12.0f) <= 2.0f + KINDA_SMALL_NUMBER);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Combat probability roll — MythicCombat::RollSucceeds
-// (shared boundary rule for crit/status procs, dodge, and resistance survival in the damage executions)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicCombatRollSucceedsTest,
@@ -3309,16 +2724,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicCombatRollSucceedsTest::RunTest(const FString &Parameters) {
     using MythicCombat::RollSucceeds;
 
-    // 0% (and negative) probability NEVER succeeds — even on an exact-0.0 roll (the bug the lower-bound guard fixes).
     TestFalse(TEXT("0% never procs at roll 0.0"), RollSucceeds(0.0f, 0.0f));
     TestFalse(TEXT("0% never procs mid-roll"), RollSucceeds(0.0f, 0.5f));
     TestFalse(TEXT("negative probability never procs"), RollSucceeds(-0.25f, 0.0f));
 
-    // 100% ALWAYS succeeds — even on an exact-1.0 roll (FRand() can return 1.0, so the comparison is `<=`, not `<`).
     TestTrue(TEXT("100% procs at roll 1.0"), RollSucceeds(1.0f, 1.0f));
     TestTrue(TEXT("100% procs at roll 0.0"), RollSucceeds(1.0f, 0.0f));
 
-    // Boundary: roll == probability succeeds (inclusive); just above fails; just below succeeds.
     TestTrue(TEXT("roll == chance succeeds"), RollSucceeds(0.5f, 0.5f));
     TestFalse(TEXT("roll just above chance fails"), RollSucceeds(0.5f, 0.5001f));
     TestTrue(TEXT("roll just below chance succeeds"), RollSucceeds(0.5f, 0.4999f));
@@ -3326,10 +2738,6 @@ bool FMythicCombatRollSucceedsTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Territory proxy delta gate — AMythicLivingWorldReplicator::TerritoryProxyNeedsUpdate
-// (only re-replicate a cell when its client-visible fields change, not on every influence shift)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldTerritoryProxyDeltaTest,
@@ -3346,23 +2754,16 @@ bool FLivingWorldTerritoryProxyDeltaTest::RunTest(const FString &Parameters) {
     FMythicFactionId Faction3;
     Faction3.Index = 3;
 
-    // Same dominant faction + contested → NO re-replication (the influence-shift-only case the fix now skips).
     TestFalse(TEXT("unchanged dominant + contested → no update (delta skip)"),
               AMythicLivingWorldReplicator::TerritoryProxyNeedsUpdate(Proxy, Faction2, 0));
-    // Dominant faction flipped → must replicate.
     TestTrue(TEXT("dominant-faction flip → update"),
              AMythicLivingWorldReplicator::TerritoryProxyNeedsUpdate(Proxy, Faction3, 0));
-    // Contested level changed (same faction) → must replicate (future-proofs the contested field).
     TestTrue(TEXT("contested-level change → update"),
              AMythicLivingWorldReplicator::TerritoryProxyNeedsUpdate(Proxy, Faction2, 5));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Significance proximity score — UMythicSignificanceProcessor::ComputeProximityScore
-// (core LOD-promotion proximity math; nearest-player, normalized, clamped)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldProximityScoreTest,
@@ -3373,7 +2774,6 @@ bool FLivingWorldProximityScoreTest::RunTest(const FString &Parameters) {
     const float R = 10.0f;
     auto Prox = &UMythicSignificanceProcessor::ComputeProximityScore;
 
-    // No players → 0 (nothing to be near).
     {
         TArray<FMythicCellCoord> NoPlayers;
         TestEqual(TEXT("no players → 0"), Prox(FMythicCellCoord(5, 5), NoPlayers, R), 0.0f);
@@ -3386,11 +2786,10 @@ bool FLivingWorldProximityScoreTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("at the radius → 0"), Prox(FMythicCellCoord(10, 0), P1, R), 0.0f);
     TestEqual(TEXT("beyond the radius → clamped to 0"), Prox(FMythicCellCoord(20, 0), P1, R), 0.0f);
 
-    // Multiple players → the NEAREST wins (max over players).
     {
         TArray<FMythicCellCoord> P2;
-        P2.Add(FMythicCellCoord(100, 100)); // far
-        P2.Add(FMythicCellCoord(0, 0));     // near (dist 3 → 0.7)
+        P2.Add(FMythicCellCoord(100, 100));
+        P2.Add(FMythicCellCoord(0, 0));
         TestEqual(TEXT("nearest player wins (max over players)"),
                   Prox(FMythicCellCoord(3, 0), P2, R), 0.7f);
     }
@@ -3398,10 +2797,6 @@ bool FLivingWorldProximityScoreTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Significance rescore gate — UMythicSignificanceProcessor::ShouldRescore
-// (LOD: hot-set always re-evaluated so embodied NPCs demote → no cognitive-slot leak)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldRescoreGateTest,
@@ -3411,14 +2806,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FLivingWorldRescoreGateTest::RunTest(const FString &Parameters) {
     using Tier = EMythicSignificanceTier;
 
-    // Ambient (Tier0) is event-driven: rescored only when dirty.
     TestFalse(TEXT("ambient + clean → skip"),
               UMythicSignificanceProcessor::ShouldRescore(false, Tier::Tier0_Ambient));
     TestTrue(TEXT("ambient + dirty → rescore"),
              UMythicSignificanceProcessor::ShouldRescore(true, Tier::Tier0_Ambient));
 
-    // Hydrated hot-set is ALWAYS re-evaluated (even when clean) — this is the slot-leak fix: a stationary embodied
-    // NPC re-scores each tick so it demotes when players leave.
     TestTrue(TEXT("Tier1 clean → always rescore"),
              UMythicSignificanceProcessor::ShouldRescore(false, Tier::Tier1_Reactive));
     TestTrue(TEXT("Tier2 clean → always rescore"),
@@ -3427,10 +2819,6 @@ bool FLivingWorldRescoreGateTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Despair state machine — UMythicPressureProcessor::ComputeDespairState
-// (bDespaired was set-once-never-reset → permanent despair; now recoverable w/ hysteresis)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldDespairStateTest,
@@ -3438,30 +2826,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FLivingWorldDespairStateTest::RunTest(const FString &Parameters) {
-    const float Thr = 10.0f; // recovery band = 7.5 (0.75 * threshold)
+    const float Thr = 10.0f;
 
-    // Enter despair at/above the threshold.
     TestTrue(TEXT("enters despair at the threshold"),
              UMythicPressureProcessor::ComputeDespairState(10.0f, Thr, false));
     TestFalse(TEXT("no despair below the threshold (not previously despaired)"),
               UMythicPressureProcessor::ComputeDespairState(9.9f, Thr, false));
 
-    // Hysteresis: once despaired, stays despaired within the band [7.5, threshold)...
     TestTrue(TEXT("stays despaired within the hysteresis band"),
              UMythicPressureProcessor::ComputeDespairState(8.0f, Thr, true));
-    // ...and recovers once pressure drops below the band (the fix: previously it could NEVER recover).
     TestFalse(TEXT("recovers once pressure drops below the band"),
               UMythicPressureProcessor::ComputeDespairState(7.0f, Thr, true));
-    // In the band but NOT previously despaired → does not spuriously enter (asymmetric enter/stay).
     TestFalse(TEXT("in-band but not previously despaired → not despaired"),
               UMythicPressureProcessor::ComputeDespairState(8.0f, Thr, false));
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Diplomacy score→relation hysteresis mapping + shift significance — FMythicWorldSimThread
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldDiplomacyMappingTest,
@@ -3475,22 +2856,18 @@ bool FLivingWorldDiplomacyMappingTest::RunTest(const FString &Parameters) {
         return FMythicWorldSimThread::MapDiplomacyScoreToRelation(S, C, Ally, Friendly, Unfriendly, Hostile, Hyst);
     };
 
-    // Entering a tier requires overshooting its threshold by Hyst.
     TestEqual(TEXT("score above ally+hyst → Allied"), (int32)Map(0.65f, R::Neutral), (int32)R::Allied);
     TestEqual(TEXT("score below hostile-hyst → Hostile"), (int32)Map(-0.65f, R::Neutral), (int32)R::Hostile);
     TestEqual(TEXT("score ~0 → Neutral"), (int32)Map(0.0f, R::Neutral), (int32)R::Neutral);
 
-    // In the [base, base+hyst) band a NON-current tier is NOT entered (steps down one tier instead)...
     TestEqual(TEXT("score in [ally, ally+hyst), not Allied → Friendly"), (int32)Map(0.55f, R::Neutral), (int32)R::Friendly);
     TestEqual(TEXT("score in (hostile-hyst, ...], not Hostile → Unfriendly"),
               (int32)Map(-0.55f, R::Neutral), (int32)R::Unfriendly);
-    // ...but a faction already in that tier STAYS (sticky — hysteresis prevents flicker).
     TestEqual(TEXT("score in [ally, ally+hyst), currently Allied → stays Allied"),
               (int32)Map(0.55f, R::Allied), (int32)R::Allied);
     TestEqual(TEXT("score below hostile (base), currently Hostile → stays Hostile"),
               (int32)Map(-0.55f, R::Hostile), (int32)R::Hostile);
 
-    // Shift significance scales with extremity: war/alliance >> minor shift > neutral.
     TestTrue(TEXT("war (Hostile) is a major shift"),
              FMythicWorldSimThread::DiplomacyShiftSignificance(R::Hostile) >= 0.8f);
     TestTrue(TEXT("alliance (Allied) is a major shift"),
@@ -3505,10 +2882,6 @@ bool FLivingWorldDiplomacyMappingTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Item stack-quantity creation clamp — UMythicItemInstance::ClampInitialStackQuantity
-// (Initialize assigned quantity raw — could over-stack past the cap or create zero/negative)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldItemStackClampTest,
@@ -3516,17 +2889,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FLivingWorldItemStackClampTest::RunTest(const FString &Parameters) {
-    // Over the stack cap → clamped to the cap (the bug: Initialize created over-cap stacks).
     TestEqual(TEXT("over-max clamps to the stack cap"),
               UMythicItemInstance::ClampInitialStackQuantity(999, 10), 10);
-    // Zero / negative → clamped to 1 (Quantity ClampMin contract).
     TestEqual(TEXT("zero clamps to 1"), UMythicItemInstance::ClampInitialStackQuantity(0, 10), 1);
     TestEqual(TEXT("negative clamps to 1"), UMythicItemInstance::ClampInitialStackQuantity(-5, 10), 1);
-    // Valid in-range quantity passes through.
     TestEqual(TEXT("valid quantity passes through"), UMythicItemInstance::ClampInitialStackQuantity(5, 10), 5);
-    // Boundary at the cap is preserved.
     TestEqual(TEXT("exact cap preserved"), UMythicItemInstance::ClampInitialStackQuantity(10, 10), 10);
-    // Non-stackable item (StackSizeMax <= 1) is always a single unit, regardless of requested quantity.
     TestEqual(TEXT("non-stackable → 1"), UMythicItemInstance::ClampInitialStackQuantity(7, 1), 1);
 
     return true;
@@ -3541,7 +2909,6 @@ bool FLivingWorldResistanceRestorationTest::RunTest(const FString &Parameters) {
     auto *DB = NewObject<UMythicFactionDatabase>();
     DB->Initialize(LivingWorldTestHelpers::CreateFactionSettings(20, 3));
 
-    // Form a resistance from faction 0's survivors (writes to the write buffer — read it back the same way).
     const FMythicFactionId ResistanceId = DB->CreateFactionFromConquest(LivingWorldTestHelpers::MakeFactionId(0), 25);
     TestTrue(TEXT("resistance faction created"), ResistanceId.IsValid());
 
@@ -3552,7 +2919,6 @@ bool FLivingWorldResistanceRestorationTest::RunTest(const FString &Parameters) {
                   static_cast<int32>(Res->Status), static_cast<int32>(EMythicFactionStatus::Resistance));
     }
 
-    // Restore it → should become a full, Active faction (the previously-impossible transition).
     DB->RestoreResistanceToFaction(ResistanceId);
     Res = DB->GetFactionMutableByIndex(ResistanceId.Index);
     if (Res) {
@@ -3560,7 +2926,6 @@ bool FLivingWorldResistanceRestorationTest::RunTest(const FString &Parameters) {
                   static_cast<int32>(Res->Status), static_cast<int32>(EMythicFactionStatus::Active));
     }
 
-    // No-op guard: restoring a non-resistance faction must not change its status.
     if (FMythicFactionData *Active = DB->GetFactionMutableByIndex(1)) {
         const EMythicFactionStatus Before = Active->Status;
         DB->RestoreResistanceToFaction(LivingWorldTestHelpers::MakeFactionId(1));
@@ -3588,7 +2953,6 @@ bool FLivingWorldTerritoryGridSetReadTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("Dominant faction should be 0"), Cell.DominantFaction.Index, (uint8)0);
     TestNearlyEqual(TEXT("Influence should be 0.9"), Cell.Influence, 0.9f);
 
-    // Unset cell should be unchanged
     FMythicTerritoryCell EmptyCell = Grid->GetCell(FMythicCellCoord(10, 10));
     TestFalse(TEXT("Unset cell should have no valid faction"), EmptyCell.DominantFaction.IsValid());
 
@@ -3607,8 +2971,6 @@ bool FLivingWorldTerritoryGridPropagateTest::RunTest(const FString &Parameters) 
     FMythicFactionId Faction0 = LivingWorldTestHelpers::MakeFactionId(0);
     FMythicFactionId Faction1 = LivingWorldTestHelpers::MakeFactionId(1);
 
-    // ─── Test 1: Spread to empty neighbors ───
-    // A strong cell should bleed influence into adjacent empty cells
     Grid->SetCellInfluence(FMythicCellCoord(8, 8), Faction0, 1.0f);
     Grid->PropagateInfluence();
     Grid->CommitWrites();
@@ -3623,17 +2985,13 @@ bool FLivingWorldTerritoryGridPropagateTest::RunTest(const FString &Parameters) 
     TestTrue(TEXT("Empty neighbor left should gain influence"), NeighborLeft.Influence > 0.0f);
     TestTrue(TEXT("Empty neighbor right should gain influence"), NeighborRight.Influence > 0.0f);
 
-    // Claimed neighbors should belong to Faction 0
     if (NeighborUp.Influence > 0.0f) {
         TestEqual(TEXT("Claimed neighbor should be Faction 0"), NeighborUp.DominantFaction.Index, (uint8)0);
     }
 
-    // Diagonal neighbor should NOT gain influence (4-neighbor, not 8-neighbor)
     FMythicTerritoryCell Diagonal = Grid->GetCell(FMythicCellCoord(9, 9));
     TestNearlyEqual(TEXT("Diagonal should have zero influence"), Diagonal.Influence, 0.0f);
 
-    // ─── Test 2: Erosion from opposing faction ───
-    // Place Faction 1 adjacent to Faction 0 — should erode its influence
     auto *Grid2 = NewObject<UMythicTerritoryGrid>();
     Grid2->Initialize(LivingWorldTestHelpers::CreateGridSettings());
 
@@ -3648,10 +3006,6 @@ bool FLivingWorldTerritoryGridPropagateTest::RunTest(const FString &Parameters) 
 
     FMythicTerritoryCell ErodedCell = Grid2->GetCell(FMythicCellCoord(5, 5));
 
-    // Faction 0 at 0.3 surrounded by 4 Faction 1 cells at 1.0 — should be heavily eroded
-    // Erosion = 4 × (1.0 × bleedRate) / 4 = bleedRate. With bleedRate=0.1, erosion=0.1
-    // New influence = 0.3 - 0.1 = 0.2 (still held but weaker)
-    // OR if eroded below threshold, flipped to Faction 1
     TestTrue(TEXT("Surrounded cell should be eroded or flipped"),
              ErodedCell.Influence < 0.3f || ErodedCell.DominantFaction == Faction1);
 
@@ -3670,17 +3024,14 @@ bool FLivingWorldTerritoryGridWorldToCellTest::RunTest(const FString &Parameters
     Settings->WorldOrigin = FVector2D(0.0, 0.0);
     Grid->Initialize(Settings);
 
-    // World position (0, 0, 0) should map to cell (0, 0)
     FMythicCellCoord Cell0 = Grid->WorldToCell(FVector(0, 0, 0));
     TestEqual(TEXT("Origin maps to cell 0,0 X"), Cell0.X, 0);
     TestEqual(TEXT("Origin maps to cell 0,0 Y"), Cell0.Y, 0);
 
-    // World position (5000, 0, 0) should map to cell (1, 0) (CellSize = 5000)
     FMythicCellCoord Cell1 = Grid->WorldToCell(FVector(5000, 0, 0));
     TestEqual(TEXT("5000 units = cell 1,0 X"), Cell1.X, 1);
     TestEqual(TEXT("5000 units = cell 1,0 Y"), Cell1.Y, 0);
 
-    // Verify IsValidCoord
     TestTrue(TEXT("(0,0) should be valid"), Grid->IsValidCoord(FMythicCellCoord(0, 0)));
     TestTrue(TEXT("(15,15) should be valid"), Grid->IsValidCoord(FMythicCellCoord(15, 15)));
     TestFalse(TEXT("(16,0) should be invalid"), Grid->IsValidCoord(FMythicCellCoord(16, 0)));
@@ -3689,9 +3040,6 @@ bool FLivingWorldTerritoryGridWorldToCellTest::RunTest(const FString &Parameters
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  FACTION DATABASE TESTS
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldFactionDBInitTest,
@@ -3713,7 +3061,6 @@ bool FLivingWorldFactionDBInitTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("Faction 0 pop = 100"), Data.Population, 100);
     TestEqual(TEXT("Faction 0 cells = 10"), Data.ControlledCellCount, 10);
 
-    // Invalid ID should fail
     bFound = DB->GetFaction(LivingWorldTestHelpers::MakeFactionId(99), Data);
     TestFalse(TEXT("Invalid faction should not be found"), bFound);
 
@@ -3729,17 +3076,14 @@ bool FLivingWorldFactionDBDoubleBufferTest::RunTest(const FString &Parameters) {
     auto *DB = NewObject<UMythicFactionDatabase>();
     DB->Initialize(LivingWorldTestHelpers::CreateFactionSettings(20, 2));
 
-    // Modify write buffer
     FMythicFactionData *WriteFaction = DB->GetFactionMutable(LivingWorldTestHelpers::MakeFactionId(0));
     TestNotNull(TEXT("Mutable faction should exist"), WriteFaction);
     WriteFaction->Population = 999;
 
-    // Read buffer should still have old value (not yet committed)
     FMythicFactionData ReadData;
     DB->GetFaction(LivingWorldTestHelpers::MakeFactionId(0), ReadData);
     TestEqual(TEXT("Pre-commit read should have original pop"), ReadData.Population, 100);
 
-    // After commit, read buffer updates
     DB->CommitWrites();
     DB->GetFaction(LivingWorldTestHelpers::MakeFactionId(0), ReadData);
     TestEqual(TEXT("Post-commit read should have new pop"), ReadData.Population, 999);
@@ -3758,7 +3102,6 @@ bool FLivingWorldFactionDBRegisterAnnihilateTest::RunTest(const FString &Paramet
 
     TestEqual(TEXT("Initial registered = 2"), DB->GetRegisteredCount(), 2);
 
-    // Register a new faction
     FMythicFactionData NewFaction;
     NewFaction.DisplayName = FText::FromString(TEXT("NewTestFaction"));
     NewFaction.bAlive = true;
@@ -3772,7 +3115,6 @@ bool FLivingWorldFactionDBRegisterAnnihilateTest::RunTest(const FString &Paramet
     DB->CommitWrites();
     TestEqual(TEXT("Active factions = 3 after commit"), DB->GetActiveFactionCount(), 3);
 
-    // Annihilate the new faction
     DB->AnnihilateFaction(NewId);
     DB->CommitWrites();
 
@@ -3787,19 +3129,8 @@ bool FLivingWorldFactionDBRegisterAnnihilateTest::RunTest(const FString &Paramet
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Kill → world-sim feedback — UMythicLivingWorldSubsystem::ReportNpcDeath (Step 5)
-// ReportNpcDeath is an instance method gated on the subsystem's private FactionDB/Settings + SimulationLock, so it can't
-// be invoked free-standing in a unit test. This test drives the SAME faction-DB read-modify-write the method performs
-// (GetFactionMutable → decrement Population / Reserves.Arms → CommitWrites) against a real UMythicFactionDatabase, and
-// asserts the kill-feedback CONTRACT verbatim: Population decrements with a floor at 0; Reserves.Arms decrements ONLY for
-// armed roles, floored at 0; MilitaryStrength is NEVER written (it is recomputed absolutely by the sim from the durable
-// Arms source each tick, so the method must leave it alone).
-// ═══════════════════════════════════════════════════════════════
 
 namespace KillFeedbackTestHelpers {
-    // Mirrors the armed-role classification + arithmetic inside ReportNpcDeath. Pure, so the contract is unit-testable
-    // without the subsystem's private state. Applies the decrement to F exactly as the method does under SimulationLock.
     void ApplyKillFeedback(FMythicFactionData &F, const FGameplayTag &RoleTag, int32 KillPopulationLoss,
                            float KillMilitaryArmsLoss) {
         const int32 PopLoss = FMath::Max(0, KillPopulationLoss);
@@ -3823,20 +3154,18 @@ bool FLivingWorldReportNpcDeathTest::RunTest(const FString &Parameters) {
 
     const FMythicFactionId Id = LivingWorldTestHelpers::MakeFactionId(0);
 
-    // Seed a known economic baseline on the write buffer.
     {
         FMythicFactionData *W = DB->GetFactionMutable(Id);
         TestNotNull(TEXT("Seed faction should exist"), W);
-        W->Population = 100;          // CreateFactionSettings seeds faction 0 to 100, but be explicit.
+        W->Population = 100;
         W->Reserves.Arms = 5.0f;
-        W->MilitaryStrength = 0.5f;   // Derived field — must stay untouched by kill feedback.
+        W->MilitaryStrength = 0.5f;
         DB->CommitWrites();
     }
 
-    // (1) Civilian death: Population -1, Arms unchanged.
     {
         FMythicFactionData *W = DB->GetFactionMutable(Id);
-        KillFeedbackTestHelpers::ApplyKillFeedback(*W, TAG_NPC_ROLE_CIVILIAN, /*PopLoss*/ 1, /*ArmsLoss*/ 0.75f);
+        KillFeedbackTestHelpers::ApplyKillFeedback(*W, TAG_NPC_ROLE_CIVILIAN, 1, 0.75f);
         DB->CommitWrites();
 
         FMythicFactionData R;
@@ -3846,10 +3175,9 @@ bool FLivingWorldReportNpcDeathTest::RunTest(const FString &Parameters) {
         TestEqual(TEXT("Civilian death leaves MilitaryStrength untouched"), R.MilitaryStrength, 0.5f);
     }
 
-    // (2) Soldier death (armed): Population -1, Arms -0.75, MilitaryStrength NOT written.
     {
         FMythicFactionData *W = DB->GetFactionMutable(Id);
-        KillFeedbackTestHelpers::ApplyKillFeedback(*W, TAG_NPC_ROLE_SOLDIER, /*PopLoss*/ 1, /*ArmsLoss*/ 0.75f);
+        KillFeedbackTestHelpers::ApplyKillFeedback(*W, TAG_NPC_ROLE_SOLDIER, 1, 0.75f);
         DB->CommitWrites();
 
         FMythicFactionData R;
@@ -3859,10 +3187,9 @@ bool FLivingWorldReportNpcDeathTest::RunTest(const FString &Parameters) {
         TestEqual(TEXT("Soldier death leaves MilitaryStrength untouched"), R.MilitaryStrength, 0.5f);
     }
 
-    // (3) Guard death is also armed.
     {
         FMythicFactionData *W = DB->GetFactionMutable(Id);
-        KillFeedbackTestHelpers::ApplyKillFeedback(*W, TAG_NPC_ROLE_GUARD, /*PopLoss*/ 1, /*ArmsLoss*/ 0.75f);
+        KillFeedbackTestHelpers::ApplyKillFeedback(*W, TAG_NPC_ROLE_GUARD, 1, 0.75f);
         DB->CommitWrites();
 
         FMythicFactionData R;
@@ -3870,12 +3197,11 @@ bool FLivingWorldReportNpcDeathTest::RunTest(const FString &Parameters) {
         TestTrue(TEXT("Guard death decrements Arms"), FMath::IsNearlyEqual(R.Reserves.Arms, 3.5f));
     }
 
-    // (4) Floors: Population can't go below 0, Arms can't go below 0.
     {
         FMythicFactionData *W = DB->GetFactionMutable(Id);
         W->Population = 0;
         W->Reserves.Arms = 0.25f;
-        KillFeedbackTestHelpers::ApplyKillFeedback(*W, TAG_NPC_ROLE_SOLDIER, /*PopLoss*/ 5, /*ArmsLoss*/ 1.0f);
+        KillFeedbackTestHelpers::ApplyKillFeedback(*W, TAG_NPC_ROLE_SOLDIER, 5, 1.0f);
         DB->CommitWrites();
 
         FMythicFactionData R;
@@ -3900,20 +3226,16 @@ bool FLivingWorldFactionDBRelationshipsTest::RunTest(const FString &Parameters) 
     FMythicFactionId B = LivingWorldTestHelpers::MakeFactionId(1);
     FMythicFactionId C = LivingWorldTestHelpers::MakeFactionId(2);
 
-    // Default relationship should be Neutral
     TestEqual(TEXT("Default A-B = Neutral"), DB->GetRelationship(A, B), EMythicFactionRelation::Neutral);
 
-    // Self-relationship should always be Allied
     TestEqual(TEXT("Self A-A = Allied"), DB->GetRelationship(A, A), EMythicFactionRelation::Allied);
 
-    // Set relationship and verify symmetry
     DB->SetRelationship(A, B, EMythicFactionRelation::Hostile);
     DB->CommitWrites();
 
     TestEqual(TEXT("A→B = Hostile"), DB->GetRelationship(A, B), EMythicFactionRelation::Hostile);
     TestEqual(TEXT("B→A = Hostile (symmetric)"), DB->GetRelationship(B, A), EMythicFactionRelation::Hostile);
 
-    // C should be unaffected
     TestEqual(TEXT("A-C unchanged = Neutral"), DB->GetRelationship(A, C), EMythicFactionRelation::Neutral);
 
     return true;
@@ -3925,12 +3247,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FLivingWorldFactionDBSerializeBehaviorFlagsTest::RunTest(const FString &Parameters) {
-    // Guards the iter-97 v2 serialization: the 5 runtime-mutated faction behavior flags must round-trip through
-    // save/load, so an evolved/devolved faction does NOT snap back to its designer defaults on reload.
     auto *DB = NewObject<UMythicFactionDatabase>();
     DB->Initialize(LivingWorldTestHelpers::CreateFactionSettings(20, 3));
 
-    // Flip all 5 behavior flags OFF their default-true on faction 1, then commit to the read snapshot.
     FMythicFactionData *WF = DB->GetFactionMutable(LivingWorldTestHelpers::MakeFactionId(1));
     TestNotNull(TEXT("Mutable faction 1 should exist"), WF);
     if (!WF) {
@@ -3943,7 +3262,6 @@ bool FLivingWorldFactionDBSerializeBehaviorFlagsTest::RunTest(const FString &Par
     WF->bCanNegotiate = false;
     DB->CommitWrites();
 
-    // Serialize → load into a fresh database (mirrors SaveLivingWorld/LoadLivingWorld via an in-memory archive).
     TArray<uint8> Blob;
     FMemoryWriter Writer(Blob);
     DB->Serialize(Writer);
@@ -3952,7 +3270,6 @@ bool FLivingWorldFactionDBSerializeBehaviorFlagsTest::RunTest(const FString &Par
     FMemoryReader Reader(Blob);
     DB2->Serialize(Reader);
 
-    // The flipped flags must survive the round-trip (NOT reset to default true).
     FMythicFactionData Loaded;
     const bool bFound = DB2->GetFaction(LivingWorldTestHelpers::MakeFactionId(1), Loaded);
     TestTrue(TEXT("Faction 1 should exist after load"), bFound);
@@ -3962,7 +3279,6 @@ bool FLivingWorldFactionDBSerializeBehaviorFlagsTest::RunTest(const FString &Par
     TestFalse(TEXT("bParticipatesInTrade restored to false"), Loaded.bParticipatesInTrade);
     TestFalse(TEXT("bCanNegotiate restored to false"), Loaded.bCanNegotiate);
 
-    // Sanity: an untouched faction keeps its default-true flags across the round-trip.
     FMythicFactionData Loaded0;
     DB2->GetFaction(LivingWorldTestHelpers::MakeFactionId(0), Loaded0);
     TestTrue(TEXT("Faction 0 keeps default-true bControlsTerritory"), Loaded0.bControlsTerritory);
@@ -3970,9 +3286,6 @@ bool FLivingWorldFactionDBSerializeBehaviorFlagsTest::RunTest(const FString &Par
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MORAL SIGNATURE TESTS
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldMoralWelfordTest,
@@ -3982,7 +3295,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FLivingWorldMoralWelfordTest::RunTest(const FString &Parameters) {
     FMythicMoralSignature Sig;
 
-    // Accumulate 3 violent actions: values 0.8, 0.6, 1.0
     constexpr float Values[] = {0.8f, 0.6f, 1.0f};
     for (float V : Values) {
         FMythicMoralAction Action;
@@ -3993,19 +3305,14 @@ bool FLivingWorldMoralWelfordTest::RunTest(const FString &Parameters) {
 
     TestEqual(TEXT("TotalActions = 3"), Sig.TotalActions, 3);
 
-    // Mean of Violence axis should be (0.8+0.6+1.0)/3 = 0.8
     const float ExpectedMean = (0.8f + 0.6f + 1.0f) / 3.0f;
     TestNearlyEqual(TEXT("Violence mean should be ~0.8"), Sig.Axes[static_cast<int32>(EMythicMoralAxis::Violence)].Mean, ExpectedMean, 0.001f);
 
-    // Variance: population variance of {0.8, 0.6, 1.0}
-    // Deviations: (0.8-0.8)=0, (0.6-0.8)=-0.2, (1.0-0.8)=0.2  => sum_sq = 0 + 0.04 + 0.04 = 0.08
-    // Pop variance = 0.08 / 3 ≈ 0.02667
     const float ExpectedVariance = 0.08f / 3.0f;
     TestNearlyEqual(TEXT("Violence variance"),
                     Sig.Axes[static_cast<int32>(EMythicMoralAxis::Violence)].GetVariance(),
                     ExpectedVariance, 0.01f);
 
-    // Dominant axis should be Violence (index 0) since other axes are 0
     TestEqual(TEXT("Dominant axis should be Violence"), (int32)Sig.DominantAxis, static_cast<int32>(EMythicMoralAxis::Violence));
 
     return true;
@@ -4019,28 +3326,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FLivingWorldMoralEvaluateAgainstTest::RunTest(const FString &Parameters) {
     FMythicMoralSignature Sig;
 
-    // Create a signature with high Violence mean
     FMythicMoralAction Action;
     FMemory::Memzero(Action.AxisValues, sizeof(Action.AxisValues));
     Action.AxisValues[static_cast<int32>(EMythicMoralAxis::Violence)] = 0.9f;
     Sig.AccumulateAction(Action);
 
-    // Pacifist faction: Violence = -1.0
     FMythicIdeologyProfile Pacifist;
     Pacifist.Violence = -1.0f;
 
-    // Warlike faction: Violence = +1.0
     FMythicIdeologyProfile Warlike;
     Warlike.Violence = 1.0f;
 
     float PacifistDot = Sig.EvaluateAgainst(Pacifist);
     float WarlikeDot = Sig.EvaluateAgainst(Warlike);
 
-    // Violent player vs pacifist = negative alignment (0.9 * -1.0 = -0.9)
     TestTrue(TEXT("Pacifist should disapprove (negative dot)"), PacifistDot < 0.0f);
     TestNearlyEqual(TEXT("Pacifist dot = -0.9"), PacifistDot, -0.9f, 0.001f);
 
-    // Violent player vs warlike = positive alignment (0.9 * 1.0 = 0.9)
     TestTrue(TEXT("Warlike should approve (positive dot)"), WarlikeDot > 0.0f);
     TestNearlyEqual(TEXT("Warlike dot = 0.9"), WarlikeDot, 0.9f, 0.001f);
 
@@ -4056,41 +3358,32 @@ bool FLivingWorldMoralActionSeverityTest::RunTest(const FString &Parameters) {
     FMythicIdeologyProfile Pacifist;
     Pacifist.Violence = -0.8f;
 
-    // Mild violence action
     FMythicMoralAction MildAction;
     FMemory::Memzero(MildAction.AxisValues, sizeof(MildAction.AxisValues));
     MildAction.AxisValues[static_cast<int32>(EMythicMoralAxis::Violence)] = 0.2f;
 
     EMythicMoralSeverity MildResult = FMythicMoralSignature::EvaluateActionSeverity(
         MildAction, Pacifist, 0.1f, 0.3f, 0.6f);
-    // Severity = -(0.2 * -0.8) = 0.16. Above Disapprove(0.1) but below Condemn(0.3)
     TestEqual(TEXT("Mild violence vs pacifist = Disapprove"), MildResult, EMythicMoralSeverity::Disapprove);
 
-    // Severe violence action
     FMythicMoralAction SevereAction;
     FMemory::Memzero(SevereAction.AxisValues, sizeof(SevereAction.AxisValues));
     SevereAction.AxisValues[static_cast<int32>(EMythicMoralAxis::Violence)] = 0.8f;
 
     EMythicMoralSeverity SevereResult = FMythicMoralSignature::EvaluateActionSeverity(
         SevereAction, Pacifist, 0.1f, 0.3f, 0.6f);
-    // Severity = -(0.8 * -0.8) = 0.64. Above Hostile(0.6)
     TestEqual(TEXT("Severe violence vs pacifist = Hostile"), SevereResult, EMythicMoralSeverity::Hostile);
 
-    // Action aligned with faction values (warlike faction, violent action)
     FMythicIdeologyProfile Warlike;
     Warlike.Violence = 0.8f;
 
     EMythicMoralSeverity AlignedResult = FMythicMoralSignature::EvaluateActionSeverity(
         SevereAction, Warlike, 0.1f, 0.3f, 0.6f);
-    // Severity = -(0.8 * 0.8) = -0.64. Negative → Ignore
     TestEqual(TEXT("Violence vs warlike = Ignore (aligned)"), AlignedResult, EMythicMoralSeverity::Ignore);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  SETTLEMENT REGISTRY TESTS
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldSettlementRegisterQueryTest,
@@ -4100,11 +3393,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FLivingWorldSettlementRegisterQueryTest::RunTest(const FString &Parameters) {
     auto *Registry = NewObject<UMythicSettlementRegistry>();
 
-    // Manually create settlement data (normally done by AMythicSettlement actors)
-    // Since we can't spawn actors without a world, test the data path directly
     TestEqual(TEXT("Initial settlement count = 0"), Registry->GetSettlementCount(), 0);
 
-    // Query empty registry — should return nullptr
     const FMythicSettlementData *Empty = Registry->GetSettlementAtCell(FMythicCellCoord(5, 5));
     TestNull(TEXT("Empty registry cell query should return null"), Empty);
 
@@ -4131,9 +3421,6 @@ bool FLivingWorldSettlementFactionQueryTest::RunTest(const FString &Parameters) 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  WORLD SIM THREAD TESTS (via friend declaration)
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldSimEconomyTest,
@@ -4141,21 +3428,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FLivingWorldSimEconomyTest::RunTest(const FString &Parameters) {
-    // Create shared data objects
     auto *Fabric = NewObject<UMythicCausalFabric>();
     Fabric->Initialize(64);
 
     auto *DB = NewObject<UMythicFactionDatabase>();
     auto *FactionSettings = LivingWorldTestHelpers::CreateFactionSettings(20, 2);
 
-    // Faction 0: has territory, produces food
     FactionSettings->InitialFactions[0].ControlledCellCount = 10;
     FactionSettings->InitialFactions[0].BaseProduction.Food = 1.0f;
     FactionSettings->InitialFactions[0].BaseProduction.Materials = 0.5f;
     FactionSettings->InitialFactions[0].Population = 100;
     FactionSettings->InitialFactions[0].bHasBeenPopulated = true;
 
-    // Faction 1: no territory (bandit-like)
     FactionSettings->InitialFactions[1].ControlledCellCount = 0;
     FactionSettings->InitialFactions[1].BaseProduction = FMythicResourceStock();
     FactionSettings->InitialFactions[1].Population = 50;
@@ -4169,24 +3453,19 @@ bool FLivingWorldSimEconomyTest::RunTest(const FString &Parameters) {
 
     auto *Settings = LivingWorldTestHelpers::CreateLivingWorldSettings();
 
-    // Record initial reserves
     FMythicFactionData InitialData0;
     DB->GetFaction(LivingWorldTestHelpers::MakeFactionId(0), InitialData0);
     const float InitialReservesFood = InitialData0.Reserves.Food;
 
-    // Setup and tick the sim thread directly (via friend access)
     FMythicWorldSimThread SimThread;
     FCriticalSection SimLock;
     SimThread.Setup(Fabric, DB, Grid, nullptr, Settings, 1.0f, &SimLock);
 
-    // Run one tick
     SimThread.SimTick();
 
-    // Faction 0 should have generated supply from territory
     FMythicFactionData PostData0;
     DB->GetFaction(LivingWorldTestHelpers::MakeFactionId(0), PostData0);
 
-    // Supply should be non-zero for faction with territory + BaseProduction
     TestTrue(TEXT("Faction 0 supply.Food should be > 0 after tick"), PostData0.Supply.Food > 0.0f);
 
     return true;
@@ -4204,7 +3483,6 @@ bool FLivingWorldSimPopulationTest::RunTest(const FString &Parameters) {
     auto *DB = NewObject<UMythicFactionDatabase>();
     auto *FactionSettings = LivingWorldTestHelpers::CreateFactionSettings(20, 1);
 
-    // Faction with territory, food, and civilian population — should grow
     FactionSettings->InitialFactions[0].ControlledCellCount = 10;
     FactionSettings->InitialFactions[0].BaseProduction.Food = 5.0f;
     FactionSettings->InitialFactions[0].Population = 100;
@@ -4223,12 +3501,10 @@ bool FLivingWorldSimPopulationTest::RunTest(const FString &Parameters) {
     FCriticalSection SimLock;
     SimThread.Setup(Fabric, DB, Grid, nullptr, Settings, 1.0f, &SimLock);
 
-    // Tick economy first so reserves are populated, then population
     SimThread.TickEconomy();
     SimThread.TickPopulation();
     SimThread.CommitAllSnapshots();
 
-    // With food-rich faction, population should not decrease catastrophically
     FMythicFactionData PostData;
     DB->GetFaction(LivingWorldTestHelpers::MakeFactionId(0), PostData);
     TestTrue(TEXT("Population should remain positive with abundant food"), PostData.Population > 0);
@@ -4248,19 +3524,16 @@ bool FLivingWorldSimDiplomacyTest::RunTest(const FString &Parameters) {
     auto *DB = NewObject<UMythicFactionDatabase>();
     auto *FactionSettings = LivingWorldTestHelpers::CreateFactionSettings(20, 3);
 
-    // Faction 0: Pacifist (Violence = -0.8)
     FactionSettings->InitialFactions[0].Ideology.Violence = -0.8f;
     FactionSettings->InitialFactions[0].Ideology.Mercy = 0.7f;
     FactionSettings->InitialFactions[0].Population = 100;
     FactionSettings->InitialFactions[0].bHasBeenPopulated = true;
 
-    // Faction 1: Also pacifist (similar ideology → should trend friendly)
     FactionSettings->InitialFactions[1].Ideology.Violence = -0.7f;
     FactionSettings->InitialFactions[1].Ideology.Mercy = 0.8f;
     FactionSettings->InitialFactions[1].Population = 100;
     FactionSettings->InitialFactions[1].bHasBeenPopulated = true;
 
-    // Faction 2: Warlike (opposed ideology → should trend hostile)
     FactionSettings->InitialFactions[2].Ideology.Violence = 0.9f;
     FactionSettings->InitialFactions[2].Ideology.Mercy = -0.5f;
     FactionSettings->InitialFactions[2].Population = 100;
@@ -4277,19 +3550,16 @@ bool FLivingWorldSimDiplomacyTest::RunTest(const FString &Parameters) {
     FCriticalSection SimLock;
     SimThread.Setup(Fabric, DB, Grid, nullptr, Settings, 1.0f, &SimLock);
 
-    // Run diplomacy ticks repeatedly to allow relationship drift
     for (int32 i = 0; i < 20; ++i) {
         SimThread.TickDiplomacy();
     }
     SimThread.CommitAllSnapshots();
 
-    // Similar factions should not be hostile
     EMythicFactionRelation SimilarRelation = DB->GetRelationship(
         LivingWorldTestHelpers::MakeFactionId(0), LivingWorldTestHelpers::MakeFactionId(1));
     TestTrue(TEXT("Similar ideology factions should not be Hostile"),
              SimilarRelation != EMythicFactionRelation::Hostile);
 
-    // Opposed factions: verify they are not Allied (with enough ticks they should drift apart)
     EMythicFactionRelation OpposedRelation = DB->GetRelationship(
         LivingWorldTestHelpers::MakeFactionId(0), LivingWorldTestHelpers::MakeFactionId(2));
     TestTrue(TEXT("Opposed ideology factions should not be Allied"),
@@ -4298,11 +3568,6 @@ bool FLivingWorldSimDiplomacyTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  SOCIAL GRAPH TESTS
-// ═══════════════════════════════════════════════════════════════
-
-// ─── Edge decay (the relationship-aging keystone — exponential, time-based) ──────────────────────────────────────────
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldSocialGraphDecayTest,
@@ -4312,14 +3577,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FLivingWorldSocialGraphDecayTest::RunTest(const FString &Parameters) {
     using SG = UMythicSocialGraph;
 
-    // No decay when the rate is non-positive → strength unchanged.
     {
         FMythicSocialEdge E;
         E.Strength = 0.8f;
         E.LastInteractionTime = 0.0;
         TestEqual(TEXT("rate 0 → unchanged"), SG::ApplyDecay(E, 100.0, 0.0f), 0.8f);
     }
-    // No decay when no time has elapsed (WorldTime <= LastInteractionTime) — equal or past clock.
     {
         FMythicSocialEdge E;
         E.Strength = 0.8f;
@@ -4327,28 +3590,23 @@ bool FLivingWorldSocialGraphDecayTest::RunTest(const FString &Parameters) {
         TestEqual(TEXT("equal time → unchanged"), SG::ApplyDecay(E, 100.0, 0.01f), 0.8f);
         TestEqual(TEXT("worldtime before last → unchanged"), SG::ApplyDecay(E, 50.0, 0.01f), 0.8f);
     }
-    // Exponential decay over elapsed time: S × e^(-rate·Δt).
     {
         FMythicSocialEdge E;
         E.Strength = 1.0f;
         E.LastInteractionTime = 0.0;
-        // rate 0.01 × 100 = 1.0 → e^-1 ≈ 0.367879.
         TestEqual(TEXT("rate·Δt=1 → S·e^-1"), SG::ApplyDecay(E, 100.0, 0.01f), 0.367879f, 0.001f);
-        // Decay never increases strength.
         TestTrue(TEXT("decayed ≤ original"), SG::ApplyDecay(E, 100.0, 0.01f) <= E.Strength);
     }
     {
         FMythicSocialEdge E;
         E.Strength = 0.5f;
         E.LastInteractionTime = 0.0;
-        // rate 0.001 × 100 = 0.1 → 0.5 × e^-0.1 ≈ 0.452419.
         TestEqual(TEXT("rate·Δt=0.1 → S·e^-0.1"), SG::ApplyDecay(E, 100.0, 0.001f), 0.452419f, 0.001f);
     }
 
     return true;
 }
 
-// ─── Initialization ──────────────────────────────────────────
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldSocialGraphInitTest,
@@ -4365,7 +3623,6 @@ bool FLivingWorldSocialGraphInitTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ─── Edge CRUD ───────────────────────────────────────────────
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldSocialGraphAddEdgeTest,
@@ -4389,28 +3646,23 @@ bool FLivingWorldSocialGraphAddEdgeTest::RunTest(const FString &Parameters) {
 
     const double Now = 1000.0;
 
-    // Add edge A → B
     Graph->AddOrStrengthenEdge(EntityA, EntityB, EMythicSocialRelation::Friend, 0.8f, Now, FactionA);
     TestEqual(TEXT("Should have 1 edge"), Graph->GetTotalEdgeCount(), 1);
     TestEqual(TEXT("Should have 1 entity with edges"), Graph->GetEntityCount(), 1);
 
-    // Add edge A → C
     Graph->AddOrStrengthenEdge(EntityA, EntityC, EMythicSocialRelation::Rival, 0.6f, Now, FactionA);
     TestEqual(TEXT("Should have 2 edges"), Graph->GetTotalEdgeCount(), 2);
 
-    // Query edges from A
     TArray<FMythicSocialEdge> Edges;
     int32 Count = Graph->GetEdges(EntityA, Now, Edges);
     TestEqual(TEXT("EntityA should have 2 outgoing edges"), Count, 2);
 
-    // Check specific edge exists
     FMythicSocialEdge FoundEdge;
     bool bHasEdge = Graph->HasEdge(EntityA, EntityB, Now, FoundEdge);
     TestTrue(TEXT("A→B edge should exist"), bHasEdge);
     TestEqual(TEXT("A→B relation should be Friend"),
               FoundEdge.Relation, EMythicSocialRelation::Friend);
 
-    // Directed: B has no outgoing edges
     TArray<FMythicSocialEdge> BEdges;
     Count = Graph->GetEdges(EntityB, Now, BEdges);
     TestEqual(TEXT("EntityB should have 0 outgoing edges"), Count, 0);
@@ -4596,7 +3848,6 @@ bool FLivingWorldSocialGraphMaxEdgesTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-// ─── Pruning ─────────────────────────────────────────────────
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldSocialGraphPruneTest,
@@ -4666,9 +3917,6 @@ bool FLivingWorldSocialGraphPruneSelectiveTest::RunTest(const FString &Parameter
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  SCHEME ENGINE TESTS
-// ═══════════════════════════════════════════════════════════════
 
 namespace SchemeTestHelpers {
     UMythicFactionDatabaseSettings *CreateSchemeTestFactionSettings() {
@@ -4751,11 +3999,6 @@ bool FLivingWorldSchemeEngineGenerateTest::RunTest(const FString &Parameters) {
 
     Engine->Initialize(FactionDB, Fabric, Grid, SchemeTestHelpers::CreateSchemeTestLivingWorldSettings());
 
-    // Tick with SimDeltaTime = 0 to isolate GENERATION: TickSchemes generates AND then progresses in the same call,
-    // and ProgressScheme's detection roll (FRand() < DetectionRisk * SimDeltaTime) could otherwise flip a freshly
-    // generated scheme to Discovered on its own birth tick (~1%), making the IsActive() assertion below flaky.
-    // Generation is SimDeltaTime-independent (gate uses SchemeBaseProbability, not dt), so dt=0 generates normally
-    // while the detection roll (× 0) can never fire — deterministic generation, no incidental same-tick discovery.
     Engine->TickSchemes(0.0f, 0);
 
     TestTrue(TEXT("Should have generated at least 1 scheme"), Engine->GetActiveSchemeCount() > 0);
@@ -4839,7 +4082,6 @@ bool FLivingWorldSchemeEngineCompletionTest::RunTest(const FString &Parameters) 
 
     Engine->TickSchemes(1.0f, 0);
 
-    // Tick many times with large delta to force completion
     for (int32 i = 1; i < 200; ++i) {
         Engine->TickSchemes(10.0f, static_cast<uint32>(i));
     }
@@ -4921,14 +4163,6 @@ bool FLivingWorldSchemeEngineMaxPerFactionTest::RunTest(const FString &Parameter
     return true;
 }
 
-// Regression: a faction that holds a Hostile/Unfriendly relation toward a faction that was LATER annihilated must
-// not pick that DEAD faction as a scheme target. AnnihilateFaction zeroes population/military/territory and sets
-// bAlive=false but intentionally leaves the relationship rows intact (faction indices are never recycled), so without
-// a bAlive guard in GenerateSchemes' target-selection loop the schemer wastes its scheme budget plotting against a
-// non-existent enemy and emits nonsensical diplomacy/chronicle events. There is no downstream bAlive guard in
-// ProgressScheme/ExecuteScheme/ApplySchemeEffects that makes this benign (DiplomaticPressure still worsens the
-// relationship toward the corpse, ExecuteScheme still writes a "Scheme Completed" event), so the fix lives at
-// generation — and this test pins it there.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FLivingWorldSchemeEngineSkipsDeadTargetTest,
     "Mythic.LivingWorld.SchemeEngine.SkipsAnnihilatedTarget",
@@ -4939,8 +4173,6 @@ bool FLivingWorldSchemeEngineSkipsDeadTargetTest::RunTest(const FString &Paramet
     auto *Fabric = NewObject<UMythicCausalFabric>();
     Fabric->Initialize(64);
 
-    // Faction 0 is the schemer: strong + populous so it is eligible and (with SchemeBaseProbability=1.0) always rolls
-    // to generate a scheme this tick.
     auto *FactionSettings = SchemeTestHelpers::CreateSchemeTestFactionSettings();
     FactionSettings->InitialFactions[0].MilitaryStrength = 0.8f;
     auto *FactionDB = NewObject<UMythicFactionDatabase>();
@@ -4949,12 +4181,8 @@ bool FLivingWorldSchemeEngineSkipsDeadTargetTest::RunTest(const FString &Paramet
     const FMythicFactionId Schemer = LivingWorldTestHelpers::MakeFactionId(0);
     const FMythicFactionId DeadTarget = LivingWorldTestHelpers::MakeFactionId(1);
 
-    // Faction 0's ONLY Hostile/Unfriendly relationship is toward faction 1. Factions 2 and 3 stay Neutral, so faction
-    // 1 is the single candidate the target-selection loop could ever pick for faction 0.
     FactionDB->SetRelationship(Schemer, DeadTarget, EMythicFactionRelation::Hostile);
 
-    // Annihilate the sole hostile target, leaving the relationship rows intact — exactly the production condition that
-    // exposes the bug.
     FactionDB->AnnihilateFaction(DeadTarget);
     FactionDB->CommitWrites();
 
@@ -4965,7 +4193,6 @@ bool FLivingWorldSchemeEngineSkipsDeadTargetTest::RunTest(const FString &Paramet
 
     Engine->TickSchemes(1.0f, 0);
 
-    // No scheme may target the annihilated faction.
     const TArray<FMythicScheme> Schemes = Engine->GetActiveSchemes();
     int32 SchemesAgainstDead = 0;
     for (const FMythicScheme &S : Schemes) {
@@ -4975,18 +4202,11 @@ bool FLivingWorldSchemeEngineSkipsDeadTargetTest::RunTest(const FString &Paramet
     }
     TestEqual(TEXT("No scheme should target the annihilated faction"), SchemesAgainstDead, 0);
 
-    // Faction 1 was faction 0's only valid target and factions 2/3 are Neutral toward everyone, so no scheme should be
-    // generated at all this tick.
     TestEqual(TEXT("No schemes generated when the only hostile target is dead"), Engine->GetActiveSchemeCount(), 0);
 
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Contested-border soldier density — UMythicTerritoryPatrolSpawnerProcessor::ApplyContestedBorderBoost
-// A faction-controlled cell bordering an at-war (Hostile) faction's cell fields a boosted garrison, clamped to the same
-// per-cell ceilings the base target honors. Pure + deterministic (no RNG).
-// ═══════════════════════════════════════════════════════════════
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicContestedBorderBoostTest,
@@ -4996,29 +4216,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicContestedBorderBoostTest::RunTest(const FString &Parameters) {
     using P = UMythicTerritoryPatrolSpawnerProcessor;
 
-    // Not contested → base target passes through unchanged (identical to a no-op), regardless of multiplier.
-    TestEqual(TEXT("uncontested passthrough"), P::ApplyContestedBorderBoost(3, /*bContested*/ false, 2.0f, 10, 20), 3);
+    TestEqual(TEXT("uncontested passthrough"), P::ApplyContestedBorderBoost(3, false, 2.0f, 10, 20), 3);
     TestEqual(TEXT("uncontested passthrough (high mult ignored)"),
               P::ApplyContestedBorderBoost(3, false, 5.0f, 10, 20), 3);
 
-    // Contested → multiplied (CeilToInt) when there is per-cell headroom.
     TestEqual(TEXT("contested 3 ×2 = 6"), P::ApplyContestedBorderBoost(3, true, 2.0f, 10, 20), 6);
     TestEqual(TEXT("contested 2 ×2.5 = ceil(5) = 5"), P::ApplyContestedBorderBoost(2, true, 2.5f, 10, 20), 5);
     TestEqual(TEXT("contested 3 ×1.5 = ceil(4.5) = 5"), P::ApplyContestedBorderBoost(3, true, 1.5f, 10, 20), 5);
 
-    // A cell that fields 0 soldiers in peacetime fields 0 even on a frontline (no phantom war garrison).
     TestEqual(TEXT("contested 0 stays 0"), P::ApplyContestedBorderBoost(0, true, 4.0f, 10, 20), 0);
 
-    // Boost is re-clamped to min(MaxSoldiersPerControlledCell, MaxEntitiesPerCell) — never exceeds the per-cell cap.
     TestEqual(TEXT("contested boost clamped to MaxSoldiers ceiling"),
-              P::ApplyContestedBorderBoost(4, true, 3.0f, /*MaxSoldiers*/ 5, /*MaxEntities*/ 20), 5);
+              P::ApplyContestedBorderBoost(4, true, 3.0f, 5, 20), 5);
     TestEqual(TEXT("contested boost clamped to MaxEntities ceiling"),
-              P::ApplyContestedBorderBoost(4, true, 3.0f, /*MaxSoldiers*/ 20, /*MaxEntities*/ 6), 6);
+              P::ApplyContestedBorderBoost(4, true, 3.0f, 20, 6), 6);
 
-    // Multiplier is floored at 1.0 — a misconfigured sub-1.0 value can never SHRINK a frontline garrison.
     TestEqual(TEXT("contested multiplier floored at 1.0"), P::ApplyContestedBorderBoost(4, true, 0.25f, 10, 20), 4);
 
-    // Determinism: same inputs → same output.
     TestEqual(TEXT("deterministic re-eval"),
               P::ApplyContestedBorderBoost(3, true, 2.0f, 10, 20),
               P::ApplyContestedBorderBoost(3, true, 2.0f, 10, 20));

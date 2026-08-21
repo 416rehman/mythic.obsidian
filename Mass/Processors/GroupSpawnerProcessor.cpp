@@ -1,4 +1,3 @@
-// Mythic Living World — Group Spawner Processor Implementation
 
 #include "Mass/Processors/GroupSpawnerProcessor.h"
 #include "MassEntitySubsystem.h"
@@ -7,7 +6,7 @@
 #include "MassCommands.h"
 #include "Mass/Fragments/MythicMassFragments.h"
 #include "Mass/Tags/MythicMassTags.h"
-#include "Mass/Processors/PopulationSpawnerProcessor.h" // UMythicPopulationSpawnerProcessor::ResolveEconomy
+#include "Mass/Processors/PopulationSpawnerProcessor.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h"
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
@@ -16,7 +15,7 @@
 #include "World/LivingWorld/Settlements/MythicSettlement.h"
 #include "World/LivingWorld/Groups/GroupTypes.h"
 #include "World/LivingWorld/NPCGeneration/NPCGenerator.h"
-#include "World/LivingWorld/MythicTags_LivingWorld.h" // NPC.Role.* fallbacks
+#include "World/LivingWorld/MythicTags_LivingWorld.h"
 #include "World/LivingWorld/Persistence/PersistentNPCRegistry.h"
 #include "World/LivingWorld/Social/SocialGraph.h"
 #include "GameFramework/PlayerController.h"
@@ -24,27 +23,19 @@
 #include "Engine/World.h"
 
 namespace {
-    // Salt the per-cell group CHANCE roll so it is independent of every per-NPC roll but deterministic per (faction,cell).
-    constexpr uint32 GroupChanceSalt = 0x47727043u; // 'GrpC'
-    // Salt for the template PICK roll (independent of the chance roll).
-    constexpr uint32 GroupPickSalt = 0x47727050u;   // 'GrpP'
-    // Salt mixed into GroupId so it doesn't collide with any NameHash.
-    constexpr uint32 GroupIdSalt = 0x47727000u;     // 'Grp\0'
-} // namespace
+    constexpr uint32 GroupChanceSalt = 0x47727043u;
+    constexpr uint32 GroupPickSalt = 0x47727050u;
+    constexpr uint32 GroupIdSalt = 0x47727000u;
+}
 
 UMythicGroupSpawnerProcessor::UMythicGroupSpawnerProcessor() {
-    // PrePhysics, server/standalone only, game thread — mirrors the population + patrol spawners exactly.
     ProcessingPhase = EMassProcessingPhase::PrePhysics;
     ExecutionFlags = static_cast<uint8>(EProcessorExecutionFlags::Server | EProcessorExecutionFlags::Standalone);
     bRequiresGameThreadExecution = true;
     bAutoRegisterWithProcessingPhases = true;
 
-    // This processor creates entities — it must run even when zero group/NPC archetypes exist yet, so don't let MASS
-    // prune it at startup (same chicken-and-egg reason as the population spawner).
     QueryBasedPruning = EMassQueryBasedPruning::Never;
 
-    // Run AFTER the ambient population spawner so settlement cells are populated first and the per-cell density count we
-    // read already reflects this tick's ambient spawns where the radii overlap.
     ExecutionOrder.ExecuteAfter.Add(TEXT("UMythicPopulationSpawnerProcessor"));
 
     ExistingNPCQuery.RegisterWithProcessor(*this);
@@ -52,15 +43,11 @@ UMythicGroupSpawnerProcessor::UMythicGroupSpawnerProcessor() {
 }
 
 void UMythicGroupSpawnerProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager> &EntityManager) {
-    // SAME SHAPE as UMythicPopulationSpawnerProcessor::ExistingNPCQuery so the per-cell density count is consistent with
-    // the ambient population (shared MaxEntitiesPerCell cap). Group members carry FMythicNPCTag, so they self-count here
-    // on subsequent ticks; encounter-owned entities are excluded (the EncounterDirector owns those).
     ExistingNPCQuery.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
     ExistingNPCQuery.AddRequirement<FMythicSignificanceFragment>(EMassFragmentAccess::ReadOnly);
     ExistingNPCQuery.AddTagRequirement<FMythicNPCTag>(EMassFragmentPresence::All);
     ExistingNPCQuery.AddTagRequirement<FMythicEncounterEntityTag>(EMassFragmentPresence::None);
 
-    // Distinct-active-group count (MaxActiveGroups cap) — only entities that carry the group fragment.
     ExistingGroupQuery.AddRequirement<FMythicGroupFragment>(EMassFragmentAccess::ReadOnly);
     ExistingGroupQuery.AddTagRequirement<FMythicGroupMemberTag>(EMassFragmentPresence::All);
 }
@@ -85,14 +72,12 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
         return;
     }
 
-    // Throttle: only run at the configured interval.
     TimeSinceLastTick += Context.GetDeltaTimeSeconds();
     if (TimeSinceLastTick < Settings->GroupSpawnIntervalSeconds) {
         return;
     }
     TimeSinceLastTick = 0.0f;
 
-    // Per-tick budgets — nothing to do if either is fully spent.
     if (Settings->MaxGroupSpawnsPerTick <= 0 || Settings->MaxGroupMemberSpawnsPerTick <= 0) {
         return;
     }
@@ -103,20 +88,11 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
         return;
     }
 
-    // Global collision-free identity source (same allocator the ambient + patrol spawners use). Without it we can't
-    // guarantee unique NameHash identities — don't spawn aliasable entities.
     UMythicPersistentNPCRegistry *PersistentRegistry = LWS->GetPersistentNPCRegistry();
     if (!PersistentRegistry) {
         return;
     }
 
-    // Resolve the group template set ONCE per Execute (never inside the per-cell loop — same hoist discipline as the
-    // population spawner's catalog). Authored DB wins; else the built-in code defaults so the system runs unauthored.
-    // The CodeDefaults are copied into a stable local array whose lifetime spans this Execute (and is captured by-copy
-    // into the deferred-create lambda below); an authored DB's Templates array is owned by the hard-referenced UObject.
-    // TemplatesArr is the working array (a stable TArray owned by this Execute): either a copy of the authored DB's
-    // Templates or the code defaults. A copy of the (tiny) authored array is cheap and keeps a single by-value source
-    // for both the static PickTemplateIndex helper (takes a const TArray&) and the deferred-create lambda capture.
     TArray<FMythicGroupTemplate> TemplatesArr;
     if (const UMythicGroupTemplateDatabase *DB = Settings->GroupTemplateDatabase.LoadSynchronous()) {
         TemplatesArr = DB->Templates;
@@ -127,7 +103,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
         return;
     }
 
-    // ─── Step 1: Gather player cells ───────────────────────
     TArray<FMythicCellCoord> PlayerCells;
     for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It) {
         if (const APlayerController *PC = It->Get()) {
@@ -140,7 +115,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
         return;
     }
 
-    // ─── Step 2: Count existing per-cell NPC density + distinct active groups ───
     TMap<FMythicCellCoord, int32> CellEntityCounts;
     ExistingNPCQuery.ForEachEntityChunk(Context, [&CellEntityCounts](FMassExecutionContext &ChunkContext) {
         const int32 NumEntities = ChunkContext.GetNumEntities();
@@ -162,7 +136,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
     });
     int32 ActiveGroupCount = ActiveGroupIds.Num();
 
-    // ─── Step 3: Per settlement cell — chance-gated weighted template draw ───
     const float SpawnRadiusSq = FMath::Square(Settings->GroupSpawnRadius);
     const int32 SpawnRadiusCells = FMath::CeilToInt(Settings->GroupSpawnRadius);
 
@@ -170,8 +143,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
     int32 MemberBudget = Settings->MaxGroupMemberSpawnsPerTick;
     const int32 PerCellCap = FMath::Max(0, Settings->MaxEntitiesPerCell);
 
-    // One member's pre-resolved spawn data (mirrors the patrol spawner's FMythicTerritorySpawnData, plus the group
-    // fragment members ride).
     struct FMythicGroupMemberSpawnData {
         FMythicIdentityFragment Identity;
         FMythicScheduleFragment Schedule;
@@ -181,8 +152,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
         bool bIsLeader = false;
     };
 
-    // All members queued this tick, plus per-group [start,count) spans so the deferred lambda can wire intra-group edges
-    // without re-deriving membership.
     TArray<FMythicGroupMemberSpawnData> SpawnData;
     struct FMythicGroupSpan {
         int32 Start = 0;
@@ -200,7 +169,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                     continue;
                 }
                 if (ActiveGroupCount >= Settings->MaxActiveGroups) {
-                    // World-wide active-group cap reached — stop considering cells entirely this tick.
                     DY = SpawnRadiusCells + 1;
                     break;
                 }
@@ -210,20 +178,15 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                     continue;
                 }
 
-                // Dedup across overlapping player radii BEFORE the SimulationLock-guarded settlement copy (same
-                // contention-avoidance reason as the population/patrol spawners).
                 if (ConsideredCells.Contains(CandidateCell)) {
                     continue;
                 }
                 ConsideredCells.Add(CandidateCell);
 
-                // Groups spawn in SETTLEMENT cells only (opposite of the patrol spawner). Snapshot under SimulationLock.
                 FMythicSettlementData Settlement;
                 if (!LWS->CopySettlementAtCell(CandidateCell, Settlement) || !Settlement.GoverningFaction.IsValid()) {
                     continue;
                 }
-                // Hostile camps host enemies, not social groups — skip them (their occupants are the population spawner's
-                // bandit branch).
                 if (Settlement.bIsHostileCamp) {
                     continue;
                 }
@@ -236,7 +199,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                     continue;
                 }
 
-                // Deterministic per-(faction,cell) chance roll: stable for this cell's lifetime under a fixed snapshot.
                 const uint32 ChanceSeed = FMythicNPCGenerator::GenerateNameHash(
                     Settlement.GoverningFaction.Index, CandidateCell, static_cast<int32>(GroupChanceSalt));
                 const float ChanceRoll = static_cast<float>(ChanceSeed & 0xFFFFFFu) / 16777216.0f;
@@ -244,12 +206,9 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                     continue;
                 }
 
-                // Resolve the cell's effective economy (authored wins; else derived from faction base production) — the
-                // same resolver the population spawner uses, so the economy gate matches the ambient role mix.
                 const EMythicSettlementEconomy EffEconomy =
                     UMythicPopulationSpawnerProcessor::ResolveEconomy(Settlement.Economy, FactionData.BaseProduction);
 
-                // Weighted-pick one eligible template deterministically.
                 const uint32 PickSeed = FMythicNPCGenerator::GenerateNameHash(
                     Settlement.GoverningFaction.Index, CandidateCell, static_cast<int32>(GroupPickSalt));
                 int32 TemplateIndex = INDEX_NONE;
@@ -258,7 +217,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                 }
                 const FMythicGroupTemplate &Template = TemplatesArr[TemplateIndex];
 
-                // ─── Roll member counts (clamped to MaxGroupMembers + per-cell + per-tick headroom) ───
                 const int32 CurrentCount = CellEntityCounts.FindRef(CandidateCell);
                 const int32 CellHeadroom = FMath::Max(0, PerCellCap - CurrentCount);
                 int32 RemainingGroupSlots = FMath::Min(MaxGroupMembers, FMath::Min(CellHeadroom, MemberBudget));
@@ -266,8 +224,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                     continue;
                 }
 
-                // Gather (role, isLeader) for each member up to the headroom, leader-first so a clipped group keeps its
-                // anchor. We resolve the leader spec first, then the rest.
                 struct FMythicResolvedMember {
                     FGameplayTag RoleTag;
                     bool bIsLeader = false;
@@ -286,14 +242,12 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                     for (int32 c = 0; c < Count; ++c) {
                         FMythicResolvedMember M;
                         M.RoleTag = Role;
-                        // Only the first member of the leader spec is the actual leader.
                         M.bIsLeader = bSpecIsLeader && (c == 0);
                         ResolvedMembers.Add(M);
                         --RemainingGroupSlots;
                     }
                 };
 
-                // Leader spec first (an explicit bIsLeader spec, else the first spec).
                 int32 LeaderSpecIdx = INDEX_NONE;
                 for (int32 s = 0; s < Template.Members.Num(); ++s) {
                     if (Template.Members[s].bIsLeader) {
@@ -305,24 +259,19 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                     LeaderSpecIdx = 0;
                 }
                 if (LeaderSpecIdx != INDEX_NONE) {
-                    AppendSpec(Template.Members[LeaderSpecIdx], /*bSpecIsLeader=*/true);
+                    AppendSpec(Template.Members[LeaderSpecIdx],true);
                 }
                 for (int32 s = 0; s < Template.Members.Num(); ++s) {
                     if (s == LeaderSpecIdx) {
                         continue;
                     }
-                    AppendSpec(Template.Members[s], /*bSpecIsLeader=*/false);
+                    AppendSpec(Template.Members[s],false);
                 }
 
-                // A group needs at least 2 members to be a "group" (and to have any social edge). A clipped 1-member
-                // group is just an ambient NPC the population spawner already covers — skip it so we don't burn the
-                // group budget on a degenerate cluster.
                 if (ResolvedMembers.Num() < 2) {
                     continue;
                 }
 
-                // Ensure exactly one leader survives clipping (the leader spec might have produced 0 if headroom was 0
-                // when it ran — but we ran it first, so member 0 is the leader; if somehow none flagged, flag member 0).
                 bool bHasLeader = false;
                 for (const FMythicResolvedMember &M : ResolvedMembers) {
                     bHasLeader |= M.bIsLeader;
@@ -331,7 +280,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                     ResolvedMembers[0].bIsLeader = true;
                 }
 
-                // ─── Allocate a deterministic-per-spawn GroupId + build each member's spawn data ───
                 const int32 LeaderSerial = PersistentRegistry->AllocateSpawnSerial();
                 const uint32 GroupId = HashCombine(GetTypeHash(CandidateCell),
                                                    HashCombine(GroupIdSalt, static_cast<uint32>(LeaderSerial)));
@@ -344,8 +292,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                     D.Identity.Faction = Settlement.GoverningFaction;
                     D.Identity.Cell = CandidateCell;
 
-                    // Globally-unique, never-reused serial → collision-free NameHash (same model as the other spawners).
-                    // The leader reuses the serial already allocated for the GroupId; the rest allocate fresh.
                     const int32 SpawnSerial = (m == 0) ? LeaderSerial : PersistentRegistry->AllocateSpawnSerial();
                     D.Identity.NameHash = FMythicNPCGenerator::GenerateNameHash(
                         Settlement.GoverningFaction.Index, CandidateCell, SpawnSerial);
@@ -354,8 +300,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                         D.Identity.NameHash, FactionData.Population > 50);
                     D.Identity.RoleTag = RM.RoleTag;
 
-                    // Members share Identity.Cell → existing scatter cohesion clusters them; the schedule anchors them to
-                    // the cell (the AIController drives local movement once embodied). No new placement call.
                     D.Schedule.Phase = EMythicSchedulePhase::Social;
                     D.Schedule.HomeCell = CandidateCell;
                     D.Schedule.WorkCell = CandidateCell;
@@ -378,7 +322,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                 Span.EdgeStrength = FMath::Clamp(Template.IntraEdgeStrength, 0.0f, 1.0f);
                 GroupSpans.Add(Span);
 
-                // Charge budgets + per-cell bookkeeping so a second group in the same cell this tick can't overflow it.
                 CellEntityCounts.FindOrAdd(CandidateCell) += SpawnedThisGroup;
                 MemberBudget -= SpawnedThisGroup;
                 --GroupBudget;
@@ -391,7 +334,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
         return;
     }
 
-    // ─── Step 4: Deferred batch-create + social wiring (handles exist only inside the lambda) ───
     const double WorldTime = World->GetTimeSeconds();
     Context.Defer().PushCommand<FMassDeferredCreateCommand>(
         [SpawnData = MoveTemp(SpawnData), GroupSpans = MoveTemp(GroupSpans), LWS, WorldTime](FMassEntityManager &Manager) {
@@ -402,8 +344,8 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                 FMythicScheduleFragment::StaticStruct(),
                 FMythicSignificanceFragment::StaticStruct(),
                 FMythicGroupFragment::StaticStruct(),
-                FMythicNPCTag::StaticStruct(),       // embody as the humanoid EmbodiedNPCClass + shared per-cell cap
-                FMythicGroupMemberTag::StaticStruct() // KIND marker (debugger tally / archetype filtering)
+                FMythicNPCTag::StaticStruct(),
+                FMythicGroupMemberTag::StaticStruct()
             };
             FMassArchetypeHandle Archetype = Manager.CreateArchetype(MakeArrayView(Composition));
 
@@ -422,11 +364,6 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                 GroupFrag.bIsLeader = D.bIsLeader ? 1 : 0;
             }
 
-            // Wire intra-group social edges. Leader-anchored relations (Subordinate) orient toward the leader; symmetric
-            // relations (Friend/Associate) get both directions. <= MaxGroupMembers members ⇒ <= MaxGroupMembers-1
-            // outgoing edges per member, under the social graph's MaxEdgesPerEntity. The graph is self-locked
-            // (write-locked here); this runs on the game thread during the command flush, and LWS (a GameInstance
-            // subsystem) outlives the frame.
             UMythicSocialGraph *SocialGraph = LWS ? LWS->GetSocialGraph() : nullptr;
             if (SocialGraph) {
                 for (const FMythicGroupSpan &Span : GroupSpans) {
@@ -449,14 +386,11 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                             const bool bBIsLeader = SpawnData[IdxB].bIsLeader;
 
                             if (Span.Relation == EMythicSocialRelation::Subordinate) {
-                                // Authority relation: only NON-leaders point AT the leader (subordinate → superior). A
-                                // member that isn't the source's superior gets no Subordinate edge.
                                 if (!bAIsLeader && bBIsLeader) {
                                     SocialGraph->AddOrStrengthenEdge(EA, EB, Span.Relation, Span.EdgeStrength,
                                                                      WorldTime, SpawnData[IdxB].Identity.Faction);
                                 }
                             } else {
-                                // Symmetric peer relation (Friend/Associate/etc.): every ordered pair gets an edge.
                                 SocialGraph->AddOrStrengthenEdge(EA, EB, Span.Relation, Span.EdgeStrength,
                                                                  WorldTime, SpawnData[IdxB].Identity.Faction);
                             }
@@ -467,14 +401,10 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
         });
 }
 
-// ─────────────────────────────────────────────────────────────
-// Static helpers (pure, deterministic, unit-testable)
-// ─────────────────────────────────────────────────────────────
 
 bool UMythicGroupSpawnerProcessor::TemplateEligible(const FMythicGroupTemplate &Template,
                                                     const FMythicFactionData &Faction,
                                                     EMythicSettlementEconomy EffEconomy) {
-    // A zero-weight or member-less template can never be drawn.
     if (Template.RelativeWeight <= 0.0f || Template.Members.Num() == 0) {
         return false;
     }
@@ -487,7 +417,6 @@ bool UMythicGroupSpawnerProcessor::TemplateEligible(const FMythicGroupTemplate &
     if (Faction.Reserves.Wealth < Template.MinReserveWealth) {
         return false;
     }
-    // Economy gate: empty list = any economy; otherwise the resolved economy must be in the list.
     if (Template.AllowedEconomies.Num() > 0 && !Template.AllowedEconomies.Contains(EffEconomy)) {
         return false;
     }
@@ -498,8 +427,6 @@ bool UMythicGroupSpawnerProcessor::PickTemplateIndex(const TArray<FMythicGroupTe
                                                      EMythicSettlementEconomy EffEconomy,
                                                      const FMythicFactionData &Faction, uint32 Seed,
                                                      int32 &OutIndex) {
-    // Single pass to total eligible weight, second cumulative walk to pick — allocation-free, identical predicate both
-    // passes so the winner-selection is consistent with the total.
     float Total = 0.0f;
     for (const FMythicGroupTemplate &T : Templates) {
         if (TemplateEligible(T, Faction, EffEconomy)) {
@@ -510,7 +437,7 @@ bool UMythicGroupSpawnerProcessor::PickTemplateIndex(const TArray<FMythicGroupTe
         return false;
     }
 
-    const float Roll = (static_cast<float>(Seed & 0xFFFFFFu) / 16777216.0f) * Total; // 2^24
+    const float Roll = (static_cast<float>(Seed & 0xFFFFFFu) / 16777216.0f) * Total;
 
     float Cumulative = 0.0f;
     int32 LastEligible = INDEX_NONE;
@@ -531,7 +458,6 @@ bool UMythicGroupSpawnerProcessor::PickTemplateIndex(const TArray<FMythicGroupTe
         }
     }
 
-    // Floating-point boundary guard: Roll can equal Total — fall to the last eligible template.
     if (LastEligible != INDEX_NONE) {
         OutIndex = LastEligible;
         return true;
@@ -545,7 +471,6 @@ int32 UMythicGroupSpawnerProcessor::RollMemberCount(const FMythicGroupMemberSpec
     if (Max == Min) {
         return Min;
     }
-    // Salt by the spec's role so two specs in one template (same Seed base) roll independently.
     const uint32 Mixed = HashCombine(Seed, GetTypeHash(Spec.RoleTag));
     const int32 Range = (Max - Min) + 1;
     return Min + static_cast<int32>(Mixed % static_cast<uint32>(Range));

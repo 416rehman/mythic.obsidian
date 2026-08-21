@@ -1,5 +1,3 @@
-// Mythic Living World System — Settings data asset
-// Centralizes all configurable parameters for the living world system.
 
 #pragma once
 
@@ -16,19 +14,11 @@ class AMythicNPCCharacter;
 class AMythicCreatureCharacter;
 class UObjectiveDefinition;
 
-/**
- * Master settings for the Living World System.
- * Create an instance of this data asset in the editor and assign it to the
- * Living World Subsystem (via project settings or direct reference).
- *
- * All configurable parameters live here — no hardcoded values in code.
- */
 UCLASS(BlueprintType, Const)
 class MYTHIC_API UMythicLivingWorldSettings : public UDataAsset {
     GENERATED_BODY()
 
 public:
-    // ─── Shared Data ──────────────────────────────────────
 
     /** Dialogue template database for dynamic NPC lines */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shared Configuration")
@@ -88,7 +78,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory")
     TSoftObjectPtr<UMythicTerritoryGridSettings> TerritorySettings;
 
-    // ─── Background Thread ────────────────────────────────
 
     /**
      * Real-time interval between background simulation ticks (seconds).
@@ -98,7 +87,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Simulation", meta = (ClampMin = "0.1", ClampMax = "10.0"))
     float SimTickIntervalSeconds = 1.0f;
 
-    // ─── Budget Caps ──────────────────────────────────────
 
     /** Max significance promotions per game frame */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Budgets", meta = (ClampMin = "1", ClampMax = "20"))
@@ -120,7 +108,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Budgets", meta = (ClampMin = "1", ClampMax = "50"))
     int32 MaxPropagationsPerFrame = 10;
 
-    // ─── Significance ─────────────────────────────────────
 
     /** Score threshold to promote an NPC from Tier 0 to Tier 1 */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Significance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -130,7 +117,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Significance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float DemotionThreshold = 0.3f;
 
-    // ─── Weights for significance scoring ─────────────────
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Significance")
     float ProximityWeight = 0.4f;
@@ -151,7 +137,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Significance", meta = (ClampMin = "0.01"))
     float EmotionalPressureFullScore = 3.0f;
 
-    // ─── Economy Simulation ──────────────────────────────
 
     /**
      * Baseline territory for production scaling.
@@ -254,9 +239,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Economy", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float ContractMilitaryThreshold = 0.6f;
 
-    // ─── Scheme Effects ─────────────────────────────────────
-    // Magnitudes a SUCCEEDED faction scheme applies (UMythicSchemeEngine::ExecuteScheme). Designer-tunable; defaults
-    // are calibrated to the economy scale (Reserves on [-100,100], RaidFraction=0.1, BaseDeathRate=0.005/tick).
 
     /** Fraction of the target's positive Wealth + Materials reserves a successful TradeDisruption drains (mirrors RaidFraction). */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schemes", meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -285,7 +267,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Economy", meta = (ClampMin = "0"))
     int32 ContractPopulationCeiling = 200;
 
-    // ─── Population Simulation ───────────────────────────
 
     /**
      * Max population supported per controlled territory cell.
@@ -359,9 +340,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population", meta = (ClampMin = "0.0"))
     float KillMilitaryArmsLoss = 0.75f;
 
-    // ─── Diplomacy ───────────────────────────────────────
-    // RelationshipScore = -(IdeologyDist × IdeologyWeight) + (EconDep × DepWeight) + (EventScore × EventWeight)
-    // Score is compared against tier thresholds to determine relationship.
 
     /**
      * Weight of ideology distance in relationship scoring. Higher = ideology matters more.
@@ -420,9 +398,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Diplomacy", meta = (ClampMin = "1", ClampMax = "50"))
     int32 DiplomacyEventScanCap = 10;
 
-    // ─── Ideology Metabolism ─────────────────────────────
-    // Each tick, faction ideology drifts toward the moral vectors of events
-    // occurring in/near their territory. This creates emergent worldview shifts.
 
     /**
      * Rate at which faction ideology drifts toward lived experience.
@@ -454,9 +429,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ideology", meta = (ClampMin = "1", ClampMax = "50"))
     int32 IdeologyEventScanCap = 10;
 
-    // ─── Faction Evolution ───────────────────────────────
-    // The sim can mutate faction behavior flags at runtime based on these thresholds.
-    // This enables emergent transformation: a warband becomes a kingdom, a kingdom shatters.
 
     /**
      * Cell count above which a non-territorial faction evolves territory control.
@@ -523,13 +495,11 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Evolution", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float SchismIdeologyMutation = 0.1f;
 
-    // ─── Settlements ─────────────────────────────────────
 
     /** Settlement settings (defaults, capital boost) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Settlements")
     TSoftObjectPtr<UMythicSettlementSettings> SettlementSettings;
 
-    // ─── Population Spawner ──────────────────────────────
 
     /**
      * Cells around each player to populate with MASS entities.
@@ -576,7 +546,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Population Spawner", meta = (Categories = "NPC.Role"))
     FGameplayTag BanditRoleTag;
 
-    // ─── Event Pipeline ──────────────────────────────────
 
     /**
      * Exponential decay rate per second for pressure channels.
@@ -624,7 +593,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline", meta = (ClampMin = "0.0", ClampMax = "0.5"))
     float SignificanceHysteresisMargin = 0.1f;
 
-    // ─── Creature Ecology ────────────────────────────────
 
     /** Interval in seconds between creature ecology processor ticks */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "0.1", ClampMax = "5.0"))
@@ -642,7 +610,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "1", ClampMax = "100"))
     int32 MaxHerdContagionPerTick = 10;
 
-    // ─── Social Graph (Phase 5) ──────────────────────────
 
     /** Max outgoing social edges per entity. Higher = richer social networks, more memory. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social Graph", meta = (ClampMin = "1", ClampMax = "32"))
@@ -664,7 +631,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social Graph", meta = (ClampMin = "1", ClampMax = "50"))
     int32 SocialPruneEntitiesPerTick = 10;
 
-    // ─── Cognitive Brain (Phase 5) ───────────────────────
 
     /** Min think interval for cognitive NPCs (seconds). Think timer randomized within [min, max]. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cognitive", meta = (ClampMin = "0.1", ClampMax = "5.0"))
@@ -694,7 +660,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cognitive", meta = (ClampMin = "1", ClampMax = "100"))
     int32 MaxCognitiveActors = 30;
 
-    // ─── Encounter Director (Phase 5) ────────────────────
 
     /** Interval between encounter template evaluations (seconds). */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Encounters", meta = (ClampMin = "1.0", ClampMax = "30.0"))
@@ -712,7 +677,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Encounters")
     TSoftObjectPtr<UMythicEncounterTemplateDatabase> EncounterTemplateDatabase;
 
-    // ─── Party System (Phase 5) ──────────────────────────
 
     /** Max companions per player party. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "1", ClampMax = "8"))
@@ -747,7 +711,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Party", meta = (ClampMin = "0.0", ClampMax = "0.9"))
     float BeliefPropagationDecay = 0.3f;
 
-    // ─── Schedule System ─────────────────────────────────
 
     /**
      * Length of one full game day in real seconds.
@@ -787,7 +750,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schedule", meta = (ClampMin = "0.0", ClampMax = "6.0"))
     float ScheduleStaggerHours = 2.0f;
 
-    // ─── Belief Propagation ──────────────────────────────
 
     /**
      * Max belief propagations processed per tick by the BeliefPropagationProcessor.
@@ -820,7 +782,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Social", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float BeliefPruneThreshold = 0.05f;
 
-    // ─── Scheme Engine (Phase 5) ─────────────────────────
 
     /** Sim ticks between scheme generation evaluations. Higher = less CPU, slower reaction. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schemes", meta = (ClampMin = "1", ClampMax = "50"))
@@ -838,7 +799,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Schemes", meta = (ClampMin = "1", ClampMax = "100"))
     int32 MaxTotalSchemes = 50;
 
-    // ─── Crime & Behavioral Responses (Phase 6) ─────────
 
     /**
      * Total accumulated pressure across all channels that triggers the Despair state.
@@ -883,7 +843,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Behavioral", meta = (ClampMin = "2", ClampMax = "20"))
     int32 MobFormationThreshold = 3;
 
-    // ─── Perception Modifiers (Phase 6) ──────────────────
 
     /**
      * Perception multiplier applied during night time (REQ-BEH-007).
@@ -900,7 +859,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Perception", meta = (ClampMin = "0.1", ClampMax = "1.0"))
     float WeatherPerceptionMultiplier = 0.6f;
 
-    // ─── Faction Lifecycle (Phase 6) ─────────────────────
 
     /**
      * Minimum surviving population to create a resistance faction from annihilation (REQ-FAC-003).
@@ -915,7 +873,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Faction Lifecycle", meta = (ClampMin = "1", ClampMax = "20"))
     int32 RestorationCellThreshold = 3;
 
-    // ─── World Persistence (Phase 6) ─────────────────────
 
     /**
      * Delay in game-time seconds before a faction assigns a successor to a vacated shop/role.
@@ -939,7 +896,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Persistence", meta = (ClampMin = "0.0", ClampMax = "2.0"))
     float EconomicCascadeStrength = 1.0f;
 
-    // ─── Tier 2-3 Promotion (Phase 6) ────────────────────
 
     /**
      * Significance score required for Tier 1 → Tier 2 promotion (actor spawn).
@@ -970,8 +926,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Event Pipeline | Significance")
     TSoftClassPtr<AMythicNPCCharacter> EmbodiedNPCClass;
 
-    // ─── Data Asset References (Phase 6) ─────────────────
-
 
     /**
      * Creature species × species aggression matrix (UDataTable).
@@ -980,21 +934,12 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology")
     TSoftObjectPtr<UDataTable> CreatureAggressionMatrix;
 
-    // ─── Creature Ecology — Spawning & Embodiment ────────
-    // Wilderness wildlife (true unowned, non-settlement cells). Creatures carry FMythicCreatureTag (NOT FMythicNPCTag)
-    // and embody as EmbodiedCreatureClass via the ActorSpawnProcessor's creature query branch.
 
     /** VISIBLE creature actor class the ActorSpawnProcessor embodies promoted creatures as. Null => creatures stay
      *  MASS-only (no actor, force-embodiment consumes the tag but spawns nothing). Subclass of AMythicNPCCharacter. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology")
     TSoftClassPtr<AMythicCreatureCharacter> EmbodiedCreatureClass;
 
-    // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
-    //  EMBODIMENT SERVICE (quality layer) — pooling, view-gated streaming, rigorous navmesh placement.
-    //  All fields below are the FROZEN cross-step contract (embodiment-service-LOCK-v1 §1). Names/types/defaults are
-    //  read verbatim by the placement service, the pool (LivingWorldSubsystem), the ActorSpawnProcessor routing, and
-    //  the SignificanceProcessor view-gate. Do NOT rename or change defaults without re-locking the spec.
-    // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
     // ─── Embodiment | Limits ─────────────────────────────
     /**
@@ -1121,9 +1066,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Creature Ecology", meta = (ClampMin = "0.0", ClampMax = "4.0"))
     float CreatureSpawnDensityScale = 1.0f;
 
-    // ─── Territory Population — Faction patrols / soldiers ─
-    // Faction-controlled NON-settlement cells get that faction's soldiers (count scaled by MilitaryStrength × Influence)
-    // plus occasional travelers. Soldiers carry FMythicNPCTag + FMythicSoldierTag.
 
     /** Cells around each player within which faction-controlled territory is populated with patrols/soldiers. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory Population", meta = (ClampMin = "1.0", ClampMax = "20.0"))
@@ -1162,9 +1104,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory Population", meta = (ClampMin = "1.0", ClampMax = "5.0"))
     float ContestedBorderSoldierMultiplier = 2.0f;
 
-    // ─── Travelers — Inter-settlement caravans / patrols ──
-    // Travelers move BETWEEN towns. They carry FMythicNPCTag + FMythicTravelerTag + FMythicTravelerFragment, and are
-    // exempt from the ambient population despawn so they survive the open road.
 
     /** Interval in seconds between traveler spawner ticks. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Travelers", meta = (ClampMin = "0.1", ClampMax = "30.0"))
@@ -1210,11 +1149,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Travelers", meta = (Categories = "NPC.Role"))
     FGameplayTag PatrolRoleTag;
 
-    // ─── Group Spawning — clustered NPCs (retinues / barter parties / friend trios) ──
-    // The GroupSpawnerProcessor runs in SETTLEMENT cells (opposite of the patrol spawner) AFTER the population spawner.
-    // Per chance-passing settlement cell it weighted-picks one eligible group template, rolls each member spec's count,
-    // and spawns the members into the cell — they share Identity.Cell so existing scatter cohesion + the embodiment gate
-    // + the shared per-cell cap apply unchanged, and the social graph is wired with the template's IntraRelation edges.
 
     /** Authored group template database. When unset, MythicGroupDefaults::BuildDefaultTemplates() supplies code defaults
      *  (a noble retinue, a merchant barter party, a friend trio) so clustered spawning runs unauthored. */
@@ -1245,7 +1179,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Group Spawning", meta = (ClampMin = "0", ClampMax = "200"))
     int32 MaxGroupMemberSpawnsPerTick = 12;
 
-    // ─── Encounters — Objective hook (data only) ──────────
 
     /** Objective offered when the player clears an encounter. Null default; offer-wiring is deferred to a later slice. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Encounters")

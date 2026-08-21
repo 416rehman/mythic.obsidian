@@ -1,10 +1,9 @@
-// 
 
 
 #include "MythicEnvironmentSubsystem.h"
 
 #include "Mythic.h"
-#include "EnvironmentTags.h" // Environment.Time.* / Environment.Season.* world-state tags
+#include "EnvironmentTags.h"
 
 void UMythicEnvironmentSubsystem::SetEnvironmentController(AMythicEnvironmentController *Controller) {
     this->EnvironmentController = Controller;
@@ -12,7 +11,6 @@ void UMythicEnvironmentSubsystem::SetEnvironmentController(AMythicEnvironmentCon
         UE_LOG(Myth_Environment, Log, TEXT("EnvironmentController set to %s"), *Controller->GetName());
         this->OnEnvironmentControllerRegisterDelegate.Broadcast(Controller);
 
-        // After the broadcast, clear the delegate
         this->OnEnvironmentControllerRegisterDelegate.Clear();
     }
     else {
@@ -63,8 +61,6 @@ EDayTime UMythicEnvironmentSubsystem::GetDayTime() const {
 }
 
 FGameplayTag UMythicEnvironmentSubsystem::GetDayTimeTag() const {
-    // Controller-gated (unlike GetDayTime, NO fail-unsafe Night default): an absent clock yields an empty tag, so a
-    // world-state consumer reads the time as "unknown" rather than wrongly "night".
     if (!this->EnvironmentController) {
         return FGameplayTag::EmptyTag;
     }
@@ -133,7 +129,6 @@ void UMythicEnvironmentSubsystem::SetWeatherInstantly(FGameplayTag Weather) {
         return;
     }
 
-    // Find the weather type by tag
     auto TargetWeather = this->EnvironmentController->WeatherTypes.FindByPredicate([&Weather](UWeatherType *WeatherType) {
         return WeatherType->Tag.MatchesTag(Weather);
     });

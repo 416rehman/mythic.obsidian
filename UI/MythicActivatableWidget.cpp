@@ -1,13 +1,26 @@
-﻿// 
+﻿
 #include "MythicActivatableWidget.h"
 
 #include "CommonUITypes.h"
 #include "ICommonInputModule.h"
 #include "Mythic.h"
+#include "CommonActivatableWidgetSwitcher.h"
+#include "UI/MythicUIStyle.h"
 #include "Editor/WidgetCompilerLog.h"
 #include "Input/CommonUIInputTypes.h"
 
 #define LOCTEXT_NAMESPACE "Mythic"
+
+void UMythicActivatableWidget::NativeConstruct() {
+    FMythicUIStyle::WireFocusRings(this);
+    Super::NativeConstruct();
+
+    if (IsActivated() && Cast<UCommonActivatableWidgetSwitcher>(GetParent())) {
+        if (UWidget *First = FMythicUIStyle::FindFirstFocusable(this)) {
+            First->SetFocus();
+        }
+    }
+}
 
 void UMythicActivatableWidget::NativeDestruct() {
     for (FUIActionBindingHandle Handle : BindingHandles) {
@@ -75,7 +88,6 @@ void UMythicActivatableWidget::ValidateCompiledWidgetTree(const UWidgetTree &Blu
                                        "GetDesiredFocusTarget wasn't implemented, you're going to have trouble using gamepads on this screen."));
         }
         else {
-            //TODO - Note for now, because we can't guarantee it isn't implemented in a native subclass of this one.
             CompileLog.Note(LOCTEXT("ValidateGetDesiredFocusTarget_Note",
                                     "GetDesiredFocusTarget wasn't implemented, you're going to have trouble using gamepads on this screen.  If it was implemented in the native base class you can ignore this message."));
         }

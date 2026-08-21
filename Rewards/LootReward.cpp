@@ -1,14 +1,16 @@
-// 
 
 
 #include "LootReward.h"
 
 #include "AbilitySystemGlobals.h"
+#include "AbilitySystemComponent.h"
 #include "Mythic.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "Rewards/LootScaling.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Proficiencies.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
 #include "GameModes/Attributes/WorldAttributes.h"
 #include "GameModes/GameState/MythicGameState.h"
 #include "Itemization/InventoryProviderInterface.h"
@@ -18,40 +20,33 @@
 
 bool ULootReward::ResolveEntryDropChance(float OverrideDropChance, int32 RarityIndex, TConstArrayView<float> RarityWeights, float &OutChance) {
     if (OverrideDropChance > 0.0f) {
-        OutChance = OverrideDropChance; // explicit per-entry override wins (player level / rarity weight ignored)
+        OutChance = OverrideDropChance;
         return true;
     }
     if (RarityWeights.IsValidIndex(RarityIndex)) {
         OutChance = RarityWeights[RarityIndex];
         return true;
     }
-    // Out-of-range rarity with no override — no resolvable weight; caller must skip (never OOB-read the weights array).
     OutChance = 0.0f;
     return false;
 }
 
 bool ULootReward::Give(FRewardContext &Context) const {
-    // Cast the context to the correct type
     FLootRewardContext *LootContext = static_cast<FLootRewardContext *>(&Context);
     checkf(LootContext, TEXT("LootReward::Give - LootRewardContext is null"));
 
-    // Get the player controller
     auto PlayerController = LootContext->PlayerController;
     checkf(PlayerController, TEXT("LootReward::Give - PlayerController is null"));
 
-    // Check if the context is an ability system component
     auto ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Context.PlayerController);
     checkf(ASC, TEXT("AbilitySystemComponent is null"));
 
-    // Get the MythicLootManager Subsystem
     auto MythicLootManager = PlayerController->GetGameInstance()->GetSubsystem<UMythicLootManagerSubsystem>();
     checkf(MythicLootManager, TEXT("LootReward::Give - MythicLootManager not found"));
 
-    // Get the game state
     auto GameState = PlayerController->GetWorld()->GetGameState<AMythicGameState>();
     checkf(GameState, TEXT("LootReward::Give - GameState is null"));
 
-    // Get the world tier attributes
     auto WorldTierAttributes = GameState->WorldTierAttributes;
     checkf(GameState->WorldTierAttributes, TEXT("LootReward::Give - WorldTierAttributes is null"));
 
@@ -64,32 +59,36 @@ bool ULootReward::Give(FRewardContext &Context) const {
 
     UE_LOG(Myth, Warning, TEXT("LootReward::Give - Current Player Level: %d"), PlayerLevel);
 
-    // Get the loot rates for the player
-    // Calculate drop rates once for this request
-    const float CommonRate = GameState->CommonLootChanceCurveRowHandle.Eval(PlayerLevel, "");
-    const float RareRate = GameState->RareLootChanceCurveRowHandle.Eval(PlayerLevel, "");
-    const float EpicRate = GameState->EpicLootChanceCurveRowHandle.Eval(PlayerLevel, "");
-    const float LegendaryRate = GameState->LegendaryLootChanceCurveRowHandle.Eval(PlayerLevel, "") * WorldTierAttributes->GetLegendaryDropRateMultiplier();
-    const float MythicRate = GameState->MythicLootChanceCurveRowHandle.Eval(PlayerLevel, "") * WorldTierAttributes->GetMythicDropRateMultiplier();
-    // Scales the rolled stack size of CURRENCY-tagged loot entries (the only live reader of this attribute, which
-    // was previously dead). Non-currency loot is unaffected — the multiplier is applied per-entry below.
+    const UMythicDeveloperSettings *DropSettings = GetDefault<UMythicDeveloperSettings>();
+    const float GlobalDropMult = DropSettings ? FMath::Max(0.0f, DropSettings->DropRateMultiplier) : 1.0f;
+
+    const float CommonRate = GameState->CommonLootChanceCurveRowHandle.Eval(PlayerLevel, "") * GlobalDropMult;
+    const float RareRate = GameState->RareLootChanceCurveRowHandle.Eval(PlayerLevel, "") * GlobalDropMult;
+    const float EpicRate = GameState->EpicLootChanceCurveRowHandle.Eval(PlayerLevel, "") * GlobalDropMult;
+    const float LegendaryRate = GameState->LegendaryLootChanceCurveRowHandle.Eval(PlayerLevel, "") * WorldTierAttributes->GetLegendaryDropRateMultiplier() * GlobalDropMult;
+    const float MythicRate = GameState->MythicLootChanceCurveRowHandle.Eval(PlayerLevel, "") * WorldTierAttributes->GetMythicDropRateMultiplier() * GlobalDropMult;
     const float GoldMult = WorldTierAttributes->GetGoldDropRateMultiplier();
 
     UE_LOG(Myth, Log, TEXT("LootReward::Give - Rarities for Level %d = Common: %f, Rare: %f, Epic: %f, Legendary: %f, Mythic: %f"), PlayerLevel, CommonRate,
            RareRate, EpicRate, LegendaryRate, MythicRate);
 
-    // Check if we have a loot source
+    bool bRarityFindFound = false;
+    bool bQuantityFindFound = false;
+    const float RarityFind = ASC->GetGameplayAttributeValue(UMythicAttributeSet_Utility::GetItemRarityFindAttribute(), bRarityFindFound);
+    const float QuantityFind = ASC->GetGameplayAttributeValue(UMythicAttributeSet_Utility::GetItemQuantityFindAttribute(), bQuantityFindFound);
+    const int32 EnemyTierInt = LootContext->EnemyTierInt;
+
     for (auto LootTable : OverridenLootSource.LootTables) {
         UE_LOG(Myth, Log, TEXT("LootReward::Give - Using loot source %s"), *LootTable->GetName());
         RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, MythicRate, GoldMult, PlayerController, LootContext->ItemLevel, LootTable,
-                              LootContext->PutInInventory, OverridenLootSource.IsPrivate, LootContext->SpawnLocation, MythicLootManager);
+                              LootContext->PutInInventory, OverridenLootSource.IsPrivate, LootContext->SpawnLocation, MythicLootManager,
+                              RarityFind, QuantityFind, EnemyTierInt);
     }
     if (OverridenLootSource.bSkipGlobal) {
         UE_LOG(Myth, Log, TEXT("LootReward::Give - Skipping global loot source"));
         return true;
     }
 
-    // Settings
     auto MythicSettings = GetDefault<UMythicDeveloperSettings>();
     if (!MythicSettings) {
         UE_LOG(Myth, Error, TEXT("LootReward::Give - Mythic Settings not found"));
@@ -102,11 +101,10 @@ bool ULootReward::Give(FRewardContext &Context) const {
         return false;
     }
 
-    // If we made it here, we didn't skip the global loot source, so we should use it
     UE_LOG(Myth, Log, TEXT("LootReward::Give - Using global loot source"));
     RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, MythicRate, GoldMult, PlayerController, LootContext->ItemLevel,
                           LootTable, LootContext->PutInInventory, OverridenLootSource.IsPrivate, LootContext->SpawnLocation,
-                          MythicLootManager);
+                          MythicLootManager, RarityFind, QuantityFind, EnemyTierInt);
 
     return true;
 }
@@ -116,13 +114,13 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
                                         APlayerController *PlayerController, int32 DropLevel,
                                         UMythicLootTable *LootTable, TScriptInterface<IInventoryProviderInterface> InventoryProvider, bool isPrivate,
                                         FVector SpawnLocation,
-                                        UMythicLootManagerSubsystem *MythicLootManager) {
+                                        UMythicLootManagerSubsystem *MythicLootManager,
+                                        float RarityFind, float QuantityFind, int32 EnemyTierInt) {
     if (!LootTable || LootTable->Entries.Num() == 0) {
         UE_LOG(Myth, Error, TEXT("LootReward::RequestLootFromSource - Loot table is empty or invalid"));
         return;
     }
 
-    // Table proc check
     float procRoll = FMath::FRand();
     if (procRoll > LootTable->DropChance) {
         UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Table failed to proc - Required: %.2f, Rolled: %.2f"),
@@ -130,9 +128,10 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
         return;
     }
 
-    // Store rarity weights
+    const FLootTierBonus TierBonus = FMythicLootScaling::ComputeTierLootBonus(EnemyTierInt, QuantityFind);
+
     constexpr int32 NumRarities = 5;
-    const float WeightsByRarity[NumRarities] = {
+    float WeightsByRarity[NumRarities] = {
         CommonRate,
         RareRate,
         EpicRate,
@@ -140,15 +139,24 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
         MythicRate
     };
 
-    // Setup recipient and location
-    auto TargetRecipient = isPrivate ? PlayerController : nullptr;
-    auto SpawnLoc = SpawnLocation.IsZero() ? PlayerController->GetPawn()->GetActorLocation() : SpawnLocation;
+    const float EffectiveRarityFind = FMath::Max(0.0f, RarityFind) + (TierBonus.RarityMult - 1.0f);
+    FMythicLootScaling::AdjustWeightsForRarityFind(MakeArrayView(WeightsByRarity, NumRarities), EffectiveRarityFind);
 
-    // First, build array of valid entries that pass the drop chance check.
-    // NOT static: RequestLootFromSource is a STATIC member, so a function-local static is one process-wide instance
-    // shared across every call — it accumulated stale indices (Reserve doesn't clear Num, and Add appended on top of
-    // the previous call's entries), inflating drop counts, indexing Entries[] out of bounds when a later table was
-    // smaller, and duplicating drops. A plain local is correct + thread-safe.
+    auto TargetRecipient = isPrivate ? PlayerController : nullptr;
+
+    FVector SpawnLoc = SpawnLocation;
+    if (SpawnLoc.IsZero() && !InventoryProvider) {
+        auto RecipientPawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+        if (!IsValid(RecipientPawn)) {
+            UE_LOG(Myth, Warning,
+                   TEXT("LootReward::RequestLootFromSource - ZeroVector spawn location, no inventory provider, and no "
+                        "pawn to resolve a drop spot (recipient is pawn-less); skipping world-drop from table %s."),
+                   *GetNameSafe(LootTable));
+            return;
+        }
+        SpawnLoc = RecipientPawn->GetActorLocation();
+    }
+
     TArray<int32> ValidIndices;
     ValidIndices.Reserve(LootTable->Entries.Num());
 
@@ -160,8 +168,6 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
             continue;
 
         const int32 RarityIndex = static_cast<int32>(Entry.Item->Rarity);
-        // Resolve via the bounds-safe helper — an out-of-range rarity with no override is SKIPPED, not an OOB read of
-        // the fixed-size WeightsByRarity stack array (mirrors the IsValidIndex guards the affix/talent count sites use).
         float DropChance = 0.0f;
         if (!ResolveEntryDropChance(Entry.OverrideDropChance, RarityIndex, MakeArrayView(WeightsByRarity, NumRarities), DropChance)) {
             UE_LOG(Myth, Warning,
@@ -183,34 +189,64 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
         }
     }
 
+    int32 GuaranteedValidPos = -1;
+    if (TierBonus.GuaranteedMinRarity > 0) {
+        int32 BestEntry = -1;
+        int32 BestRarity = -1;
+        for (int32 i = 0; i < LootTable->Entries.Num(); ++i) {
+            const auto &Entry = LootTable->Entries[i];
+            if (!Entry.Item) {
+                continue;
+            }
+            const int32 R = static_cast<int32>(Entry.Item->Rarity);
+            if (R >= TierBonus.GuaranteedMinRarity && R > BestRarity) {
+                BestRarity = R;
+                BestEntry = i;
+            }
+        }
+        if (BestEntry >= 0) {
+            int32 Pos = ValidIndices.IndexOfByKey(BestEntry);
+            if (Pos == INDEX_NONE) {
+                ValidIndices.Add(BestEntry);
+                Pos = ValidIndices.Num() - 1;
+            }
+            GuaranteedValidPos = Pos;
+            UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Boss floor: guaranteeing rarity>=%d drop (%s)"),
+                   TierBonus.GuaranteedMinRarity, *LootTable->Entries[BestEntry].Item->GetName());
+        }
+    }
+
     if (ValidIndices.Num() == 0) {
         UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - No items passed the drop chance check"));
         return;
     }
 
-    // Determine how many items we'll actually drop
-    const int32 NumItemsToDrop = FMath::RandRange(1, FMath::Min(LootTable->MaxItems, ValidIndices.Num()));
-    UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Will drop %d items from %d eligible items"),
-           NumItemsToDrop, ValidIndices.Num());
+    const int32 NumItemsToDrop = FMath::RandRange(1, FMath::Min(LootTable->MaxItems, ValidIndices.Num()))
+        + FMath::Max(0, TierBonus.ExtraDropCount)
+        + ((TierBonus.FractionalDropChance > 0.0f && FMath::FRand() < TierBonus.FractionalDropChance) ? 1 : 0);
+    UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Will drop %d items from %d eligible items (tier extra: %d)"),
+           NumItemsToDrop, ValidIndices.Num(), TierBonus.ExtraDropCount);
 
-    // Track used indices (plain local — same static-carryover hazard as ValidIndices above).
     TBitArray<> UsedIndices;
     UsedIndices.Init(false, ValidIndices.Num());
 
     int32 SuccessfulDrops = 0;
     for (int32 DropCount = 0; DropCount < NumItemsToDrop; ++DropCount) {
-        // Reset used tracking if we've used all items
         if (UsedIndices.CountSetBits() == ValidIndices.Num()) {
             UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Reset used items tracking - all items have been used"));
             UsedIndices.Init(false, ValidIndices.Num());
         }
 
-        // Try to find an unused item
         int32 MaxAttempts = 10;
         int32 SelectedIndex = -1;
         int32 CurrentAttempt = 0;
 
-        while (MaxAttempts-- > 0) {
+        if (DropCount == 0 && GuaranteedValidPos >= 0 && ValidIndices.IsValidIndex(GuaranteedValidPos)) {
+            SelectedIndex = GuaranteedValidPos;
+            UsedIndices[GuaranteedValidPos] = true;
+        }
+
+        while (SelectedIndex == -1 && MaxAttempts-- > 0) {
             CurrentAttempt++;
             int32 RandomIdx = FMath::RandRange(0, ValidIndices.Num() - 1);
 
@@ -228,18 +264,11 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
 
         const auto &SelectedEntry = LootTable->Entries[ValidIndices[SelectedIndex]];
 
-        // Calculate stack size
         int32 StackSize = SelectedEntry.Item->StackSizeMax > 1 ? FMath::RandRange(SelectedEntry.StackRange.Min, SelectedEntry.StackRange.Max) : 1;
 
-        // Currency loot scales by the world-tier GoldDropRateMultiplier (previously a dead attribute). The base
-        // amount is the designer-authored StackRange; the multiplier only tunes it. Clamp to [1, StackSizeMax]
-        // (the mint produces a single instance clamped to StackSizeMax — no overflow loop).
         if (SelectedEntry.Item->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY)) {
             const int32 ScaledStack = FMath::RoundToInt(StackSize * GoldMultiplier);
             const int32 MaxStack = FMath::Max(1, SelectedEntry.Item->StackSizeMax);
-            // A single loot mint produces one instance clamped to StackSizeMax (no overflow carry), so a scaled
-            // amount above the cap is discarded. Surface that as a Warning so a misconfigured currency
-            // StackSizeMax (too small for the tier multiplier) is visible rather than silently losing gold.
             if (ScaledStack > MaxStack) {
                 UE_LOG(Myth, Warning,
                        TEXT("LootReward: currency %s scaled to %d exceeds StackSizeMax %d; clamping (excess discarded). "
@@ -254,7 +283,6 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
                static_cast<int32>(SelectedEntry.Item->Rarity),
                StackSize);
 
-        // Spawn the item
         if (InventoryProvider) {
             MythicLootManager->CreateAndGive(
                 SelectedEntry.Item,
@@ -264,7 +292,6 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
                 DropLevel
                 );
 
-            // The item is either in the inventory or in the world, so we're done
             UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Item %s spawned in inventory"), *SelectedEntry.Item->GetName());
         }
         else {

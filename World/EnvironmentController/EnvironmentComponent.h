@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -11,7 +10,6 @@
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class MYTHIC_API UEnvironmentComponent : public UActorComponent {
     GENERATED_BODY()
-    // Constructor
     UEnvironmentComponent();
 
 protected:
@@ -21,7 +19,6 @@ protected:
     UFUNCTION()
     void OnEnvironmentControllerRegistered(AMythicEnvironmentController *EnvironmentController);
 
-    // Function to call when the hour changes
     UFUNCTION()
     void CallOnHourChanged(int32 OldHour, int32 NewHour) {
         this->OnHourChanged.Broadcast(OldHour, NewHour);

@@ -1,4 +1,3 @@
-// 
 
 #pragma once
 
@@ -23,15 +22,11 @@ struct FCraftingRequirement {
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
     int32 DismantleReward = 1;
 
-    // == Operator
     bool operator==(const FCraftingRequirement &Other) const {
         return RequiredItem == Other.RequiredItem && RequiredAmount == Other.RequiredAmount && DismantleReward == Other.DismantleReward;
     }
 };
 
-/**
- * This fragment allows this item to be crafted or dismantled at a crafting station
- */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
 class MYTHIC_API UCraftableFragment : public UItemFragment {
     GENERATED_BODY()

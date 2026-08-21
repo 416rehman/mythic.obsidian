@@ -1,4 +1,3 @@
-//
 
 #include "MythicFactionStandingComponent.h"
 
@@ -6,9 +5,8 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
-#include "World/LivingWorld/LivingWorldSubsystem.h" // FactionDatabase (server-side faction name resolution)
+#include "World/LivingWorld/LivingWorldSubsystem.h"
 #include "World/LivingWorld/Factions/FactionDatabase.h"
-#include "UI/MythicFeedbackSubsystem.h" // unified feedback subsystem — faction shift = hero banner
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/Pawn.h"
 
@@ -19,9 +17,6 @@ UMythicFactionStandingComponent::UMythicFactionStandingComponent() {
 
 void UMythicFactionStandingComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-    // Owner-only: faction standing is private per-player UI data. This component lives on the PlayerState (net-relevant
-    // to EVERY client), so an unconditional DOREPLIFETIME leaked every player's full reputation list to all peers.
-    // Matches the sibling progression components (Proficiency / ObjectiveTracker, both COND_OwnerOnly).
     DOREPLIFETIME_CONDITION(UMythicFactionStandingComponent, Standings, COND_OwnerOnly);
 }
 
@@ -66,15 +61,15 @@ void UMythicFactionStandingComponent::ServerAdjustStanding(FMythicFactionId Fact
 float FMythicKillStandingPropagation::FactorForRelation(EMythicFactionRelation Relation) const {
     switch (Relation) {
     case EMythicFactionRelation::Allied:
-        return AlliedFactor; // ally of the victim — also loses standing
+        return AlliedFactor;
     case EMythicFactionRelation::Friendly:
         return FriendlyFactor;
     case EMythicFactionRelation::Hostile:
-        return -HostileFactor; // enemy of the victim — GAINS standing (negate so the penalty becomes a reward)
+        return -HostileFactor;
     case EMythicFactionRelation::Unfriendly:
         return -UnfriendlyFactor;
     default:
-        return 0.0f; // Neutral — no reaction
+        return 0.0f;
     }
 }
 
@@ -84,15 +79,9 @@ void UMythicFactionStandingComponent::ServerApplyKillStanding(FMythicFactionId V
         return;
     }
 
-    // Direct hit: the victim's own faction always reacts (the original kill→standing behavior, unchanged).
     const float BasePenalty = KillStandingPenalty;
     ServerAdjustStanding(VictimFaction, -BasePenalty);
 
-    // Politics propagation across the faction-relationship graph. Read the committed faction snapshot lock-free on the
-    // game thread (the established pattern — see NotifyStandingTierChange). Collect the alive faction IDs FIRST, then
-    // read relationships + adjust standing OUTSIDE ForEachAliveFaction: GetRelationship and ForEachAliveFaction both
-    // take the DB snapshot lock, and nesting them would rely on the mutex being recursive. ServerAdjustStanding mutates
-    // OUR Standings array (not the DB), so it's safe to call here.
     if (KillStandingPropagation.IsDisabled()) {
         return;
     }
@@ -111,7 +100,7 @@ void UMythicFactionStandingComponent::ServerApplyKillStanding(FMythicFactionId V
 
     for (const FMythicFactionId Id : AliveFactions) {
         if (!Id.IsValid() || Id == VictimFaction) {
-            continue; // the victim faction already took the direct hit
+            continue;
         }
         const EMythicFactionRelation Relation = FDB->GetRelationship(VictimFaction, Id);
         const float Factor = KillStandingPropagation.FactorForRelation(Relation);
@@ -153,10 +142,8 @@ void UMythicFactionStandingComponent::NotifyStandingTierChange(FMythicFactionId 
     const EMythicStandingTier OldTier = TierForStanding(OldValue);
     const EMythicStandingTier NewTier = TierForStanding(NewValue);
     if (OldTier == NewTier) {
-        return; // only announce a genuine tier crossing
+        return;
     }
-    // Resolve the faction's display name on the SERVER (clients carry no FactionDatabase) and push it to the owning
-    // client. Reading the committed faction snapshot from the game thread is the established lock-free pattern.
     FString FactionName = FString::Printf(TEXT("Faction %d"), Faction.Index);
     if (UWorld *World = GetWorld()) {
         if (UGameInstance *GI = World->GetGameInstance()) {
@@ -174,35 +161,4 @@ void UMythicFactionStandingComponent::NotifyStandingTierChange(FMythicFactionId 
 }
 
 void UMythicFactionStandingComponent::ClientNotifyStandingTier_Implementation(const FString &FactionName, EMythicStandingTier NewTier) {
-    const APlayerState *PS = Cast<APlayerState>(GetOwner());
-    const APawn *Pawn = PS ? PS->GetPawn() : nullptr;
-    if (!Pawn) {
-        return;
-    }
-    UWorld *World = Pawn->GetWorld();
-    if (!World) {
-        return;
-    }
-    if (UMythicFeedbackSubsystem *Feedback = World->GetSubsystem<UMythicFeedbackSubsystem>()) {
-        FString TierText;
-        FLinearColor Color;
-        switch (NewTier) {
-        case EMythicStandingTier::Hostile:
-            TierText = TEXT("Hostile");
-            Color = FLinearColor(0.9f, 0.1f, 0.1f); // red
-            break;
-        case EMythicStandingTier::Friendly:
-            TierText = TEXT("Friendly");
-            Color = FLinearColor(0.1f, 0.9f, 0.3f); // green
-            break;
-        default:
-            TierText = TEXT("Neutral");
-            Color = FLinearColor(0.8f, 0.8f, 0.8f); // gray
-            break;
-        }
-        // A faction standing shift is a major beat -> hero banner (faction name + the new standing beneath).
-        Feedback->AddScreenBanner(FText::FromString(FactionName),
-                                  FText::FromString(FString::Printf(TEXT("Now %s"), *TierText)),
-                                  Color, nullptr, 3.0f);
-    }
 }

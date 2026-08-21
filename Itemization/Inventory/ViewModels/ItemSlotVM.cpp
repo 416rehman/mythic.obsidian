@@ -1,4 +1,3 @@
-// 
 
 
 #include "ItemSlotVM.h"
@@ -9,6 +8,9 @@
 #include "TimerManager.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/ItemDefinition.h"
+#include "Itemization/Inventory/InventorySlotDefinition.h"
+#include "Itemization/Inventory/MythicLootFilter.h"
+#include "Itemization/MythicTags_Inventory.h"
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
 
 void UItemSlotVM::SetIcon(UTexture2D *InIcon) {
@@ -19,6 +21,16 @@ void UItemSlotVM::SetIcon(UTexture2D *InIcon) {
 
 UTexture2D *UItemSlotVM::GetIcon() const {
     return Icon;
+}
+
+void UItemSlotVM::SetEmptySlotIcon(UTexture2D *InIcon) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(EmptySlotIcon, InIcon)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(EmptySlotIcon);
+    }
+}
+
+UTexture2D *UItemSlotVM::GetEmptySlotIcon() const {
+    return EmptySlotIcon;
 }
 
 void UItemSlotVM::SetIsJunk(bool NewIsJunk) {
@@ -204,20 +216,22 @@ void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *
     SetSlotDefinition(InSlotDefinition);
     SetParentInventoryVM(InParentVM);
 
-    // figure out equipment state from the slot entry
     bool bSlotIsEquipment = false;
+    bool bSlotCanTake = true;
     if (InParentVM) {
         UMythicInventoryComponent *InvComp = InParentVM->GetOwningInventoryComponent();
         if (InvComp) {
             FMythicInventorySlotEntry SlotEntry;
             if (InvComp->GetSlotEntry(InAbsoluteIndex, SlotEntry)) {
                 bSlotIsEquipment = SlotEntry.bEquipmentSlot;
+                bSlotCanTake = SlotEntry.bCanPlayerTake;
             }
         }
     }
 
     if (InItemInstance == nullptr) {
         SetIcon(nullptr);
+        SetEmptySlotIcon(bSlotIsEquipment && SlotDefinition ? SlotDefinition->Icon.Get() : nullptr);
         SetIsJunk(false);
         SetBackgroundColor(FLinearColor::Black);
         SetQuantity(0);
@@ -240,6 +254,7 @@ void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *
     if (ItemDef == nullptr) {
         UE_LOG(Myth, Error, TEXT("ItemInstance %s has null ItemDefinition"), *GetNameSafe(InItemInstance));
         SetIcon(nullptr);
+        SetEmptySlotIcon(bSlotIsEquipment && SlotDefinition ? SlotDefinition->Icon.Get() : nullptr);
         SetIsJunk(false);
         SetBackgroundColor(FLinearColor::Black);
         SetQuantity(0);
@@ -258,13 +273,18 @@ void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *
         return;
     }
 
-    // icon (synchronous load for soft refs, matches ConversionViewModels::LoadIcon)
     SetIcon(ItemDef->Icon2d.IsNull() ? nullptr : ItemDef->Icon2d.LoadSynchronous());
-    SetIsJunk(false);
+    SetEmptySlotIcon(nullptr);
+
+    const bool bItemIsCurrency = ItemDef->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY);
+    SetIsJunk(MythicLootFilter::IsJunk(InItemInstance->IsMarkedJunk(),
+                                       static_cast<int32>(ItemDef->Rarity.GetValue()),
+                                       MythicLootFilter::DefaultMaxJunkRarity,
+                                       ItemDef->Value, bItemIsCurrency, bSlotIsEquipment, bSlotCanTake));
+
     SetBackgroundColor(UItemDefinition::GetRarityColor(ItemDef->Rarity));
     SetQuantity(InItemInstance->GetStacks());
 
-    // identity fields from definition
     SetItemName(ItemDef->Name);
     SetItemDescription(ItemDef->Description);
     SetRarity(ItemDef->Rarity);
@@ -273,10 +293,8 @@ void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *
     SetWeight(ItemDef->Weight);
     SetValue(ItemDef->Value);
 
-    // equipment slot with a live item counts as equipped
     SetIsEquipped(bSlotIsEquipment && InItemInstance != nullptr);
 
-    // durability from the DurabilityFragment if present
     const UDurabilityFragment *DurFrag = InItemInstance->GetFragment<UDurabilityFragment>();
     if (DurFrag) {
         float CurDur = static_cast<float>(DurFrag->GetCurrentDurability());

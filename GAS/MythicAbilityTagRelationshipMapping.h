@@ -11,7 +11,6 @@
 
 class UObject;
 
-/** Struct that defines the relationship between different ability tags */
 USTRUCT()
 struct FMythicAbilityTagRelationship
 {
@@ -39,7 +38,6 @@ struct FMythicAbilityTagRelationship
 };
 
 
-/** Mapping of how ability tags block or cancel other abilities */
 UCLASS()
 class UMythicAbilityTagRelationshipMapping : public UDataAsset
 {
@@ -51,12 +49,9 @@ private:
     TArray<FMythicAbilityTagRelationship> AbilityTagRelationships;
 
 public:
-    /** Given a set of ability tags, parse the tag relationship and fill out tags to block and cancel */
     void GetAbilityTagsToBlockAndCancel(const FGameplayTagContainer& AbilityTags, FGameplayTagContainer* OutTagsToBlock, FGameplayTagContainer* OutTagsToCancel) const;
 
-    /** Given a set of ability tags, add additional required and blocking tags */
     void GetRequiredAndBlockedActivationTags(const FGameplayTagContainer& AbilityTags, FGameplayTagContainer* OutActivationRequired, FGameplayTagContainer* OutActivationBlocked) const;
 
-    /** Returns true if the specified ability tags are canceled by the passed in action tag */
     bool IsAbilityCancelledByTag(const FGameplayTagContainer& AbilityTags, const FGameplayTag& ActionTag) const;
 };

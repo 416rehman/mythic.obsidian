@@ -1,4 +1,3 @@
-//
 
 
 #include "MythicGameMode.h"
@@ -14,19 +13,17 @@
 #include "TimerManager.h"
 #include "AbilitySystemInterface.h"
 #include "AbilitySystemComponent.h"
-#include "EngineUtils.h"                       // TActorIterator (re-publicize a departing player's private loot)
+#include "EngineUtils.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Itemization/Loot/MythicWorldItem.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "Subsystem/SaveSystem/MythicSaveGameSubsystem.h"
+#include "Player/MythicPlayerState.h"
 #include "UObject/Package.h"
 
 namespace {
-    // Local FString aliases of the canonical slot names (single source: UMythicSaveGameSubsystem) so cheat-saved,
-    // auto-saved, and world-loaded data all share the same slots.
     const FString WorldSaveSlot = UMythicSaveGameSubsystem::DebugWorldSlot;
-    const FString CharacterSaveSlot = UMythicSaveGameSubsystem::DebugCharacterSlot;
 }
 
 void AMythicGameMode::RequestRespawn(AController *Controller, float Delay) {
@@ -34,8 +31,6 @@ void AMythicGameMode::RequestRespawn(AController *Controller, float Delay) {
         return;
     }
 
-    // Cancel any pending respawn for this controller so a duplicate request (e.g. two lethal hits) can't
-    // queue two restarts.
     if (FTimerHandle *Existing = RespawnTimers.Find(Controller)) {
         GetWorldTimerManager().ClearTimer(*Existing);
         RespawnTimers.Remove(Controller);
@@ -52,7 +47,6 @@ void AMythicGameMode::RequestRespawn(AController *Controller, float Delay) {
 }
 
 float AMythicGameMode::GetAutosaveTimeRemaining() const {
-    // Game-thread read for the Living World gameplay debugger. GetTimerRemaining returns -1 when the timer is inactive.
     if (const UWorld *W = GetWorld()) {
         return W->GetTimerManager().GetTimerRemaining(AutosaveTimerHandle);
     }
@@ -66,8 +60,6 @@ void AMythicGameMode::HandleRespawnTimer(AController *Controller) {
         return;
     }
 
-    // Release the old (dead) pawn so RestartPlayer spawns a fresh one, but DON'T destroy it yet - if the
-    // respawn fails (no valid PlayerStart) we must not strand the controller pawnless.
     APawn *OldPawn = Controller->GetPawn();
     if (OldPawn) {
         Controller->UnPossess();
@@ -77,23 +69,18 @@ void AMythicGameMode::HandleRespawnTimer(AController *Controller) {
 
     APawn *NewPawn = Controller->GetPawn();
     if (NewPawn && NewPawn != OldPawn) {
-        // Respawn succeeded: destroy the old corpse.
         if (IsValid(OldPawn)) {
             OldPawn->Destroy();
         }
         return;
     }
 
-    // Respawn produced no new pawn (missing/blocked PlayerStart). Recover by re-possessing and reviving the
-    // old pawn rather than leaving the player stuck spectating, and surface the misconfiguration loudly.
     UE_LOG(Myth, Error, TEXT("MythicGameMode: respawn for %s produced no pawn (missing PlayerStart?); reviving old pawn."),
            *GetNameSafe(Controller));
     if (IsValid(OldPawn)) {
         if (Controller->GetPawn() != OldPawn) {
             Controller->Possess(OldPawn);
         }
-        // Clear the death latch so the re-possessed pawn is alive again (otherwise bOutOfHealth keeps it an
-        // immortal corpse).
         if (IAbilitySystemInterface *ASI = Cast<IAbilitySystemInterface>(OldPawn)) {
             if (UAbilitySystemComponent *ASC = ASI->GetAbilitySystemComponent()) {
                 if (const UMythicAttributeSet_Life *Life = ASC->GetSet<UMythicAttributeSet_Life>()) {
@@ -110,30 +97,23 @@ void AMythicGameMode::Logout(AController *Exiting) {
         RespawnTimers.Remove(Exiting);
     }
 
-    // A departing player's PRIVATE world-item drops are bOnlyRelevantToOwner with their PlayerController as the
-    // relevancy owner. Once that controller is torn down (just below, in Super::Logout) the items become relevant to
-    // NOBODY — invisible, unclaimable, and leaked on the server. Re-publicize them so they revert to ordinary public
-    // loot a remaining player can pick up (the reservation expired with the player; strictly better than a leak).
-    // Server-only; logout is rare, so the one-time world-item scan is fine.
     if (HasAuthority() && GetWorld() && Exiting) {
         for (TActorIterator<AMythicWorldItem> It(GetWorld()); It; ++It) {
             AMythicWorldItem *WorldItem = *It;
             if (WorldItem && WorldItem->GetTargetRecipient() == Exiting) {
-                WorldItem->SetOwner(nullptr);            // detach from the leaving PC (the relevancy owner)
-                WorldItem->bOnlyRelevantToOwner = false; // relevant to every connection again
-                WorldItem->SetTargetRecipient(nullptr);  // OnRep clears the private-visibility hide → visible to all
+                WorldItem->SetOwner(nullptr);
+                WorldItem->bOnlyRelevantToOwner = false;
+                WorldItem->SetTargetRecipient(nullptr);
+                WorldItem->FlushNetDormancy();
             }
         }
     }
 
-    // Save-on-logout: persist the departing player's character while their PlayerState is still valid
-    // (Super::Logout tears it down). Reuses the cheat path's exact call: SaveCharacter(PlayerState, Slot).
-    // Single fixed slot until a per-player save key exists (see autosave note / BACKLOG).
     if (HasAuthority()) {
         if (APlayerController *PC = Cast<APlayerController>(Exiting)) {
             if (PC->PlayerState) {
                 if (UMythicSaveGameSubsystem *SaveSys = GetSaveSubsystem()) {
-                    SaveSys->SaveCharacter(PC->PlayerState, CharacterSaveSlot);
+                    SaveSys->SaveCharacter(PC->PlayerState, GetCharacterSlotForPlayer(PC->PlayerState));
                 }
             }
         }
@@ -143,19 +123,13 @@ void AMythicGameMode::Logout(AController *Exiting) {
 }
 
 void AMythicGameMode::OnPostLogin(AController *NewPlayer) {
-    // Super first so the default AGameModeBase possession / HUD / welcome flow completes before we touch state.
     Super::OnPostLogin(NewPlayer);
 
-    // CHARACTER load-on-join: the per-player mirror of the world load (AMythicGameState::BeginPlay). At this point
-    // possession is done, so the PlayerController + its UProficiencyComponent + inventory components have begun
-    // play (slots initialized) and the PlayerState is valid. Pass the PlayerState exactly like the save callers so
-    // ResolveCharacterActors handles the PS(name)->PC(proficiencies/inventory) split. LoadCharacter self-guards via
-    // DoesSaveGameExist, so a brand-new character with no save is a clean no-op.
     if (!HasAuthority() || !NewPlayer || !NewPlayer->PlayerState) {
         return;
     }
     if (UMythicSaveGameSubsystem *SaveSys = GetSaveSubsystem()) {
-        SaveSys->LoadCharacter(NewPlayer->PlayerState, CharacterSaveSlot);
+        SaveSys->LoadCharacter(NewPlayer->PlayerState, GetCharacterSlotForPlayer(NewPlayer->PlayerState));
     }
 }
 
@@ -166,8 +140,6 @@ void AMythicGameMode::BeginPlay() {
         return;
     }
 
-    // Arm the periodic autosave. Per-slot save concurrency is gated inside the save subsystem (it skips a slot
-    // that already has a background write in flight), so no GameMode-side in-flight tracking is needed.
     GetWorldTimerManager().SetTimer(AutosaveTimerHandle, this, &AMythicGameMode::HandleAutosaveTimer, AutosaveIntervalSeconds, true);
 }
 
@@ -186,17 +158,12 @@ void AMythicGameMode::HandleAutosaveTimer() {
         return;
     }
 
-    // World autosave. The subsystem skips a slot with a write already in flight, so a slow save can't be
-    // stacked by the next tick.
     SaveSys->SaveWorld(WorldSaveSlot);
 
-    // Character autosave for each connected player. Single fixed slot => last-writer-wins in multiplayer until
-    // a per-player save key (session / character-select layer) exists; see Docs/BACKLOG.md. The subsystem's
-    // per-slot in-flight gate prevents concurrent writes to the shared slot from racing/tearing the file.
     if (GameState) {
         for (APlayerState *PS : GameState->PlayerArray) {
             if (PS) {
-                SaveSys->SaveCharacter(PS, CharacterSaveSlot);
+                SaveSys->SaveCharacter(PS, GetCharacterSlotForPlayer(PS));
             }
         }
     }
@@ -205,4 +172,22 @@ void AMythicGameMode::HandleAutosaveTimer() {
 UMythicSaveGameSubsystem *AMythicGameMode::GetSaveSubsystem() const {
     UGameInstance *GI = GetGameInstance();
     return GI ? GI->GetSubsystem<UMythicSaveGameSubsystem>() : nullptr;
+}
+
+FString AMythicGameMode::GetCharacterSlotForPlayer(const APlayerState *PS) const {
+    if (const AMythicPlayerState *MythPS = Cast<AMythicPlayerState>(PS)) {
+        const FString &Persistent = MythPS->GetPersistentCharacterId();
+        if (!Persistent.IsEmpty()) {
+            return Persistent;
+        }
+    }
+
+    FString StableId;
+    if (PS) {
+        const FUniqueNetIdRepl &NetId = PS->GetUniqueId();
+        if (NetId.IsValid()) {
+            StableId = NetId->ToString();
+        }
+    }
+    return UMythicSaveGameSubsystem::ResolvePerPlayerCharacterSlot(StableId);
 }

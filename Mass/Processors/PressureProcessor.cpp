@@ -1,6 +1,3 @@
-// Mythic Living World — Pressure Accumulation & Venting Implementation
-// Handles: pressure accumulation, lazy decay, personality-routed venting,
-// guard Enforce, emotional contagion, mob dynamics, and despair detection.
 
 #include "Mass/Processors/PressureProcessor.h"
 #include "MassEntitySubsystem.h"
@@ -18,10 +15,9 @@
 UMythicPressureProcessor::UMythicPressureProcessor() {
     ProcessingPhase = EMassProcessingPhase::PrePhysics;
     ExecutionFlags = static_cast<uint8>(EProcessorExecutionFlags::Server | EProcessorExecutionFlags::Standalone);
-    bRequiresGameThreadExecution = true; // Accesses world subsystems
+    bRequiresGameThreadExecution = true;
     bAutoRegisterWithProcessingPhases = true;
 
-    // Run after witness perception has produced results
     ExecutionOrder.ExecuteAfter.Add(TEXT("UMythicWitnessPerceptionProcessor"));
 
     HydratedEntityQuery.RegisterWithProcessor(*this);
@@ -36,11 +32,11 @@ void UMythicPressureProcessor::ConfigureQueries(const TSharedRef<FMassEntityMana
 }
 
 bool UMythicPressureProcessor::ComputeDespairState(float TotalPressure, float DespairThreshold, bool bWasDespaired) {
-    constexpr float RecoveryFraction = 0.75f; // lift despair only after pressure drops to 75% of the trigger (hysteresis)
+    constexpr float RecoveryFraction = 0.75f;
     if (!bWasDespaired) {
-        return TotalPressure >= DespairThreshold; // enter despair
+        return TotalPressure >= DespairThreshold;
     }
-    return TotalPressure >= DespairThreshold * RecoveryFraction; // stay despaired until well below the trigger
+    return TotalPressure >= DespairThreshold * RecoveryFraction;
 }
 
 void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassExecutionContext &Context) {
@@ -51,7 +47,6 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
         return;
     }
 
-    // Resolve action event subsystem
     if (!CachedActionSubsystem.IsValid()) {
         CachedActionSubsystem = World->GetSubsystem<UMythicActionEventSubsystem>();
     }
@@ -63,7 +58,7 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
 
     TArray<FMythicWitnessResult> &WitnessResults = ActionSub->GetPendingWitnessResults();
     if (WitnessResults.Num() == 0) {
-        return; // Event-driven: zero cost when idle
+        return;
     }
 
     UGameInstance *GI = World->GetGameInstance();
@@ -97,12 +92,10 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
     const int32 ShameIdx = static_cast<int32>(EMythicPressureChannel::Shame);
     const int32 DesireIdx = static_cast<int32>(EMythicPressureChannel::Desire);
 
-    // Vent channel indices
     const int32 EnforceVent = static_cast<int32>(EMythicVentChannel::Enforce);
     const int32 FightVent = static_cast<int32>(EMythicVentChannel::Fight);
     const int32 FleeVent = static_cast<int32>(EMythicVentChannel::Flee);
 
-    // ─── Phase 1: Build entity → witness results map ───
     TMap<FMassEntityHandle, TArray<const FMythicWitnessResult *>> EntityWitnessMap;
     EntityWitnessMap.Reserve(WitnessResults.Num());
 
@@ -111,22 +104,18 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
         EntityWitnessMap.FindOrAdd(WitnessResults[i].WitnessEntity).Add(&WitnessResults[i]);
     }
 
-    // ─── Phase 2: Track venting for secondary effects (guard assist, contagion, mobs) ───
-    // Deferred secondary pressure effects — applied next frame to avoid O(n²) within same frame
     struct FDeferredPressureBoost {
         FMythicCellCoord Cell;
         FMythicFactionId Faction;
         int32 PressureChannel;
         float Amount;
-        int32 Radius; // cell radius — from the designer-tunable GuardAssist/EmotionalContagion settings, not a hardcoded 2
+        int32 Radius;
     };
     TArray<FDeferredPressureBoost> DeferredBoosts;
     DeferredBoosts.Reserve(16);
 
-    // Track Fight targets for mob dynamics
-    TMap<int32, int32> FightTargetCounts; // target entity index → count of fighters
+    TMap<int32, int32> FightTargetCounts;
 
-    // ─── Phase 3: Process entities with pending witness results ───
     HydratedEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext &ChunkContext) {
         if (PressureBudget <= 0) {
             return;
@@ -142,7 +131,7 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
             const FMassEntityHandle Entity = ChunkContext.GetEntity(i);
             const TArray<const FMythicWitnessResult *> *Results = EntityWitnessMap.Find(Entity);
             if (!Results) {
-                continue; // This entity has no pending witness results
+                continue;
             }
 
             const FMythicIdentityFragment &Identity = IdentityView[i];
@@ -150,8 +139,6 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
             const FMythicPersonalityFragment &Personality = PersonalityView[i];
             FMythicSignificanceFragment &Significance = SignificanceView[i];
 
-            // ─── Lazy Decay ───
-            // O(1): exponential decay since last event, computed only when touched
             const double Elapsed = CurrentWorldTime - Psycho.LastEventTime;
             if (Elapsed > 0.0 && Psycho.LastEventTime > 0.0) {
                 const float DecayMultiplier = FMath::Exp(-DecayRate * static_cast<float>(Elapsed));
@@ -160,11 +147,9 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
                 }
             }
 
-            // ─── Accumulate Pressure ───
             for (const FMythicWitnessResult *Result : *Results) {
                 --PressureBudget;
 
-                // Severity-based magnitude scaling
                 float SeverityMagnitude = 0.0f;
                 switch (Result->Severity) {
                 case EMythicMoralSeverity::Disapprove:
@@ -177,10 +162,9 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
                     SeverityMagnitude = 1.0f * Result->EventSignificance;
                     break;
                 default:
-                    continue; // Ignore — should never reach here
+                    continue;
                 }
 
-                // Map category flags → pressure channels
                 const bool bIsCombat = (Result->EventCategoryFlags & EMythicEventCategory::Combat) != 0;
                 const bool bIsCrime = (Result->EventCategoryFlags & EMythicEventCategory::Crime) != 0;
                 const bool bIsDeath = (Result->EventCategoryFlags & EMythicEventCategory::Death) != 0;
@@ -197,15 +181,12 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
                 if (bIsDeath) {
                     Psycho.Pressure[GriefIdx] += SeverityMagnitude * 0.8f;
                 }
-                // Magic/ability spectacle → extra Threat for non-magic NPCs
                 if (bIsMagic) {
                     Psycho.Pressure[ThreatIdx] += SeverityMagnitude * 0.6f;
                 }
-                // Environmental danger → pure Threat
                 if (bIsEnvironment) {
                     Psycho.Pressure[ThreatIdx] += SeverityMagnitude * 0.7f;
                 }
-                // Default: if no specific category, apply to Threat at half magnitude
                 if (!bIsCombat && !bIsCrime && !bIsDeath && !bIsMagic && !bIsEnvironment) {
                     Psycho.Pressure[ThreatIdx] += SeverityMagnitude * 0.5f;
                 }
@@ -213,17 +194,10 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
 
             Psycho.LastEventTime = CurrentWorldTime;
 
-            // ─── Despair Detection (REQ-BEH-009) ───
-            // Total unvented pressure across all channels exceeds threshold → despair
             float TotalPressure = 0.0f;
             for (int32 c = 0; c < PressureChannelCount; ++c) {
                 TotalPressure += Psycho.Pressure[c];
             }
-            // Despair is RECOVERABLE (was previously set-once-never-reset → permanent). Recompute each pressure tick; it
-            // lifts once pressure falls back through the hysteresis band. NOTE: only updates when the entity has witness
-            // results this tick (the processor is event-driven), so decay-only recovery lags until the entity is next
-            // processed — acceptable, and far better than never recovering. (bDespaired's consumer — faction-collapse
-            // spirals per the fragment doc — is still unbuilt/design-gated; this makes the state correct for it.)
             const bool bNowDespaired = ComputeDespairState(TotalPressure, DespairThreshold, Psycho.bDespaired);
             if (bNowDespaired != Psycho.bDespaired) {
                 Psycho.bDespaired = bNowDespaired;
@@ -233,8 +207,6 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
                        TotalPressure, DespairThreshold);
             }
 
-            // ─── Vent Check ───
-            // Find the pressure channel with the highest value
             float MaxPressure = 0.0f;
             int32 MaxPressureChannel = -1;
             for (int32 c = 0; c < PressureChannelCount; ++c) {
@@ -245,8 +217,6 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
             }
 
             if (MaxPressure >= VentThreshold && MaxPressureChannel >= 0) {
-                // Route through personality — pick the vent channel with highest weight
-                // Guards (role tag) have elevated Enforce weight from personality generation
                 float BestVentWeight = -1.0f;
                 int32 BestVentChannel = 0;
                 for (int32 v = 0; v < VentChannelCount; ++v) {
@@ -256,50 +226,40 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
                     }
                 }
 
-                // ─── Guard Assist Propagation (REQ-BEH-002) ───
-                // When a guard vents via Enforce, nearby same-faction guards get assist boost
                 if (BestVentChannel == EnforceVent) {
                     FDeferredPressureBoost Boost;
                     Boost.Cell = Identity.Cell;
                     Boost.Faction = Identity.Faction;
                     Boost.PressureChannel = InjusticeIdx;
-                    Boost.Amount = MaxPressure * 0.3f; // 30% of enforcer's pressure
-                    Boost.Radius = FMath::RoundToInt(GuardAssistRadius); // REQ-BEH-002 designer-tunable radius (was hardcoded 2)
+                    Boost.Amount = MaxPressure * 0.3f;
+                    Boost.Radius = FMath::RoundToInt(GuardAssistRadius);
                     DeferredBoosts.Add(Boost);
                 }
 
-                // ─── Emotional Contagion (REQ-BEH-003) ───
-                // Flee venting spreads Threat to nearby entities (budget-capped, 1 hop)
                 if (BestVentChannel == FleeVent) {
                     FDeferredPressureBoost Boost;
                     Boost.Cell = Identity.Cell;
-                    Boost.Faction = FMythicFactionId(); // Any faction — contagion crosses faction lines
+                    Boost.Faction = FMythicFactionId();
                     Boost.PressureChannel = ThreatIdx;
-                    Boost.Amount = MaxPressure * 0.2f; // 20% contagion transfer
-                    Boost.Radius = FMath::RoundToInt(EmotionalContagionRadius); // REQ-BEH-003 designer-tunable radius (was hardcoded 2)
+                    Boost.Amount = MaxPressure * 0.2f;
+                    Boost.Radius = FMath::RoundToInt(EmotionalContagionRadius);
                     DeferredBoosts.Add(Boost);
                 }
 
-                // ─── Mob Dynamics (REQ-BEH-005) ───
-                // Track Fight target for mob formation
                 if (BestVentChannel == FightVent && Psycho.FightTargetEntity != INDEX_NONE) {
                     FightTargetCounts.FindOrAdd(Psycho.FightTargetEntity)++;
                 }
 
-                // Reduce pressure after venting (release half the peak pressure)
                 Psycho.Pressure[MaxPressureChannel] *= 0.5f;
 
                 UE_LOG(LogMythLivingWorld, Verbose, TEXT("Pressure vent: Entity vented via channel %d (pressure=%.2f, threshold=%.2f)"),
                        BestVentChannel, MaxPressure, VentThreshold);
             }
 
-            // Dirty significance — pressure change affects significance score
             Significance.bDirty = true;
         }
     });
 
-    // ─── Phase 4: Apply mob bonuses ───
-    // When enough entities share the same Fight target, grant mob bonus
     if (FightTargetCounts.Num() > 0) {
         HydratedEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext &ChunkContext) {
             const int32 NumEntities = ChunkContext.GetNumEntities();
@@ -313,21 +273,15 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
 
                 const int32 *Count = FightTargetCounts.Find(Psycho.FightTargetEntity);
                 if (Count && *Count >= MobFormationThreshold) {
-                    // Mob formed: boost Fight pressure, reduce Threat (safety in numbers)
                     Psycho.Pressure[WrathIdx] += 0.3f;
-                    Psycho.Pressure[ThreatIdx] *= 0.7f; // 30% Threat reduction from mob
+                    Psycho.Pressure[ThreatIdx] *= 0.7f;
                 }
             }
         });
     }
 
-    // ─── Phase 5: Store deferred boosts for next frame processing ───
-    // Guard assist and emotional contagion are applied via the ActionEventSubsystem's
-    // deferred pressure boost queue. This prevents O(n²) per-frame cascades.
-    // The boosts are processed in the NEXT frame's pressure pass.
-    // (For now, we process inline with a secondary chunk pass — budget-capped)
     if (DeferredBoosts.Num() > 0) {
-        int32 DeferredBudget = 16; // Max deferred pressure applications per frame
+        int32 DeferredBudget = 16;
         HydratedEntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext &ChunkContext) {
             if (DeferredBudget <= 0) {
                 return;
@@ -339,13 +293,11 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
             for (int32 i = 0; i < NumEntities && DeferredBudget > 0; ++i) {
                 const FMythicIdentityFragment &Identity = IdentityView[i];
                 for (const FDeferredPressureBoost &Boost : DeferredBoosts) {
-                    // Check cell radius
                     const int32 Dist = FMath::Abs(Identity.Cell.X - Boost.Cell.X)
                         + FMath::Abs(Identity.Cell.Y - Boost.Cell.Y);
-                    if (Dist > Boost.Radius) { // designer-tunable per-boost radius (GuardAssist/EmotionalContagion settings)
+                    if (Dist > Boost.Radius) {
                         continue;
                     }
-                    // Faction check (if specified — contagion is faction-agnostic)
                     if (Boost.Faction.IsValid() && Identity.Faction.Index != Boost.Faction.Index) {
                         continue;
                     }
@@ -356,6 +308,5 @@ void UMythicPressureProcessor::Execute(FMassEntityManager &EntityManager, FMassE
         });
     }
 
-    // Flush consumed witness results
     ActionSub->FlushProcessedWitnessResults();
 }

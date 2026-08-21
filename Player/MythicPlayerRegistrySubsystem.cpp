@@ -16,10 +16,8 @@ void UMythicPlayerRegistrySubsystem::RegisterPlayer(const FString &CanonicalKey,
         return;
     }
 
-    // clean up any existing entries under this key to ensure clean overwrite
     UnregisterPlayer(CanonicalKey);
 
-    // clear key associations for objects if they were already mapped elsewhere
     if (PlayerState) {
         UnregisterObject(PlayerState);
     }
@@ -31,7 +29,6 @@ void UMythicPlayerRegistrySubsystem::RegisterPlayer(const FString &CanonicalKey,
         UnregisterObject(Pawn);
     }
 
-    // record weak references using the canonical key
     if (PlayerState) {
         RegisteredPlayerStates.Add(CanonicalKey, PlayerState);
         ObjectToKeyMap.Add(FObjectKey(PlayerState), CanonicalKey);
@@ -51,7 +48,6 @@ void UMythicPlayerRegistrySubsystem::UnregisterPlayer(const FString &CanonicalKe
         return;
     }
 
-    // remove object key associations from the reverse lookup map
     if (const TWeakObjectPtr<AMythicPlayerState> *FoundPS = RegisteredPlayerStates.Find(CanonicalKey)) {
         if (AMythicPlayerState *PS = FoundPS->Get()) {
             ObjectToKeyMap.Remove(FObjectKey(PS));
@@ -68,7 +64,6 @@ void UMythicPlayerRegistrySubsystem::UnregisterPlayer(const FString &CanonicalKe
         }
     }
 
-    // erase primary lookup entries
     RegisteredPlayerStates.Remove(CanonicalKey);
     RegisteredPlayerControllers.Remove(CanonicalKey);
     RegisteredPawns.Remove(CanonicalKey);
@@ -79,7 +74,6 @@ void UMythicPlayerRegistrySubsystem::UnregisterObject(UObject *PlayerObject) {
         return;
     }
 
-    // look up the key associated with the object and wipe all references
     FString Key;
     if (GetKeyForObject(PlayerObject, Key)) {
         UnregisterPlayer(Key);

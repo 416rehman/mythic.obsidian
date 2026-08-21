@@ -2,12 +2,6 @@
 #include "MVVMViewModelBase.h"
 #include "InputTypes.generated.h"
 
-/// ViewModels for Mythic Input Types
-/// Toggle On/Off
-/// Select Option
-/// Slider
-///
-///
 
 USTRUCT(BlueprintType)
 struct FOptionAndDescription {
@@ -32,7 +26,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
     virtual void SetLabel(FText InLabel) {
         Label = InLabel;
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Label); // FText has no usable operator== for the equality-checked macro
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Label);
     };
 
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
@@ -43,7 +37,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
     virtual void SetDescription(FText InDescription) {
         Description = InDescription;
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Description); // FText has no usable operator== for the equality-checked macro
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Description);
     };
 
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")

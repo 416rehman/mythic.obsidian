@@ -1,7 +1,9 @@
 #include "MythicUIManagerSubsystem.h"
 
 #include "CommonLocalPlayer.h"
+#include "Widgets/CommonActivatableWidgetContainer.h"
 #include "Engine/GameInstance.h"
+#include "TimerManager.h"
 #include "GameFramework/HUD.h"
 #include "GameUIPolicy.h"
 #include "Mythic.h"
@@ -17,20 +19,101 @@ UMythicUIManagerSubsystem::UMythicUIManagerSubsystem() {}
 void UMythicUIManagerSubsystem::Initialize(FSubsystemCollectionBase &Collection) {
     Super::Initialize(Collection);
 
-    //TickHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &UMythicUIManagerSubsystem::Tick), 0.0f);
+    bModalLayerAffectsOtherLayers = true;
+    ModalLayer = FGameplayTag::RequestGameplayTag(TEXT("UI.Layer.Menu"));
+    OtherLayers.Reset();
+    OtherLayers.AddTag(FGameplayTag::RequestGameplayTag(TEXT("UI.Layer.Game")));
+    OtherLayersVisibility = ESlateVisibility::Collapsed;
 }
 
 void UMythicUIManagerSubsystem::Deinitialize() {
     Super::Deinitialize();
-
-    //FTSTicker::GetCoreTicker().RemoveTicker(TickHandle);
 }
 
 void UMythicUIManagerSubsystem::NotifyPlayerAdded(UCommonLocalPlayer *NewLocalPlayer) {
     Super::NotifyPlayerAdded(NewLocalPlayer);
     if (GetCurrentUIPolicy()) {
         this->PrimaryLocalPlayer = NewLocalPlayer;
+        BindModalLayerWatch();
     }
+}
+
+void UMythicUIManagerSubsystem::BindModalLayerWatch() {
+    if (bModalWatchBound || !bModalLayerAffectsOtherLayers || !ModalLayer.IsValid()) {
+        return;
+    }
+
+    auto RetryLater = [this](const TCHAR *Why) {
+        if (++ModalWatchAttempts > 40) {
+            UE_LOG(Myth, Warning, TEXT("BindModalLayerWatch: gave up after %d attempts (%s). The HUD will draw over menus."),
+                   ModalWatchAttempts, Why);
+            return;
+        }
+        if (UGameInstance *GI = GetGameInstance()) {
+            GI->GetTimerManager().SetTimer(ModalWatchRetryTimer,
+                                           FTimerDelegate::CreateUObject(this, &UMythicUIManagerSubsystem::BindModalLayerWatch),
+                                           0.25f, false);
+        }
+    };
+
+    const UGameUIPolicy *Policy = GetCurrentUIPolicy();
+    if (!Policy || !PrimaryLocalPlayer) {
+        RetryLater(TEXT("no policy or local player"));
+        return;
+    }
+    UPrimaryGameLayout *RootLayout = Policy->GetRootLayout(PrimaryLocalPlayer);
+    if (!RootLayout) {
+        RetryLater(TEXT("root layout not built yet"));
+        return;
+    }
+    UCommonActivatableWidgetContainerBase *Modal = RootLayout->GetLayerWidget(ModalLayer);
+    if (!Modal) {
+        RetryLater(TEXT("modal layer not registered yet"));
+        return;
+    }
+
+    Modal->OnDisplayedWidgetChanged().AddUObject(this, &UMythicUIManagerSubsystem::HandleModalDisplayedWidgetChanged);
+    bModalWatchBound = true;
+    UE_LOG(Myth, Log, TEXT("BindModalLayerWatch: watching %s; %d layer(s) will collapse while it is showing"),
+           *ModalLayer.ToString(), OtherLayers.Num());
+
+    ApplyModalLayerEffect(Modal->GetActiveWidget() != nullptr);
+}
+
+void UMythicUIManagerSubsystem::HandleModalDisplayedWidgetChanged(UCommonActivatableWidget *Displayed) {
+    ApplyModalLayerEffect(Displayed != nullptr);
+}
+
+void UMythicUIManagerSubsystem::ApplyModalLayerEffect(bool bModalShowing) {
+    const UGameUIPolicy *Policy = GetCurrentUIPolicy();
+    if (!Policy || !PrimaryLocalPlayer) {
+        return;
+    }
+    UPrimaryGameLayout *RootLayout = Policy->GetRootLayout(PrimaryLocalPlayer);
+    if (!RootLayout) {
+        return;
+    }
+
+    if (bModalShowing) {
+        for (const FGameplayTag &LayerTag : OtherLayers) {
+            UCommonActivatableWidgetContainerBase *Layer = RootLayout->GetLayerWidget(LayerTag);
+            if (!Layer) {
+                continue;
+            }
+            if (!LayerVisibilityMap.Contains(LayerTag)) {
+                LayerVisibilityMap.Add(LayerTag, Layer->GetVisibility());
+            }
+            Layer->SetVisibility(OtherLayersVisibility);
+        }
+        return;
+    }
+
+    for (const TPair<FGameplayTag, ESlateVisibility> &Pair : LayerVisibilityMap) {
+        if (UCommonActivatableWidgetContainerBase *Layer = RootLayout->GetLayerWidget(Pair.Key)) {
+            Layer->SetVisibility(Pair.Value);
+        }
+    }
+    LayerVisibilityMap.Empty();
 }
 
 void UMythicUIManagerSubsystem::NotifyPlayerRemoved(UCommonLocalPlayer *OldLocalPlayer) {
@@ -165,11 +248,9 @@ void UMythicUIManagerSubsystem::SyncRootLayoutVisibilityToShowHUD() {
                     return;
                 }
 
-                // Modal's current child
                 auto ModalLayerChild = Modal->GetActiveWidget();
                 if (!ModalLayerChild) {
                     if (LayerVisibilityMap.Num() > 0) {
-                        // Reset the visibility of the other layers
                         for (const auto &LayerVisibilityPair : LayerVisibilityMap) {
                             auto Layer = RootLayout->GetLayerWidget(LayerVisibilityPair.Key);
                             if (!Layer) {
@@ -179,26 +260,22 @@ void UMythicUIManagerSubsystem::SyncRootLayoutVisibilityToShowHUD() {
                             Layer->SetVisibility(LayerVisibilityPair.Value);
                         }
 
-                        // Clear the map
                         LayerVisibilityMap.Empty();
                     }
 
                     return;
                 }
 
-                // Modal has a child so modify the visibility of the other layers
                 for (const FGameplayTag &LayerTag : this->OtherLayers) {
                     auto Layer = RootLayout->GetLayerWidget(LayerTag);
                     if (!Layer) {
                         return;
                     }
 
-                    // Save the current visibility of the layer
                     if (!LayerVisibilityMap.Contains(LayerTag)) {
                         LayerVisibilityMap.Add(LayerTag, Layer->GetVisibility());
                     }
 
-                    // Set the visibility of the layer
                     Layer->SetVisibility(this->OtherLayersVisibility);
                 }
             }

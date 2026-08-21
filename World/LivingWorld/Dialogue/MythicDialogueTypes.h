@@ -1,6 +1,3 @@
-// Mythic Living World — Dialogue Template Types
-// Template selection system for NPC dialogue. Zero procedural text generation.
-// Designers author templates per role × faction × situation archetype.
 
 #pragma once
 
@@ -9,15 +6,6 @@
 #include "Engine/DataAsset.h"
 #include "MythicDialogueTypes.generated.h"
 
-/**
- * A single dialogue template authored by designers.
- * The cognitive brain selects the best-matching template based on
- * pressure state, relationship, recent events, and role.
- *
- * Template variables are filled from live data at runtime:
- * {faction_name}, {recent_event}, {player_reputation_descriptor},
- * {npc_name}, {settlement_name}, {scheme_name}
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicDialogueTemplate {
     GENERATED_BODY()
@@ -74,11 +62,6 @@ struct MYTHIC_API FMythicDialogueTemplate {
     float CommentaryMoralThreshold = 0.5f;
 };
 
-/**
- * Designer-authored database of dialogue templates.
- * Loaded from the DA_LivingWorldSettings → DialogueDatabase reference.
- * Templates are indexed at load time for fast lookup.
- */
 UCLASS(BlueprintType)
 class MYTHIC_API UMythicDialogueDatabase : public UDataAsset {
     GENERATED_BODY()

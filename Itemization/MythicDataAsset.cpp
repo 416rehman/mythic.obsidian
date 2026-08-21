@@ -8,7 +8,7 @@
 
 #if WITH_EDITOR
 #include "DesktopPlatformModule.h"
-#include "Mythic/Mythic.h" // Assuming "Mythic.h" defines the "Myth" log category
+#include "Mythic/Mythic.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Windows/WindowsPlatformApplicationMisc.h"
 #include "Framework/Application/SlateApplication.h"
@@ -185,7 +185,6 @@ void UMythicDataAssetJSONImportLibrary::ImportDataAssetsFromFolder(TSubclassOf<U
         }
 
         FString AssetName = FPaths::GetBaseFilename(FileName);
-        // Ensure PackagePath ends with / if not empty
         if (!PackagePath.IsEmpty() && !PackagePath.EndsWith("/")) {
             PackagePath += "/";
         }

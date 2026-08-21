@@ -1,4 +1,3 @@
-// Mythic Living World — Creature Ecology Processor Implementation
 
 #include "Mass/Processors/CreatureEcologyProcessor.h"
 #include "MassEntitySubsystem.h"
@@ -18,21 +17,17 @@ UMythicCreatureEcologyProcessor::UMythicCreatureEcologyProcessor() {
     bRequiresGameThreadExecution = false;
     bAutoRegisterWithProcessingPhases = true;
 
-    // Run after population spawner
     ExecutionOrder.ExecuteAfter.Add(TEXT("UMythicPopulationSpawnerProcessor"));
 
-    // Register queries in constructor so CallInitialize can bind the entity manager before ConfigureQueries
     CreatureQuery.RegisterWithProcessor(*this);
     HydratedCreatureQuery.RegisterWithProcessor(*this);
 }
 
 void UMythicCreatureEcologyProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager> &EntityManager) {
-    // All creatures: identity + creature fragment + creature tag
     CreatureQuery.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
     CreatureQuery.AddRequirement<FMythicCreatureFragment>(EMassFragmentAccess::ReadWrite);
     CreatureQuery.AddTagRequirement<FMythicCreatureTag>(EMassFragmentPresence::All);
 
-    // Hydrated creatures: also have psychodynamic fragments for pressure
     HydratedCreatureQuery.AddRequirement<FMythicIdentityFragment>(EMassFragmentAccess::ReadOnly);
     HydratedCreatureQuery.AddRequirement<FMythicCreatureFragment>(EMassFragmentAccess::ReadWrite);
     HydratedCreatureQuery.AddRequirement<FMythicPsychodynamicFragment>(EMassFragmentAccess::ReadWrite);
@@ -41,15 +36,13 @@ void UMythicCreatureEcologyProcessor::ConfigureQueries(const TSharedRef<FMassEnt
 }
 
 float UMythicCreatureEcologyProcessor::ComputeTerritorialAggression(float BaseAggression, bool bNearDen, float TerritorialBoost) {
-    // Transient boost near the den, clamped to 1; the bare authored base elsewhere. Recomputed from BaseAggression
-    // every tick (idempotent — no accumulation), so aggression relaxes the moment the creature leaves its territory.
     return bNearDen ? FMath::Min(1.0f, BaseAggression + TerritorialBoost) : BaseAggression;
 }
 
 void UMythicCreatureEcologyProcessor::BuildAggressionMatrix(const UDataTable *Table, FMythicCreatureAggressionMatrix &OutMatrix) {
     OutMatrix.Entries.Reset();
     if (!Table) {
-        return; // No authored matrix => empty => no cross-species aggression (current behavior preserved).
+        return;
     }
     TArray<FMythicCreatureAggressionRow *> Rows;
     Table->GetAllRows<FMythicCreatureAggressionRow>(TEXT("CreatureAggressionMatrix"), Rows);
@@ -58,7 +51,6 @@ void UMythicCreatureEcologyProcessor::BuildAggressionMatrix(const UDataTable *Ta
         if (!Row) {
             continue;
         }
-        // Last writer wins on a duplicate ordered pair (well-defined; the table author controls ordering).
         OutMatrix.Entries.Add(FMythicCreatureAggressionMatrix::PackKey(Row->AttackerSpeciesId, Row->TargetSpeciesId),
                               FMath::Clamp(Row->Aggression, 0.0f, 1.0f));
     }
@@ -87,16 +79,12 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
         return;
     }
 
-    // Throttle
     TimeSinceLastTick += Context.GetDeltaTimeSeconds();
     if (TimeSinceLastTick < Settings->CreatureEcologyIntervalSeconds) {
         return;
     }
     TimeSinceLastTick = 0.0f;
 
-    // Resolve the species×species aggression matrix ONCE (game-thread only — LoadSynchronous is not thread-safe; this
-    // processor may run off the game thread, so we defer the load to the first game-thread tick and reuse the cached
-    // flattened map thereafter). Until loaded, AggressionMatrix is empty => no cross-species aggression (safe default).
     if (!bAggressionMatrixResolved && IsInGameThread()) {
         bAggressionMatrixResolved = true;
         const UDataTable *Table = Settings->CreatureAggressionMatrix.LoadSynchronous();
@@ -108,9 +96,6 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
     int32 ContagionBudget = Settings->MaxHerdContagionPerTick;
     const int32 ThreatIdx = static_cast<int32>(EMythicPressureChannel::Threat);
 
-    // ─── Step 0: Per-cell species presence (for the cross-species aggression lookup) ───
-    // Built only when an aggression matrix is authored — otherwise it's pure cost for no effect. Maps a cell to the set
-    // of distinct species occupying it. Bounded: one small TSet per occupied cell, cleared each tick (scratch reused).
     TMap<FMythicCellCoord, TSet<uint8>> CellSpecies;
     if (!AggressionMatrix.IsEmpty()) {
         CreatureQuery.ForEachEntityChunk(Context, [&CellSpecies](FMassExecutionContext &ChunkContext) {
@@ -123,9 +108,6 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
         });
     }
 
-    // ─── Step 1: Territorial Aggression Boost (+ cross-species aggression from the matrix) ──────────
-    // For all creatures, boost aggression when near den cell, then raise it toward the highest matrix aggression this
-    // creature feels for any DIFFERENT species sharing its cell (predator senses co-located prey).
 
     CreatureQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext &ChunkContext) {
         const int32 NumEntities = ChunkContext.GetNumEntities();
@@ -140,20 +122,14 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
             const int32 DistToDen = FMath::Abs(CurrentCell.X - DenCell.X) + FMath::Abs(CurrentCell.Y - DenCell.Y);
             const bool bNearDen = DistToDen <= static_cast<int32>(Creature.TerritorialRadius);
 
-            // Recompute the EFFECTIVE aggression transiently from the authored base — boosted near the den, relaxed
-            // away. NEVER mutate BaseAggression (the prior `BaseAggression += Boost` had no decay, so it ratcheted to
-            // 1.0 and stuck — territorial aggression that never relaxed once the creature had visited its den).
             Creature.CurrentAggression = ComputeTerritorialAggression(Creature.BaseAggression, bNearDen, TerritorialBoost);
 
-            // Cross-species aggression: if this creature shares its cell with another species it is hostile toward
-            // (per the authored matrix), raise CurrentAggression toward that value. Transient (recomputed each tick),
-            // so it relaxes the moment the species separate. Skipped entirely when no matrix is authored.
             if (!AggressionMatrix.IsEmpty()) {
                 if (const TSet<uint8> *Here = CellSpecies.Find(CurrentCell)) {
                     float MaxCross = 0.0f;
                     for (const uint8 OtherSpecies : *Here) {
                         if (OtherSpecies == Creature.SpeciesId) {
-                            continue; // same species — not a target
+                            continue;
                         }
                         MaxCross = FMath::Max(MaxCross, AggressionMatrix.Get(Creature.SpeciesId, OtherSpecies));
                     }
@@ -163,14 +139,7 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
         }
     });
 
-    // ─── Step 2: Pack Pressure Sharing + Herd-Flee Contagion ──
-    // Only for hydrated creatures that have psychodynamic fragments
 
-    // First pass: per pack, find the highest Threat AND the cell of the member holding it — pressure sharing is gated
-    // on distance to that source cell (PackRadiusSq) so distant pack members don't telepathically inherit a far-off
-    // scare. (Previously PackRadiusSq was computed but never used and the max threat was shared pack-wide regardless of
-    // distance, defeating PackPressureShareRadius — Mass chunks are archetype-grouped, not spatial, so there was no
-    // implicit spatial bound.)
     TMap<uint16, TPair<float, FMythicCellCoord>> PackMaxThreat;
 
     HydratedCreatureQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext &ChunkContext) {
@@ -182,7 +151,7 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
         for (int32 i = 0; i < NumEntities; ++i) {
             const uint16 PackId = CreatureView[i].PackId;
             if (PackId == 0) {
-                continue; // Solitary creature, no pack
+                continue;
             }
 
             const float Threat = PsychoView[i].Pressure[ThreatIdx];
@@ -194,7 +163,6 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
         }
     });
 
-    // Second pass: share max threat back to pack members + herd-flee contagion
     HydratedCreatureQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext &ChunkContext) {
         const int32 NumEntities = ChunkContext.GetNumEntities();
         const auto CreatureView = ChunkContext.GetFragmentView<FMythicCreatureFragment>();
@@ -212,8 +180,6 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
                 continue;
             }
 
-            // Distance-gate: only members within PackPressureShareRadius of the threat source share its pressure
-            // (the documented contract). Squared-Euclidean so we consume PackRadiusSq without a sqrt.
             const FMythicCellCoord &Cell = IdentityView[i].Cell;
             const int32 dX = Cell.X - PackMax->Value.X;
             const int32 dY = Cell.Y - PackMax->Value.Y;
@@ -223,7 +189,6 @@ void UMythicCreatureEcologyProcessor::Execute(FMassEntityManager &EntityManager,
 
             FMythicPsychodynamicFragment &Psycho = PsychoView[i];
 
-            // Pack pressure sharing: raise this member's threat toward pack max (dampened)
             if (PackMax->Key > Psycho.Pressure[ThreatIdx]) {
                 const float SharedFraction = 0.5f;
                 Psycho.Pressure[ThreatIdx] = FMath::Lerp(Psycho.Pressure[ThreatIdx], PackMax->Key, SharedFraction);

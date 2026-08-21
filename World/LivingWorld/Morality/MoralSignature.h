@@ -1,5 +1,3 @@
-// Mythic Living World System — Moral Signature
-// O(1) incremental moral tracking using Welford's online algorithm
 
 #pragma once
 
@@ -8,38 +6,25 @@
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "MoralSignature.generated.h"
 
-// ─────────────────────────────────────────────────────────────
-// Moral Action — Input to moral evaluation
-// ─────────────────────────────────────────────────────────────
 
-/** A single moral action expressed as contribution per axis. Passed into the signature accumulator. */
 USTRUCT()
 struct MYTHIC_API FMythicMoralAction {
     GENERATED_BODY()
 
-    /** Contribution on each moral axis. Positive = aligned, negative = opposed. */
     float AxisValues[MoralAxisCount] = {};
 };
 
-// ─────────────────────────────────────────────────────────────
-// Per-Axis Running Statistics — Welford's algorithm
-// ─────────────────────────────────────────────────────────────
 
-/** Incrementally maintained mean + variance for one moral axis. Uses Welford's online algorithm: O(1) per update, O(1) per query. */
 USTRUCT()
 struct MYTHIC_API FMythicMoralAxisStats {
     GENERATED_BODY()
 
-    /** Running count of observations */
     int32 Count = 0;
 
-    /** Running mean of observed values */
     float Mean = 0.0f;
 
-    /** Running M2 aggregator (sum of squared deviations from the current mean) */
     float M2 = 0.0f;
 
-    /** Update this axis with a new observation. Welford's O(1) update. */
     void Accumulate(float Value) {
         ++Count;
         const float Delta = Value - Mean;
@@ -48,7 +33,6 @@ struct MYTHIC_API FMythicMoralAxisStats {
         M2 += Delta * Delta2;
     }
 
-    /** Variance of observations. Returns 0 if fewer than 2 observations. */
     float GetVariance() const {
         return Count >= 2 ? M2 / static_cast<float>(Count) : 0.0f;
     }
@@ -67,27 +51,11 @@ struct TStructOpsTypeTraits<FMythicMoralAxisStats> : public TStructOpsTypeTraits
     enum { WithNetSerializer = true };
 };
 
-// ─────────────────────────────────────────────────────────────
-// Moral Signature — Cached per-entity/per-player moral profile
-// ─────────────────────────────────────────────────────────────
 
-/**
- * Incremental moral profile maintained with O(1) cost per action.
- * Stored per-player for reputation tracking and per-NPC for moral evaluation.
- *
- * Evaluation against a faction tolerance vector is a single dot product: O(1).
- *
- * ContradictionScore tracks how self-contradictory an entity's actions are
- * (high variance across axes = unpredictable/chaotic actor).
- *
- * TrajectoryAngle tracks how much the entity's moral direction has shifted
- * recently vs. historical behavior (redemption / corruption arcs).
- */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicMoralSignature {
     GENERATED_BODY()
 
-    /** Per-axis running statistics */
     FMythicMoralAxisStats Axes[MoralAxisCount];
 
     /**
@@ -112,20 +80,11 @@ struct MYTHIC_API FMythicMoralSignature {
     UPROPERTY(BlueprintReadOnly)
     uint8 DominantAxis = 0;
 
-    /** Total count of moral actions accumulated */
     int32 TotalActions = 0;
 
-    /**
-     * Recent-behavior EMA per axis — the "recent" vector for TrajectoryAngle. TRANSIENT: deliberately NOT a UPROPERTY
-     * and NOT in NetSerialize, so it is neither replicated nor saved (recent behavior is a live, session-local signal;
-     * the derived TrajectoryAngle IS replicated/persisted). Seeded from the historical mean on the first accumulation
-     * after construction OR load (while still all-zero), so a fresh signature reads "no arc" until behavior diverges.
-     */
     float RecentMean[MoralAxisCount] = {};
 
-    // ─────────────────────────────────────────────────────────
 
-    /** Accumulate a new moral action. O(1). Updates all cached derived values. */
     void AccumulateAction(const FMythicMoralAction &Action) {
         ++TotalActions;
 
@@ -146,10 +105,6 @@ struct MYTHIC_API FMythicMoralSignature {
 
         ContradictionScore = VarianceSum / static_cast<float>(MoralAxisCount);
 
-        // ─── Recent-behavior EMA + trajectory arc ───
-        // The historical mean was just updated above. Update the recent EMA, then cache the angle between recent and
-        // historical. Seed the EMA from the mean whenever it is still all-zero (first-ever action OR a post-load/
-        // post-construct signature — RecentMean is transient) so a fresh signature reads angle 0 until behavior diverges.
         float MeanVec[MoralAxisCount];
         bool bRecentZero = true;
         for (int32 i = 0; i < MoralAxisCount; ++i) {
@@ -163,7 +118,7 @@ struct MYTHIC_API FMythicMoralSignature {
                 RecentMean[i] = MeanVec[i];
             }
         } else {
-            constexpr float RecentAlpha = 0.25f; // ~4-action recent window
+            constexpr float RecentAlpha = 0.25f;
             for (int32 i = 0; i < MoralAxisCount; ++i) {
                 RecentMean[i] = RecentMean[i] * (1.0f - RecentAlpha) + Action.AxisValues[i] * RecentAlpha;
             }
@@ -171,11 +126,6 @@ struct MYTHIC_API FMythicMoralSignature {
         TrajectoryAngle = ComputeMoralTrajectoryAngle(RecentMean, MeanVec);
     }
 
-    /**
-     * Pure angle (radians, [0, PI]) between two moral vectors — the recent-behavior EMA and the historical mean.
-     * Returns 0 when either vector is degenerate (no behaviour accumulated → no detectable arc). Static + pure so the
-     * trajectory math is unit-testable without a populated signature.
-     */
     static float ComputeMoralTrajectoryAngle(const float Recent[MoralAxisCount], const float Historical[MoralAxisCount]) {
         float Dot = 0.0f;
         float RecentSq = 0.0f;
@@ -193,11 +143,6 @@ struct MYTHIC_API FMythicMoralSignature {
         return FMath::Acos(CosAngle);
     }
 
-    /**
-     * Evaluate this signature against a faction's tolerance thresholds.
-     * Returns a dot product: positive = aligned, negative = opposed.
-     * O(1) — just one multiply-accumulate per axis.
-     */
     float EvaluateAgainst(const FMythicIdeologyProfile &Ideology) const {
         float DotProduct = 0.0f;
         for (int32 i = 0; i < MoralAxisCount; ++i) {
@@ -207,10 +152,6 @@ struct MYTHIC_API FMythicMoralSignature {
         return DotProduct;
     }
 
-    /**
-     * Evaluate a single action against a tolerance vector to determine severity.
-     * Used by the witness perception system to evaluate a crime in real-time.
-     */
     static EMythicMoralSeverity EvaluateActionSeverity(
         const FMythicMoralAction &Action,
         const FMythicIdeologyProfile &Ideology,
@@ -223,7 +164,6 @@ struct MYTHIC_API FMythicMoralSignature {
             DotProduct += Action.AxisValues[i] * Ideology.GetAxis(Axis);
         }
 
-        // Negative dot product means action opposes faction values
         const float Severity = -DotProduct;
 
         if (Severity >= HostileThreshold) {
@@ -238,14 +178,6 @@ struct MYTHIC_API FMythicMoralSignature {
         return EMythicMoralSeverity::Ignore;
     }
 
-    /**
-     * The canonical moral vector of a lethal-violence / kill action. SINGLE SOURCE (Rule 3) for BOTH the live kill
-     * path (MythicLifeComponent) and the persistent-NPC death record (PersistentNPCRegistry) so the sign can never
-     * drift between them again. CONVENTION (FactionDatabase.h:66 "+1.0 glorifies combat / -1.0 total pacifism";
-     * NPCGenerator Fight=+Violence; the whole test suite): a harmful act is POSITIVE on the Violence axis, so an
-     * anti-violence faction (Ideology.Violence < 0) yields a POSITIVE Severity (= -DotProduct) → condemnation. Mercy
-     * is NEGATIVE because a kill is the absence of mercy.
-     */
     static FMythicMoralAction MakeKillActionMoralVector() {
         FMythicMoralAction V;
         V.AxisValues[static_cast<int32>(EMythicMoralAxis::Violence)] = 0.9f;
@@ -253,14 +185,32 @@ struct MYTHIC_API FMythicMoralSignature {
         return V;
     }
 
-    /** Get the mean moral vector for signatures comparison / trajectory */
+    static FMythicMoralAction MakeMercyActionMoralVector() {
+        FMythicMoralAction V;
+        V.AxisValues[static_cast<int32>(EMythicMoralAxis::Mercy)] = 0.8f;
+        V.AxisValues[static_cast<int32>(EMythicMoralAxis::Violence)] = -0.3f;
+        return V;
+    }
+
+    static FMythicMoralAction MakeTrespassActionMoralVector() {
+        FMythicMoralAction V;
+        V.AxisValues[static_cast<int32>(EMythicMoralAxis::Authority)] = -0.4f;
+        V.AxisValues[static_cast<int32>(EMythicMoralAxis::Loyalty)] = -0.2f;
+        return V;
+    }
+
+    static FMythicMoralAction MakeTheftActionMoralVector() {
+        FMythicMoralAction V;
+        V.AxisValues[static_cast<int32>(EMythicMoralAxis::Theft)] = 0.7f;
+        return V;
+    }
+
     void GetMeanVector(float OutVector[MoralAxisCount]) const {
         for (int32 i = 0; i < MoralAxisCount; ++i) {
             OutVector[i] = Axes[i].Mean;
         }
     }
 
-    /** Reset all accumulated data */
     void Reset() {
         for (int32 i = 0; i < MoralAxisCount; ++i) {
             Axes[i] = FMythicMoralAxisStats();
