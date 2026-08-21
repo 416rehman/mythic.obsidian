@@ -18,6 +18,10 @@ public:
     // Buildup one landed proc contributes. Never negative: a hit must never drain the meter it is filling.
     static float ComputeBuildupPerProc(float BasePerProc, float SourceMultiplier);
 
+    // Armour must not reduce a hit below the chip floor, but a hit already nullified stays nullified —
+    // otherwise immunity through IncomingDamageMultiplier cannot be expressed.
+    static float ApplyChipFloor(float Damage, float MinChipDamage);
+
 protected:
     virtual void Execute_Implementation(const FGameplayEffectCustomExecutionParameters& ExecutionParams, FGameplayEffectCustomExecutionOutput& OutExecutionOutput) const override;
 

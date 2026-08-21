@@ -31,6 +31,13 @@ bool UMythicDamageApplication::ShouldNegateFriendlyFire(bool bSourceIsPlayer, bo
     return bSourceIsPlayer && bTargetIsPlayer && !bSameActor && !bFriendlyFireEnabled;
 }
 
+float UMythicDamageApplication::ApplyChipFloor(float Damage, float MinChipDamage) {
+    if (Damage <= 0.0f) {
+        return 0.0f;
+    }
+    return FMath::Max(MinChipDamage, Damage);
+}
+
 float UMythicDamageApplication::ComputeBuildupPerProc(float BasePerProc, float SourceMultiplier) {
     return FMath::Max(0.0f, BasePerProc) * FMath::Max(0.0f, SourceMultiplier);
 }
@@ -258,20 +265,6 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     if (MythicContext->IsCriticalHit()) {
         FinalDamage += FinalDamage * CriticalHitDamage;
         UE_LOG(Myth, Verbose, TEXT("DamageApplication:: Critical hit! Damage increased by %f Percent"), CriticalHitDamage * 100.0f);
-
-        if (UMythicAbilitySystemComponent *SourceMythicASC = Cast<UMythicAbilitySystemComponent>(SourceASC)) {
-            FGameplayCueParameters CueParams;
-            if (const FHitResult *Hit = MythicContext->GetHitResult()) {
-                CueParams.Location = Hit->ImpactPoint;
-            }
-            else if (const AActor *TargetActor = TargetASC ? TargetASC->GetAvatarActor() : nullptr) {
-                CueParams.Location = TargetActor->GetActorLocation();
-            }
-            if (AActor *SourceActor = SourceASC->GetAvatarActor()) {
-                CueParams.Instigator = SourceActor;
-            }
-            SourceMythicASC->ExecuteGameplayCueMulticast(TAG_GameplayCue_Combat_Crit, CueParams);
-        }
     }
 
     FinalDamage = FMath::Max(0.0f, FinalDamage * OutgoingDamageMultiplier * IncomingDamageMultiplier);
@@ -420,6 +413,24 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         return;
     }
 
+    // Plays here, not where the crit is rolled: everything above can still negate the hit, and a crit bang on a
+    // dodged or nullified swing reads as a hit that landed.
+    if (MythicContext->IsCriticalHit()) {
+        if (UMythicAbilitySystemComponent *SourceMythicASC = Cast<UMythicAbilitySystemComponent>(SourceASC)) {
+            FGameplayCueParameters CueParams;
+            if (const FHitResult *Hit = MythicContext->GetHitResult()) {
+                CueParams.Location = Hit->ImpactPoint;
+            }
+            else if (const AActor *TargetActor = TargetASC ? TargetASC->GetAvatarActor() : nullptr) {
+                CueParams.Location = TargetActor->GetActorLocation();
+            }
+            if (AActor *SourceActor = SourceASC->GetAvatarActor()) {
+                CueParams.Instigator = SourceActor;
+            }
+            SourceMythicASC->ExecuteGameplayCueMulticast(TAG_GameplayCue_Combat_Crit, CueParams);
+        }
+    }
+
     bool bAnyStatusResisted = false;
     auto GateStatus = [&](const FGameplayEffectAttributeCaptureDefinition &ResistDef, bool bSourceIntent) -> bool {
         if (!bSourceIntent) {
@@ -465,7 +476,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     }
     FinalDamage *= (1.0f - MitigationFraction);
     if (GS) {
-        FinalDamage = FMath::Max(GS->MinChipDamage, FinalDamage);
+        FinalDamage = ApplyChipFloor(FinalDamage, GS->MinChipDamage);
     }
 
     float Shield = 0.0f;
