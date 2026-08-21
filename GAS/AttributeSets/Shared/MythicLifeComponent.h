@@ -170,6 +170,13 @@ public:
 
     static bool IsKillCreditedToOther(const AActor *Victim, const AActor *Killer, const APawn *KillerPawn);
 
+    /**
+     * SERVER: sets or clears one of the owner state tags a client reads — dead, dying, downed, exhausted,
+     * staggered, in combat. Every such write goes through here because the engine default for a loose tag is
+     * "do not replicate", so a call site that spells the write out by hand leaves every client blind.
+     */
+    static void SetReplicatedStateTag(UAbilitySystemComponent *ASC, const FGameplayTag &Tag, bool bActive);
+
     // True while the owner is in the co-op downed state (incapacitated, bleeding out, revivable).
     UFUNCTION(BlueprintPure, Category = "Mythic|Health")
     bool IsDowned() const { return bIsDowned; }

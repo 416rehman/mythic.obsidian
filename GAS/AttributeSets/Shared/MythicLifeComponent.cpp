@@ -250,17 +250,17 @@ void UMythicLifeComponent::HandleReceivedHit(const FGameplayEventData *Payload) 
     LastStaggerTime = Now;
     bStaggered = true;
 
-    AbilitySystemComponent->AddLooseGameplayTag(GAS_DEBUFF_STUNNED);
+    SetReplicatedStateTag(AbilitySystemComponent, GAS_DEBUFF_STUNNED, true);
     if (W) {
         W->GetTimerManager().SetTimer(StaggerTimerHandle, FTimerDelegate::CreateWeakLambda(this, [this]() {
             if (AbilitySystemComponent) {
-                AbilitySystemComponent->RemoveLooseGameplayTag(GAS_DEBUFF_STUNNED);
+                SetReplicatedStateTag(AbilitySystemComponent, GAS_DEBUFF_STUNNED, false);
             }
             bStaggered = false;
         }), StaggerDuration,false);
     }
     else {
-        AbilitySystemComponent->RemoveLooseGameplayTag(GAS_DEBUFF_STUNNED);
+        SetReplicatedStateTag(AbilitySystemComponent, GAS_DEBUFF_STUNNED, false);
         bStaggered = false;
     }
 }
@@ -303,7 +303,7 @@ void UMythicLifeComponent::EnterDownedState(AActor *Killer) {
     DownedKiller = Killer;
     CancelReviveChannel();
 
-    AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DOWNED, 1);
+    SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_DOWNED, true);
     AbilitySystemComponent->CancelAllAbilities();
     ClearStagger();
 
@@ -326,7 +326,7 @@ void UMythicLifeComponent::EnterDownedState(AActor *Killer) {
             }
             bIsDowned = false;
             if (AbilitySystemComponent) {
-                AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DOWNED, 0);
+                SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_DOWNED, false);
             }
             StartDeath(DownedKiller.Get());
         }), BleedOut,false);
@@ -345,7 +345,7 @@ void UMythicLifeComponent::ServerReviveFromDowned() {
     }
     bIsDowned = false;
     DownedKiller = nullptr;
-    AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DOWNED, 0);
+    SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_DOWNED, false);
 
     if (ACharacter *Char = Cast<ACharacter>(GetOwner())) {
         if (UCharacterMovementComponent *Move = Char->GetCharacterMovement()) {
@@ -533,7 +533,7 @@ void UMythicLifeComponent::ClearStagger() {
         W->GetTimerManager().ClearTimer(StaggerTimerHandle);
     }
     if (bStaggered && AbilitySystemComponent) {
-        AbilitySystemComponent->RemoveLooseGameplayTag(GAS_DEBUFF_STUNNED);
+        SetReplicatedStateTag(AbilitySystemComponent, GAS_DEBUFF_STUNNED, false);
     }
     bStaggered = false;
     LastStaggerTime = 0.0;
@@ -541,6 +541,12 @@ void UMythicLifeComponent::ClearStagger() {
 
 bool UMythicLifeComponent::IsEligibleForSharedKillCredit(bool bIsKiller, float DistSqToVictim, float RangeSq) {
     return bIsKiller || (RangeSq > 0.0f && DistSqToVictim <= RangeSq);
+}
+
+void UMythicLifeComponent::SetReplicatedStateTag(UAbilitySystemComponent *ASC, const FGameplayTag &Tag, bool bActive) {
+    if (ASC && Tag.IsValid()) {
+        ASC->SetLooseGameplayTagCount(Tag, bActive ? 1 : 0, EGameplayTagReplicationState::TagOnly);
+    }
 }
 
 bool UMythicLifeComponent::IsKillCreditedToOther(const AActor *Victim, const AActor *Killer, const APawn *KillerPawn) {
@@ -654,8 +660,8 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
     AMythicPlayerState *KillerPS = Cast<AMythicPlayerState>(KillerBasePS);
     const bool bKilledByOther = IsKillCreditedToOther(Owner, Killer, KillerPawn);
 
-    AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DYING, 1);
-    AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DEAD, 1);
+    SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_DYING, true);
+    SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_DEAD, true);
     AbilitySystemComponent->CancelAllAbilities();
 
     ClearStagger();
@@ -1247,7 +1253,7 @@ void UMythicLifeComponent::ApplyRegen() {
                 AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Utility::GetCurrentStaminaAttribute(), NewV);
             }
             if (NewV <= 0.0f) {
-                AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_EXHAUSTED, 1);
+                SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_EXHAUSTED, true);
                 ReevaluateCrowdControl();
                 if (const APawn *OwnerPawn = Cast<APawn>(GetOwner())) {
                     if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(OwnerPawn->GetController())) {
@@ -1262,7 +1268,7 @@ void UMythicLifeComponent::ApplyRegen() {
                 AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Utility::GetCurrentStaminaAttribute(), NewV);
             }
             if (bSprintGate && bExhausted && ShouldRecoverFromExhaustion(NewV, Util->GetMaxStamina(), Settings->SprintRecoverStaminaFraction)) {
-                AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_EXHAUSTED, 0);
+                SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_EXHAUSTED, false);
                 ReevaluateCrowdControl();
                 if (const APawn *OwnerPawn = Cast<APawn>(GetOwner())) {
                     if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(OwnerPawn->GetController())) {
@@ -1345,10 +1351,10 @@ bool UMythicLifeComponent::TrySpendStamina(float Cost) {
 
 void UMythicLifeComponent::ClearGameplayTags() const {
     if (AbilitySystemComponent && AbilitySystemComponent->IsOwnerActorAuthoritative()) {
-        AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DYING, 0);
-        AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_DEAD, 0);
-        AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_EXHAUSTED, 0);
-        AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_INCOMBAT, 0, EGameplayTagReplicationState::TagOnly);
+        SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_DYING, false);
+        SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_DEAD, false);
+        SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_EXHAUSTED, false);
+        SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_INCOMBAT, false);
     }
 }
 
@@ -1357,7 +1363,7 @@ void UMythicLifeComponent::MarkInCombat() {
         return;
     }
     if (!AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_INCOMBAT)) {
-        AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_INCOMBAT, 1, EGameplayTagReplicationState::TagOnly);
+        SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_INCOMBAT, true);
     }
     if (UWorld *World = GetWorld()) {
         World->GetTimerManager().SetTimer(CombatTagTimerHandle, this, &UMythicLifeComponent::ClearInCombat,
@@ -1370,7 +1376,7 @@ void UMythicLifeComponent::ClearInCombat() {
         World->GetTimerManager().ClearTimer(CombatTagTimerHandle);
     }
     if (AbilitySystemComponent && AbilitySystemComponent->IsOwnerActorAuthoritative()) {
-        AbilitySystemComponent->SetLooseGameplayTagCount(GAS_STATE_INCOMBAT, 0, EGameplayTagReplicationState::TagOnly);
+        SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_INCOMBAT, false);
     }
 }
 

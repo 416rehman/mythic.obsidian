@@ -218,8 +218,8 @@ void UMythicAttributeSet_Life::ResetForRespawn() {
     bOutOfHealth = false;
     if (UAbilitySystemComponent *ASC = GetOwningAbilitySystemComponent()) {
         if (ASC->IsOwnerActorAuthoritative()) {
-            ASC->SetLooseGameplayTagCount(GAS_STATE_DYING, 0);
-            ASC->SetLooseGameplayTagCount(GAS_STATE_DEAD, 0);
+            UMythicLifeComponent::SetReplicatedStateTag(ASC, GAS_STATE_DYING, false);
+            UMythicLifeComponent::SetReplicatedStateTag(ASC, GAS_STATE_DEAD, false);
 
             if (const UMythicAttributeSet_Defense *DefenseConst = ASC->GetSet<UMythicAttributeSet_Defense>()) {
                 const_cast<UMythicAttributeSet_Defense *>(DefenseConst)->ResetCcAndBuildupState();
