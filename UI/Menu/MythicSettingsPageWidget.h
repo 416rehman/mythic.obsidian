@@ -29,6 +29,21 @@ public:
     void HandleClicked();
 };
 
+UCLASS()
+class MYTHIC_API UMythicSettingTabProxy : public UObject {
+    GENERATED_BODY()
+
+public:
+    UPROPERTY()
+    TWeakObjectPtr<UMythicSettingsPageWidget> Page;
+
+    UPROPERTY()
+    int32 CategoryIndex = INDEX_NONE;
+
+    UFUNCTION()
+    void HandleClicked();
+};
+
 USTRUCT()
 struct FMythicSettingsRow {
     GENERATED_BODY()
@@ -104,6 +119,10 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UPanelWidget> SettingsList;
 
+    /** Category tabs are built into this at startup. Absent means the page shows every category. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UPanelWidget> TabStrip;
+
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UButton> Btn_Apply;
 
@@ -158,6 +177,8 @@ private:
     };
 
     void BuildDefinitions();
+    void BuildTabs();
+    void RefreshTabVisuals();
     void Refresh();
 
     FMythicSettingsRow &GetOrCreateRow(int32 Index);
@@ -172,6 +193,9 @@ private:
 
     UPROPERTY()
     TArray<FMythicSettingsRow> RowPool;
+
+    UPROPERTY()
+    TArray<TObjectPtr<UCommonTextBlock>> TabLabels;
 
     bool bPendingApply = false;
     bool bBuilt = false;

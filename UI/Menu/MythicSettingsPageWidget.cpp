@@ -106,6 +106,7 @@ void UMythicSettingsPageWidget::NativeConstruct() {
         bBuilt = true;
 
         BuildDefinitions();
+        BuildTabs();
 
         if (SettingsList) {
             for (int32 i = 0; i < Definitions.Num(); ++i) {
@@ -125,9 +126,65 @@ void UMythicSettingsPageWidget::NativeConstruct() {
 
 void UMythicSettingsPageWidget::NativeOnActivated() {
     Super::NativeOnActivated();
+    RefreshTabVisuals();
     Refresh();
 }
 
+
+void UMythicSettingTabProxy::HandleClicked() {
+    if (UMythicSettingsPageWidget *P = Page.Get()) {
+        P->SetActiveCategory(CategoryIndex);
+    }
+}
+
+void UMythicSettingsPageWidget::BuildTabs() {
+    if (!TabStrip || TabLabels.Num() > 0) {
+        return;
+    }
+
+    const TArray<FText> Categories = GetCategoryNames();
+    if (Categories.Num() == 0) {
+        return;
+    }
+
+    // Built once at startup, never at runtime, and never rebuilt - the count is fixed by the definitions.
+    for (int32 i = 0; i < Categories.Num(); ++i) {
+        UCommonTextBlock *Label = nullptr;
+        UWidget *Button = FMythicUIStyle::MakeButton(this, EMythicTextRole::Body, Label);
+        if (!Button || !Label) {
+            continue;
+        }
+        Label->SetText(Categories[i]);
+
+        UMythicSettingTabProxy *Proxy = NewObject<UMythicSettingTabProxy>(this);
+        Proxy->Page = this;
+        Proxy->CategoryIndex = i;
+        FMythicUIStyle::BindButtonClicked(Button, Proxy,
+                                          GET_FUNCTION_NAME_CHECKED(UMythicSettingTabProxy, HandleClicked));
+
+        if (UHorizontalBoxSlot *TabSlot = Cast<UHorizontalBoxSlot>(TabStrip->AddChild(Button))) {
+            TabSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+            TabSlot->SetPadding(FMargin(0.0f, 0.0f, 20.0f, 0.0f));
+        }
+        TabLabels.Add(Label);
+    }
+
+    // A page with tabs opens on the first one. Without a strip the default stays "show everything", so the
+    // settings are reachable either way.
+    if (TabLabels.Num() > 0 && ActiveCategory == INDEX_NONE) {
+        ActiveCategory = 0;
+    }
+}
+
+void UMythicSettingsPageWidget::RefreshTabVisuals() {
+    for (int32 i = 0; i < TabLabels.Num(); ++i) {
+        if (TabLabels[i]) {
+            // The active tab is the page's only "you are here", so it carries the bright ink.
+            TabLabels[i]->SetColorAndOpacity(FSlateColor(i == ActiveCategory ? FMythicUIStyle::Get().Ink
+                                                                            : FMythicUIStyle::Get().InkSubtle));
+        }
+    }
+}
 
 void UMythicSettingsPageWidget::BuildDefinitions() {
     Definitions.Reset();
@@ -869,6 +926,7 @@ bool UMythicSettingsPageWidget::IsRowVisible(bool bIsHeading, const FText &RowCa
 
 void UMythicSettingsPageWidget::SetActiveCategory(int32 CategoryIndex) {
     ActiveCategory = CategoryIndex;
+    RefreshTabVisuals();
     Refresh();
 }
 
