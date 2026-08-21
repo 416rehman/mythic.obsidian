@@ -35,20 +35,6 @@ bool UMythicGA_Triggered::ShouldProc(float ResolvedChance, float InternalCooldow
     return MythicCombat::RollSucceeds(MythicCombat::ClampProbability(ResolvedChance), Roll01);
 }
 
-float UMythicGA_Triggered::ResolveRolledValue(const FGameplayTag &Parameter, float Fallback) const {
-    if (Parameter.IsValid()) {
-        if (const UObject *Source = GetCurrentSourceObject()) {
-            if (const IMythicAbilityRollSource *RollSource = Cast<IMythicAbilityRollSource>(Source)) {
-                float Rolled = 0.0f;
-                if (RollSource->GetRolledAbilityValue(GetCurrentAbilitySpecHandle(), Parameter, Rolled)) {
-                    return Rolled;
-                }
-            }
-        }
-    }
-    return Fallback;
-}
-
 bool UMythicGA_Triggered::HasPayload(const FMythicTriggerSpec &Spec) {
     return Spec.StatusToApply.IsValid() || Spec.EffectToApply != nullptr;
 }

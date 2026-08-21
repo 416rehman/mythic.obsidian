@@ -40,6 +40,13 @@ class MYTHIC_API UMythicGameplayAbility : public UGameplayAbility {
     void SendEvent(FGameplayAbilityTargetDataHandle TargetData, FGameplayEffectContextHandle EffectContextHandle, FGameplayTag EventTag);
 
 public:
+    /**
+     * Value the granting source rolled under Parameter, or Fallback when it rolled nothing under that tag. This is
+     * how an ability's numbers come from the item that granted it rather than from the ability asset.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Mythic|Ability")
+    float ResolveRolledValue(const FGameplayTag &Parameter, float Fallback) const;
+
     UMythicGameplayAbility(const FObjectInitializer &ObjectInitializer = FObjectInitializer::Get());
     void TryActivateAbilityOnSpawn(const FGameplayAbilityActorInfo *ActorInfo, const FGameplayAbilitySpec &Spec) const;
 

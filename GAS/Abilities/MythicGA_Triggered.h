@@ -206,9 +206,6 @@ public:
     // Chance and internal cooldown in one decision, so the gate is testable without a world.
     static bool ShouldProc(float ResolvedChance, float InternalCooldown, double Now, double LastFireTime, float Roll01);
 
-    // Value the granting source rolled under Parameter, or Fallback when it rolled nothing under that tag.
-    float ResolveRolledValue(const FGameplayTag &Parameter, float Fallback) const;
-
     // True when the clause would do something. A clause with neither a status nor an effect is inert.
     static bool HasPayload(const FMythicTriggerSpec &Spec);
 

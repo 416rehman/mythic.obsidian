@@ -1,6 +1,7 @@
 
 
 #include "MythicGameplayAbility.h"
+#include "GAS/Abilities/MythicAbilityRollSource.h"
 
 #include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
@@ -713,4 +714,17 @@ FGameplayTagContainer UMythicGameplayAbility::BuildAbilityContextTags() const {
     }
 
     return Out;
+}
+float UMythicGameplayAbility::ResolveRolledValue(const FGameplayTag &Parameter, float Fallback) const {
+    if (Parameter.IsValid()) {
+        if (const UObject *Source = GetCurrentSourceObject()) {
+            if (const IMythicAbilityRollSource *RollSource = Cast<IMythicAbilityRollSource>(Source)) {
+                float Rolled = 0.0f;
+                if (RollSource->GetRolledAbilityValue(GetCurrentAbilitySpecHandle(), Parameter, Rolled)) {
+                    return Rolled;
+                }
+            }
+        }
+    }
+    return Fallback;
 }
