@@ -2,6 +2,7 @@
 #include "MythicGA_Triggered.h"
 
 #include "AbilitySystemComponent.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 
@@ -15,6 +16,8 @@
 #include "GAS/Effects/MythicStatusEffectDefinition.h"
 #include "GAS/Effects/MythicStatusRegistry.h"
 #include "GAS/Executions/MythicCombatRoll.h"
+#include "GAS/Executions/MythicDamageApplication.h"
+#include "Settings/MythicDeveloperSettings.h"
 #include "Mythic.h"
 
 UMythicGA_Triggered::UMythicGA_Triggered(const FObjectInitializer &ObjectInitializer)
@@ -93,6 +96,57 @@ float UMythicGA_Triggered::GetStatusResistance(const AActor *Target, const FGame
     }
     bool bFound = false;
     return ASC->GetGameplayAttributeValue(Definition->ResistanceAttribute, bFound);
+}
+
+void UMythicGA_Triggered::LimitTargets(TArray<AActor *> &Targets, int32 MaxTargets) {
+    if (MaxTargets > 0 && Targets.Num() > MaxTargets) {
+        Targets.SetNum(MaxTargets);
+    }
+}
+
+void UMythicGA_Triggered::GatherClauseTargets(const FMythicTriggerSpec &Spec, AActor *Origin, AActor *Owner, TArray<AActor *> &Out) const {
+    const float Radius = ResolveRolledValue(Spec.RadiusParameter, Spec.Radius);
+    if (Radius <= 0.0f) {
+        Out.Add(Origin);
+        return;
+    }
+
+    const UWorld *World = Origin ? Origin->GetWorld() : nullptr;
+    if (!World) {
+        return;
+    }
+
+    TArray<FOverlapResult> Overlaps;
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(MythicTriggerSweep), false, Owner);
+    World->OverlapMultiByChannel(Overlaps, Origin->GetActorLocation(), FQuat::Identity, ECC_Pawn,
+                                 FCollisionShape::MakeSphere(Radius), Params);
+
+    const APawn *OwnerPawn = Cast<APawn>(Owner);
+    const bool bSourceIsPlayer = OwnerPawn && OwnerPawn->IsPlayerControlled();
+    const bool bFriendlyFire = GetDefault<UMythicDeveloperSettings>()->bFriendlyFireEnabled;
+
+    for (const FOverlapResult &Overlap : Overlaps) {
+        AActor *Candidate = Overlap.GetActor();
+        if (!Candidate || Candidate == Owner || Out.Contains(Candidate)) {
+            continue;
+        }
+        if (!UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Candidate)) {
+            continue;
+        }
+        // The same rule the damage execution applies, so a sweep cannot hit what a swing would not.
+        const APawn *CandidatePawn = Cast<APawn>(Candidate);
+        const bool bTargetIsPlayer = CandidatePawn && CandidatePawn->IsPlayerControlled();
+        if (UMythicDamageApplication::ShouldNegateFriendlyFire(bSourceIsPlayer, bTargetIsPlayer, false, bFriendlyFire)) {
+            continue;
+        }
+        Out.Add(Candidate);
+    }
+
+    const FVector Centre = Origin->GetActorLocation();
+    Out.Sort([Centre](const AActor &A, const AActor &B) {
+        return FVector::DistSquared(A.GetActorLocation(), Centre) < FVector::DistSquared(B.GetActorLocation(), Centre);
+    });
+    LimitTargets(Out, Spec.MaxTargets);
 }
 
 bool UMythicGA_Triggered::IsNthEvent(int32 EveryNth, int32 Count) {
@@ -249,15 +303,20 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
             continue;
         }
 
+        TArray<AActor *> Recipients;
+        GatherClauseTargets(Spec, Target, Owner, Recipients);
+
         bool bLanded = false;
-        if (Spec.StatusToApply.IsValid()) {
-            const float Survives = SurviveChanceFromResistance(GetStatusResistance(Target, Spec.StatusToApply));
-            if (MythicCombat::RollSucceeds(Survives, FMath::FRand())) {
-                bLanded |= UMythicStatusRegistry::ApplyStatusToActor(Target, Spec.StatusToApply, Owner);
+        for (AActor *Recipient : Recipients) {
+            if (Spec.StatusToApply.IsValid()) {
+                const float Survives = SurviveChanceFromResistance(GetStatusResistance(Recipient, Spec.StatusToApply));
+                if (MythicCombat::RollSucceeds(Survives, FMath::FRand())) {
+                    bLanded |= UMythicStatusRegistry::ApplyStatusToActor(Recipient, Spec.StatusToApply, Owner);
+                }
             }
-        }
-        if (Spec.EffectToApply) {
-            bLanded |= ApplyClauseEffect(Spec, Target, Owner);
+            if (Spec.EffectToApply) {
+                bLanded |= ApplyClauseEffect(Spec, Recipient, Owner);
+            }
         }
         if (bLanded) {
             LastFireTimes.Add(Index, Now);

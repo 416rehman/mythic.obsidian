@@ -137,6 +137,39 @@ bool FMythicTriggeredProcTest::RunTest(const FString &Parameters) {
         TestFalse(TEXT("one blow in five does not fire on the fourth"), GA::IsNthEvent(5, 4));
     }
 
+    // Sweep caps. A talent that hits everything nearby still needs a bound a designer can set.
+    {
+        auto Make = [](int32 Count) {
+            TArray<AActor *> Out;
+            for (int32 i = 1; i <= Count; ++i) {
+                Out.Add(reinterpret_cast<AActor *>(static_cast<UPTRINT>(i)));
+            }
+            return Out;
+        };
+
+        TArray<AActor *> Five = Make(5);
+        GA::LimitTargets(Five, 0);
+        TestEqual(TEXT("no cap keeps every target"), Five.Num(), 5);
+
+        TArray<AActor *> Capped = Make(5);
+        GA::LimitTargets(Capped, 3);
+        TestEqual(TEXT("a cap trims the sweep"), Capped.Num(), 3);
+
+        TArray<AActor *> Under = Make(2);
+        GA::LimitTargets(Under, 3);
+        TestEqual(TEXT("a cap above the count changes nothing"), Under.Num(), 2);
+
+        // The sweep is sorted nearest-first before the cap, so trimming keeps the closest.
+        TArray<AActor *> Order = Make(4);
+        GA::LimitTargets(Order, 2);
+        TestEqual(TEXT("the cap keeps the front of the list"), Order[0], reinterpret_cast<AActor *>(static_cast<UPTRINT>(1)));
+        TestEqual(TEXT("and the one after it"), Order[1], reinterpret_cast<AActor *>(static_cast<UPTRINT>(2)));
+
+        TArray<AActor *> Empty;
+        GA::LimitTargets(Empty, 3);
+        TestEqual(TEXT("an empty sweep stays empty"), Empty.Num(), 0);
+    }
+
     // Resistance. A talent must not ignore a resistance that a weapon proc respects.
     {
         TestEqual(TEXT("no resistance lets everything through"), GA::SurviveChanceFromResistance(0.0f), 1.0f);

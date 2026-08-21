@@ -68,7 +68,8 @@ bool FMythicProcContentTest::RunTest(const FString &Parameters) {
             for (const TPair<FGameplayTag, const TCHAR *> &Param : {
                      TPair<FGameplayTag, const TCHAR *>(Spec.ChanceParameter, TEXT("chance")),
                      TPair<FGameplayTag, const TCHAR *>(Spec.MagnitudeParameter, TEXT("magnitude")),
-                     TPair<FGameplayTag, const TCHAR *>(Spec.DurationParameter, TEXT("duration"))}) {
+                     TPair<FGameplayTag, const TCHAR *>(Spec.DurationParameter, TEXT("duration")),
+                     TPair<FGameplayTag, const TCHAR *>(Spec.RadiusParameter, TEXT("radius"))}) {
                 if (Param.Key.IsValid()) {
                     TestTrue(*FString::Printf(TEXT("%s %s parameter is rolled by the talent"), *Where, Param.Value),
                              Talent->AbilityDef.ParameterRolls.Contains(Param.Key));
@@ -93,6 +94,12 @@ bool FMythicProcContentTest::RunTest(const FString &Parameters) {
             if (Spec.Condition.RequiredEventTag.IsValid()) {
                 TestTrue(*FString::Printf(TEXT("%s event gate is a registered tag"), *Where),
                          Tags.RequestGameplayTag(Spec.Condition.RequiredEventTag.GetTagName(), false).IsValid());
+            }
+
+            // A sweep with no cap can pay out on a whole pack at once, which is a balance cliff rather than a
+            // feature. Anything that sweeps must say how wide it may go.
+            if (Spec.Radius > 0.0f || Spec.RadiusParameter.IsValid()) {
+                TestTrue(*FString::Printf(TEXT("%s sweep caps its targets"), *Where), Spec.MaxTargets > 0);
             }
 
             TestTrue(*FString::Printf(TEXT("%s source health window is not inverted"), *Where),

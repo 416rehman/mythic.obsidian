@@ -129,6 +129,22 @@ struct MYTHIC_API FMythicTriggerSpec {
     FMythicTriggerCondition Condition;
 
     /**
+     * Centimetres around the clause's target to sweep. 0 applies to that target alone. Above 0 the clause applies
+     * to everyone the sweep finds INSTEAD of the target, with the target's location as the origin — which is what
+     * "a kill opens every wound around it" and "you throw out a shock that stuns everything near" both describe.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger", meta = (ClampMin = "0.0"))
+    float Radius = 0.0f;
+
+    // SetByCaller-style key the item rolled the radius under, same one-tag rule as magnitude and duration.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger")
+    FGameplayTag RadiusParameter;
+
+    // Most actors one sweep may affect. 0 = every actor it finds.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger", meta = (ClampMin = "0"))
+    int32 MaxTargets = 0;
+
+    /**
      * Fire only on every Nth qualifying event — "every third strike". 0 or 1 fires on every one. Counted per
      * clause, and only events that already passed the condition advance the count, so a gated clause counts the
      * strikes that mattered rather than every swing.
@@ -181,6 +197,9 @@ public:
     // Health as a 0..1 fraction. Returns 1 for anything with no health, so a "below half" gate stays shut on it.
     static float GetHealthFraction(const AActor *Actor);
 
+    // Trims a sweep to its cap, keeping the nearest. 0 means no cap.
+    static void LimitTargets(TArray<AActor *> &Targets, int32 MaxTargets);
+
     // Whether this occurrence is the Nth. Count includes the current event.
     static bool IsNthEvent(int32 EveryNth, int32 Count);
 
@@ -194,6 +213,9 @@ public:
     static float GetStatusResistance(const AActor *Target, const FGameplayTag &StatusType);
 
 protected:
+    // Every actor a clause should act on: the resolved target, or the sweep around it when a radius is authored.
+    void GatherClauseTargets(const FMythicTriggerSpec &Spec, AActor *Origin, AActor *Owner, TArray<AActor *> &Out) const;
+
     // Applies the clause's effect to the resolved target, with its rolled magnitude set by caller.
     bool ApplyClauseEffect(const FMythicTriggerSpec &Spec, AActor *Target, AActor *Owner) const;
 
