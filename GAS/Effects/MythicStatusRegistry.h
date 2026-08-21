@@ -4,9 +4,15 @@
 #include "CoreMinimal.h"
 #include "AttributeSet.h"
 #include "GameplayTagContainer.h"
+#include "Itemization/Inventory/Fragments/FragmentTypes.h"
 #include "Itemization/MythicDataAsset.h"
+#include "NativeGameplayTags.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "MythicStatusRegistry.generated.h"
+
+// Magnitudes an authored status effect reads so the same effect can carry a different number per application.
+MYTHIC_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_AILMENT_DAMAGE);
+MYTHIC_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_AILMENT_DURATION);
 
 class UAbilitySystemComponent;
 class UMythicStatusEffectDefinition;
@@ -46,6 +52,9 @@ public:
 
     // Plays a cue on the target through the Mythic ASC multicast path. No-op for an unset tag.
     static void PlayStatusCue(UAbilitySystemComponent *TargetASC, const FGameplayTag &CueTag);
+
+    // Rolls a range, scales it by the applier's multiplier, and never returns a negative.
+    static float RollScaledMagnitude(const FRollDefinition &Range, int32 Level, float SourceMultiplier, float Roll01);
 
 private:
     void EnsureIndexed() const { if (!bIndexed) { const_cast<UMythicStatusRegistry *>(this)->BuildIndex(); } }
