@@ -89,8 +89,21 @@ private:
     void BindGameplayEvents();
     void HandleKillEvent(const FGameplayEventData *Payload);
     void HandleDeathEvent(const FGameplayEventData *Payload);
+    void HandleItemAcquiredEvent(const FGameplayEventData *Payload);
     FDelegateHandle KillEventHandle;
     FDelegateHandle DeathEventHandle;
+    FDelegateHandle ItemAcquiredEventHandle;
+
+public:
+    /**
+     * Whether an acquisition counts as gathered rather than looted. Decided from the item's own type tags, since
+     * that is all the acquisition event carries — a resource bought from a vendor therefore reads as gathered,
+     * which is the cost of not tracking where an item came from.
+     */
+    static bool IsGatheredAcquisition(const FGameplayTagContainer &ItemTags, const FGameplayTagContainer &GatheredTypes);
+
+    // Whole items acquired by one event, never fewer than one.
+    static int64 QuantityFromEvent(float EventMagnitude);
 
     UFUNCTION()
     void HandleInventorySlotUpdated(int32 Slot);

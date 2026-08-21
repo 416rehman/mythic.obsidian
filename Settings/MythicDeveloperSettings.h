@@ -294,6 +294,14 @@ public:
     float StatusBuildupDecayPerSecond = 0.0f;
 
     /**
+     * Item types that count as GATHERED when acquired rather than looted, matched against the item's type tag and
+     * its parents. Everything else acquired counts as looted. Authored rather than fixed, because which families
+     * are "taken from the world" is a content decision — adding a Fishing type should not need a code change.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Itemization", meta = (Categories = "Itemization.Type"))
+    FGameplayTagContainer GatheredItemTypes;
+
+    /**
      * CROSS-PLAYER REACTION DETONATION (co-op combo-assist) master switch. When TRUE (default), a reaction whose authored
      * row sets bCrossActorDetonation pays a co-op bonus IF the pre-existing status it consumes was applied by a DIFFERENT
      * player than the one landing the detonating hit ("you oil, I ignite"): a bonus AoE status pulse, a combat-XP assist to

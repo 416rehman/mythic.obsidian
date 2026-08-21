@@ -1,6 +1,8 @@
 
 #include "MythicStatLedgerComponent.h"
 
+#include "Settings/MythicDeveloperSettings.h"
+
 #include "MythicStatLedger.h"
 #include "MythicTags_MetaProgression.h"
 #include "Mythic/GAS/MythicTags_GAS.h"
@@ -177,6 +179,30 @@ void UMythicStatLedgerComponent::BindGameplayEvents() {
         this, &UMythicStatLedgerComponent::HandleKillEvent);
     DeathEventHandle = ASC->GenericGameplayEventCallbacks.FindOrAdd(GAS_EVENT_DEATH).AddUObject(
         this, &UMythicStatLedgerComponent::HandleDeathEvent);
+    ItemAcquiredEventHandle = ASC->GenericGameplayEventCallbacks.FindOrAdd(GAS_EVENT_ITEM_ACQUIRED).AddUObject(
+        this, &UMythicStatLedgerComponent::HandleItemAcquiredEvent);
+}
+
+bool UMythicStatLedgerComponent::IsGatheredAcquisition(const FGameplayTagContainer &ItemTags, const FGameplayTagContainer &GatheredTypes) {
+    if (GatheredTypes.IsEmpty() || ItemTags.IsEmpty()) {
+        return false;
+    }
+    return ItemTags.HasAny(GatheredTypes);
+}
+
+int64 UMythicStatLedgerComponent::QuantityFromEvent(float EventMagnitude) {
+    return FMath::Max<int64>(1, static_cast<int64>(FMath::RoundToInt(EventMagnitude)));
+}
+
+void UMythicStatLedgerComponent::HandleItemAcquiredEvent(const FGameplayEventData *Payload) {
+    if (!Payload) {
+        return;
+    }
+    // The acquisition event stamps the item's type onto TargetTags, so the ledger classifies without reloading
+    // the definition.
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    const bool bGathered = Settings && IsGatheredAcquisition(Payload->TargetTags, Settings->GatheredItemTypes);
+    RecordStat(bGathered ? STAT_ITEM_GATHERED : STAT_ITEM_LOOTED, QuantityFromEvent(Payload->EventMagnitude));
 }
 
 void UMythicStatLedgerComponent::HandleKillEvent(const FGameplayEventData *Payload) {

@@ -2,7 +2,11 @@
 
 #include "GAS/MythicAbilityTagRelationshipMapping.h"
 
-UMythicDeveloperSettings::UMythicDeveloperSettings() {}
+UMythicDeveloperSettings::UMythicDeveloperSettings() {
+    // The two families a player takes straight out of the world. Overridable in Project Settings.
+    GatheredItemTypes.AddTag(FGameplayTag::RequestGameplayTag(FName("Itemization.Type.Farming"), false));
+    GatheredItemTypes.AddTag(FGameplayTag::RequestGameplayTag(FName("Itemization.Type.Mining"), false));
+}
 
 UMythicAbilityTagRelationshipMapping *UMythicDeveloperSettings::GetAbilityTagRelationshipMapping() const {
     return DefaultAbilityTagRelationshipMapping.Get();
