@@ -102,8 +102,8 @@ bool FMythicStatusPipelineTest::RunTest(const FString &Parameters) {
     if (TestTrue(TEXT("the burn is present as an active effect"), Active.Num() > 0)) {
         const FActiveGameplayEffect *Effect = ASC->GetActiveGameplayEffect(Active[0]);
         if (TestNotNull(TEXT("the active burn resolves"), Effect)) {
-            const float Damage = Effect->Spec.GetSetByCallerMagnitude(GAS_SETBYCALLER_AILMENT_DAMAGE, false, -1.0f);
-            const float Duration = Effect->Spec.GetSetByCallerMagnitude(GAS_SETBYCALLER_AILMENT_DURATION, false, -1.0f);
+            const float Damage = Effect->Spec.GetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_DAMAGE, false, -1.0f);
+            const float Duration = Effect->Spec.GetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_DURATION, false, -1.0f);
 
             TestTrue(*FString::Printf(TEXT("burn carries rolled damage inside its authored band, got %.2f"), Damage),
                      Damage >= Burn->DamagePerTick.Min && Damage <= Burn->DamagePerTick.Max);

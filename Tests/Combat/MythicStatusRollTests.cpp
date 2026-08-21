@@ -5,11 +5,11 @@
 #include "Itemization/Inventory/Fragments/FragmentTypes.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FMythicAilmentRollTest,
-    "Mythic.Combat.AilmentRoll",
+    FMythicStatusRollTest,
+    "Mythic.Combat.StatusRoll",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
-bool FMythicAilmentRollTest::RunTest(const FString &Parameters) {
+bool FMythicStatusRollTest::RunTest(const FString &Parameters) {
     using Reg = UMythicStatusRegistry;
 
     FRollDefinition Range;

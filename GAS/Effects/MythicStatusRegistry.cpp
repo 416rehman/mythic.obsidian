@@ -14,9 +14,9 @@
 #include "Player/MythicPlayerState.h"
 #include "Settings/MythicDeveloperSettings.h"
 
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_AILMENT_DAMAGE, "SetByCaller.Ailment.Damage",
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_STATUS_DAMAGE, "SetByCaller.Status.Damage",
                                "Per-tick damage handed to an authored status effect");
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_AILMENT_DURATION, "SetByCaller.Ailment.Duration",
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_STATUS_DURATION, "SetByCaller.Status.Duration",
                                "Seconds handed to an authored status effect");
 
 void UMythicStatusRegistry::BuildIndex() {
@@ -164,11 +164,11 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
     // The authored band is the whole story: two applications differ by the roll, not by a stat on the applier.
     const float Damage = RollScaledMagnitude(Definition->DamagePerTick, 0, 1.0f, FMath::FRand());
     if (Damage > 0.0f) {
-        Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_AILMENT_DAMAGE, Damage);
+        Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_DAMAGE, Damage);
     }
     const float Duration = RollScaledMagnitude(Definition->DurationSeconds, 0, 1.0f, FMath::FRand());
     if (Duration > 0.0f) {
-        Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_AILMENT_DURATION, Duration);
+        Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_DURATION, Duration);
     }
 
     TargetASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());

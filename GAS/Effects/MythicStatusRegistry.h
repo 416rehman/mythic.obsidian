@@ -11,8 +11,8 @@
 #include "MythicStatusRegistry.generated.h"
 
 // Magnitudes an authored status effect reads so the same effect can carry a different number per application.
-MYTHIC_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_AILMENT_DAMAGE);
-MYTHIC_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_AILMENT_DURATION);
+MYTHIC_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_STATUS_DAMAGE);
+MYTHIC_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_STATUS_DURATION);
 
 class UAbilitySystemComponent;
 class UMythicStatusEffectDefinition;

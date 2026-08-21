@@ -64,7 +64,7 @@ public:
 
     /**
      * Damage each tick, rolled per application. Leave Min and Max at zero for a status that deals no damage. The
-     * effect must read it through the SetByCaller.Ailment.Damage tag for this to reach the target.
+     * effect must read it through the SetByCaller.Status.Damage tag for this to reach the target.
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FRollDefinition DamagePerTick;
