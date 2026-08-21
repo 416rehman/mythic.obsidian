@@ -54,6 +54,35 @@ bool FMythicBuildupPerProcTest::RunTest(const FString &Parameters) {
         TestEqual(TEXT("a negative chance is nothing"), DiminishProbability(-3.0f, Soft), 0.0f);
         TestEqual(TEXT("a soft cap of zero bends everything from the start"), DiminishProbability(0.0f, 0.0f), 0.0f);
         TestTrue(TEXT("a soft cap of one is a plain clamp"), DiminishProbability(5.0f, 1.0f) <= 1.0f);
+
+        // The same curve carries every stacked stat, not just chance, so it has to behave at ceilings above 1.
+        // A damage bonus authored to top out at +500% is Diminish(raw, soft, 5).
+        TestEqual(TEXT("below the soft cap a bonus is face value"), Diminish(0.8f, 1.0f, 5.0f), 0.8f);
+        TestEqual(TEXT("at the soft cap it is still face value"), Diminish(1.0f, 1.0f, 5.0f), 1.0f);
+
+        const float Stacked = Diminish(3.0f, 1.0f, 5.0f);
+        TestTrue(TEXT("past the soft cap a bonus is bent down"), Stacked < 3.0f);
+        TestTrue(TEXT("but is still worth more than the cap"), Stacked > 1.0f);
+        TestTrue(TEXT("and never reaches the ceiling"), Diminish(1000.0f, 1.0f, 5.0f) < 5.0f);
+
+        // The failure that shipped once: past roughly ten times the headroom the exponential rounds away and the
+        // result becomes exactly the ceiling. At a ceiling of 1 that deletes the roll.
+        TestTrue(TEXT("an absurd stack still leaves headroom"), Diminish(1.0e6f, 1.0f, 5.0f) < 5.0f);
+
+        // Stacking must always pay something, or gear stops mattering at the top end.
+        TestTrue(TEXT("more raw always yields more effective"), Diminish(4.0f, 1.0f, 5.0f) > Diminish(3.0f, 1.0f, 5.0f));
+
+        // Each further point buys less than the last -- that is what diminishing means.
+        const float First = Diminish(2.0f, 1.0f, 5.0f) - Diminish(1.0f, 1.0f, 5.0f);
+        const float Later = Diminish(4.0f, 1.0f, 5.0f) - Diminish(3.0f, 1.0f, 5.0f);
+        TestTrue(TEXT("later points are worth less than earlier ones"), Later < First);
+
+        // A ceiling of zero would otherwise divide by a zero headroom.
+        TestEqual(TEXT("a ceiling of zero yields nothing"), Diminish(5.0f, 0.0f, 0.0f), 0.0f);
+        TestEqual(TEXT("a negative value is nothing"), Diminish(-2.0f, 1.0f, 5.0f), 0.0f);
+
+        // A soft cap authored above the ceiling is an authoring slip, not a request for unbounded scaling.
+        TestTrue(TEXT("a soft cap above the ceiling cannot exceed it"), Diminish(50.0f, 9.0f, 5.0f) <= 5.0f);
     }
 
     return true;
