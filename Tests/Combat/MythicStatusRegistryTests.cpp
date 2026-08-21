@@ -8,6 +8,9 @@
 #include "GameplayEffectComponents/TargetTagsGameplayEffectComponent.h"
 #include "GameplayTagsManager.h"
 #include "Settings/MythicDeveloperSettings.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
+#include "Itemization/Affixes/MythicAffixPoolDataAsset.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicStatusLibraryTest,
@@ -93,6 +96,61 @@ bool FMythicStatusLibraryTest::RunTest(const FString &Parameters) {
     };
     for (const FGameplayAttribute &Buildup : PipelineBuildups) {
         TestTrue(*FString::Printf(TEXT("a status covers the %s the damage pipeline feeds"), *Buildup.GetName()), CoveredBuildups.Contains(Buildup));
+    }
+
+    return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicStatusRollableTest,
+    "Mythic.Combat.StatusRollable",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicStatusRollableTest::RunTest(const FString &Parameters) {
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    UMythicStatusEffectLibrary *Library = Settings ? Settings->StatusEffectLibrary.LoadSynchronous() : nullptr;
+    if (!TestNotNull(TEXT("status library loads"), Library)) {
+        return false;
+    }
+
+    FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry &Registry = Module.Get();
+    Registry.SearchAllAssets(true);
+
+    TArray<FAssetData> PoolAssets;
+    Registry.GetAssetsByClass(UMythicAffixPoolDataAsset::StaticClass()->GetClassPathName(), PoolAssets);
+    if (!TestTrue(TEXT("the project ships at least one affix pool"), PoolAssets.Num() > 0)) {
+        return false;
+    }
+
+    TSet<FString> RollableAttributes;
+    for (const FAssetData &PoolAsset : PoolAssets) {
+        const UMythicAffixPoolDataAsset *Pool = Cast<UMythicAffixPoolDataAsset>(PoolAsset.GetAsset());
+        if (!Pool) {
+            continue;
+        }
+        for (const FMythicTieredAffixDef &Def : Pool->Defs) {
+            if (Def.Attribute.IsValid() && Def.Tiers.Num() > 0) {
+                RollableAttributes.Add(Def.Attribute.GetName());
+            }
+        }
+    }
+    TestTrue(TEXT("affix pools grant something"), RollableAttributes.Num() > 0);
+
+    // A status a player cannot roll for is a status no build can be made of. This is the check that would have
+    // caught Poison and Freeze being absent from every pool while still looking wired up in code.
+    for (const UMythicStatusEffectDefinition *Definition : Library->Statuses) {
+        if (!Definition || !Definition->StatusType.IsValid()) {
+            continue;
+        }
+        const FString TagPath = Definition->StatusType.ToString();
+        int32 Dot = INDEX_NONE;
+        const FString Leaf = TagPath.FindLastChar(TCHAR('.'), Dot) ? TagPath.RightChop(Dot + 1) : TagPath;
+        const FString ChanceAttribute = FString::Printf(TEXT("Apply%sOnHitChance"), *Leaf);
+
+        TestTrue(*FString::Printf(TEXT("%s can be rolled by loot (%s appears in an affix pool)"), *Leaf, *ChanceAttribute),
+                 RollableAttributes.Contains(ChanceAttribute));
     }
 
     return true;
