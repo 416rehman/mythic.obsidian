@@ -7,6 +7,7 @@
 #include "Engine/UserInterfaceSettings.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
+#include "Misc/CoreDelegates.h"
 #include "Performance/MaxTickRateHandlerModule.h"
 #include "Features/IModularFeatures.h"
 #include "RHI.h"
@@ -99,8 +100,21 @@ const EStreamlineDLSSGMode GFrameGenModes[] = {
 }
 #endif
 
+namespace {
+/**
+ * The DLSS plugin refuses every query until PostEngineInit and logs an error for each one. Settings are
+ * applied during engine init, so without this every launch printed errors and answered nothing useful.
+ */
+bool IsDLSSQueryable() {
+    return GIsRunning;
+}
+}
+
 bool UMythicUserSettings::IsDLSSAvailable() {
 #if MYTHIC_WITH_DLSS
+    if (!IsDLSSQueryable()) {
+        return false;
+    }
     // Asks the plugin, not the vendor: an NVIDIA card too old for DLSS, or one with a stale driver, says no
     // here and the row greys out rather than offering a mode that silently does nothing.
     return UDLSSLibrary::IsDLSSSupported();
@@ -111,6 +125,9 @@ bool UMythicUserSettings::IsDLSSAvailable() {
 
 bool UMythicUserSettings::IsFrameGenerationAvailable() {
 #if MYTHIC_WITH_DLSS
+    if (!IsDLSSQueryable()) {
+        return false;
+    }
     // Separate from IsDLSSAvailable on purpose - frame generation needs a 40-series card or newer, so a 30-series
     // player gets upscaling but not this.
     return UStreamlineLibraryDLSSG::IsDLSSGSupported();
@@ -127,6 +144,9 @@ bool UMythicUserSettings::IsHardwareRayTracingAvailable() {
 
 bool UMythicUserSettings::IsRayReconstructionAvailable() {
 #if MYTHIC_WITH_DLSS
+    if (!IsDLSSQueryable()) {
+        return false;
+    }
     return UDLSSLibrary::IsDLSSRRSupported();
 #else
     return false;
@@ -135,6 +155,19 @@ bool UMythicUserSettings::IsRayReconstructionAvailable() {
 
 void UMythicUserSettings::ApplyDLSS() const {
 #if MYTHIC_WITH_DLSS
+    // Deferred rather than dropped: the settings the player saved must still take effect on this launch.
+    if (!IsDLSSQueryable()) {
+        static bool bDeferred = false;
+        if (!bDeferred) {
+            bDeferred = true;
+            FCoreDelegates::OnPostEngineInit.AddLambda([]() {
+                if (UMythicUserSettings *Settings = UMythicUserSettings::Get()) {
+                    Settings->ApplyDLSS();
+                }
+            });
+        }
+        return;
+    }
     if (UDLSSLibrary::IsDLSSSupported()) {
         const int32 Index = FMath::Clamp(DLSSMode, 0, UE_ARRAY_COUNT(GDLSSModes) - 1);
         const UDLSSMode Mode = GDLSSModes[Index];

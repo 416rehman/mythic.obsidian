@@ -69,6 +69,12 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> Txt_Title;
 
+public:
+    /** The screen Escape opens for Settings. Public for the same reachability reason as the menu shell. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Escape")
+    TSubclassOf<UCommonActivatableWidget> GetSettingsScreenClass() const { return SettingsScreenClass; }
+
+protected:
     /** The settings screen, pushed onto SettingsLayerTag when Settings is chosen. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Escape")
     TSubclassOf<UCommonActivatableWidget> SettingsScreenClass;

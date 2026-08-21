@@ -65,6 +65,14 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Menu")
     void CyclePage(int32 Delta);
 
+    /**
+     * The page class registered under an id, or null when nothing is. Public because "is this screen
+     * actually reachable?" is a question worth asserting: a screen can compile, save and read back
+     * perfectly while no entry point points at it.
+     */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Menu")
+    TSubclassOf<UCommonActivatableWidget> GetRegisteredPageClass(FName PageId) const;
+
     /** The leftmost available tab — what a bare Tab press opens. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Menu")
     FName GetFirstPageId() const;

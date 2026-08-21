@@ -21,6 +21,21 @@ class MYTHIC_API UMythicSettingRowBase : public UCommonUserWidget {
     GENERATED_BODY()
 
 public:
+    /** Re-reads the live value and tells the Blueprint to redraw. Used after Restore Defaults. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void Redraw();
+
+    /**
+     * Left or right on the row: steps a select, nudges a slider by one authored step, flips a toggle.
+     * One focus stop per row rather than one per control - you move down the list, not into it.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void Nudge(int32 Delta);
+
+    /** Accept on the row: flips a toggle, advances a select, fires an action. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void ActivateRow();
+
     /** Hands this row the setting it represents. Calls OnDefinitionSet so the Blueprint can redraw. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetDefinition(const FMythicSettingDefinition &InDefinition, UMythicSettingsScreenBase *InScreen);
@@ -77,7 +92,21 @@ public:
     UFUNCTION(BlueprintImplementableEvent, Category = "Mythic|Settings")
     void OnValueChanged();
 
+    /** Draw the focus state. The Blueprint owns what focus looks like; this class only reports it. */
+    UFUNCTION(BlueprintImplementableEvent, Category = "Mythic|Settings")
+    void OnFocusChanged(bool bFocused);
+
+    /** A row the player cannot act on: an action fired, or a keybind waiting for a key. */
+    UFUNCTION(BlueprintImplementableEvent, Category = "Mythic|Settings")
+    void OnActionTriggered();
+
 protected:
+    virtual void NativeConstruct() override;
+    virtual FReply NativeOnFocusReceived(const FGeometry &Geo, const FFocusEvent &Event) override;
+    virtual void NativeOnFocusLost(const FFocusEvent &Event) override;
+    virtual FReply NativeOnKeyDown(const FGeometry &Geo, const FKeyEvent &Event) override;
+    virtual FReply NativeOnMouseButtonDown(const FGeometry &Geo, const FPointerEvent &Event) override;
+
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Settings")
     FMythicSettingDefinition Definition;
 

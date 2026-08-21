@@ -224,6 +224,12 @@ FName UMythicMenuShell::GetFirstPageId() const {
     return OrderedPageIds.Num() > 0 ? OrderedPageIds[0] : NAME_None;
 }
 
+TSubclassOf<UCommonActivatableWidget> UMythicMenuShell::GetRegisteredPageClass(FName PageId) const {
+    const FMythicMenuPage *Found = Pages.FindByPredicate(
+        [PageId](const FMythicMenuPage &Page) { return Page.PageId == PageId; });
+    return Found ? Found->PageClass : nullptr;
+}
+
 void UMythicMenuShell::CyclePage(int32 Delta) {
     const int32 Count = OrderedPageIds.Num();
     if (Count <= 1 || Delta == 0) {

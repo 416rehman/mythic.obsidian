@@ -1,8 +1,102 @@
 
 #include "UI/Settings/MythicSettingRowBase.h"
 
+#include "UI/Kit/MythicKitInputs.h"
 #include "UI/Settings/MythicSettingAccess.h"
 #include "UI/Settings/MythicSettingsScreenBase.h"
+
+void UMythicSettingRowBase::NativeConstruct() {
+    Super::NativeConstruct();
+
+    // A heading is text, not a stop. Letting it take focus makes a pad feel broken: the row lights up and
+    // then answers nothing.
+    SetIsFocusable(!UMythicSettingsScreenBase::IsGroupHeading(Definition));
+}
+
+FReply UMythicSettingRowBase::NativeOnFocusReceived(const FGeometry &Geo, const FFocusEvent &Event) {
+    if (UMythicSettingsScreenBase *Owner = Screen.Get()) {
+        Owner->SetFocusedRow(Definition);
+    }
+    OnFocusChanged(true);
+    return Super::NativeOnFocusReceived(Geo, Event);
+}
+
+void UMythicSettingRowBase::NativeOnFocusLost(const FFocusEvent &Event) {
+    OnFocusChanged(false);
+    Super::NativeOnFocusLost(Event);
+}
+
+FReply UMythicSettingRowBase::NativeOnMouseButtonDown(const FGeometry &Geo, const FPointerEvent &Event) {
+    if (!IsAvailable()) {
+        return Super::NativeOnMouseButtonDown(Geo, Event);
+    }
+    ActivateRow();
+    return FReply::Handled().SetUserFocus(TakeWidget(), EFocusCause::Mouse);
+}
+
+FReply UMythicSettingRowBase::NativeOnKeyDown(const FGeometry &Geo, const FKeyEvent &Event) {
+    const FMythicInputStep Input = FMythicInputStep::FromKey(Event.GetKey());
+    if (!Input.IsHandled() || !IsAvailable()) {
+        return Super::NativeOnKeyDown(Geo, Event);
+    }
+    if (Input.bAccept) {
+        ActivateRow();
+    }
+    else {
+        Nudge(Input.Delta);
+    }
+    // Handled either way, so left and right adjust the value instead of walking Slate navigation out of
+    // the list.
+    return FReply::Handled();
+}
+
+void UMythicSettingRowBase::Redraw() {
+    OnDefinitionSet();
+    OnValueChanged();
+}
+
+void UMythicSettingRowBase::Nudge(int32 Delta) {
+    switch (Definition.Control) {
+        case EMythicSettingControl::Slider: {
+            const float Step = Definition.StepSize > KINDA_SMALL_NUMBER ? Definition.StepSize : 0.05f;
+            const float Current = UMythicSettingAccess::ReadValue(Definition);
+            UMythicSettingAccess::WriteValue(
+                Definition,
+                FMath::Clamp(Current + Step * static_cast<float>(Delta), Definition.MinValue, Definition.MaxValue));
+            NotifyChanged();
+            break;
+        }
+        case EMythicSettingControl::Select:
+        case EMythicSettingControl::Toggle:
+            StepOption(Delta);
+            break;
+        default:
+            break;
+    }
+}
+
+void UMythicSettingRowBase::ActivateRow() {
+    switch (Definition.Control) {
+        case EMythicSettingControl::Toggle: {
+            // Accept flips, so a toggle answers the same button as everything else on the page. Wraps,
+            // because with two options there is no far end to run into.
+            const int32 Count = UMythicSettingAccess::GetAvailableOptions(Definition).Num();
+            if (Count > 0) {
+                SetOptionIndex((GetOptionIndex() + 1) % Count);
+            }
+            break;
+        }
+        case EMythicSettingControl::Select:
+            StepOption(1);
+            break;
+        case EMythicSettingControl::Action:
+        case EMythicSettingControl::Keybind:
+            OnActionTriggered();
+            break;
+        default:
+            break;
+    }
+}
 
 void UMythicSettingRowBase::SetDefinition(const FMythicSettingDefinition &InDefinition,
                                           UMythicSettingsScreenBase *InScreen) {

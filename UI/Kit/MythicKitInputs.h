@@ -3,12 +3,26 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "InputCoreTypes.h"
 #include "CommonUserWidget.h"
 #include "MythicKitInputs.generated.h"
 
 class UImage;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+
+/**
+ * Which way a key press moves a focusable control. One definition for the whole project: a settings row and
+ * a kit input that disagreed about what "right" means is a bug the player feels and nobody can find.
+ */
+struct MYTHIC_API FMythicInputStep {
+    int32 Delta = 0;
+    bool bAccept = false;
+
+    bool IsHandled() const { return Delta != 0 || bAccept; }
+
+    static FMythicInputStep FromKey(const FKey &Key);
+};
 
 UENUM()
 enum class EMythicKitInputKind : uint8 {

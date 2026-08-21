@@ -20,6 +20,21 @@ const TCHAR *DefaultInputMaterial = TEXT("/Game/Mythic/UI/Globals/materials/M_UI
 }
 
 
+FMythicInputStep FMythicInputStep::FromKey(const FKey &Key) {
+    FMythicInputStep Step;
+    if (Key == EKeys::Left || Key == EKeys::Gamepad_DPad_Left || Key == EKeys::Gamepad_LeftStick_Left) {
+        Step.Delta = -1;
+    }
+    else if (Key == EKeys::Right || Key == EKeys::Gamepad_DPad_Right || Key == EKeys::Gamepad_LeftStick_Right) {
+        Step.Delta = 1;
+    }
+    else if (Key == EKeys::Gamepad_FaceButton_Bottom || Key == EKeys::Enter || Key == EKeys::SpaceBar) {
+        Step.bAccept = true;
+    }
+    return Step;
+}
+
+
 void UMythicKitInputBase::NativePreConstruct() {
     Super::NativePreConstruct();
 
@@ -105,18 +120,9 @@ FReply UMythicKitInputBase::NativeOnKeyDown(const FGeometry &Geo, const FKeyEven
         return Super::NativeOnKeyDown(Geo, Event);
     }
 
-    const FKey Key = Event.GetKey();
-
-    const bool bLeft = Key == EKeys::Left || Key == EKeys::Gamepad_DPad_Left || Key == EKeys::Gamepad_LeftStick_Left;
-    const bool bRight = Key == EKeys::Right || Key == EKeys::Gamepad_DPad_Right || Key == EKeys::Gamepad_LeftStick_Right;
-
-    if (bLeft || bRight) {
-        Step(bRight ? 1 : -1);
-        return FReply::Handled();
-    }
-
-    if (Key == EKeys::Gamepad_FaceButton_Bottom || Key == EKeys::Enter || Key == EKeys::SpaceBar) {
-        Step(1);
+    const FMythicInputStep Input = FMythicInputStep::FromKey(Event.GetKey());
+    if (Input.IsHandled()) {
+        Step(Input.bAccept ? 1 : Input.Delta);
         return FReply::Handled();
     }
 
