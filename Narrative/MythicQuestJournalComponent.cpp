@@ -15,6 +15,9 @@
 #include "Objectives/ObjectiveTracker.h"
 #include "Player/MythicPlayerState.h"
 #include "World/LivingWorld/MythicWorldStateSubsystem.h"
+#include "Player/MythicPlayerState.h"
+#include "Progression/MythicStatLedgerComponent.h"
+#include "Progression/MythicTags_MetaProgression.h"
 
 UMythicQuestJournalComponent::UMythicQuestJournalComponent() {
     PrimaryComponentTick.bCanEverTick = false;
@@ -245,6 +248,15 @@ void UMythicQuestJournalComponent::ApplyQuestCompleted(UMythicQuestDefinition *Q
     }
     else {
         UE_LOG(Myth, Log, TEXT("QuestJournal: quest '%s' completed (no outcome matched)"), *GetNameSafe(Quest));
+    }
+
+    // The terminal-state latch means this runs once per quest, so no extra dedupe is needed here.
+    if (PC) {
+        if (const AMythicPlayerState *PS = PC->GetPlayerState<AMythicPlayerState>()) {
+            if (UMythicStatLedgerComponent *StatLedger = PS->GetStatLedgerComponent()) {
+                StatLedger->RecordStat(STAT_QUEST_COMPLETED);
+            }
+        }
     }
 
     AdvanceStorylines(Quest);
