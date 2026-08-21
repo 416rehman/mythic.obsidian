@@ -6,7 +6,9 @@
 #include "GameFramework/Pawn.h"
 #include "Player/MythicPlayerController.h"
 #include "NativeGameplayTags.h"
-#include "GAS/Effects/MythicStatusEffects.h"
+#include "Engine/GameInstance.h"
+#include "GAS/Effects/MythicStatusEffectDefinition.h"
+#include "GAS/Effects/MythicStatusRegistry.h"
 #include "GAS/Effects/MythicCrowdControl.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/Feedback/MythicTags_FeedbackCues.h"
@@ -92,143 +94,107 @@ void UMythicAttributeSet_Defense::PostGameplayEffectExecute(const FGameplayEffec
         }
     }
 
-    if (Data.EvaluatedData.Attribute == GetBurnBuildupAttribute() || Data.EvaluatedData.Attribute == GetPoisonBuildupAttribute() ||
-        Data.EvaluatedData.Attribute == GetBleedBuildupAttribute() || Data.EvaluatedData.Attribute == GetSlowBuildupAttribute() ||
-        Data.EvaluatedData.Attribute == GetFreezeBuildupAttribute() || Data.EvaluatedData.Attribute == GetStunBuildupAttribute())
-    {
-        UAbilitySystemComponent* TargetASC = GetOwningAbilitySystemComponent();
-        if (TargetASC)
-        {
-            auto CheckAndTriggerStatus = [this, TargetASC, &Data](const FGameplayAttribute& BuildupAttr, const FGameplayAttribute& ResistAttr, const FGameplayTag& StatusTag, const FGameplayTag& ApplyTag)
-            {
-                if (Data.EvaluatedData.Attribute == BuildupAttr)
-                {
-                    float CurrentBuildup = BuildupAttr.GetNumericValue(this);
-                    float Resistance = ResistAttr.GetNumericValue(this);
-                    float Threshold = ComputeBuildupThreshold(Resistance);
+    if (!Data.EvaluatedData.Attribute.IsValid()) {
+        return;
+    }
 
-                    const bool bHardCC = (StatusTag == TAG_Status_Type_Stun || StatusTag == TAG_Status_Type_Freeze);
+    UAbilitySystemComponent *TargetASC = GetOwningAbilitySystemComponent();
+    if (!TargetASC) {
+        return;
+    }
 
-                    if (bHardCC && TargetASC->HasMatchingGameplayTag(GAS_IMMUNE_HARDCC))
-                    {
-                        if (CurrentBuildup >= Threshold)
-                        {
-                            TargetASC->SetNumericAttributeBase(BuildupAttr, CurrentBuildup - Threshold);
+    const UWorld *World = TargetASC->GetWorld();
+    const UGameInstance *GameInstance = World ? World->GetGameInstance() : nullptr;
+    const UMythicStatusRegistry *Registry = GameInstance ? GameInstance->GetSubsystem<UMythicStatusRegistry>() : nullptr;
+    if (!Registry) {
+        return;
+    }
 
-                            if (UMythicAbilitySystemComponent *TargetMythicASC = Cast<UMythicAbilitySystemComponent>(TargetASC)) {
-                                FGameplayCueParameters CueParams;
-                                if (const AActor *TargetActor = TargetASC->GetAvatarActor()) {
-                                    CueParams.Location = TargetActor->GetActorLocation();
-                                }
-                                TargetMythicASC->ExecuteGameplayCueMulticast(TAG_GameplayCue_Combat_Immune, CueParams);
-                            }
-                        }
-                        return;
-                    }
+    const UMythicStatusEffectDefinition *Definition = Registry->FindStatusByBuildupAttribute(Data.EvaluatedData.Attribute);
+    if (!Definition) {
+        return;
+    }
 
-                    float EffectiveThreshold = Threshold;
-                    FMythicCcEscalationConfig CcCfg;
-                    FMythicCcResolution CcRes;
-                    if (bHardCC)
-                    {
-                        CcCfg = FMythicCrowdControlRules::ConfigForTier(ResolveTargetTierInt(TargetASC));
-                        const UWorld *CcWorld = TargetASC->GetWorld();
-                        const float Now = CcWorld ? CcWorld->GetTimeSeconds() : 0.0f;
-                        CcRes = FMythicCrowdControlRules::ResolveCcTrigger(CcHardTrackStates.FindRef(StatusTag), CcCfg, Now);
-                        EffectiveThreshold = Threshold * CcRes.EffectiveThresholdMultiplier;
-                    }
+    const float CurrentBuildup = TargetASC->GetNumericAttribute(Data.EvaluatedData.Attribute);
+    const float Resistance = TargetASC->HasAttributeSetForAttribute(Definition->ResistanceAttribute)
+                                 ? TargetASC->GetNumericAttribute(Definition->ResistanceAttribute)
+                                 : 0.0f;
+    const float Threshold = ComputeBuildupThreshold(Resistance);
+    const bool bHardCC = Definition->bHardCrowdControl;
 
-                    if (CurrentBuildup >= EffectiveThreshold)
-                    {
-                        TargetASC->SetNumericAttributeBase(BuildupAttr, CurrentBuildup - EffectiveThreshold);
+    if (bHardCC && TargetASC->HasMatchingGameplayTag(GAS_IMMUNE_HARDCC)) {
+        if (CurrentBuildup >= Threshold) {
+            TargetASC->SetNumericAttributeBase(Data.EvaluatedData.Attribute, CurrentBuildup - Threshold);
+            UMythicStatusRegistry::PlayStatusCue(TargetASC, TAG_GameplayCue_Combat_Immune);
+        }
+        return;
+    }
 
-                        if (bHardCC)
-                        {
-                            CcHardTrackStates.Add(StatusTag, CcRes.NextState);
-                        }
+    float EffectiveThreshold = Threshold;
+    FMythicCcEscalationConfig CcCfg;
+    FMythicCcResolution CcRes;
+    if (bHardCC) {
+        CcCfg = FMythicCrowdControlRules::ConfigForTier(ResolveTargetTierInt(TargetASC));
+        const float Now = World ? World->GetTimeSeconds() : 0.0f;
+        CcRes = FMythicCrowdControlRules::ResolveCcTrigger(CcHardTrackStates.FindRef(Definition->StatusType), CcCfg, Now);
+        EffectiveThreshold = Threshold * CcRes.EffectiveThresholdMultiplier;
+    }
 
-                        bool bReactionTriggered = false;
-                        if (StatusTag == TAG_Status_Type_Burn && TargetASC->HasMatchingGameplayTag(TAG_Status_State_Poisoned))
-                        {
-                            bReactionTriggered = true;
-                            TargetASC->RemoveActiveEffectsWithGrantedTags(FGameplayTagContainer(TAG_Status_State_Poisoned));
+    if (CurrentBuildup < EffectiveThreshold) {
+        return;
+    }
 
-                            FGameplayEventData EventData;
-                            EventData.EventTag = TAG_Reaction_ExplosiveToxin;
-                            EventData.Instigator = Data.EffectSpec.GetContext().GetInstigator();
-                            EventData.Target = TargetASC->GetAvatarActor();
-                            TargetASC->HandleGameplayEvent(EventData.EventTag, &EventData);
+    TargetASC->SetNumericAttributeBase(Data.EvaluatedData.Attribute, CurrentBuildup - EffectiveThreshold);
 
-                            if (UMythicAbilitySystemComponent *ReactAsc = Cast<UMythicAbilitySystemComponent>(TargetASC)) {
-                                FGameplayCueParameters CueParams;
-                                if (const AActor *TargetActor = TargetASC->GetAvatarActor()) {
-                                    CueParams.Location = TargetActor->GetActorLocation();
-                                }
-                                ReactAsc->ExecuteGameplayCueMulticast(TAG_GameplayCue_Combat_Reaction, CueParams);
-                            }
-                        }
+    if (bHardCC) {
+        CcHardTrackStates.Add(Definition->StatusType, CcRes.NextState);
+    }
 
-                        if (!bReactionTriggered)
-                        {
-                            FGameplayEventData EventData;
-                            EventData.EventTag = ApplyTag;
-                            EventData.Instigator = Data.EffectSpec.GetContext().GetInstigator();
-                            EventData.Target = TargetASC->GetAvatarActor();
-                            EventData.EventMagnitude = 1.0f;
-                            TargetASC->HandleGameplayEvent(ApplyTag, &EventData);
+    AActor *EffectInstigator = Data.EffectSpec.GetContext().GetInstigator();
+    AActor *EffectCauser = Data.EffectSpec.GetContext().GetEffectCauser();
 
-                            if (TSubclassOf<UGameplayEffect> DebuffGE = FMythicStatusEffectResolver::ResolveDebuffGEForStatus(StatusTag))
-                            {
-                                const FGameplayEffectContextHandle &SourceCtx = Data.EffectSpec.GetContext();
-                                FGameplayEffectContextHandle DebuffCtx = TargetASC->MakeEffectContext();
-                                DebuffCtx.AddInstigator(SourceCtx.GetInstigator(), SourceCtx.GetEffectCauser());
-                                FGameplayEffectSpecHandle DebuffSpec = TargetASC->MakeOutgoingSpec(DebuffGE, 1.0f, DebuffCtx);
-                                if (DebuffSpec.IsValid())
-                                {
-                                    TargetASC->ApplyGameplayEffectSpecToSelf(*DebuffSpec.Data.Get());
-                                }
-                            }
+    const FMythicStatusReaction *Reaction = nullptr;
+    for (const FMythicStatusReaction &Candidate : Definition->Reactions) {
+        if (Candidate.RequiredTargetTag.IsValid() && TargetASC->HasMatchingGameplayTag(Candidate.RequiredTargetTag)) {
+            Reaction = &Candidate;
+            break;
+        }
+    }
 
-                            FGameplayTag OnsetCue;
-                            if (StatusTag == TAG_Status_Type_Burn) { OnsetCue = TAG_GameplayCue_Status_Burn_Onset; }
-                            else if (StatusTag == TAG_Status_Type_Bleed) { OnsetCue = TAG_GameplayCue_Status_Bleed_Onset; }
-                            else if (StatusTag == TAG_Status_Type_Poison) { OnsetCue = TAG_GameplayCue_Status_Poison_Onset; }
-                            else if (StatusTag == TAG_Status_Type_Slow) { OnsetCue = TAG_GameplayCue_Status_Slow_Onset; }
-                            else if (StatusTag == TAG_Status_Type_Freeze) { OnsetCue = TAG_GameplayCue_Status_Freeze_Onset; }
-                            else if (StatusTag == TAG_Status_Type_Stun) { OnsetCue = TAG_GameplayCue_Status_Stun_Onset; }
-                            if (OnsetCue.IsValid()) {
-                                if (UMythicAbilitySystemComponent *OnsetAsc = Cast<UMythicAbilitySystemComponent>(TargetASC)) {
-                                    FGameplayCueParameters CueParams;
-                                    if (const AActor *TargetActor = TargetASC->GetAvatarActor()) {
-                                        CueParams.Location = TargetActor->GetActorLocation();
-                                    }
-                                    OnsetAsc->ExecuteGameplayCueMulticast(OnsetCue, CueParams);
-                                }
-                            }
-                        }
+    if (Reaction) {
+        if (Reaction->bConsumeExistingStatus) {
+            TargetASC->RemoveActiveEffectsWithGrantedTags(FGameplayTagContainer(Reaction->RequiredTargetTag));
+        }
+        if (Reaction->ReactionEventTag.IsValid()) {
+            FGameplayEventData ReactionEvent;
+            ReactionEvent.EventTag = Reaction->ReactionEventTag;
+            ReactionEvent.Instigator = EffectInstigator;
+            ReactionEvent.Target = TargetASC->GetAvatarActor();
+            ReactionEvent.OptionalObject = Definition;
+            TargetASC->HandleGameplayEvent(ReactionEvent.EventTag, &ReactionEvent);
+        }
+        UMythicStatusRegistry::PlayStatusCue(TargetASC, Reaction->ReactionCueTag);
+    }
 
-                        if (bHardCC && CcRes.bGrantImmunity)
-                        {
-                            const FGameplayEffectContextHandle &SrcCtx = Data.EffectSpec.GetContext();
-                            FGameplayEffectContextHandle ImmuneCtx = TargetASC->MakeEffectContext();
-                            ImmuneCtx.AddInstigator(SrcCtx.GetInstigator(), SrcCtx.GetEffectCauser());
-                            FGameplayEffectSpecHandle ImmuneSpec = TargetASC->MakeOutgoingSpec(UMythicGE_CCImmune::StaticClass(), 1.0f, ImmuneCtx);
-                            if (ImmuneSpec.IsValid())
-                            {
-                                ImmuneSpec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_CCIMMUNE_DURATION, CcCfg.ImmuneSeconds);
-                                TargetASC->ApplyGameplayEffectSpecToSelf(*ImmuneSpec.Data.Get());
-                            }
-                        }
-                    }
-                }
-            };
+    if (!Reaction || !Reaction->bSuppressStatusApplication) {
+        FGameplayEventData ApplyEvent;
+        ApplyEvent.EventTag = TAG_Event_ApplyStatus;
+        ApplyEvent.Instigator = EffectInstigator;
+        ApplyEvent.Target = TargetASC->GetAvatarActor();
+        ApplyEvent.EventMagnitude = 1.0f;
+        ApplyEvent.OptionalObject = Definition;
+        TargetASC->HandleGameplayEvent(TAG_Event_ApplyStatus, &ApplyEvent);
 
-            CheckAndTriggerStatus(GetBurnBuildupAttribute(), GetBurnResistanceAttribute(), TAG_Status_Type_Burn, TAG_Event_ApplyStatus);
-            CheckAndTriggerStatus(GetPoisonBuildupAttribute(), GetPoisonResistanceAttribute(), TAG_Status_Type_Poison, TAG_Event_ApplyStatus);
-            CheckAndTriggerStatus(GetBleedBuildupAttribute(), GetBleedResistanceAttribute(), TAG_Status_Type_Bleed, TAG_Event_ApplyStatus);
-            CheckAndTriggerStatus(GetSlowBuildupAttribute(), GetSlowResistanceAttribute(), TAG_Status_Type_Slow, TAG_Event_ApplyStatus);
-            CheckAndTriggerStatus(GetFreezeBuildupAttribute(), GetFreezeResistanceAttribute(), TAG_Status_Type_Freeze, TAG_Event_ApplyStatus);
-            CheckAndTriggerStatus(GetStunBuildupAttribute(), GetStunResistanceAttribute(), TAG_Status_Type_Stun, TAG_Event_ApplyStatus);
+        UMythicStatusRegistry::ApplyStatusEffect(TargetASC, Definition, EffectInstigator, EffectCauser);
+    }
+
+    if (bHardCC && CcRes.bGrantImmunity) {
+        FGameplayEffectContextHandle ImmuneCtx = TargetASC->MakeEffectContext();
+        ImmuneCtx.AddInstigator(EffectInstigator, EffectCauser);
+        FGameplayEffectSpecHandle ImmuneSpec = TargetASC->MakeOutgoingSpec(UMythicGE_CCImmune::StaticClass(), 1.0f, ImmuneCtx);
+        if (ImmuneSpec.IsValid()) {
+            ImmuneSpec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_CCIMMUNE_DURATION, CcCfg.ImmuneSeconds);
+            TargetASC->ApplyGameplayEffectSpecToSelf(*ImmuneSpec.Data.Get());
         }
     }
 }

@@ -27,6 +27,7 @@ class AMythicWorldItem;
 class UMythicAchievementSet;
 class UMythicUnlockRuleSet;
 class UMythicCodexLibrary;
+class UMythicStatusEffectLibrary;
 class UMythicRenownTierTable;
 class UMythicTitleRegistry;
 class UGameplayEffect;
@@ -104,6 +105,14 @@ public:
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Knowledge")
     TSoftObjectPtr<UMythicCodexLibrary> DefaultCodexLibrary;
+
+    /**
+     * Every status effect the game can apply (Burn, Bleed, Stun, ...). UMythicStatusRegistry indexes it by
+     * Status.Type tag. A status must appear here to be reachable by buildup, abilities or cheats — unset means no
+     * status effect can land.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combat")
+    TSoftObjectPtr<UMythicStatusEffectLibrary> StatusEffectLibrary;
 
     /** Maximum character level, derived from the summed proficiency levels. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Progression")
