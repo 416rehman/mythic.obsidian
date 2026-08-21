@@ -7,6 +7,12 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_INCOMBAT, "GAS.State.InCombat", "The en
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_SPRINTING, "GAS.State.Sprinting", "The entity is sprinting");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_EXHAUSTED, "GAS.State.Exhausted", "Winded: out of stamina from sprinting — the sprint speed bonus is suppressed until stamina recovers");
 
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_HEALTH, "GAS.State.Health", "Parent of the health bands an entity currently sits in");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_HEALTH_CRITICAL, "GAS.State.Health.Critical", "At death's door");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_HEALTH_LOW, "GAS.State.Health.Low", "Badly hurt");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_HEALTH_WOUNDED, "GAS.State.Health.Wounded", "Has taken a meaningful wound");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_HEALTH_UNHURT, "GAS.State.Health.Unhurt", "Effectively untouched");
+
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF, "GAS.Debuff", "Parent category for all debuffs");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF_BLEEDING, "GAS.Debuff.Bleeding", "The entity is bleeding and taking damage over time");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_DEBUFF_BURNING, "GAS.Debuff.Burning", "The entity is burning and taking damage over time");

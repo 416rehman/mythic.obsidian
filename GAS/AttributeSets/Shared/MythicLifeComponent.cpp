@@ -5,6 +5,8 @@
 #include "Mythic.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/MythicTags_GAS.h"
+#include "GAS/MythicHealthBands.h"
+#include "Settings/MythicCombatSettings.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -166,6 +168,8 @@ void UMythicLifeComponent::InitializeWithAbilitySystem(UAbilitySystemComponent *
     const FGameplayEffectContextHandle EmptyContextHandle = FGameplayEffectContextHandle();
     OnHealthChanged.Broadcast(Health, 0, HealthAttr, EmptyContextHandle);
     OnMaxHealthChanged.Broadcast(MaxHealth, 0, MaxHealthAttr, EmptyContextHandle);
+
+    RefreshHealthBands();
 
     ReevaluateCrowdControl();
 }
@@ -1647,3 +1651,27 @@ void UMythicLifeComponent::HandleHealthChanged(AActor *DamageInstigator, AActor 
 
 void UMythicLifeComponent::HandleMaxHealthChanged(AActor *DamageInstigator, AActor *DamageCauser, const FGameplayEffectSpec *DamageEffectSpec,
                                                   float DamageMagnitude, float OldValue, float NewValue) {}
+
+void UMythicLifeComponent::RefreshHealthBands() const {
+    if (!AbilitySystemComponent || !AbilitySystemComponent->IsOwnerActorAuthoritative()) {
+        return;
+    }
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    if (!Settings || !Settings->HealthBands.IsConfigured()) {
+        return;
+    }
+    const UMythicAttributeSet_Life *Life = AbilitySystemComponent->GetSet<UMythicAttributeSet_Life>();
+    if (!Life) {
+        return;
+    }
+
+    const float Fraction = FMythicHealthBandRules::FractionOf(Life->GetHealth(), Life->GetMaxHealth());
+    FGameplayTagContainer Active;
+    FMythicHealthBandRules::ResolveBands(Settings->HealthBands.Bands, Fraction, Active);
+
+    for (const FMythicHealthBand &Band : Settings->HealthBands.Bands) {
+        if (Band.Tag.IsValid()) {
+            SetReplicatedStateTag(AbilitySystemComponent, Band.Tag, Active.HasTagExact(Band.Tag));
+        }
+    }
+}

@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
 #include "GAS/Executions/MythicDamageCompose.h"
+#include "GAS/MythicHealthBands.h"
 #include "GAS/MythicWeatherCombatRules.h"
 #include "MythicCombatSettings.generated.h"
 
@@ -26,4 +27,16 @@ public:
     // sample set. Resolved ONCE per damage application (a cheap subsystem getter — no Tick, no polling).
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Weather Combat")
     FMythicWeatherCombatConfig WeatherCombat;
+
+    /**
+     * Slices of the health bar an entity advertises as GAS.State.Health.* tags while inside them. This is the whole
+     * mechanism behind "hits harder when the target is nearly dead": the band tag is a normal gameplay tag, so a
+     * gameplay effect gates a modifier on it with the tag requirements GAS already has, and no C++ knows which
+     * talent is asking. Bands nest deliberately - an entity at 10% carries Critical, Low and Wounded at once, so a
+     * two-tier talent is two modifiers rather than a special case.
+     *
+     * Empty (never, unless deliberately cleared) = no band tags are published and every effect gated on one is inert.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Health Bands")
+    FMythicHealthBandConfig HealthBands;
 };

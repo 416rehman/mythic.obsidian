@@ -87,6 +87,12 @@ public:
                                     NewValue);
 
 public:
+    /**
+     * Republishes the GAS.State.Health.* tags for the owner's current health fraction. Authority only: the tags
+     * replicate, so a client that recomputed them locally would fight the server's copy.
+     */
+    void RefreshHealthBands() const;
+
     void TriggerHealthChange(const FOnAttributeChangeData &OnAttributeChangeData) const {
         if (OnHealthChanged.IsBound()) {
             FGameplayEffectContextHandle Context = FGameplayEffectContextHandle();
@@ -96,6 +102,7 @@ public:
 
             OnHealthChanged.Broadcast(OnAttributeChangeData.NewValue, OnAttributeChangeData.OldValue, OnAttributeChangeData.Attribute, Context);
         }
+        RefreshHealthBands();
     }
 
     void TriggerMaxHealthChange(const FOnAttributeChangeData &OnAttributeChangeData) const {
@@ -107,6 +114,7 @@ public:
 
             OnMaxHealthChanged.Broadcast(OnAttributeChangeData.NewValue, OnAttributeChangeData.OldValue, OnAttributeChangeData.Attribute, Context);
         }
+        RefreshHealthBands();
     }
 
     UPROPERTY(BlueprintAssignable, Blueprintable)
@@ -378,6 +386,7 @@ protected:
 
     virtual void HandleMaxHealthChanged(AActor *DamageInstigator, AActor *DamageCauser, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude,
                                         float OldValue, float NewValue);
+
 
 protected:
     UPROPERTY()
