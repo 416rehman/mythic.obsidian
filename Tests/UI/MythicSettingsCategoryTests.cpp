@@ -37,8 +37,11 @@ bool FMythicSettingsCategoryTest::RunTest(const FString &Parameters) {
     TestFalse(TEXT("and hides another tab's rows"), Page::IsRowVisible(false, Audio, 0, Categories));
     TestTrue(TEXT("switching tab shows the other set"), Page::IsRowVisible(false, Audio, 1, Categories));
 
-    // The tab already names the category, so repeating it as a heading row is the label twice.
-    TestFalse(TEXT("the active tab hides its own heading"), Page::IsRowVisible(true, Display, 0, Categories));
+    // Semantics changed deliberately: bIsHeading now means a GROUP sub-heading, which belongs INSIDE its
+    // tab and must show - that is what turns a flat dump of settings into readable sections. The tab
+    // markers themselves are filtered out before this rule ever sees them.
+    TestTrue(TEXT("a group sub-heading shows inside its own tab"), Page::IsRowVisible(true, Display, 0, Categories));
+    TestFalse(TEXT("but not inside another tab"), Page::IsRowVisible(true, Display, 1, Categories));
 
     // The rule above was never the bug. The bug was the DEFAULT: shipping ActiveCategory = 0 meant a page
     // whose Blueprint had no tab strip engaged tabbing anyway and hid 31 of its 36 settings. Asserting the
