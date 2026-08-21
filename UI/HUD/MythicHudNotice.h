@@ -13,6 +13,9 @@ enum class EMythicNoticeKind : uint8 {
     Combat,
     Warning,
     Celebration,
+    // First time a status is inflicted on the player. Read once, then never again — so it is the only kind whose
+    // job is to be READ rather than glanced at.
+    Status,
 };
 
 USTRUCT(BlueprintType)
@@ -61,6 +64,9 @@ struct MYTHIC_API FMythicHudNotice {
 struct MYTHIC_API FMythicHudNoticeRules {
     static float LifetimeFor(EMythicNoticeKind Kind) {
         switch (Kind) {
+            case EMythicNoticeKind::Status:
+                // A sentence to read mid-fight, not a number to glance at.
+                return 6.0f;
             case EMythicNoticeKind::Celebration:
                 return 4.5f;
             case EMythicNoticeKind::Progression:

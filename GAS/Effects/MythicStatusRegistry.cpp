@@ -6,7 +6,12 @@
 #include "AbilitySystemGlobals.h"
 #include "GAS/Effects/MythicStatusEffectDefinition.h"
 #include "GAS/MythicAbilitySystemComponent.h"
+#include "GAS/Abilities/MythicAbilityRollSource.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "GAS/MythicGameplayEffectContext.h"
+#include "Knowledge/MythicCodexComponent.h"
+#include "Player/MythicPlayerController.h"
+#include "Player/MythicPlayerState.h"
 #include "Settings/MythicDeveloperSettings.h"
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_AILMENT_DAMAGE, "SetByCaller.Ailment.Damage",
@@ -95,6 +100,40 @@ void UMythicStatusRegistry::PlayStatusCue(UAbilitySystemComponent *TargetASC, co
     MythicASC->ExecuteGameplayCueMulticast(CueTag, CueParams);
 }
 
+bool UMythicStatusRegistry::ShouldTeachStatus(bool bTargetIsPlayer, bool bAlreadyKnown, bool bHasDescription) {
+    return bTargetIsPlayer && !bAlreadyKnown && bHasDescription;
+}
+
+namespace {
+// Names a status the first time it happens to a player, and records it as known. The codex glossary is what
+// remembers, so this survives a reload and cannot fire twice for the same character.
+void TeachStatusIfNew(const UAbilitySystemComponent *TargetASC, const UMythicStatusEffectDefinition *Definition) {
+    if (!TargetASC || !Definition || !Definition->StatusType.IsValid()) {
+        return;
+    }
+
+    APawn *TargetPawn = nullptr;
+    AController *TargetController = nullptr;
+    APlayerState *TargetPS = nullptr;
+    UMythicGameplayEffectContextLibrary::ResolveInstigator(TargetASC->GetAvatarActor(), TargetPawn, TargetController, TargetPS);
+
+    AMythicPlayerController *PC = Cast<AMythicPlayerController>(TargetController);
+    AMythicPlayerState *MythicPS = Cast<AMythicPlayerState>(TargetPS);
+    UMythicCodexComponent *Codex = MythicPS ? MythicPS->GetCodexComponent() : nullptr;
+    if (!PC || !Codex) {
+        return;
+    }
+
+    const bool bKnown = Codex->HasDiscoveredTerm(Definition->StatusType);
+    if (!UMythicStatusRegistry::ShouldTeachStatus(true, bKnown, !Definition->Description.IsEmpty())) {
+        return;
+    }
+
+    Codex->ServerDiscoverTerm(Definition->StatusType);
+    PC->ClientNotifyStatusLearned(Definition->DisplayName, Definition->Description, Definition->DisplayColor);
+}
+}
+
 float UMythicStatusRegistry::RollScaledMagnitude(const FRollDefinition &Range, int32 Level, float SourceMultiplier, float Roll01) {
     // An unauthored range means the effect keeps whatever it authors itself.
     if (Range.Min <= 0.0f && Range.Max <= 0.0f) {
@@ -144,6 +183,7 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
 
     TargetASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
     PlayStatusCue(TargetASC, Definition->OnsetCueTag);
+    TeachStatusIfNew(TargetASC, Definition);
     return true;
 }
 

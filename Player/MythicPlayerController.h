@@ -422,6 +422,13 @@ public:
     UFUNCTION(Client, Reliable, Category = "Zone")
     void ClientNotifyZoneEntry(const FText &SettlementName);
 
+    /**
+     * The first time a status is inflicted on this player, name it and say what it does. Sent once per status per
+     * character — the codex glossary is what remembers, so it survives a reload and never fires twice.
+     */
+    UFUNCTION(Client, Reliable, Category = "Status")
+    void ClientNotifyStatusLearned(const FText &StatusName, const FText &Description, FLinearColor Accent);
+
     UFUNCTION(Server, Reliable, WithValidation, Category = "Fast Travel")
     void ServerFastTravel(int32 SettlementId);
 

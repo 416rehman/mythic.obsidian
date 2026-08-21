@@ -29,6 +29,13 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> Txt_Detail;
 
+    /**
+     * Preferred over Txt_Detail whenever the WBP provides it. Status descriptions are authored in the project's
+     * <Roll>/<Context> markup, which a plain text block would print as literal angle brackets.
+     */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<class URichTextBlock> Rich_Detail;
+
     /** Root of the visible banner. Collapsed between beats. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UWidget> BannerRoot;

@@ -53,6 +53,12 @@ public:
     // Plays a cue on the target through the Mythic ASC multicast path. No-op for an unset tag.
     static void PlayStatusCue(UAbilitySystemComponent *TargetASC, const FGameplayTag &CueTag);
 
+    /**
+      * Whether this application is the one that should teach the player what the status is. True only for a player
+      * meeting it for the first time, and only when there is something authored to read.
+      */
+    static bool ShouldTeachStatus(bool bTargetIsPlayer, bool bAlreadyKnown, bool bHasDescription);
+
     // Rolls a range, scales it by the applier's multiplier, and never returns a negative.
     static float RollScaledMagnitude(const FRollDefinition &Range, int32 Level, float SourceMultiplier, float Roll01);
 

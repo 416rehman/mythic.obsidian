@@ -1508,6 +1508,19 @@ void AMythicPlayerController::ClientNotifyFastTravelRefused_Implementation(const
 void AMythicPlayerController::ClientNotifyZoneEntry_Implementation(const FText &SettlementName) {
 }
 
+void AMythicPlayerController::ClientNotifyStatusLearned_Implementation(const FText &StatusName, const FText &Description,
+                                                                      FLinearColor Accent) {
+    FMythicHudNotice Notice;
+    Notice.Kind = EMythicNoticeKind::Status;
+    Notice.Text = StatusName;
+    Notice.Detail = Description;
+    Notice.Accent = Accent;
+    // Keyed so a status inflicted twice in the same breath cannot stack two banners; it can only ever teach once
+    // anyway, but the key keeps that true if the rule is ever relaxed.
+    Notice.StackKey = FName(*StatusName.ToString());
+    RaiseHudNotice(Notice);
+}
+
 void AMythicPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason) {
     if (GetWorld()) {
         GetWorld()->GetTimerManager().ClearTimer(ZoneCheckTimerHandle);

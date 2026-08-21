@@ -5,6 +5,7 @@
 #include "Components/TextBlock.h"
 #include "Player/MythicPlayerController.h"
 #include "TimerManager.h"
+#include "Components/RichTextBlock.h"
 
 void UMythicHudBannerWidget::NativeConstruct() {
     Super::NativeConstruct();
@@ -64,9 +65,15 @@ void UMythicHudBannerWidget::PlayNext() {
         Txt_Title->SetColorAndOpacity(FSlateColor(Notice.Accent));
         Txt_Title->SetVisibility(ESlateVisibility::HitTestInvisible);
     }
-    if (Txt_Detail) {
+    const bool bUseRich = Rich_Detail != nullptr;
+    if (Rich_Detail) {
         const bool bHasDetail = !Notice.Detail.IsEmpty();
-        Txt_Detail->SetText(Notice.Detail);
+        Rich_Detail->SetText(Notice.Detail);
+        Rich_Detail->SetVisibility(bHasDetail ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+    }
+    if (Txt_Detail) {
+        const bool bHasDetail = !Notice.Detail.IsEmpty() && !bUseRich;
+        Txt_Detail->SetText(bUseRich ? FText::GetEmpty() : Notice.Detail);
         Txt_Detail->SetVisibility(bHasDetail ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
     }
     if (BannerRoot) {
