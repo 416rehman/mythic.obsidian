@@ -19,6 +19,12 @@
 #include "Mythic/Player/Proficiency/ProficiencyDefinition.h"
 #include "Mythic/GAS/MythicAbilitySystemComponent.h"
 #include "Mythic/GAS/MythicTags_GAS.h"
+#include "Mythic/GAS/Effects/MythicStatusRegistry.h"
+#include "Mythic/GAS/Effects/MythicStatusEffectDefinition.h"
+#include "Mythic/GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
+#include "Mythic/GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "GameplayEffect.h"
+#include "ScalableFloat.h"
 #include "Mythic/Mythic.h"
 #include "Mythic/World/LivingWorld/LivingWorldSubsystem.h"
 #include "Mythic/World/LivingWorld/Factions/FactionDatabase.h"
@@ -471,56 +477,187 @@ void UMythicCheatManager::MythListAttributes() {
 }
 
 namespace {
-const TMap<FString, FGameplayTag> &Cheat_StatusTags() {
-    static const TMap<FString, FGameplayTag> Map = {
-        {TEXT("burning"), GAS_DEBUFF_BURNING},
-        {TEXT("bleeding"), GAS_DEBUFF_BLEEDING},
-        {TEXT("poisoned"), GAS_DEBUFF_POISONED},
-        {TEXT("stunned"), GAS_DEBUFF_STUNNED},
-        {TEXT("slowed"), GAS_DEBUFF_SLOWED},
-        {TEXT("frozen"), GAS_DEBUFF_FROZEN},
-        {TEXT("weakened"), GAS_DEBUFF_WEAKENED},
-        {TEXT("terrified"), GAS_DEBUFF_TERRIFIED},
-    };
-    return Map;
-}
-
 UMythicAbilitySystemComponent *Cheat_PlayerASC(APlayerController *PC) {
     AMythicPlayerState *PS = PC ? Cast<AMythicPlayerState>(PC->PlayerState) : nullptr;
     return PS ? Cast<UMythicAbilitySystemComponent>(PS->GetAbilitySystemComponent()) : nullptr;
 }
+
+UMythicStatusRegistry *Cheat_StatusRegistry(const APlayerController *PC) {
+    const UWorld *World = PC ? PC->GetWorld() : nullptr;
+    UGameInstance *GameInstance = World ? World->GetGameInstance() : nullptr;
+    return GameInstance ? GameInstance->GetSubsystem<UMythicStatusRegistry>() : nullptr;
+}
+
+FString Cheat_StatusShortName(const UMythicStatusEffectDefinition *Definition) {
+    const FString Full = Definition->StatusType.ToString();
+    int32 Dot = INDEX_NONE;
+    return Full.FindLastChar(TCHAR('.'), Dot) ? Full.RightChop(Dot + 1) : Full;
+}
+
+UMythicStatusEffectDefinition *Cheat_FindStatus(const APlayerController *PC, const FString &Name) {
+    const UMythicStatusRegistry *Registry = Cheat_StatusRegistry(PC);
+    if (!Registry) {
+        UE_LOG(Myth, Error, TEXT(">>> No status registry"));
+        return nullptr;
+    }
+    for (UMythicStatusEffectDefinition *Definition : Registry->GetAllStatuses()) {
+        if (Definition && Cheat_StatusShortName(Definition).Equals(Name, ESearchCase::IgnoreCase)) {
+            return Definition;
+        }
+    }
+    UE_LOG(Myth, Error, TEXT(">>> Unknown status '%s'. Known:"), *Name);
+    for (const UMythicStatusEffectDefinition *Definition : Registry->GetAllStatuses()) {
+        if (Definition) {
+            UE_LOG(Myth, Warning, TEXT("      %s"), *Cheat_StatusShortName(Definition));
+        }
+    }
+    return nullptr;
+}
+
+// Buildup has to arrive as a real effect. SetNumericAttributeBase skips PostGameplayEffectExecute, which is
+// where the threshold, reactions, cues and CC escalation live, so a status could never trigger from it.
+void Cheat_AddBuildup(UMythicAbilitySystemComponent *ASC, const FGameplayAttribute &Attribute, float Amount) {
+    UGameplayEffect *Effect = NewObject<UGameplayEffect>(GetTransientPackage(), FName(TEXT("Cheat_StatusBuildup")));
+    Effect->DurationPolicy = EGameplayEffectDurationType::Instant;
+
+    FGameplayModifierInfo Mod;
+    Mod.Attribute = Attribute;
+    Mod.ModifierOp = EGameplayModOp::Additive;
+    Mod.ModifierMagnitude = FGameplayEffectModifierMagnitude(FScalableFloat(Amount));
+    Effect->Modifiers.Add(Mod);
+
+    ASC->ApplyGameplayEffectToSelf(Effect, 1.0f, ASC->MakeEffectContext());
+}
 }
 
 void UMythicCheatManager::MythStatus(const FString &StatusName, int32 bOn) {
-    UMythicAbilitySystemComponent *ASC = Cheat_PlayerASC(GetOuterAPlayerController());
+    APlayerController *PC = GetOuterAPlayerController();
+    UMythicAbilitySystemComponent *ASC = Cheat_PlayerASC(PC);
     if (!ASC) {
         UE_LOG(Myth, Error, TEXT(">>> No ASC"));
         return;
     }
-
-    const FGameplayTag *Found = Cheat_StatusTags().Find(StatusName.ToLower());
-    if (!Found) {
-        UE_LOG(Myth, Error, TEXT(">>> Unknown status '%s'. Known:"), *StatusName);
-        for (const TPair<FString, FGameplayTag> &Pair : Cheat_StatusTags()) {
-            UE_LOG(Myth, Warning, TEXT("      %s"), *Pair.Key);
-        }
+    const UMythicStatusEffectDefinition *Definition = Cheat_FindStatus(PC, StatusName);
+    if (!Definition) {
         return;
     }
 
-    ASC->SetLooseGameplayTagCount(*Found, bOn != 0 ? 1 : 0);
-    UE_LOG(Myth, Warning, TEXT(">>> %s %s"), *Found->ToString(), bOn != 0 ? TEXT("ON") : TEXT("OFF"));
+    if (bOn == 0) {
+        if (Definition->GrantedStateTag.IsValid()) {
+            ASC->RemoveActiveEffectsWithGrantedTags(FGameplayTagContainer(Definition->GrantedStateTag));
+        }
+        UE_LOG(Myth, Warning, TEXT(">>> %s removed"), *Cheat_StatusShortName(Definition));
+        return;
+    }
+
+    APawn *Pawn = PC ? PC->GetPawn() : nullptr;
+    if (!Pawn || !Pawn->HasAuthority()) {
+        UE_LOG(Myth, Error, TEXT(">>> MythStatus needs authority - run it on the server or in standalone"));
+        return;
+    }
+
+    if (UMythicStatusRegistry::ApplyStatusToActor(Pawn, Definition->StatusType, Pawn)) {
+        UE_LOG(Myth, Warning, TEXT(">>> %s applied directly. This skips buildup, immunity and diminishing returns - use MythBuildup for the real path"),
+               *Cheat_StatusShortName(Definition));
+    }
+    else {
+        UE_LOG(Myth, Error, TEXT(">>> %s has no EffectToApply authored"), *Cheat_StatusShortName(Definition));
+    }
 }
 
 void UMythicCheatManager::MythClearStatus() {
-    UMythicAbilitySystemComponent *ASC = Cheat_PlayerASC(GetOuterAPlayerController());
+    APlayerController *PC = GetOuterAPlayerController();
+    UMythicAbilitySystemComponent *ASC = Cheat_PlayerASC(PC);
+    const UMythicStatusRegistry *Registry = Cheat_StatusRegistry(PC);
+    if (!ASC || !Registry) {
+        UE_LOG(Myth, Error, TEXT(">>> No ASC or status registry"));
+        return;
+    }
+    for (const UMythicStatusEffectDefinition *Definition : Registry->GetAllStatuses()) {
+        if (!Definition) {
+            continue;
+        }
+        if (Definition->GrantedStateTag.IsValid()) {
+            ASC->RemoveActiveEffectsWithGrantedTags(FGameplayTagContainer(Definition->GrantedStateTag));
+            ASC->SetLooseGameplayTagCount(Definition->GrantedStateTag, 0);
+        }
+        if (Definition->BuildupAttribute.IsValid()) {
+            ASC->SetNumericAttributeBase(Definition->BuildupAttribute, 0.0f);
+        }
+    }
+    UE_LOG(Myth, Warning, TEXT(">>> Statuses and buildup cleared"));
+}
+
+void UMythicCheatManager::MythBuildup(const FString &StatusName, float Amount) {
+    APlayerController *PC = GetOuterAPlayerController();
+    UMythicAbilitySystemComponent *ASC = Cheat_PlayerASC(PC);
     if (!ASC) {
         UE_LOG(Myth, Error, TEXT(">>> No ASC"));
         return;
     }
-    for (const TPair<FString, FGameplayTag> &Pair : Cheat_StatusTags()) {
-        ASC->SetLooseGameplayTagCount(Pair.Value, 0);
+    const UMythicStatusEffectDefinition *Definition = Cheat_FindStatus(PC, StatusName);
+    if (!Definition) {
+        return;
     }
-    UE_LOG(Myth, Warning, TEXT(">>> All status tags cleared"));
+    if (!Definition->BuildupAttribute.IsValid()) {
+        UE_LOG(Myth, Error, TEXT(">>> %s has no BuildupAttribute authored"), *Cheat_StatusShortName(Definition));
+        return;
+    }
+
+    Cheat_AddBuildup(ASC, Definition->BuildupAttribute, Amount);
+
+    const float Now = ASC->GetNumericAttribute(Definition->BuildupAttribute);
+    const float Resist = ASC->HasAttributeSetForAttribute(Definition->ResistanceAttribute)
+                             ? ASC->GetNumericAttribute(Definition->ResistanceAttribute)
+                             : 0.0f;
+    UE_LOG(Myth, Warning, TEXT(">>> %s buildup +%.1f -> %.1f of %.1f"), *Cheat_StatusShortName(Definition), Amount, Now,
+           UMythicAttributeSet_Defense::ComputeBuildupThreshold(Resist));
+}
+
+void UMythicCheatManager::MythProcChance(const FString &StatusName, float Chance) {
+    APlayerController *PC = GetOuterAPlayerController();
+    UMythicAbilitySystemComponent *ASC = Cheat_PlayerASC(PC);
+    if (!ASC) {
+        UE_LOG(Myth, Error, TEXT(">>> No ASC"));
+        return;
+    }
+    const UMythicStatusEffectDefinition *Definition = Cheat_FindStatus(PC, StatusName);
+    if (!Definition) {
+        return;
+    }
+    const FString PropertyName = FString::Printf(TEXT("Apply%sOnHitChance"), *Cheat_StatusShortName(Definition));
+    FProperty *Property = FindFProperty<FProperty>(UMythicAttributeSet_Offense::StaticClass(), FName(*PropertyName));
+    if (!Property) {
+        UE_LOG(Myth, Error, TEXT(">>> No attribute named %s"), *PropertyName);
+        return;
+    }
+    ASC->SetNumericAttributeBase(FGameplayAttribute(Property), Chance);
+    UE_LOG(Myth, Warning, TEXT(">>> %s = %.2f - hit something to roll it"), *PropertyName, Chance);
+}
+
+void UMythicCheatManager::MythStatusList() {
+    APlayerController *PC = GetOuterAPlayerController();
+    UMythicAbilitySystemComponent *ASC = Cheat_PlayerASC(PC);
+    const UMythicStatusRegistry *Registry = Cheat_StatusRegistry(PC);
+    if (!ASC || !Registry) {
+        UE_LOG(Myth, Error, TEXT(">>> No ASC or status registry"));
+        return;
+    }
+    UE_LOG(Myth, Warning, TEXT(">>> %-10s %-24s %8s %10s %7s %s"), TEXT("STATUS"), TEXT("GRANTED TAG"), TEXT("BUILDUP"),
+           TEXT("THRESHOLD"), TEXT("RESIST"), TEXT("ACTIVE"));
+    for (const UMythicStatusEffectDefinition *Definition : Registry->GetAllStatuses()) {
+        if (!Definition) {
+            continue;
+        }
+        const float Buildup = Definition->BuildupAttribute.IsValid() ? ASC->GetNumericAttribute(Definition->BuildupAttribute) : -1.0f;
+        const float Resist = ASC->HasAttributeSetForAttribute(Definition->ResistanceAttribute)
+                                 ? ASC->GetNumericAttribute(Definition->ResistanceAttribute)
+                                 : 0.0f;
+        const bool bActive = Definition->GrantedStateTag.IsValid() && ASC->HasMatchingGameplayTag(Definition->GrantedStateTag);
+        UE_LOG(Myth, Warning, TEXT("    %-10s %-24s %8.1f %10.1f %7.2f %s"), *Cheat_StatusShortName(Definition),
+               *Definition->GrantedStateTag.ToString(), Buildup, UMythicAttributeSet_Defense::ComputeBuildupThreshold(Resist),
+               Resist, bActive ? TEXT("yes") : TEXT("no"));
+    }
 }
 
 void UMythicCheatManager::MythSetAttribute(const FString &AttributeName, float Value) {

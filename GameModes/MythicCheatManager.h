@@ -83,6 +83,15 @@ public:
     UFUNCTION(Exec)
     void MythClearStatus();
 
+    UFUNCTION(Exec)
+    void MythBuildup(const FString &StatusName, float Amount = 25.0f);
+
+    UFUNCTION(Exec)
+    void MythStatusList();
+
+    UFUNCTION(Exec)
+    void MythProcChance(const FString &StatusName, float Chance = 1.0f);
+
 
     UFUNCTION(Exec)
     void MythListAttributes();
