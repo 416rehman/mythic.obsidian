@@ -9,7 +9,6 @@
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "MythicAIController.generated.h"
 
-class UMythicAttributeSet_NPCCombat;
 class UMythicAbilitySystemComponent;
 class UAIPerceptionComponent;
 class UAISenseConfig_Sight;

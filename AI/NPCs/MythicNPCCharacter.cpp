@@ -4,7 +4,6 @@
 
 #include "Mythic.h"
 #include "GAS/MythicAbilitySystemComponent.h"
-#include "GAS/AttributeSets/NPC/MythicAttributeSet_NPCCombat.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
@@ -387,7 +386,6 @@ AMythicNPCCharacter::AMythicNPCCharacter() {
     AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Minimal);
 
     LifeAttributes = CreateDefaultSubobject<UMythicAttributeSet_Life>("LifeAttributes");
-    CombatAttributes = CreateDefaultSubobject<UMythicAttributeSet_NPCCombat>("CombatAttributes");
     DefenseAttributes = CreateDefaultSubobject<UMythicAttributeSet_Defense>("DefenseAttributes");
     OffenseAttributes = CreateDefaultSubobject<UMythicAttributeSet_Offense>("OffenseAttributes");
 

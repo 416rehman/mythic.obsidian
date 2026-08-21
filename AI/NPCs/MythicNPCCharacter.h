@@ -15,7 +15,6 @@
 struct FMythicIdentityFragment;
 
 class UMythicNPCManager;
-class UMythicAttributeSet_NPCCombat;
 class UMythicAttributeSet_Life;
 class UMythicAttributeSet_Defense;
 class UMythicAttributeSet_Offense;
@@ -154,10 +153,6 @@ protected:
     // The LifeAttributeSet for the NPC
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mythic NPC | Stats")
     UMythicAttributeSet_Life *LifeAttributes;
-
-    // The Combat Attribute Set for the NPC
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mythic NPC | Stats")
-    UMythicAttributeSet_NPCCombat *CombatAttributes;
 
     // The Defense Attribute Set for the NPC. Lets the shared damage execution apply armor / resistances /
     // dodge / shield mitigation to NPC targets exactly as it does for players (single source of truth).
