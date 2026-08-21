@@ -414,6 +414,31 @@ void UMythicSettingsPageWidget::BuildDefinitions() {
                [](UMythicUserSettings *S) { return S->GetShadingQuality(); },
                [](UMythicUserSettings *S, int32 V) { S->SetShadingQuality(V); });
 
+    {
+        // Vendor-specific, so the row greys out rather than pretending to work on other cards. Reflex also
+        // reports its own availability, which covers a driver too old for it on an NVIDIA card.
+        const auto ReflexUsable = []() {
+            return UMythicUserSettings::IsNvidiaGpu() && UMythicUserSettings::IsReflexAvailable();
+        };
+        AddChoice(NSLOCTEXT("Mythic", "SetReflex", "NVIDIA Reflex"),
+                  NSLOCTEXT("Mythic", "DescReflex",
+                            "Cuts the delay between your input and the frame that answers it, by keeping the "
+                            "graphics card from running further ahead than it needs to. Boost also holds the "
+                            "clocks up, which costs power for a little more consistency. NVIDIA cards only."),
+                  ESettingControl::Stepper,
+                  []() { return 3; },
+                  []() { UMythicUserSettings *S = UMythicUserSettings::Get(); return S ? S->GetReflexMode() : 0; },
+                  [](int32 I) { if (UMythicUserSettings *S = UMythicUserSettings::Get()) { S->SetReflexMode(I); } },
+                  [](int32 I) {
+                      switch (I) {
+                          case 0: return NSLOCTEXT("Mythic", "ReflexOff", "Off");
+                          case 1: return NSLOCTEXT("Mythic", "ReflexOn", "On");
+                          default: return NSLOCTEXT("Mythic", "ReflexBoost", "On + Boost");
+                      }
+                  });
+        Definitions.Last().IsEnabled = ReflexUsable;
+    }
+
     Heading(NSLOCTEXT("Mythic", "SetImage", "IMAGE"));
 
     {
@@ -838,10 +863,16 @@ void UMythicSettingsPageWidget::Refresh() {
             continue;
         }
 
+        // An unbound TFunction asserts when invoked, so a row that never set this reads as enabled.
+        const bool bRowEnabled = !Def.IsEnabled || Def.IsEnabled();
+
         FMythicUIStyle::ApplyTextStyle(Row.Label, EMythicTextRole::Body);
-        Row.Label->SetColorAndOpacity(FSlateColor(FMythicUIStyle::Get().Ink));
-        Row.Left->SetVisibility(ESlateVisibility::Visible);
-        Row.Right->SetVisibility(ESlateVisibility::Visible);
+        Row.Label->SetColorAndOpacity(FSlateColor(bRowEnabled ? FMythicUIStyle::Get().Ink
+                                                              : FMythicUIStyle::Get().InkSubtle));
+        // A disabled row keeps its space and its value so the player can see what it is set to, but loses
+        // the arrows - a control that cannot do anything should not invite a press.
+        Row.Left->SetVisibility(bRowEnabled ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
+        Row.Right->SetVisibility(bRowEnabled ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
         Row.Value->SetVisibility(ESlateVisibility::HitTestInvisible);
         Row.Value->SetText(Def.Read ? Def.Read() : FText::GetEmpty());
         if (RuleWidget) {
@@ -872,6 +903,9 @@ void UMythicSettingsPageWidget::StepSetting(int32 RowIndex, int32 Delta) {
     }
     const FSettingDef &Def = Definitions[RowIndex];
     if (Def.bHeading || !Def.Step) {
+        return;
+    }
+    if (Def.IsEnabled && !Def.IsEnabled()) {
         return;
     }
     Def.Step(Delta);

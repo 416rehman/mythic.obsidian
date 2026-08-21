@@ -7,6 +7,9 @@
 #include "Engine/UserInterfaceSettings.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
+#include "Performance/MaxTickRateHandlerModule.h"
+#include "Features/IModularFeatures.h"
+#include "RHI.h"
 #include "Misc/App.h"
 #include "Scalability.h"
 
@@ -56,6 +59,50 @@ void UMythicUserSettings::ApplyImageSettings() const {
     PushCVar(TEXT("r.BloomQuality"), bBloom ? 5 : 0);
     PushCVar(TEXT("r.MaxAnisotropy"), MaxAnisotropy);
     PushCVar(TEXT("r.VT.MaxAnisotropy"), MaxAnisotropy);
+}
+
+namespace {
+// Reflex reaches the engine as a modular feature, not a cvar, so the lookup is by feature name and returns
+// nothing at all when the plugin is absent. That is the honest availability check.
+IMaxTickRateHandlerModule *FindReflexHandler() {
+    const FName FeatureName = IMaxTickRateHandlerModule::GetModularFeatureName();
+    IModularFeatures &Features = IModularFeatures::Get();
+    const int32 Count = Features.GetModularFeatureImplementationCount(FeatureName);
+    for (int32 i = 0; i < Count; ++i) {
+        if (IMaxTickRateHandlerModule *Handler = static_cast<IMaxTickRateHandlerModule *>(
+                Features.GetModularFeatureImplementation(FeatureName, i))) {
+            return Handler;
+        }
+    }
+    return nullptr;
+}
+}
+
+bool UMythicUserSettings::IsNvidiaGpu() {
+    return IsRHIDeviceNVIDIA();
+}
+
+bool UMythicUserSettings::IsReflexAvailable() {
+    IMaxTickRateHandlerModule *Handler = FindReflexHandler();
+    // GetAvailable() also covers the driver version, so a card old enough to lack Reflex reports false here
+    // rather than silently accepting a mode it cannot honour.
+    return Handler && Handler->GetAvailable();
+}
+
+void UMythicUserSettings::ApplyReflex() const {
+    IMaxTickRateHandlerModule *Handler = FindReflexHandler();
+    if (!Handler || !Handler->GetAvailable()) {
+        return;
+    }
+    const bool bOn = ReflexMode > 0;
+    Handler->SetEnabled(bOn);
+    // Bit 0 is low latency, bit 1 is boost.
+    Handler->SetFlags(bOn ? (ReflexMode >= 2 ? 3u : 1u) : 0u);
+}
+
+void UMythicUserSettings::SetReflexMode(int32 Mode) {
+    ReflexMode = FMath::Clamp(Mode, 0, 2);
+    ApplyReflex();
 }
 
 void UMythicUserSettings::ApplyRenderingSettings() const {
@@ -292,6 +339,7 @@ void UMythicUserSettings::ApplySettings(bool bCheckForCommandLineOverrides) {
     ApplyAudioSettings();
     ApplyImageSettings();
     ApplyRenderingSettings();
+    ApplyReflex();
     ApplyDisplayGamma();
     ApplyInterfaceSettings();
     ApplyVibration();

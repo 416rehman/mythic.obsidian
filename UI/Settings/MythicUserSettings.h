@@ -148,6 +148,21 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetNanite(bool bEnabled);
 
+    /** True on an NVIDIA card. Gates the vendor-specific rows so they grey out rather than lying elsewhere. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    static bool IsNvidiaGpu();
+
+    /** True when Reflex is present AND the driver supports it, so the row can grey out on its own terms. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    static bool IsReflexAvailable();
+
+    /** NVIDIA Reflex low latency: 0 off, 1 on, 2 on plus boost. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    int32 GetReflexMode() const { return ReflexMode; }
+
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetReflexMode(int32 Mode);
+
 
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     bool GetMuteWhenUnfocused() const { return bMuteWhenUnfocused; }
@@ -273,6 +288,8 @@ private:
     /** Pushes the renderer-feature cvars. Separate from image settings because these are the expensive ones. */
     void ApplyRenderingSettings() const;
 
+    void ApplyReflex() const;
+
     UPROPERTY(Config)
     int32 AntiAliasingMethod = 4; // TSR: the engine default for UE5 and the right one for an open world
 
@@ -312,6 +329,9 @@ private:
 
     UPROPERTY(Config)
     bool bNanite = true;
+
+    UPROPERTY(Config)
+    int32 ReflexMode = 1;
 
     UPROPERTY(Config)
     int32 MaxAnisotropy = 8;
