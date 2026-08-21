@@ -30,6 +30,9 @@
 #include "Player/Proficiency/ProficiencyDefinition.h"
 #include "AbilitySystemGlobals.h"
 #include "ViewModels/ConversionViewModels.h"
+#include "Player/MythicPlayerState.h"
+#include "Progression/MythicStatLedgerComponent.h"
+#include "Progression/MythicTags_MetaProgression.h"
 
 namespace {
     constexpr double kMinRequestInterval = 0.2;
@@ -718,6 +721,8 @@ void UConversionStationComponent::ProduceAndRoute(UConversionRecipe *R, const FC
         return;
     }
 
+    int32 ItemsCreated = 0;
+
     TArray<UMythicItemInstance *> Held;
     for (FHeldTransform &H : HeldTransforms) {
         if (H.JobId == Job.JobId && IsValid(H.Instance)) {
@@ -753,6 +758,7 @@ void UConversionStationComponent::ProduceAndRoute(UConversionRecipe *R, const FC
                 if (UMythicItemInstance *Inst = Loot->Create(Def, Take, nullptr, Level)) {
                     R->PostProcessProduct(Inst, SeamCtx);
                     RouteInstance(Inst, R->Process.OutputRouting, Job);
+                    ItemsCreated += Take;
                 }
                 Remaining -= Take;
             }
@@ -782,6 +788,17 @@ void UConversionStationComponent::ProduceAndRoute(UConversionRecipe *R, const FC
             }
             R->PostProcessProduct(T, SeamCtx);
             RouteInstance(T, R->Process.OutputRouting, Job);
+        }
+    }
+
+    // Counts items the station newly made. A transform mutates an item that already existed, so it is not a craft.
+    if (ItemsCreated > 0) {
+        if (const AController *Crafter = ResolveInstigatorController(Job.JobId)) {
+            if (const AMythicPlayerState *PS = Crafter->GetPlayerState<AMythicPlayerState>()) {
+                if (UMythicStatLedgerComponent *Ledger = PS->GetStatLedgerComponent()) {
+                    Ledger->RecordStat(STAT_ITEM_CRAFTED, ItemsCreated);
+                }
+            }
         }
     }
 
