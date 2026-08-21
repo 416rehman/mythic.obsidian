@@ -60,12 +60,14 @@ void UMythicAttributeSet_Defense::PreAttributeChange(const FGameplayAttribute &A
         || Attribute == GetBurnResistanceAttribute() || Attribute == GetBleedResistanceAttribute()
         || Attribute == GetPoisonResistanceAttribute() || Attribute == GetSlowResistanceAttribute()
         || Attribute == GetFreezeResistanceAttribute() || Attribute == GetStunResistanceAttribute()
+        || Attribute == GetWeakenResistanceAttribute() || Attribute == GetTerrifyResistanceAttribute()
         || Attribute == GetDecreasedDamageFromEnemiesUnderStatusEffectsAttribute()) {
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     }
     else if (Attribute == GetBurnBuildupAttribute() || Attribute == GetBleedBuildupAttribute()
         || Attribute == GetPoisonBuildupAttribute() || Attribute == GetSlowBuildupAttribute()
-        || Attribute == GetFreezeBuildupAttribute() || Attribute == GetStunBuildupAttribute()) {
+        || Attribute == GetFreezeBuildupAttribute() || Attribute == GetStunBuildupAttribute()
+        || Attribute == GetWeakenBuildupAttribute() || Attribute == GetTerrifyBuildupAttribute()) {
         NewValue = FMath::Max(0.0f, NewValue);
     }
     else if (Attribute == GetArmorAttribute()) {
@@ -231,6 +233,14 @@ void UMythicAttributeSet_Defense::OnRep_StunResistance(const FGameplayAttributeD
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Defense, StunResistance, OldStunResistance);
 }
 
+void UMythicAttributeSet_Defense::OnRep_WeakenResistance(const FGameplayAttributeData &OldWeakenResistance) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Defense, WeakenResistance, OldWeakenResistance);
+}
+
+void UMythicAttributeSet_Defense::OnRep_TerrifyResistance(const FGameplayAttributeData &OldTerrifyResistance) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Defense, TerrifyResistance, OldTerrifyResistance);
+}
+
 void UMythicAttributeSet_Defense::OnRep_BurnBuildup(const FGameplayAttributeData &OldBurnBuildup) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Defense, BurnBuildup, OldBurnBuildup);
 }
@@ -253,6 +263,14 @@ void UMythicAttributeSet_Defense::OnRep_FreezeBuildup(const FGameplayAttributeDa
 
 void UMythicAttributeSet_Defense::OnRep_StunBuildup(const FGameplayAttributeData &OldStunBuildup) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Defense, StunBuildup, OldStunBuildup);
+}
+
+void UMythicAttributeSet_Defense::OnRep_WeakenBuildup(const FGameplayAttributeData &OldWeakenBuildup) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Defense, WeakenBuildup, OldWeakenBuildup);
+}
+
+void UMythicAttributeSet_Defense::OnRep_TerrifyBuildup(const FGameplayAttributeData &OldTerrifyBuildup) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Defense, TerrifyBuildup, OldTerrifyBuildup);
 }
 
 void UMythicAttributeSet_Defense::OnRep_DecreasedDamageFromEnemiesUnderStatusEffects(
@@ -300,6 +318,8 @@ void UMythicAttributeSet_Defense::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, SlowResistance, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, FreezeResistance, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, StunResistance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, WeakenResistance, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, TerrifyResistance, COND_OwnerOnly, REPNOTIFY_Always);
 
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, BurnBuildup, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, BleedBuildup, COND_OwnerOnly, REPNOTIFY_Always);
@@ -307,6 +327,8 @@ void UMythicAttributeSet_Defense::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, SlowBuildup, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, FreezeBuildup, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, StunBuildup, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, WeakenBuildup, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, TerrifyBuildup, COND_OwnerOnly, REPNOTIFY_Always);
 
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, DecreasedDamageFromEnemiesUnderStatusEffects, COND_OwnerOnly,
                                    REPNOTIFY_Always);
@@ -348,6 +370,8 @@ void UMythicAttributeSet_Defense::DecayAllBuildups(UAbilitySystemComponent *ASC,
         {GetSlowBuildupAttribute(), Def->GetSlowBuildup()},
         {GetFreezeBuildupAttribute(), Def->GetFreezeBuildup()},
         {GetStunBuildupAttribute(), Def->GetStunBuildup()},
+        {GetWeakenBuildupAttribute(), Def->GetWeakenBuildup()},
+        {GetTerrifyBuildupAttribute(), Def->GetTerrifyBuildup()},
     };
     for (const TPair<FGameplayAttribute, float> &B : Buildups) {
         if (B.Value > 0.0f) {
@@ -369,6 +393,8 @@ void UMythicAttributeSet_Defense::ResetCcAndBuildupState() {
         ASC->SetNumericAttributeBase(GetSlowBuildupAttribute(), 0.0f);
         ASC->SetNumericAttributeBase(GetFreezeBuildupAttribute(), 0.0f);
         ASC->SetNumericAttributeBase(GetStunBuildupAttribute(), 0.0f);
+        ASC->SetNumericAttributeBase(GetWeakenBuildupAttribute(), 0.0f);
+        ASC->SetNumericAttributeBase(GetTerrifyBuildupAttribute(), 0.0f);
 
         ASC->SetNumericAttributeBase(GetShieldAttribute(), 0.0f);
     }

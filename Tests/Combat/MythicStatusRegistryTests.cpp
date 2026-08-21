@@ -66,6 +66,8 @@ bool FMythicStatusLibraryTest::RunTest(const FString &Parameters) {
         UMythicAttributeSet_Defense::GetSlowBuildupAttribute(),
         UMythicAttributeSet_Defense::GetFreezeBuildupAttribute(),
         UMythicAttributeSet_Defense::GetStunBuildupAttribute(),
+        UMythicAttributeSet_Defense::GetWeakenBuildupAttribute(),
+        UMythicAttributeSet_Defense::GetTerrifyBuildupAttribute(),
     };
     for (const FGameplayAttribute &Buildup : PipelineBuildups) {
         TestTrue(*FString::Printf(TEXT("a status covers the %s the damage pipeline feeds"), *Buildup.GetName()), CoveredBuildups.Contains(Buildup));

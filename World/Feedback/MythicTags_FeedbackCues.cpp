@@ -13,6 +13,8 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_GameplayCue_Status_Poison_Onset, "GameplayCue
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_GameplayCue_Status_Slow_Onset, "GameplayCue.Status.Slow.Onset", "Slow/chill status crossed threshold and applied");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_GameplayCue_Status_Freeze_Onset, "GameplayCue.Status.Freeze.Onset", "Freeze status crossed threshold and applied");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_GameplayCue_Status_Stun_Onset, "GameplayCue.Status.Stun.Onset", "Stun status crossed threshold and applied");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_GameplayCue_Status_Weaken_Onset, "GameplayCue.Status.Weaken.Onset", "Weaken status crossed threshold and applied");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_GameplayCue_Status_Terrify_Onset, "GameplayCue.Status.Terrify.Onset", "Terrify status crossed threshold and applied");
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_GameplayCue_World_POIDiscovered, "GameplayCue.World.POIDiscovered", "A landmark POI was discovered/unlocked");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_GameplayCue_World_TreasureUnearthed, "GameplayCue.World.TreasureUnearthed", "A buried dig-site reward was unearthed");

@@ -60,6 +60,8 @@ struct FDamageApplicationStatics {
     FGameplayEffectAttributeCaptureDefinition SlowResistance;
     FGameplayEffectAttributeCaptureDefinition FreezeResistance;
     FGameplayEffectAttributeCaptureDefinition StunResistance;
+    FGameplayEffectAttributeCaptureDefinition WeakenResistance;
+    FGameplayEffectAttributeCaptureDefinition TerrifyResistance;
     FGameplayEffectAttributeCaptureDefinition IncomingDamageMultiplier;
 
     FDamageApplicationStatics() {
@@ -110,6 +112,10 @@ struct FDamageApplicationStatics {
                                                                      EGameplayEffectAttributeCaptureSource::Target, false);
         StunResistance = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Defense::GetStunResistanceAttribute(),
                                                                    EGameplayEffectAttributeCaptureSource::Target, false);
+        WeakenResistance = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Defense::GetWeakenResistanceAttribute(),
+                                                                     EGameplayEffectAttributeCaptureSource::Target, false);
+        TerrifyResistance = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Defense::GetTerrifyResistanceAttribute(),
+                                                                      EGameplayEffectAttributeCaptureSource::Target, false);
         IncomingDamageMultiplier = FGameplayEffectAttributeCaptureDefinition(UMythicAttributeSet_Defense::GetIncomingDamageMultiplierAttribute(),
                                                                              EGameplayEffectAttributeCaptureSource::Target, false);
     }
@@ -144,6 +150,8 @@ UMythicDamageApplication::UMythicDamageApplication() {
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().SlowResistance);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().FreezeResistance);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().StunResistance);
+    RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().WeakenResistance);
+    RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().TerrifyResistance);
     RelevantAttributesToCapture.Add(MythicDamageApplicationStatics().IncomingDamageMultiplier);
 
     if (const UMythicCombatSettings *CombatSettings = GetDefault<UMythicCombatSettings>()) {
@@ -423,6 +431,8 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     MythicContext->SetSlow(GateStatus(Statics.SlowResistance, MythicContext->IsSlow()));
     MythicContext->SetFreeze(GateStatus(Statics.FreezeResistance, MythicContext->IsFreeze()));
     MythicContext->SetStun(GateStatus(Statics.StunResistance, MythicContext->IsStun()));
+    MythicContext->SetWeaken(GateStatus(Statics.WeakenResistance, MythicContext->IsWeaken()));
+    MythicContext->SetTerrify(GateStatus(Statics.TerrifyResistance, MythicContext->IsTerrify()));
 
     if (bAnyStatusResisted) {
         if (UMythicAbilitySystemComponent *TargetMythicASC = Cast<UMythicAbilitySystemComponent>(TargetASC)) {
@@ -480,6 +490,8 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     AddBuildup(MythicContext->IsSlow(), UMythicAttributeSet_Defense::GetSlowBuildupAttribute());
     AddBuildup(MythicContext->IsFreeze(), UMythicAttributeSet_Defense::GetFreezeBuildupAttribute());
     AddBuildup(MythicContext->IsStun(), UMythicAttributeSet_Defense::GetStunBuildupAttribute());
+    AddBuildup(MythicContext->IsWeaken(), UMythicAttributeSet_Defense::GetWeakenBuildupAttribute());
+    AddBuildup(MythicContext->IsTerrify(), UMythicAttributeSet_Defense::GetTerrifyBuildupAttribute());
 
     if (WeatherBonusStatusTag.IsValid()) {
         const FGameplayAttribute WeatherBuildupAttr =
@@ -489,6 +501,8 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
             : WeatherBonusStatusTag == GAS_DEBUFF_SLOWED   ? UMythicAttributeSet_Defense::GetSlowBuildupAttribute()
             : WeatherBonusStatusTag == GAS_DEBUFF_FROZEN   ? UMythicAttributeSet_Defense::GetFreezeBuildupAttribute()
             : WeatherBonusStatusTag == GAS_DEBUFF_STUNNED  ? UMythicAttributeSet_Defense::GetStunBuildupAttribute()
+            : WeatherBonusStatusTag == GAS_DEBUFF_WEAKENED ? UMythicAttributeSet_Defense::GetWeakenBuildupAttribute()
+            : WeatherBonusStatusTag == GAS_DEBUFF_TERRIFIED ? UMythicAttributeSet_Defense::GetTerrifyBuildupAttribute()
                                                            : FGameplayAttribute();
         if (WeatherBuildupAttr.IsValid()) {
             OutExecutionOutput.AddOutputModifier(FGameplayModifierEvaluatedData(

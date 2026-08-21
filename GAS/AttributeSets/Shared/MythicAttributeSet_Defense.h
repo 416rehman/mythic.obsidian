@@ -36,6 +36,12 @@ protected:
     // Reduces chance to be stunned - Cannot move or attack
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_StunResistance)
     FGameplayAttributeData StunResistance;
+    // Reduces chance to be weakened - Deals less damage
+    UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_WeakenResistance)
+    FGameplayAttributeData WeakenResistance;
+    // Reduces chance to be terrified - Takes more damage
+    UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_TerrifyResistance)
+    FGameplayAttributeData TerrifyResistance;
 
     // Tracks current buildup towards Burn
     UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_BurnBuildup)
@@ -60,6 +66,14 @@ protected:
     // Tracks current buildup towards Stun
     UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_StunBuildup)
     FGameplayAttributeData StunBuildup;
+
+    // Tracks current buildup towards Weaken
+    UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_WeakenBuildup)
+    FGameplayAttributeData WeakenBuildup;
+
+    // Tracks current buildup towards Terrify
+    UPROPERTY(BlueprintReadOnly, Category = "Buildup", ReplicatedUsing = OnRep_TerrifyBuildup)
+    FGameplayAttributeData TerrifyBuildup;
 
     // Reduces incoming damage from enemies under status effects
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_DecreasedDamageFromEnemiesUnderStatusEffects)
@@ -105,12 +119,16 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, SlowResistance);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, FreezeResistance);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, StunResistance);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, WeakenResistance);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, TerrifyResistance);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, BurnBuildup);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, BleedBuildup);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, PoisonBuildup);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, SlowBuildup);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, FreezeBuildup);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, StunBuildup);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, WeakenBuildup);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, TerrifyBuildup);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, DecreasedDamageFromEnemiesUnderStatusEffects);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, HealthRegenRate);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, MaxShield);
@@ -147,6 +165,10 @@ public:
     UFUNCTION()
     virtual void OnRep_StunResistance(const FGameplayAttributeData &OldStunResistance);
     UFUNCTION()
+    virtual void OnRep_WeakenResistance(const FGameplayAttributeData &OldWeakenResistance);
+    UFUNCTION()
+    virtual void OnRep_TerrifyResistance(const FGameplayAttributeData &OldTerrifyResistance);
+    UFUNCTION()
     virtual void OnRep_BurnBuildup(const FGameplayAttributeData &OldBurnBuildup);
     UFUNCTION()
     virtual void OnRep_BleedBuildup(const FGameplayAttributeData &OldBleedBuildup);
@@ -158,6 +180,10 @@ public:
     virtual void OnRep_FreezeBuildup(const FGameplayAttributeData &OldFreezeBuildup);
     UFUNCTION()
     virtual void OnRep_StunBuildup(const FGameplayAttributeData &OldStunBuildup);
+    UFUNCTION()
+    virtual void OnRep_WeakenBuildup(const FGameplayAttributeData &OldWeakenBuildup);
+    UFUNCTION()
+    virtual void OnRep_TerrifyBuildup(const FGameplayAttributeData &OldTerrifyBuildup);
     UFUNCTION()
     virtual void OnRep_DecreasedDamageFromEnemiesUnderStatusEffects(const FGameplayAttributeData &OldDecreasedDamageFromEnemiesUnderStatusEffects);
     UFUNCTION()
