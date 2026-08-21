@@ -152,6 +152,10 @@ bool UMythicGA_Triggered::ApplyClauseEffect(const FMythicTriggerSpec &Spec, AAct
         EffectSpec.Data->SetSetByCallerMagnitude(Spec.MagnitudeParameter,
                                                  ResolveRolledValue(Spec.MagnitudeParameter, Spec.Magnitude));
     }
+    if (Spec.DurationParameter.IsValid()) {
+        EffectSpec.Data->SetSetByCallerMagnitude(Spec.DurationParameter,
+                                                 ResolveRolledValue(Spec.DurationParameter, Spec.Duration));
+    }
 
     return OwnerASC->ApplyGameplayEffectSpecToTarget(*EffectSpec.Data.Get(), TargetASC).WasSuccessfullyApplied();
 }

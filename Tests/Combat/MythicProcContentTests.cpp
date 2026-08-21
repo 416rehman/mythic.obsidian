@@ -63,9 +63,22 @@ bool FMythicProcContentTest::RunTest(const FString &Parameters) {
 
             // A clause naming a rolled chance the talent never rolls falls back to its constant without a word,
             // which reads as authored variance that is not there.
-            if (Spec.ChanceParameter.IsValid()) {
-                TestTrue(*FString::Printf(TEXT("%s chance parameter is rolled by the talent"), *Where),
-                         Talent->AbilityDef.ParameterRolls.Contains(Spec.ChanceParameter));
+            // Every parameter a clause names must be one the talent actually rolls. A missing roll falls back to
+            // the authored constant without a word, so the clause reads as having item variance it does not have.
+            for (const TPair<FGameplayTag, const TCHAR *> &Param : {
+                     TPair<FGameplayTag, const TCHAR *>(Spec.ChanceParameter, TEXT("chance")),
+                     TPair<FGameplayTag, const TCHAR *>(Spec.MagnitudeParameter, TEXT("magnitude")),
+                     TPair<FGameplayTag, const TCHAR *>(Spec.DurationParameter, TEXT("duration"))}) {
+                if (Param.Key.IsValid()) {
+                    TestTrue(*FString::Printf(TEXT("%s %s parameter is rolled by the talent"), *Where, Param.Value),
+                             Talent->AbilityDef.ParameterRolls.Contains(Param.Key));
+                }
+            }
+
+            // A clause that applies an effect but names no magnitude hands it nothing to scale by.
+            if (Spec.EffectToApply) {
+                TestTrue(*FString::Printf(TEXT("%s effect clause names a magnitude"), *Where),
+                         Spec.MagnitudeParameter.IsValid() || Spec.Magnitude != 0.0f);
             }
 
             // A world gate outside Environment.* can never open: the world container holds only weather, time

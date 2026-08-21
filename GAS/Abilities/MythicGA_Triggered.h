@@ -106,6 +106,17 @@ struct MYTHIC_API FMythicTriggerSpec {
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger")
     float Magnitude = 0.0f;
 
+    /**
+     * SetByCaller tag the effect reads its duration from, and the key the item rolled it under. Pair with
+     * MagnitudeParameter for a buff whose size and length both roll. Invalid = the effect keeps its own duration.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger")
+    FGameplayTag DurationParameter;
+
+    // Duration used when DurationParameter resolves no roll.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger", meta = (ClampMin = "0.0"))
+    float Duration = 0.0f;
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trigger")
     EMythicTriggerTarget Target = EMythicTriggerTarget::Other;
 
