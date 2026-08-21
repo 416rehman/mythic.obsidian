@@ -8,7 +8,46 @@
 #include "MythicPlayerStatusViewModel.generated.h"
 
 class UAbilitySystemComponent;
+class UMythicStatusEffectDefinition;
+class UTexture2D;
 struct FOnAttributeChangeData;
+
+/**
+ * One status the game can inflict, with everything a badge needs to draw itself. The list holds EVERY authored
+ * status, not just active ones, so the badge row can pool its widgets once at startup and toggle visibility
+ * rather than adding and removing children.
+ */
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicStatusBadgeEntry {
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    FGameplayTag StatusType;
+
+    // The tag the effect grants while active. Matching on this is how a tag change finds its badge.
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    FGameplayTag GrantedStateTag;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    FText DisplayName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    FText Description;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    TSoftObjectPtr<UTexture2D> Icon;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    FLinearColor DisplayColor = FLinearColor::White;
+
+    // The status is on the player right now.
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bActive = false;
+
+    // Progress toward the status landing, 0..1, so a badge can fill before the status hits.
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    float BuildupFraction = 0.0f;
+};
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMythicHealthDamaged, float, Delta, float, NewPercent);
 
@@ -65,6 +104,15 @@ public:
     UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetFrozen, Getter = GetFrozen, meta = (AllowPrivateAccess))
     bool bFrozen = false;
 
+    /**
+     * Every authored status, sorted by tag so the row never reshuffles between runs. Built from the status
+     * registry, so a status added in data shows up with its icon, colour and text without any code change.
+     */
+    UPROPERTY(BlueprintReadOnly, FieldNotify, Getter = GetStatusBadges, meta = (AllowPrivateAccess))
+    TArray<FMythicStatusBadgeEntry> StatusBadges;
+
+    const TArray<FMythicStatusBadgeEntry> &GetStatusBadges() const { return StatusBadges; }
+
     void SetHealthPercent(float V);
     float GetHealthPercent() const { return HealthPercent; }
     void SetStaminaPercent(float V);
@@ -110,6 +158,14 @@ public:
 private:
     void HandleAttributeChanged(const FOnAttributeChangeData &Data);
     void HandleTagChanged(const FGameplayTag Tag, int32 NewCount);
+
+    void BuildStatusBadges(UAbilitySystemComponent *InASC);
+    void HandleBadgeTagChanged(const FGameplayTag Tag, int32 NewCount);
+    void HandleBadgeAttributeChanged(const FOnAttributeChangeData &Data);
+    static float ComputeBuildupFraction(const UAbilitySystemComponent *InASC, const UMythicStatusEffectDefinition *Definition);
+
+    TArray<FGameplayTag> BadgeBoundTags;
+    TArray<FGameplayAttribute> BadgeBoundAttributes;
     void Unbind();
 
     TWeakObjectPtr<UAbilitySystemComponent> ASC;

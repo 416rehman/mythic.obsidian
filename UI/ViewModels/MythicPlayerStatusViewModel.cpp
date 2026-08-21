@@ -1,6 +1,10 @@
 // Copyright Stellar Games. All Rights Reserved.
 
 #include "MythicPlayerStatusViewModel.h"
+
+#include "Engine/GameInstance.h"
+#include "GAS/Effects/MythicStatusEffectDefinition.h"
+#include "GAS/Effects/MythicStatusRegistry.h"
 #include "AbilitySystemComponent.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
@@ -45,6 +49,108 @@ void UMythicPlayerStatusViewModel::InitializeForASC(UAbilitySystemComponent *InA
         if (Tag.IsValid()) {
             InASC->RegisterGameplayTagEvent(Tag, EGameplayTagEventType::NewOrRemoved).AddUObject(this, &UMythicPlayerStatusViewModel::HandleTagChanged);
         }
+    }
+
+    BuildStatusBadges(InASC);
+}
+
+void UMythicPlayerStatusViewModel::BuildStatusBadges(UAbilitySystemComponent *InASC) {
+    StatusBadges.Reset();
+    BadgeBoundTags.Reset();
+    BadgeBoundAttributes.Reset();
+
+    const UWorld *World = InASC ? InASC->GetWorld() : nullptr;
+    const UGameInstance *GameInstance = World ? World->GetGameInstance() : nullptr;
+    const UMythicStatusRegistry *Registry = GameInstance ? GameInstance->GetSubsystem<UMythicStatusRegistry>() : nullptr;
+    if (!Registry) {
+        return;
+    }
+
+    TArray<UMythicStatusEffectDefinition *> Definitions = Registry->GetAllStatuses();
+    // The registry returns map order, which is not stable between runs, and a badge row must not reshuffle.
+    Definitions.Sort([](const UMythicStatusEffectDefinition &A, const UMythicStatusEffectDefinition &B) {
+        return A.StatusType.ToString() < B.StatusType.ToString();
+    });
+
+    for (const UMythicStatusEffectDefinition *Definition : Definitions) {
+        if (!Definition || !Definition->StatusType.IsValid()) {
+            continue;
+        }
+        FMythicStatusBadgeEntry Entry;
+        Entry.StatusType = Definition->StatusType;
+        Entry.GrantedStateTag = Definition->GrantedStateTag;
+        Entry.DisplayName = Definition->DisplayName;
+        Entry.Description = Definition->Description;
+        Entry.Icon = Definition->Icon;
+        Entry.DisplayColor = Definition->DisplayColor;
+        Entry.bActive = Definition->GrantedStateTag.IsValid() && InASC->HasMatchingGameplayTag(Definition->GrantedStateTag);
+        Entry.BuildupFraction = ComputeBuildupFraction(InASC, Definition);
+        StatusBadges.Add(Entry);
+
+        if (Definition->GrantedStateTag.IsValid()) {
+            BadgeBoundTags.Add(Definition->GrantedStateTag);
+            InASC->RegisterGameplayTagEvent(Definition->GrantedStateTag, EGameplayTagEventType::NewOrRemoved)
+                 .AddUObject(this, &UMythicPlayerStatusViewModel::HandleBadgeTagChanged);
+        }
+        if (Definition->BuildupAttribute.IsValid()) {
+            BadgeBoundAttributes.Add(Definition->BuildupAttribute);
+            InASC->GetGameplayAttributeValueChangeDelegate(Definition->BuildupAttribute)
+                 .AddUObject(this, &UMythicPlayerStatusViewModel::HandleBadgeAttributeChanged);
+        }
+    }
+
+    UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(StatusBadges);
+}
+
+float UMythicPlayerStatusViewModel::ComputeBuildupFraction(const UAbilitySystemComponent *InASC, const UMythicStatusEffectDefinition *Definition) {
+    if (!InASC || !Definition || !Definition->BuildupAttribute.IsValid()) {
+        return 0.0f;
+    }
+    const float Resistance = InASC->HasAttributeSetForAttribute(Definition->ResistanceAttribute)
+                                 ? InASC->GetNumericAttribute(Definition->ResistanceAttribute)
+                                 : 0.0f;
+    const float Threshold = UMythicAttributeSet_Defense::ComputeBuildupThreshold(Resistance);
+    if (Threshold <= 0.0f) {
+        return 0.0f;
+    }
+    return FMath::Clamp(InASC->GetNumericAttribute(Definition->BuildupAttribute) / Threshold, 0.0f, 1.0f);
+}
+
+void UMythicPlayerStatusViewModel::HandleBadgeTagChanged(const FGameplayTag Tag, int32 NewCount) {
+    bool bChanged = false;
+    for (FMythicStatusBadgeEntry &Entry : StatusBadges) {
+        if (Entry.GrantedStateTag == Tag && Entry.bActive != (NewCount > 0)) {
+            Entry.bActive = NewCount > 0;
+            bChanged = true;
+        }
+    }
+    if (bChanged) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(StatusBadges);
+    }
+}
+
+void UMythicPlayerStatusViewModel::HandleBadgeAttributeChanged(const FOnAttributeChangeData &Data) {
+    const UAbilitySystemComponent *A = ASC.Get();
+    const UWorld *World = A ? A->GetWorld() : nullptr;
+    const UGameInstance *GameInstance = World ? World->GetGameInstance() : nullptr;
+    const UMythicStatusRegistry *Registry = GameInstance ? GameInstance->GetSubsystem<UMythicStatusRegistry>() : nullptr;
+    if (!Registry) {
+        return;
+    }
+    const UMythicStatusEffectDefinition *Definition = Registry->FindStatusByBuildupAttribute(Data.Attribute);
+    if (!Definition) {
+        return;
+    }
+    const float NewFraction = ComputeBuildupFraction(A, Definition);
+    bool bChanged = false;
+    for (FMythicStatusBadgeEntry &Entry : StatusBadges) {
+        if (Entry.StatusType == Definition->StatusType && !FMath::IsNearlyEqual(Entry.BuildupFraction, NewFraction)) {
+            Entry.BuildupFraction = NewFraction;
+            bChanged = true;
+        }
+    }
+    if (bChanged) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(StatusBadges);
     }
 }
 
@@ -126,6 +232,15 @@ void UMythicPlayerStatusViewModel::Unbind() {
             A->RegisterGameplayTagEvent(Tag, EGameplayTagEventType::NewOrRemoved).RemoveAll(this);
         }
     }
+    for (const FGameplayTag &Tag : BadgeBoundTags) {
+        A->RegisterGameplayTagEvent(Tag, EGameplayTagEventType::NewOrRemoved).RemoveAll(this);
+    }
+    for (const FGameplayAttribute &Attribute : BadgeBoundAttributes) {
+        A->GetGameplayAttributeValueChangeDelegate(Attribute).RemoveAll(this);
+    }
+    BadgeBoundTags.Reset();
+    BadgeBoundAttributes.Reset();
+
     ASC = nullptr;
 }
 
