@@ -79,6 +79,19 @@ public:
     float GetShieldAbsorbed() const { return ShieldAbsorbed; }
     void SetShieldAbsorbed(float InShieldAbsorbed) { ShieldAbsorbed = InShieldAbsorbed; }
 
+protected:
+    UPROPERTY()
+    float StatusOverflow = 0.0f;
+
+public:
+    /**
+     * Proc chance this hit carried beyond certainty, from whichever status procced with the most to spare. The
+     * damage execution spends it on buildup, so a chance stacked past 100% brings the ailment on sooner instead
+     * of being discarded. Written by the calculation, read by the application — they share one context.
+     */
+    float GetStatusOverflow() const { return StatusOverflow; }
+    void SetStatusOverflow(float InStatusOverflow) { StatusOverflow = InStatusOverflow; }
+
     virtual FGameplayEffectContext *Duplicate() const override {
         FMythicGameplayEffectContext *NewContext = new FMythicGameplayEffectContext();
         *NewContext = *this;

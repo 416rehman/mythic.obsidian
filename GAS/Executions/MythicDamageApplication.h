@@ -16,7 +16,8 @@ public:
     static float ApplySkillDamageBonus(float Damage, bool bIsSkillHit, float BonusSkillDamage);
 
     // Buildup one landed proc contributes. Never negative: a hit must never drain the meter it is filling.
-    static float ComputeBuildupPerProc(float BasePerProc, float SourceMultiplier);
+    // Overflow is proc chance stacked past certainty, spent here so it is not simply discarded.
+    static float ComputeBuildupPerProc(float BasePerProc, float SourceMultiplier, float ChanceOverflow = 0.0f);
 
     // Armour must not reduce a hit below the chip floor, but a hit already nullified stays nullified —
     // otherwise immunity through IncomingDamageMultiplier cannot be expressed.

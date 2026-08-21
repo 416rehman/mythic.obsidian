@@ -95,9 +95,19 @@ void UMythicDamageCalculation::Execute_Implementation(const FGameplayEffectCusto
     float ApplyTerrifyOnHitChance = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageCalcStatics().ApplyTerrifyOnHitChance, EvaluateParameters, ApplyTerrifyOnHitChance);
 
-    const auto ProcRoll = [](float Chance) { return MythicCombat::RollSucceeds(MythicCombat::ClampProbability(Chance), FMath::FRand()); };
+    // Chance past certainty is spent on buildup rather than discarded. Tracked from whichever ailment procced
+    // with the most to spare, so a build stacking one element keeps being paid for stacking it.
+    float StatusOverflow = 0.0f;
+    const auto ProcRoll = [&StatusOverflow](float Chance) {
+        const bool bProcced = MythicCombat::RollSucceeds(MythicCombat::ClampProbability(Chance), FMath::FRand());
+        if (bProcced) {
+            StatusOverflow = FMath::Max(StatusOverflow, MythicCombat::ProbabilityOverflow(Chance));
+        }
+        return bProcced;
+    };
 
-    MythicContext->SetCriticalHit(ProcRoll(CriticalHitChance));
+    // Crit is not an ailment, so its overflow does not feed ailment buildup.
+    MythicContext->SetCriticalHit(MythicCombat::RollSucceeds(MythicCombat::ClampProbability(CriticalHitChance), FMath::FRand()));
     MythicContext->SetBleed(MythicContext->IsBleed() || ProcRoll(ApplyBleedOnHitChance));
     MythicContext->SetBurn(MythicContext->IsBurn() || ProcRoll(ApplyBurnOnHitChance));
     MythicContext->SetPoison(MythicContext->IsPoison() || ProcRoll(ApplyPoisonOnHitChance));
@@ -106,4 +116,6 @@ void UMythicDamageCalculation::Execute_Implementation(const FGameplayEffectCusto
     MythicContext->SetStun(MythicContext->IsStun() || ProcRoll(ApplyStunOnHitChance));
     MythicContext->SetWeaken(MythicContext->IsWeaken() || ProcRoll(ApplyWeakenOnHitChance));
     MythicContext->SetTerrify(MythicContext->IsTerrify() || ProcRoll(ApplyTerrifyOnHitChance));
+
+    MythicContext->SetStatusOverflow(StatusOverflow);
 }
