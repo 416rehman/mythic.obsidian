@@ -7,6 +7,31 @@
 UMythicAttributeSet_Offense::UMythicAttributeSet_Offense() {
     InitOutgoingDamageMultiplier(1.0f);
     InitStatusBuildupMultiplier(1.0f);
+    InitBurnDamageMultiplier(1.0f);
+    InitBleedDamageMultiplier(1.0f);
+    InitPoisonDamageMultiplier(1.0f);
+    InitBurnDurationMultiplier(1.0f);
+    InitBleedDurationMultiplier(1.0f);
+    InitPoisonDurationMultiplier(1.0f);
+    InitSlowDurationMultiplier(1.0f);
+    InitFreezeDurationMultiplier(1.0f);
+    InitStunDurationMultiplier(1.0f);
+    InitWeakenDurationMultiplier(1.0f);
+    InitTerrifyDurationMultiplier(1.0f);
+}
+
+bool UMythicAttributeSet_Offense::IsStatusScalingAttribute(const FGameplayAttribute &Attribute) {
+    return Attribute == GetBurnDamageMultiplierAttribute()
+        || Attribute == GetBleedDamageMultiplierAttribute()
+        || Attribute == GetPoisonDamageMultiplierAttribute()
+        || Attribute == GetBurnDurationMultiplierAttribute()
+        || Attribute == GetBleedDurationMultiplierAttribute()
+        || Attribute == GetPoisonDurationMultiplierAttribute()
+        || Attribute == GetSlowDurationMultiplierAttribute()
+        || Attribute == GetFreezeDurationMultiplierAttribute()
+        || Attribute == GetStunDurationMultiplierAttribute()
+        || Attribute == GetWeakenDurationMultiplierAttribute()
+        || Attribute == GetTerrifyDurationMultiplierAttribute();
 }
 
 bool UMythicAttributeSet_Offense::IsProbabilityAttribute(const FGameplayAttribute &Attribute) {
@@ -28,7 +53,7 @@ void UMythicAttributeSet_Offense::PreAttributeChange(const FGameplayAttribute &A
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     }
     // A negative multiplier would drain buildup on hit, which reads as curing the status by attacking.
-    else if (Attribute == GetStatusBuildupMultiplierAttribute()) {
+    else if (Attribute == GetStatusBuildupMultiplierAttribute() || IsStatusScalingAttribute(Attribute)) {
         NewValue = FMath::Max(0.0f, NewValue);
     }
 }
@@ -40,7 +65,7 @@ void UMythicAttributeSet_Offense::PreAttributeBaseChange(const FGameplayAttribut
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     }
     // A negative multiplier would drain buildup on hit, which reads as curing the status by attacking.
-    else if (Attribute == GetStatusBuildupMultiplierAttribute()) {
+    else if (Attribute == GetStatusBuildupMultiplierAttribute() || IsStatusScalingAttribute(Attribute)) {
         NewValue = FMath::Max(0.0f, NewValue);
     }
 }
@@ -171,4 +196,60 @@ void UMythicAttributeSet_Offense::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, OutgoingDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, StatusBuildupMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BurnDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BleedDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, PoisonDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BurnDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BleedDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, PoisonDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, SlowDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, FreezeDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, StunDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, WeakenDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, TerrifyDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
 }
+
+void UMythicAttributeSet_Offense::OnRep_BurnDamageMultiplier(const FGameplayAttributeData &OldBurnDamageMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BurnDamageMultiplier, OldBurnDamageMultiplier);
+}
+
+void UMythicAttributeSet_Offense::OnRep_BleedDamageMultiplier(const FGameplayAttributeData &OldBleedDamageMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BleedDamageMultiplier, OldBleedDamageMultiplier);
+}
+
+void UMythicAttributeSet_Offense::OnRep_PoisonDamageMultiplier(const FGameplayAttributeData &OldPoisonDamageMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, PoisonDamageMultiplier, OldPoisonDamageMultiplier);
+}
+
+void UMythicAttributeSet_Offense::OnRep_BurnDurationMultiplier(const FGameplayAttributeData &OldBurnDurationMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BurnDurationMultiplier, OldBurnDurationMultiplier);
+}
+
+void UMythicAttributeSet_Offense::OnRep_BleedDurationMultiplier(const FGameplayAttributeData &OldBleedDurationMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BleedDurationMultiplier, OldBleedDurationMultiplier);
+}
+
+void UMythicAttributeSet_Offense::OnRep_PoisonDurationMultiplier(const FGameplayAttributeData &OldPoisonDurationMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, PoisonDurationMultiplier, OldPoisonDurationMultiplier);
+}
+
+void UMythicAttributeSet_Offense::OnRep_SlowDurationMultiplier(const FGameplayAttributeData &OldSlowDurationMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, SlowDurationMultiplier, OldSlowDurationMultiplier);
+}
+
+void UMythicAttributeSet_Offense::OnRep_FreezeDurationMultiplier(const FGameplayAttributeData &OldFreezeDurationMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, FreezeDurationMultiplier, OldFreezeDurationMultiplier);
+}
+
+void UMythicAttributeSet_Offense::OnRep_StunDurationMultiplier(const FGameplayAttributeData &OldStunDurationMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, StunDurationMultiplier, OldStunDurationMultiplier);
+}
+
+void UMythicAttributeSet_Offense::OnRep_WeakenDurationMultiplier(const FGameplayAttributeData &OldWeakenDurationMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, WeakenDurationMultiplier, OldWeakenDurationMultiplier);
+}
+
+void UMythicAttributeSet_Offense::OnRep_TerrifyDurationMultiplier(const FGameplayAttributeData &OldTerrifyDurationMultiplier) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, TerrifyDurationMultiplier, OldTerrifyDurationMultiplier);
+}
+

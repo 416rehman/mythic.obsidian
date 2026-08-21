@@ -59,6 +59,12 @@ public:
       */
     static bool ShouldTeachStatus(bool bTargetIsPlayer, bool bAlreadyKnown, bool bHasDescription);
 
+    /**
+     * What the applier's gear multiplies a status by, after its diminishing curve. 1.0 when the status names no
+     * stat, when there is no applier, or when the applier has no ability system.
+     */
+    static float ResolveApplierScale(const AActor *Instigator, const FGameplayAttribute &Attribute);
+
     // Rolls a range, scales it by the applier's multiplier, and never returns a negative.
     static float RollScaledMagnitude(const FRollDefinition &Range, int32 Level, float SourceMultiplier, float Roll01);
 

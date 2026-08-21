@@ -50,6 +50,21 @@ FORCEINLINE float DiminishProbability(float Probability, float SoftCap) {
     return Diminish(Probability, SoftCap, 1.0f);
 }
 
+/**
+ * The gear-stat case of Diminish. A multiplier stat is stored 1.0-based - 1.0 is no bonus, 1.35 reads as +35% -
+ * so it is the BONUS that bends, not the whole value, or a character with no gear would already be diminished.
+ *
+ * SoftCapBonus and CeilingBonus are both expressed as bonus fractions: 1.0 means +100%. A ceiling of zero means
+ * no curve is authored for this stat, in which case the bonus is returned untouched.
+ */
+FORCEINLINE float DiminishMultiplier(float RawMultiplier, float SoftCapBonus, float CeilingBonus) {
+    const float Bonus = FMath::Max(0.0f, RawMultiplier - 1.0f);
+    if (CeilingBonus <= 0.0f) {
+        return 1.0f + Bonus;
+    }
+    return 1.0f + Diminish(Bonus, SoftCapBonus, CeilingBonus);
+}
+
 FORCEINLINE float ClampProbability(float Probability, float MaxChance = 1.0f) {
     return FMath::Clamp(Probability, 0.0f, FMath::Clamp(MaxChance, 0.0f, 1.0f));
 }

@@ -112,6 +112,47 @@ protected:
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_StatusBuildupMultiplier)
     FGameplayAttributeData StatusBuildupMultiplier;
 
+    /**
+     * Per-status scaling of what a status does once it lands, as opposed to how fast it lands. 1.0 is the authored
+     * band untouched; gear adds fractions on top, so 1.35 reads as +35% on the sheet.
+     *
+     * These are per status rather than one global stat because a poison build and a fire build should not be the
+     * same build. Only the three damage-over-time statuses carry a damage band, so only they get a damage stat -
+     * a FreezeDamageMultiplier would be a stat with nothing to multiply.
+     */
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BurnDamageMultiplier)
+    FGameplayAttributeData BurnDamageMultiplier;
+
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BleedDamageMultiplier)
+    FGameplayAttributeData BleedDamageMultiplier;
+
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_PoisonDamageMultiplier)
+    FGameplayAttributeData PoisonDamageMultiplier;
+
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BurnDurationMultiplier)
+    FGameplayAttributeData BurnDurationMultiplier;
+
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BleedDurationMultiplier)
+    FGameplayAttributeData BleedDurationMultiplier;
+
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_PoisonDurationMultiplier)
+    FGameplayAttributeData PoisonDurationMultiplier;
+
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_SlowDurationMultiplier)
+    FGameplayAttributeData SlowDurationMultiplier;
+
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_FreezeDurationMultiplier)
+    FGameplayAttributeData FreezeDurationMultiplier;
+
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_StunDurationMultiplier)
+    FGameplayAttributeData StunDurationMultiplier;
+
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_WeakenDurationMultiplier)
+    FGameplayAttributeData WeakenDurationMultiplier;
+
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_TerrifyDurationMultiplier)
+    FGameplayAttributeData TerrifyDurationMultiplier;
+
 
 public:
     UMythicAttributeSet_Offense();
@@ -141,11 +182,26 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, OutgoingDamageMultiplier);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, StatusBuildupMultiplier);
 
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BurnDamageMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BleedDamageMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, PoisonDamageMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BurnDurationMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BleedDurationMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, PoisonDurationMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, SlowDurationMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, FreezeDurationMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, StunDurationMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, WeakenDurationMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, TerrifyDurationMultiplier);
+
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
     virtual void PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const override;
 
     static bool IsProbabilityAttribute(const FGameplayAttribute &Attribute);
+
+    // True for the per-status scaling stats, which share one clamp: never negative, or gear would cure on hit.
+    static bool IsStatusScalingAttribute(const FGameplayAttribute &Attribute);
 
     UFUNCTION()
     virtual void OnRep_Power(const FGameplayAttributeData &OldPower);
@@ -196,6 +252,39 @@ public:
 
     UFUNCTION()
     virtual void OnRep_StatusBuildupMultiplier(const FGameplayAttributeData &OldStatusBuildupMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_BurnDamageMultiplier(const FGameplayAttributeData &OldBurnDamageMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_BleedDamageMultiplier(const FGameplayAttributeData &OldBleedDamageMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_PoisonDamageMultiplier(const FGameplayAttributeData &OldPoisonDamageMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_BurnDurationMultiplier(const FGameplayAttributeData &OldBurnDurationMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_BleedDurationMultiplier(const FGameplayAttributeData &OldBleedDurationMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_PoisonDurationMultiplier(const FGameplayAttributeData &OldPoisonDurationMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_SlowDurationMultiplier(const FGameplayAttributeData &OldSlowDurationMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_FreezeDurationMultiplier(const FGameplayAttributeData &OldFreezeDurationMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_StunDurationMultiplier(const FGameplayAttributeData &OldStunDurationMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_WeakenDurationMultiplier(const FGameplayAttributeData &OldWeakenDurationMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_TerrifyDurationMultiplier(const FGameplayAttributeData &OldTerrifyDurationMultiplier);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 };

@@ -76,6 +76,18 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FRollDefinition DurationSeconds;
 
+    /**
+     * Applier stat that scales DamagePerTick, named by data exactly as BuildupAttribute and ResistanceAttribute
+     * are. Leave it unset on a status with no damage band - a stat pointed at a band of zero would validate green
+     * and do nothing.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
+    FGameplayAttribute DamageMultiplierAttribute;
+
+    // Applier stat that scales DurationSeconds. Same rule: unset means the authored band is the whole story.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
+    FGameplayAttribute DurationMultiplierAttribute;
+
     // Hard crowd control. Obeys HardCC immunity and the diminishing-returns escalation rules.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     bool bHardCrowdControl = false;

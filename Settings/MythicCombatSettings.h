@@ -5,6 +5,7 @@
 #include "Engine/DeveloperSettings.h"
 #include "GAS/Executions/MythicDamageCompose.h"
 #include "GAS/MythicHealthBands.h"
+#include "GAS/MythicStatDiminishing.h"
 #include "GAS/MythicWeatherCombatRules.h"
 #include "MythicCombatSettings.generated.h"
 
@@ -39,4 +40,13 @@ public:
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Health Bands")
     FMythicHealthBandConfig HealthBands;
+
+    /**
+     * Diminishing returns per stat. Gear stacks additively, so without a curve a deep enough stash makes any one
+     * stat unbounded; with one, stacking always pays something and never pays everything.
+     *
+     * Unnamed stats are uncurved by default, so this is an opt-in list rather than a silent global cap.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Diminishing")
+    FMythicStatDiminishingConfig StatDiminishing;
 };

@@ -1,5 +1,7 @@
 
 #include "MythicStatusRegistry.h"
+#include "GAS/MythicStatDiminishing.h"
+#include "Settings/MythicCombatSettings.h"
 
 #include "Mythic.h"
 #include "AbilitySystemComponent.h"
@@ -147,6 +149,23 @@ float UMythicStatusRegistry::RollScaledMagnitude(const FRollDefinition &Range, i
     return FMath::Max(0.0f, Rolled * FMath::Max(0.0f, SourceMultiplier));
 }
 
+float UMythicStatusRegistry::ResolveApplierScale(const AActor *Instigator, const FGameplayAttribute &Attribute) {
+    if (!Attribute.IsValid()) {
+        return 1.0f;
+    }
+    const UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Instigator);
+    // An applier without the stat is not an applier with zero of it. Environmental and scripted sources have no
+    // ability system at all, and must inflict the authored band rather than nothing.
+    if (!ASC || !ASC->HasAttributeSetForAttribute(Attribute)) {
+        return 1.0f;
+    }
+
+    const float Raw = ASC->GetNumericAttribute(Attribute);
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    return Settings ? FMythicStatDiminishingRules::Apply(Settings->StatDiminishing, Attribute, Raw)
+                    : FMath::Max(0.0f, Raw);
+}
+
 bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC, const UMythicStatusEffectDefinition *Definition, AActor *Instigator,
                                               AActor *Causer) {
     if (!TargetASC || !Definition || !Definition->EffectToApply) {
@@ -161,12 +180,15 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
         return false;
     }
 
-    // The authored band is the whole story: two applications differ by the roll, not by a stat on the applier.
-    const float Damage = RollScaledMagnitude(Definition->DamagePerTick, 0, 1.0f, FMath::FRand());
+    // Two applications differ by the roll AND by what the applier has stacked, so a poison build hits harder
+    // than a passer-by inflicting the same poison.
+    const float DamageScale = ResolveApplierScale(Instigator, Definition->DamageMultiplierAttribute);
+    const float Damage = RollScaledMagnitude(Definition->DamagePerTick, 0, DamageScale, FMath::FRand());
     if (Damage > 0.0f) {
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_DAMAGE, Damage);
     }
-    const float Duration = RollScaledMagnitude(Definition->DurationSeconds, 0, 1.0f, FMath::FRand());
+    const float DurationScale = ResolveApplierScale(Instigator, Definition->DurationMultiplierAttribute);
+    const float Duration = RollScaledMagnitude(Definition->DurationSeconds, 0, DurationScale, FMath::FRand());
     if (Duration > 0.0f) {
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_DURATION, Duration);
     }
