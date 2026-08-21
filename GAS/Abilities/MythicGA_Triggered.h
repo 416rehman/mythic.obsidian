@@ -7,6 +7,18 @@
 #include "MythicGA_Triggered.generated.h"
 
 UENUM(BlueprintType)
+enum class EMythicTriggerFacing : uint8 {
+    // No facing requirement.
+    Any,
+    // We are in front of them: they are looking at us.
+    Front,
+    // We are behind them.
+    Behind,
+    // Neither: we are off one of their shoulders.
+    Flank,
+};
+
+UENUM(BlueprintType)
 enum class EMythicTriggerTarget : uint8 {
     // Whoever is on the other end of the event: the actor we hit, or the actor that hit us.
     Other,
@@ -52,6 +64,21 @@ struct MYTHIC_API FMythicTriggerCondition {
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Condition", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float SourceHealthMax = 1.0f;
+
+    /**
+     * Where the owner must stand relative to the OTHER PARTY of the event - the foe struck, or the one who struck
+     * us - regardless of where the clause applies its payload. That is what lets "face them squarely" buff yourself
+     * while still being a statement about the enemy.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Condition")
+    EMythicTriggerFacing RequiredFacing = EMythicTriggerFacing::Any;
+
+    /**
+     * Cosine bounding the front and back arcs. The default 0.707 gives each a 90 degree cone and leaves the rest as
+     * flank. Raise it for a narrower arc, lower it for a wider one.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Condition", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FacingThreshold = 0.707f;
 
     // Health fraction the other party must be inside. 0..0.2 is "already dying"; 1..1 is "unwounded".
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Condition", meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -199,6 +226,12 @@ public:
 
     // Trims a sweep to its cap, keeping the nearest. 0 means no cap.
     static void LimitTargets(TArray<AActor *> &Targets, int32 MaxTargets);
+
+    // Which arc of the other party the owner is standing in. Any when either vector is degenerate.
+    static EMythicTriggerFacing ResolveFacing(const FVector &OtherForward, const FVector &OtherToOwner, float Threshold);
+
+    // Whether a resolved arc satisfies what a clause asked for.
+    static bool PassesFacing(EMythicTriggerFacing Required, EMythicTriggerFacing Actual);
 
     // Whether this occurrence is the Nth. Count includes the current event.
     static bool IsNthEvent(int32 EveryNth, int32 Count);

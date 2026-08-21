@@ -149,6 +149,33 @@ void UMythicGA_Triggered::GatherClauseTargets(const FMythicTriggerSpec &Spec, AA
     LimitTargets(Out, Spec.MaxTargets);
 }
 
+EMythicTriggerFacing UMythicGA_Triggered::ResolveFacing(const FVector &OtherForward, const FVector &OtherToOwner, float Threshold) {
+    FVector Forward = OtherForward;
+    FVector ToOwner = OtherToOwner;
+    // Two actors on the same spot, or an actor with no orientation, have no arc to speak of.
+    if (!Forward.Normalize() || !ToOwner.Normalize()) {
+        return EMythicTriggerFacing::Any;
+    }
+
+    const float Dot = static_cast<float>(FVector::DotProduct(Forward, ToOwner));
+    const float Bound = FMath::Clamp(Threshold, 0.0f, 1.0f);
+    if (Dot >= Bound) {
+        return EMythicTriggerFacing::Front;
+    }
+    if (Dot <= -Bound) {
+        return EMythicTriggerFacing::Behind;
+    }
+    return EMythicTriggerFacing::Flank;
+}
+
+bool UMythicGA_Triggered::PassesFacing(EMythicTriggerFacing Required, EMythicTriggerFacing Actual) {
+    if (Required == EMythicTriggerFacing::Any) {
+        return true;
+    }
+    // An unknown arc fails a clause that asked for one, rather than passing by accident.
+    return Actual == Required;
+}
+
 bool UMythicGA_Triggered::IsNthEvent(int32 EveryNth, int32 Count) {
     if (EveryNth <= 1) {
         return true;
@@ -284,6 +311,17 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
         if (const UAbilitySystemComponent *TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Target)) {
             TargetASC->GetOwnedGameplayTags(TargetTags);
         }
+        if (Spec.Condition.RequiredFacing != EMythicTriggerFacing::Any) {
+            const AActor *Other = Payload ? Payload->Target.Get() : nullptr;
+            const EMythicTriggerFacing Actual = Other
+                ? ResolveFacing(Other->GetActorForwardVector(), Owner->GetActorLocation() - Other->GetActorLocation(),
+                                Spec.Condition.FacingThreshold)
+                : EMythicTriggerFacing::Any;
+            if (!PassesFacing(Spec.Condition.RequiredFacing, Actual)) {
+                continue;
+            }
+        }
+
         const FGameplayTagContainer &EventTags = Payload ? Payload->InstigatorTags : FGameplayTagContainer::EmptyContainer;
         if (!PassesCondition(Spec.Condition, WorldTags, EventTags, SourceTags, TargetTags, SourceHealth,
                              GetHealthFraction(Target))) {

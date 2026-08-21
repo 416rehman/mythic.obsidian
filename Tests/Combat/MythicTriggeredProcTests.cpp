@@ -137,6 +137,47 @@ bool FMythicTriggeredProcTest::RunTest(const FString &Parameters) {
         TestFalse(TEXT("one blow in five does not fire on the fourth"), GA::IsNthEvent(5, 4));
     }
 
+    // Facing, measured from the other party's forward vector toward the owner, so Behind means their back is to us.
+    {
+        const FVector North(1, 0, 0);
+        const float Bound = 0.707f;
+
+        TestEqual(TEXT("standing where they are looking is front"),
+                  GA::ResolveFacing(North, FVector(1, 0, 0), Bound), EMythicTriggerFacing::Front);
+        TestEqual(TEXT("standing at their back is behind"),
+                  GA::ResolveFacing(North, FVector(-1, 0, 0), Bound), EMythicTriggerFacing::Behind);
+        TestEqual(TEXT("standing off their shoulder is a flank"),
+                  GA::ResolveFacing(North, FVector(0, 1, 0), Bound), EMythicTriggerFacing::Flank);
+        TestEqual(TEXT("the other shoulder is also a flank"),
+                  GA::ResolveFacing(North, FVector(0, -1, 0), Bound), EMythicTriggerFacing::Flank);
+
+        TestEqual(TEXT("just inside the front arc is front"),
+                  GA::ResolveFacing(North, FVector(0.8f, 0.2f, 0), Bound), EMythicTriggerFacing::Front);
+        TestEqual(TEXT("just outside it is a flank"),
+                  GA::ResolveFacing(North, FVector(0.6f, 0.8f, 0), Bound), EMythicTriggerFacing::Flank);
+
+        // A wider arc swallows what was a flank; a narrower one gives it back.
+        TestEqual(TEXT("a wide arc counts a shoulder as front"),
+                  GA::ResolveFacing(North, FVector(0.6f, 0.8f, 0), 0.5f), EMythicTriggerFacing::Front);
+        TestEqual(TEXT("a narrow arc does not"),
+                  GA::ResolveFacing(North, FVector(0.9f, 0.4f, 0), 0.99f), EMythicTriggerFacing::Flank);
+
+        // Degenerate input has no arc, and must not satisfy a clause that asked for one.
+        TestEqual(TEXT("actors on the same spot have no arc"),
+                  GA::ResolveFacing(North, FVector::ZeroVector, Bound), EMythicTriggerFacing::Any);
+        TestEqual(TEXT("an actor with no orientation has no arc"),
+                  GA::ResolveFacing(FVector::ZeroVector, North, Bound), EMythicTriggerFacing::Any);
+
+        TestTrue(TEXT("a clause asking for nothing accepts any arc"),
+                 GA::PassesFacing(EMythicTriggerFacing::Any, EMythicTriggerFacing::Flank));
+        TestTrue(TEXT("a behind clause accepts behind"),
+                 GA::PassesFacing(EMythicTriggerFacing::Behind, EMythicTriggerFacing::Behind));
+        TestFalse(TEXT("a behind clause rejects front"),
+                  GA::PassesFacing(EMythicTriggerFacing::Behind, EMythicTriggerFacing::Front));
+        TestFalse(TEXT("a behind clause rejects an unknown arc rather than passing by accident"),
+                  GA::PassesFacing(EMythicTriggerFacing::Behind, EMythicTriggerFacing::Any));
+    }
+
     // Sweep caps. A talent that hits everything nearby still needs a bound a designer can set.
     {
         auto Make = [](int32 Count) {
