@@ -77,4 +77,11 @@ public:
     bool IsDead() const { return bOutOfHealth; }
 
     void ResetForRespawn();
+
+    /**
+     * Re-derives the out-of-health latch from current health. Anything that restores health with
+     * SetNumericAttributeBase must call this: that path skips PostGameplayEffectExecute, so the latch set on
+     * death stays set and every later hit is zeroed.
+     */
+    void RefreshOutOfHealthLatch();
 };

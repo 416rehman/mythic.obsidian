@@ -358,6 +358,8 @@ void UMythicLifeComponent::ServerReviveFromDowned() {
     if (LifeSet) {
         const float NewHealth = FMath::Max(1.0f, LifeSet->GetMaxHealth() * Fraction);
         AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Life::GetHealthAttribute(), NewHealth);
+        // Without this the latch set on going down survives the revive and every later hit is zeroed.
+        const_cast<UMythicAttributeSet_Life *>(LifeSet.Get())->RefreshOutOfHealthLatch();
     }
 
     CancelReviveChannel();

@@ -225,6 +225,10 @@ void UMythicAttributeSet_Life::ResetForRespawn() {
     }
 }
 
+void UMythicAttributeSet_Life::RefreshOutOfHealthLatch() {
+    bOutOfHealth = ComputeOutOfHealthLatch(GetHealth());
+}
+
 bool UMythicAttributeSet_Life::ComputeOutOfHealthLatch(float NewHealth) {
     return NewHealth <= 0.0f;
 }
