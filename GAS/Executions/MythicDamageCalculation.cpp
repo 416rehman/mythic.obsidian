@@ -95,7 +95,7 @@ void UMythicDamageCalculation::Execute_Implementation(const FGameplayEffectCusto
     float ApplyTerrifyOnHitChance = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageCalcStatics().ApplyTerrifyOnHitChance, EvaluateParameters, ApplyTerrifyOnHitChance);
 
-    const auto ProcRoll = [](float Chance) { return MythicCombat::RollSucceeds(Chance, FMath::FRand()); };
+    const auto ProcRoll = [](float Chance) { return MythicCombat::RollSucceeds(MythicCombat::ClampProbability(Chance), FMath::FRand()); };
 
     MythicContext->SetCriticalHit(ProcRoll(CriticalHitChance));
     MythicContext->SetBleed(MythicContext->IsBleed() || ProcRoll(ApplyBleedOnHitChance));

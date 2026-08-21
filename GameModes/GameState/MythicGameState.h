@@ -78,6 +78,13 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline", meta = (ClampMin = "0.0"))
     float StatusBuildupPerProc = 25.0f;
 
+    /**
+     * Ceiling on dodge chance, however much an entity stacks. At 1.0 a build reaching 100% dodge is literally
+     * invulnerable, so this must stay below 1 for stacked dodge to remain a trade rather than an exploit.
+     */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaxDodgeChance = 0.75f;
+
     // Upper bound on UMythicAttributeSet_Utility::CooldownReduction when it scales ability cooldown durations
     // (effective cooldown = base * (1 - clamp(CDR, 0, MaxCooldownReduction))). A safety cap, NOT a balance lever:
     // it keeps a sliver of cooldown so stacked CDR gear can't reach a degenerate zero/instant cooldown. 0.8 = at

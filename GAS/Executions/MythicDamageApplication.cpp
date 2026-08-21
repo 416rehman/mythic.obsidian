@@ -408,6 +408,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
 
     float DodgeChance = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.DodgeChance, EvaluateParameters, DodgeChance);
+    DodgeChance = MythicCombat::ClampProbability(DodgeChance, GS ? GS->MaxDodgeChance : 0.75f);
     if (MythicCombat::RollSucceeds(DodgeChance, FMath::FRand())) {
         MythicContext->SetDodged(true);
         UE_LOG(Myth, Log, TEXT("DamageApplication:: Attack DODGED (chance %.2f)"), DodgeChance);
