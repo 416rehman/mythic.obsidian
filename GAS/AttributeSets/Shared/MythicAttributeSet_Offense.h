@@ -112,13 +112,6 @@ protected:
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_StatusBuildupMultiplier)
     FGameplayAttributeData StatusBuildupMultiplier;
 
-    // Scales the damage of statuses this source inflicts. 1.0 is normal.
-    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_AilmentDamageMultiplier)
-    FGameplayAttributeData AilmentDamageMultiplier;
-
-    // Scales how long statuses this source inflicts last. 1.0 is normal.
-    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_AilmentDurationMultiplier)
-    FGameplayAttributeData AilmentDurationMultiplier;
 
 public:
     UMythicAttributeSet_Offense();
@@ -147,8 +140,6 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusDamageToSuperiorEnemies);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, OutgoingDamageMultiplier);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, StatusBuildupMultiplier);
-    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, AilmentDamageMultiplier);
-    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, AilmentDurationMultiplier);
 
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
@@ -205,12 +196,6 @@ public:
 
     UFUNCTION()
     virtual void OnRep_StatusBuildupMultiplier(const FGameplayAttributeData &OldStatusBuildupMultiplier);
-
-    UFUNCTION()
-    virtual void OnRep_AilmentDamageMultiplier(const FGameplayAttributeData &OldAilmentDamageMultiplier);
-
-    UFUNCTION()
-    virtual void OnRep_AilmentDurationMultiplier(const FGameplayAttributeData &OldAilmentDurationMultiplier);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 };

@@ -188,8 +188,6 @@ bool FMythicBuildStatsRollableTest::RunTest(const FString &Parameters) {
         TEXT("CriticalHitDamage"),
         TEXT("BonusSkillDamage"),
         TEXT("StatusBuildupMultiplier"),
-        TEXT("AilmentDamageMultiplier"),
-        TEXT("AilmentDurationMultiplier"),
         TEXT("IncreasedDamageToEnemiesUnderStatusEffects"),
         TEXT("BonusDamageToSuperiorEnemies"),
         TEXT("DecreasedDamageFromEnemiesUnderStatusEffects"),

@@ -5,7 +5,9 @@
 #include "Mythic.h"
 #include "GAS/MythicGameplayEffectContext.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "Engine/World.h"
 #include "GAS/Executions/MythicCombatRoll.h"
+#include "GameModes/GameState/MythicGameState.h"
 
 struct FMythicDamageCalcStatics {
     FGameplayEffectAttributeCaptureDefinition CriticalHitChance;
@@ -95,19 +97,20 @@ void UMythicDamageCalculation::Execute_Implementation(const FGameplayEffectCusto
     float ApplyTerrifyOnHitChance = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageCalcStatics().ApplyTerrifyOnHitChance, EvaluateParameters, ApplyTerrifyOnHitChance);
 
-    // Chance past certainty is spent on buildup rather than discarded. Tracked from whichever ailment procced
-    // with the most to spare, so a build stacking one element keeps being paid for stacking it.
-    float StatusOverflow = 0.0f;
-    const auto ProcRoll = [&StatusOverflow](float Chance) {
-        const bool bProcced = MythicCombat::RollSucceeds(MythicCombat::ClampProbability(Chance), FMath::FRand());
-        if (bProcced) {
-            StatusOverflow = FMath::Max(StatusOverflow, MythicCombat::ProbabilityOverflow(Chance));
-        }
-        return bProcced;
+    /**
+     * On-hit chances stack from gear, so they are bent toward certainty rather than clamped at it. Past the soft
+     * cap each further point buys less than the last and the curve never reaches 1, which keeps stacking worth
+     * something without ever removing the roll.
+     */
+    const UAbilitySystemComponent *SourceASC = ExecutionParams.GetSourceAbilitySystemComponent();
+    const UWorld *World = SourceASC ? SourceASC->GetWorld() : nullptr;
+    const AMythicGameState *GameState = World ? World->GetGameState<AMythicGameState>() : nullptr;
+    const float SoftCap = GameState ? GameState->ProbabilitySoftCap : 0.5f;
+    const auto ProcRoll = [SoftCap](float Chance) {
+        return MythicCombat::RollSucceeds(MythicCombat::DiminishProbability(Chance, SoftCap), FMath::FRand());
     };
 
-    // Crit is not an ailment, so its overflow does not feed ailment buildup.
-    MythicContext->SetCriticalHit(MythicCombat::RollSucceeds(MythicCombat::ClampProbability(CriticalHitChance), FMath::FRand()));
+    MythicContext->SetCriticalHit(ProcRoll(CriticalHitChance));
     MythicContext->SetBleed(MythicContext->IsBleed() || ProcRoll(ApplyBleedOnHitChance));
     MythicContext->SetBurn(MythicContext->IsBurn() || ProcRoll(ApplyBurnOnHitChance));
     MythicContext->SetPoison(MythicContext->IsPoison() || ProcRoll(ApplyPoisonOnHitChance));
@@ -116,6 +119,4 @@ void UMythicDamageCalculation::Execute_Implementation(const FGameplayEffectCusto
     MythicContext->SetStun(MythicContext->IsStun() || ProcRoll(ApplyStunOnHitChance));
     MythicContext->SetWeaken(MythicContext->IsWeaken() || ProcRoll(ApplyWeakenOnHitChance));
     MythicContext->SetTerrify(MythicContext->IsTerrify() || ProcRoll(ApplyTerrifyOnHitChance));
-
-    MythicContext->SetStatusOverflow(StatusOverflow);
 }

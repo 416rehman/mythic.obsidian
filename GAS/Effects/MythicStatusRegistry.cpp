@@ -161,22 +161,12 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
         return false;
     }
 
-    // The applier's stats decide how hard and how long its ailments bite, so two players inflicting the same
-    // status do not inflict the same number.
-    float DamageMultiplier = 1.0f;
-    float DurationMultiplier = 1.0f;
-    if (const UAbilitySystemComponent *SourceASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Instigator)) {
-        if (const UMythicAttributeSet_Offense *Offense = SourceASC->GetSet<UMythicAttributeSet_Offense>()) {
-            DamageMultiplier = Offense->GetAilmentDamageMultiplier();
-            DurationMultiplier = Offense->GetAilmentDurationMultiplier();
-        }
-    }
-
-    const float Damage = RollScaledMagnitude(Definition->DamagePerTick, 0, DamageMultiplier, FMath::FRand());
+    // The authored band is the whole story: two applications differ by the roll, not by a stat on the applier.
+    const float Damage = RollScaledMagnitude(Definition->DamagePerTick, 0, 1.0f, FMath::FRand());
     if (Damage > 0.0f) {
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_AILMENT_DAMAGE, Damage);
     }
-    const float Duration = RollScaledMagnitude(Definition->DurationSeconds, 0, DurationMultiplier, FMath::FRand());
+    const float Duration = RollScaledMagnitude(Definition->DurationSeconds, 0, 1.0f, FMath::FRand());
     if (Duration > 0.0f) {
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_AILMENT_DURATION, Duration);
     }

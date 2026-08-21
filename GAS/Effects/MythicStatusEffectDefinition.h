@@ -63,16 +63,15 @@ public:
     FGameplayAttribute ResistanceAttribute;
 
     /**
-     * Damage each tick, rolled per application and scaled by the applier's AilmentDamageMultiplier. Leave Min and
-     * Max at zero for a status that deals no damage. The effect must read it through the
-     * SetByCaller.Ailment.Damage tag for this to reach the target.
+     * Damage each tick, rolled per application. Leave Min and Max at zero for a status that deals no damage. The
+     * effect must read it through the SetByCaller.Ailment.Damage tag for this to reach the target.
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FRollDefinition DamagePerTick;
 
     /**
-     * Seconds the status lasts, rolled per application and scaled by the applier's AilmentDurationMultiplier.
-     * Leave Min and Max at zero to keep whatever duration the effect authors itself.
+     * Seconds the status lasts, rolled per application. Leave Min and Max at zero to keep whatever duration the
+     * effect authors itself.
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FRollDefinition DurationSeconds;

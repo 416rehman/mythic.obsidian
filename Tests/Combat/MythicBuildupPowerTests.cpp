@@ -23,27 +23,37 @@ bool FMythicBuildupPerProcTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("zeroing the multiplier stops buildup entirely"), Exec::ComputeBuildupPerProc(25.0f, 0.0f), 0.0f);
 
 
-    // Proc chance stacked past certainty. Every input here is rolled, so a build reaches the cap and keeps going.
+    // Stacked on-hit chance bends toward certainty instead of clamping at it, so gear keeps paying and the roll
+    // never disappears.
     {
         using namespace MythicCombat;
-        auto Buildup = [](float Base, float Mult, float Overflow) {
-            return UMythicDamageApplication::ComputeBuildupPerProc(Base, Mult, Overflow);
-        };
+        const float Soft = 0.5f;
 
-        TestEqual(TEXT("no overflow leaves buildup alone"), Buildup(25.0f, 1.0f, 0.0f), 25.0f);
-        TestEqual(TEXT("chance is only overflow once past certainty"), ProbabilityOverflow(0.8f), 0.0f);
-        TestEqual(TEXT("exactly certain overflows by nothing"), ProbabilityOverflow(1.0f), 0.0f);
-        TestEqual(TEXT("half again as much chance is half again as much overflow"), ProbabilityOverflow(1.5f), 0.5f);
+        TestEqual(TEXT("a chance below the soft cap is exactly what it says"), DiminishProbability(0.25f, Soft), 0.25f);
+        TestEqual(TEXT("a chance at the soft cap is untouched"), DiminishProbability(0.5f, Soft), 0.5f);
 
-        // The point of the change: a chance stacked to 150% now buys something instead of being discarded.
-        TestTrue(TEXT("overflow makes the ailment build faster"), Buildup(25.0f, 1.0f, 0.5f) > Buildup(25.0f, 1.0f, 0.0f));
-        TestEqual(TEXT("and by the amount overflowed"), Buildup(25.0f, 1.0f, 0.5f), 37.5f);
+        const float AtOne = DiminishProbability(1.0f, Soft);
+        TestTrue(TEXT("past the cap a chance still beats the cap"), AtOne > Soft);
+        TestTrue(TEXT("but no longer its face value"), AtOne < 1.0f);
 
-        // Overflow multiplies the same total the buildup stat scales, so the two compound rather than one winning.
-        TestEqual(TEXT("overflow compounds with the buildup stat"), Buildup(25.0f, 2.0f, 1.0f), 100.0f);
+        // The property the design turns on: more always gives more, and never gives everything.
+        const float AtTwo = DiminishProbability(2.0f, Soft);
+        const float AtTen = DiminishProbability(10.0f, Soft);
+        TestTrue(TEXT("more chance is always more"), AtTwo > AtOne && AtTen > AtTwo);
+        TestTrue(TEXT("certainty is never reached, however much is stacked"), AtTen < 1.0f);
+        TestTrue(TEXT("and it does get close"), AtTen > 0.99f);
+        TestEqual(TEXT("the ceiling holds at any amount of stacking"),
+                  DiminishProbability(1000.0f, Soft), MaxEffectiveProbability);
+        // The ceiling exists so a roll still exists: the worst roll must still be able to fail.
+        TestFalse(TEXT("even a fully stacked chance can fail"),
+                  RollSucceeds(DiminishProbability(1000.0f, Soft), 1.0f));
 
-        TestEqual(TEXT("a negative overflow cannot drain the meter"), Buildup(25.0f, 1.0f, -3.0f), 25.0f);
-        TestTrue(TEXT("no combination produces negative buildup"), Buildup(-5.0f, -5.0f, -5.0f) >= 0.0f);
+        // Each further point buys less than the one before it.
+        TestTrue(TEXT("returns diminish"), (AtTwo - AtOne) < (AtOne - DiminishProbability(0.5f, Soft)));
+
+        TestEqual(TEXT("a negative chance is nothing"), DiminishProbability(-3.0f, Soft), 0.0f);
+        TestEqual(TEXT("a soft cap of zero bends everything from the start"), DiminishProbability(0.0f, 0.0f), 0.0f);
+        TestTrue(TEXT("a soft cap of one is a plain clamp"), DiminishProbability(5.0f, 1.0f) <= 1.0f);
     }
 
     return true;

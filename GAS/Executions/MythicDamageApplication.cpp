@@ -38,8 +38,8 @@ float UMythicDamageApplication::ApplyChipFloor(float Damage, float MinChipDamage
     return FMath::Max(MinChipDamage, Damage);
 }
 
-float UMythicDamageApplication::ComputeBuildupPerProc(float BasePerProc, float SourceMultiplier, float ChanceOverflow) {
-    return FMath::Max(0.0f, BasePerProc) * FMath::Max(0.0f, SourceMultiplier) * (1.0f + FMath::Max(0.0f, ChanceOverflow));
+float UMythicDamageApplication::ComputeBuildupPerProc(float BasePerProc, float SourceMultiplier) {
+    return FMath::Max(0.0f, BasePerProc) * FMath::Max(0.0f, SourceMultiplier);
 }
 
 float UMythicDamageApplication::ApplySkillDamageBonus(float Damage, bool bIsSkillHit, float BonusSkillDamage) {
@@ -502,8 +502,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
 
     float BuildupMultiplier = 1.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.StatusBuildupMultiplier, EvaluateParameters, BuildupMultiplier);
-    const float StatusBuildupPerProc = ComputeBuildupPerProc(GS ? GS->StatusBuildupPerProc : 25.0f, BuildupMultiplier,
-                                                             MythicContext->GetStatusOverflow());
+    const float StatusBuildupPerProc = ComputeBuildupPerProc(GS ? GS->StatusBuildupPerProc : 25.0f, BuildupMultiplier);
     auto AddBuildup = [&](bool bProcSurvived, const FGameplayAttribute &BuildupAttr) {
         if (bProcSurvived) {
             OutExecutionOutput.AddOutputModifier(FGameplayModifierEvaluatedData(

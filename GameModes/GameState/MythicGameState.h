@@ -85,6 +85,14 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MaxDodgeChance = 0.75f;
 
+    /**
+     * Where on-hit chances stop being worth their face value. Below this a chance is exactly what it says; above it
+     * each further point buys less than the last, approaching certainty without reaching it. Raise it to let gear
+     * carry more before the curve bites; lower it to make specialising bite sooner.
+     */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ProbabilitySoftCap = 0.5f;
+
     // Upper bound on UMythicAttributeSet_Utility::CooldownReduction when it scales ability cooldown durations
     // (effective cooldown = base * (1 - clamp(CDR, 0, MaxCooldownReduction))). A safety cap, NOT a balance lever:
     // it keeps a sliver of cooldown so stacked CDR gear can't reach a degenerate zero/instant cooldown. 0.8 = at
