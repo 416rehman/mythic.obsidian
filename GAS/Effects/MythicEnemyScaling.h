@@ -18,9 +18,13 @@ struct FMythicTierScaling {
 };
 
 struct MYTHIC_API FMythicEnemyScaling {
-    static FVector2D ComputeStatMultiplier(int32 PartySize, int32 WorldTier,
-                                           float PerExtraMemberHealth, float PerExtraMemberDamage,
-                                           float PerTierHealth, float PerTierDamage);
+    /**
+      * Party size and world tier are independent axes, so they compose multiplicatively. World tier arrives as the
+      * already-evaluated EnemyHealth/EnemyDamage multiplier from UWorldTierAttributes rather than a per-NPC linear
+      * term, so a gameplay effect can push it and one curve decides the whole tier ladder.
+      */
+    static FVector2D ComputeStatMultiplier(int32 PartySize, float PerExtraMemberHealth, float PerExtraMemberDamage,
+                                           float WorldHealthMultiplier, float WorldDamageMultiplier);
 
     static FMythicTierScaling GetTierScaling(const FGameplayTag &TierTag);
 };

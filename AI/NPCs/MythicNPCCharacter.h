@@ -210,16 +210,12 @@ protected:
 
     void PublishIdentityTags();
 
-    // Party/world-tier scaling tunables (C5). Each EXTRA party member (beyond the first) adds these fractions to the
-    // health/damage mult; each world-tier step adds the per-tier fractions. Baseline (solo + world tier 0) => x1.
+    // Each EXTRA party member beyond the first adds these fractions to this NPC's health/damage multiplier. World
+    // tier scaling is not here — it comes from UWorldTierAttributes so one curve drives the whole tier ladder.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic NPC | Combat | Scaling", meta = (ClampMin = "0.0"))
     float PerExtraMemberHealth = 0.15f;
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic NPC | Combat | Scaling", meta = (ClampMin = "0.0"))
     float PerExtraMemberDamage = 0.10f;
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic NPC | Combat | Scaling", meta = (ClampMin = "0.0"))
-    float PerTierHealth = 0.25f;
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic NPC | Combat | Scaling", meta = (ClampMin = "0.0"))
-    float PerTierDamage = 0.15f;
 
     void ApplyCombatScaling();
 

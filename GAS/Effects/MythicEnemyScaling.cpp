@@ -13,21 +13,19 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_SCALING_DAMAGE, "SetByCaller.Scal
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_COMBATSCALING, "GAS.State.CombatScaling",
                                "Granted by the infinite CombatScaling GE so pool-return can strip it (else it accumulates)");
 
-FVector2D FMythicEnemyScaling::ComputeStatMultiplier(int32 PartySize, int32 WorldTier,
-                                                     float PerExtraMemberHealth, float PerExtraMemberDamage,
-                                                     float PerTierHealth, float PerTierDamage) {
-    const int32 ClampedParty = FMath::Max(PartySize, 1);
-    const int32 ClampedTier = FMath::Max(WorldTier, 0);
-    const int32 ExtraMembers = ClampedParty - 1;
+FVector2D FMythicEnemyScaling::ComputeStatMultiplier(int32 PartySize, float PerExtraMemberHealth, float PerExtraMemberDamage,
+                                                     float WorldHealthMultiplier, float WorldDamageMultiplier) {
+    const int32 ExtraMembers = FMath::Max(PartySize, 1) - 1;
 
     const float PEMH = FMath::Max(PerExtraMemberHealth, 0.0f);
     const float PEMD = FMath::Max(PerExtraMemberDamage, 0.0f);
-    const float PTH = FMath::Max(PerTierHealth, 0.0f);
-    const float PTD = FMath::Max(PerTierDamage, 0.0f);
 
-    const float HealthMult = 1.0f + ExtraMembers * PEMH + ClampedTier * PTH;
-    const float DamageMult = 1.0f + ExtraMembers * PEMD + ClampedTier * PTD;
-    return FVector2D(HealthMult, DamageMult);
+    // A world multiplier that has not replicated yet reads as zero. Treat anything non-positive as "no tier bonus"
+    // so a late attribute leaves the enemy at its authored strength instead of erasing it.
+    const float WorldH = WorldHealthMultiplier > 0.0f ? WorldHealthMultiplier : 1.0f;
+    const float WorldD = WorldDamageMultiplier > 0.0f ? WorldDamageMultiplier : 1.0f;
+
+    return FVector2D((1.0f + ExtraMembers * PEMH) * WorldH, (1.0f + ExtraMembers * PEMD) * WorldD);
 }
 
 FMythicTierScaling FMythicEnemyScaling::GetTierScaling(const FGameplayTag &TierTag) {

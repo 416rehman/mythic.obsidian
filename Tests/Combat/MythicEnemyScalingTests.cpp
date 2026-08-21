@@ -15,46 +15,51 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicEnemyScalingTest::RunTest(const FString &Parameters) {
     using ES = FMythicEnemyScaling;
 
-    const float PEMH = 0.15f, PEMD = 0.10f, PTH = 0.25f, PTD = 0.15f;
+    const float PEMH = 0.15f, PEMD = 0.10f;
 
     {
-        const FVector2D M = ES::ComputeStatMultiplier(1, 0, PEMH, PEMD, PTH, PTD);
+        const FVector2D M = ES::ComputeStatMultiplier(1, PEMH, PEMD, 1.0f, 1.0f);
         TestEqual(TEXT("baseline health mult == 1"), static_cast<float>(M.X), 1.0f);
         TestEqual(TEXT("baseline damage mult == 1"), static_cast<float>(M.Y), 1.0f);
     }
 
     {
-        const FVector2D MParty = ES::ComputeStatMultiplier(0, 0, PEMH, PEMD, PTH, PTD);
-        TestEqual(TEXT("PartySize 0 clamps to solo (health 1)"), static_cast<float>(MParty.X), 1.0f);
-        TestEqual(TEXT("PartySize 0 clamps to solo (damage 1)"), static_cast<float>(MParty.Y), 1.0f);
-
-        const FVector2D MTier = ES::ComputeStatMultiplier(1, -5, PEMH, PEMD, PTH, PTD);
-        TestEqual(TEXT("WorldTier -5 clamps to 0 (health 1)"), static_cast<float>(MTier.X), 1.0f);
-        TestEqual(TEXT("WorldTier -5 clamps to 0 (damage 1)"), static_cast<float>(MTier.Y), 1.0f);
+        const FVector2D M = ES::ComputeStatMultiplier(0, PEMH, PEMD, 1.0f, 1.0f);
+        TestEqual(TEXT("PartySize 0 clamps to solo (health 1)"), static_cast<float>(M.X), 1.0f);
+        TestEqual(TEXT("PartySize 0 clamps to solo (damage 1)"), static_cast<float>(M.Y), 1.0f);
     }
 
     {
-        const FVector2D M = ES::ComputeStatMultiplier(3, 0, PEMH, PEMD, PTH, PTD);
+        const FVector2D M = ES::ComputeStatMultiplier(3, PEMH, PEMD, 1.0f, 1.0f);
         TestEqual(TEXT("party 3 health = 1 + 2*0.15"), static_cast<float>(M.X), 1.30f);
         TestEqual(TEXT("party 3 damage = 1 + 2*0.10"), static_cast<float>(M.Y), 1.20f);
-        TestTrue(TEXT("party scales health above baseline"), M.X > 1.0f);
-        TestTrue(TEXT("party scales damage above baseline"), M.Y > 1.0f);
+    }
+
+    // The whole point of #101: the tier ladder is the authored curve, so changing the attribute must change the
+    // scaled result. Curve_WorldTiers rows EnemyHealthMultiplier/EnemyDamageMultiplier read 1, 1.5, 2, 3.
+    {
+        const FVector2D M = ES::ComputeStatMultiplier(1, PEMH, PEMD, 3.0f, 3.0f);
+        TestEqual(TEXT("world tier 4 health takes the curve value"), static_cast<float>(M.X), 3.0f);
+        TestEqual(TEXT("world tier 4 damage takes the curve value"), static_cast<float>(M.Y), 3.0f);
     }
 
     {
-        const FVector2D M = ES::ComputeStatMultiplier(1, 2, PEMH, PEMD, PTH, PTD);
-        TestEqual(TEXT("world tier 2 health = 1 + 2*0.25"), static_cast<float>(M.X), 1.50f);
-        TestEqual(TEXT("world tier 2 damage = 1 + 2*0.15"), static_cast<float>(M.Y), 1.30f);
+        // Party and world tier are separate axes and compose multiplicatively.
+        const FVector2D M = ES::ComputeStatMultiplier(3, PEMH, PEMD, 1.5f, 1.5f);
+        TestEqual(TEXT("party 3 at tier 2 health = 1.30 * 1.5"), static_cast<float>(M.X), 1.95f);
+        TestEqual(TEXT("party 3 at tier 2 damage = 1.20 * 1.5"), static_cast<float>(M.Y), 1.80f);
     }
 
     {
-        const FVector2D M = ES::ComputeStatMultiplier(2, 1, PEMH, PEMD, PTH, PTD);
-        TestEqual(TEXT("party2+tier1 health = 1 + 0.15 + 0.25"), static_cast<float>(M.X), 1.40f);
-        TestEqual(TEXT("party2+tier1 damage = 1 + 0.10 + 0.15"), static_cast<float>(M.Y), 1.25f);
+        // The attributes replicate, so an NPC can spawn before they arrive and read zero. That must leave the
+        // enemy at its authored strength, never erase it.
+        const FVector2D M = ES::ComputeStatMultiplier(3, PEMH, PEMD, 0.0f, 0.0f);
+        TestEqual(TEXT("unreplicated world health falls back to no tier bonus"), static_cast<float>(M.X), 1.30f);
+        TestEqual(TEXT("unreplicated world damage falls back to no tier bonus"), static_cast<float>(M.Y), 1.20f);
     }
 
     {
-        const FVector2D M = ES::ComputeStatMultiplier(5, 3, -1.0f, -1.0f, -1.0f, -1.0f);
+        const FVector2D M = ES::ComputeStatMultiplier(5, -1.0f, -1.0f, -1.0f, -1.0f);
         TestTrue(TEXT("negative tunables: health >= 1"), M.X >= 1.0f);
         TestTrue(TEXT("negative tunables: damage >= 1"), M.Y >= 1.0f);
     }
@@ -99,12 +104,13 @@ bool FMythicEnemyScalingTest::RunTest(const FString &Parameters) {
     }
 
     {
-        const FVector2D PartyWorld = ES::ComputeStatMultiplier(3, 1, PEMH, PEMD, PTH, PTD);
+        // Party, world tier and NPC rank are three independent axes; ApplyCombatScaling multiplies all three.
+        const FVector2D PartyWorld = ES::ComputeStatMultiplier(3, PEMH, PEMD, 1.5f, 1.5f);
         const FMythicTierScaling Elite = ES::GetTierScaling(AI_TIER_ELITE);
         const float CombinedHealth = static_cast<float>(PartyWorld.X) * Elite.HealthMult;
         const float CombinedDamage = static_cast<float>(PartyWorld.Y) * Elite.DamageMult;
-        TestEqual(TEXT("combined health == 1.55 * 2.5"), CombinedHealth, 3.875f);
-        TestEqual(TEXT("combined damage == 1.35 * 1.8"), CombinedDamage, 2.43f);
+        TestEqual(TEXT("combined health == 1.30 * 1.5 * 2.5"), CombinedHealth, 4.875f);
+        TestEqual(TEXT("combined damage == 1.20 * 1.5 * 1.8"), CombinedDamage, 3.24f);
         TestTrue(TEXT("combined health exceeds each factor"),
                  CombinedHealth > static_cast<float>(PartyWorld.X) && CombinedHealth > Elite.HealthMult);
     }

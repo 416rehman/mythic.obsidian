@@ -205,16 +205,20 @@ void AMythicNPCCharacter::ApplyCombatScaling() {
     }
 
     int32 PartySize = 1;
-    int32 WorldTier = 0;
+    float WorldHealthMult = 1.0f;
+    float WorldDamageMult = 1.0f;
     if (const UWorld *World = GetWorld()) {
         if (const AMythicGameState *GS = World->GetGameState<AMythicGameState>()) {
             PartySize = GS->PlayerArray.Num();
-            WorldTier = static_cast<int32>(GS->WorldTier);
+            if (const UWorldTierAttributes *WTA = GS->WorldTierAttributes) {
+                WorldHealthMult = WTA->GetEnemyHealthMultiplier();
+                WorldDamageMult = WTA->GetEnemyDamageMultiplier();
+            }
         }
     }
 
     const FVector2D PartyWorldMult = FMythicEnemyScaling::ComputeStatMultiplier(
-        PartySize, WorldTier, PerExtraMemberHealth, PerExtraMemberDamage, PerTierHealth, PerTierDamage);
+        PartySize, PerExtraMemberHealth, PerExtraMemberDamage, WorldHealthMult, WorldDamageMult);
     const FMythicTierScaling Tier = FMythicEnemyScaling::GetTierScaling(EnemyTier);
 
     const float HealthMult = static_cast<float>(PartyWorldMult.X) * Tier.HealthMult;
