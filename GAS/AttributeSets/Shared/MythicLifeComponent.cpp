@@ -48,22 +48,11 @@
 #include "Itemization/MythicTags_Inventory.h"
 #include "Engine/GameInstance.h"
 #include "AI/MythicTags_AI.h"
-#include "Progression/MythicStatLedgerComponent.h"
-#include "Progression/MythicTags_MetaProgression.h"
 #include "Knowledge/MythicCodexTypes.h"
 #include "Knowledge/MythicCodexComponent.h"
 #include "GAS/MythicGameplayEffectContext.h"
 #include "World/LivingWorld/Pressure/MythicRegionalPressureSubsystem.h"
 #include "World/LivingWorld/Pressure/MythicTags_Pressure.h"
-
-namespace {
-UMythicStatLedgerComponent *LedgerForActor(const AActor *Actor) {
-    const APawn *Pawn = Cast<APawn>(Actor);
-    const AController *Controller = Pawn ? Pawn->GetController() : nullptr;
-    const AMythicPlayerState *PS = Controller ? Controller->GetPlayerState<AMythicPlayerState>() : nullptr;
-    return PS ? PS->GetStatLedgerComponent() : nullptr;
-}
-}
 
 
 UMythicLifeComponent::UMythicLifeComponent(const FObjectInitializer &ObjectInitializer)
@@ -672,10 +661,6 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
 
     UE_LOG(Myth, Log, TEXT("LifeComponent: %s died."), *GetNameSafe(Owner));
 
-    if (UMythicStatLedgerComponent *Ledger = LedgerForActor(Owner)) {
-        Ledger->RecordStat(STAT_DEATH);
-    }
-
     BP_OnDeath();
     OnDeath.Broadcast(Owner);
 
@@ -1224,13 +1209,6 @@ void UMythicLifeComponent::HandleKill(const struct FGameplayEventData *Payload) 
     if (AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_DEAD)) {
         return;
     }
-    if (UMythicStatLedgerComponent *Ledger = LedgerForActor(GetOwner())) {
-        Ledger->RecordStat(STAT_KILL_GENERIC);
-        if (Payload && Payload->TargetTags.HasTag(AI_TIER_BOSS)) {
-            Ledger->RecordStat(STAT_KILL_BOSS);
-        }
-    }
-
     const UMythicAttributeSet_Defense *Def = AbilitySystemComponent->GetSet<UMythicAttributeSet_Defense>();
     if (!LifeSet || !Def) {
         return;
