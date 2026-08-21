@@ -271,24 +271,15 @@ FProficiency* UProficiencyComponent::FindCombatProficiency() {
 }
 
 void UProficiencyComponent::GrantCombatXP(float Amount) {
-    if (Amount <= 0.0f) {
-        return;
-    }
-    if (!ASC || !GetOwner() || !GetOwner()->HasAuthority()) {
-        return;
-    }
-
     FProficiency *CombatProf = FindCombatProficiency();
-    if (!CombatProf || !CombatProf->ProgressAttribute.IsValid()) {
+    if (!CombatProf) {
         UE_LOG(Myth, Warning, TEXT("ProficiencyComponent: no combat proficiency configured, cannot grant XP"));
         return;
     }
 
-    const float Current = ASC->GetNumericAttributeBase(CombatProf->ProgressAttribute);
-    ASC->SetNumericAttributeBase(CombatProf->ProgressAttribute, Current + Amount);
-
-    UE_LOG(Myth, Log, TEXT("ProficiencyComponent: granted %.1f combat proficiency XP (%.1f -> %.1f)"),
-           Amount, Current, Current + Amount);
+    // Combat is a proficiency like any other. Granting it by hand skipped GAS.Event.Proficiency.Gained, so a
+    // talent that rewards work saw every kind of work except killing.
+    GrantProficiencyXPWithContext(CombatProf->Definition, Amount, FGameplayTagContainer());
 }
 
 void UProficiencyComponent::GrantProficiencyXP(UProficiencyDefinition *Definition, float Amount) {
