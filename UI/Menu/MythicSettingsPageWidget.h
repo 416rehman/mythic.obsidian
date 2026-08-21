@@ -87,6 +87,15 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     int32 GetActiveCategory() const { return ActiveCategory; }
 
+    /**
+     * Whether one row shows, given which category is active. Pure and static so the case that matters -
+     * a page whose Blueprint has no tab strip yet - is testable without building a widget tree.
+     *
+     * An ActiveCategoryIndex outside Categories means "not tabbed": every row shows, headings included.
+     */
+    static bool IsRowVisible(bool bIsHeading, const FText &RowCategory, int32 ActiveCategoryIndex,
+                             const TArray<FText> &Categories);
+
 protected:
     virtual void NativeConstruct() override;
     virtual void NativeOnActivated() override;
@@ -167,6 +176,10 @@ private:
     bool bPendingApply = false;
     bool bBuilt = false;
 
-    // Index into GetCategoryNames(). INDEX_NONE shows every category, the behaviour before tabs existed.
-    int32 ActiveCategory = 0;
+    /**
+     * Index into GetCategoryNames(). INDEX_NONE shows every category, which is the behaviour before tabs
+     * existed and is deliberately the DEFAULT: a page whose Blueprint has no tab strip yet must show all its
+     * settings, not silently hide every category but the first.
+     */
+    int32 ActiveCategory = INDEX_NONE;
 };

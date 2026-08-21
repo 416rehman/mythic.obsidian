@@ -291,6 +291,7 @@ void UMythicUserSettings::ApplySettings(bool bCheckForCommandLineOverrides) {
     ApplyMasterVolume();
     ApplyAudioSettings();
     ApplyImageSettings();
+    ApplyRenderingSettings();
     ApplyDisplayGamma();
     ApplyInterfaceSettings();
     ApplyVibration();

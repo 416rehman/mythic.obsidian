@@ -779,6 +779,15 @@ TArray<FText> UMythicSettingsPageWidget::GetCategoryNames() const {
     return Names;
 }
 
+bool UMythicSettingsPageWidget::IsRowVisible(bool bIsHeading, const FText &RowCategory, int32 ActiveCategoryIndex,
+                                             const TArray<FText> &Categories) {
+    if (!Categories.IsValidIndex(ActiveCategoryIndex)) {
+        return true;
+    }
+    // The tab already names the category, so its heading row would be the same label twice.
+    return !bIsHeading && RowCategory.EqualTo(Categories[ActiveCategoryIndex]);
+}
+
 void UMythicSettingsPageWidget::SetActiveCategory(int32 CategoryIndex) {
     ActiveCategory = CategoryIndex;
     Refresh();
@@ -790,20 +799,14 @@ void UMythicSettingsPageWidget::Refresh() {
     }
 
     const TArray<FText> Categories = GetCategoryNames();
-    const bool bTabbed = Categories.IsValidIndex(ActiveCategory);
-    const FText ShownCategory = bTabbed ? Categories[ActiveCategory] : FText::GetEmpty();
 
     for (int32 i = 0; i < Definitions.Num(); ++i) {
         FMythicSettingsRow &Row = GetOrCreateRow(i);
         const FSettingDef &Def = Definitions[i];
 
-        if (bTabbed) {
-            // The tab already says what the category is, so its heading row would be the label twice.
-            const bool bInTab = !Def.bHeading && Def.Category.EqualTo(ShownCategory);
-            if (!bInTab) {
-                Row.Box->SetVisibility(ESlateVisibility::Collapsed);
-                continue;
-            }
+        if (!IsRowVisible(Def.bHeading, Def.Category, ActiveCategory, Categories)) {
+            Row.Box->SetVisibility(ESlateVisibility::Collapsed);
+            continue;
         }
 
         Row.Box->SetVisibility(ESlateVisibility::Visible);
