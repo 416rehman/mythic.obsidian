@@ -24,7 +24,15 @@ enum class EMythicStatCategory : uint8 {
     Utility,
     Proficiency,
     Survival,
-    Hidden
+    Hidden,
+
+    /**
+     * A stat the player invests in that derives others, rather than one derived from something else.
+     *
+     * Appended rather than inserted at the top: the values are serialised in config and assets, so
+     * renumbering would silently repoint existing rows. The panel orders tiers explicitly instead.
+     */
+    Primary
 };
 
 USTRUCT(BlueprintType)
@@ -119,6 +127,27 @@ public:
     // rows (unrolled magic find, unused weapon-family bonuses) out of the player's face until something grants them.
     UPROPERTY(EditAnywhere, Config, Category = "Stat Display")
     bool bHideUnmodifiedZeroStats = true;
+};
+
+/** One line of a primary stat's tooltip: what it feeds, and how much it is feeding it right now. */
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicStatContributionLine {
+    GENERATED_BODY()
+
+    /** Name of the derived value, taken from the same rule table that names it everywhere else. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FText Label;
+
+    /** Preformatted, e.g. "+38%". */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FText Value;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    float Fraction = 0.0f;
+
+    /** True when the diminishing curve is measurably cutting this contribution, so the UI can say so. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    bool bDiminished = false;
 };
 
 namespace MythicStatDisplay {

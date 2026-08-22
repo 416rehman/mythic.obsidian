@@ -43,7 +43,11 @@ namespace MythicStatDisplay {
         Hide(M, TEXT("MaxShield"));
         Hide(M, TEXT("MaxStamina"));
 
-        Add(M, TEXT("Power"), TEXT("Power"), EMythicStatCategory::Offense, EMythicStatFormat::Flat, 10);
+        // Power and Strength are the two the player invests in; everything else on the sheet is
+        // downstream of them. The tier is what makes that causality visible instead of presenting
+        // one flat list, so they sit in their own category rather than among their own outputs.
+        Add(M, TEXT("Power"), TEXT("Power"), EMythicStatCategory::Primary, EMythicStatFormat::Flat, 10);
+        Add(M, TEXT("Strength"), TEXT("Strength"), EMythicStatCategory::Primary, EMythicStatFormat::Flat, 20);
         Add(M, TEXT("DamagePerHit"), TEXT("Damage Per Hit"), EMythicStatCategory::Offense, EMythicStatFormat::Flat, 20);
         Add(M, TEXT("AttackSpeed"), TEXT("Attack Speed"), EMythicStatCategory::Offense, EMythicStatFormat::Multiplier, 30);
         Add(M, TEXT("CriticalHitChance"), TEXT("Critical Hit Chance"), EMythicStatCategory::Offense, EMythicStatFormat::Percent, 40);
@@ -257,6 +261,8 @@ namespace MythicStatDisplay {
 
     FText GetCategoryLabel(EMythicStatCategory Category) {
         switch (Category) {
+            case EMythicStatCategory::Primary:
+                return NSLOCTEXT("MythicStats", "Cat_Primary", "Primary");
             case EMythicStatCategory::Vitality:
                 return NSLOCTEXT("MythicStats", "Cat_Vitality", "Vitality");
             case EMythicStatCategory::Offense:

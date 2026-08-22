@@ -41,6 +41,21 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Stats")
     void Refresh();
 
+    /**
+     * What a primary stat is contributing right now, generated from the same authored rows the gameplay
+     * reads. The tooltip therefore cannot drift from the maths: retuning a coefficient moves both together.
+     *
+     * A hand-written tooltip string is the defect this exists to prevent.
+     */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Stats")
+    TArray<FMythicStatContributionLine> GetContributionsFor(FGameplayAttribute Stat) const;
+
+    /** True for a stat the player invests in, as opposed to one derived from it. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Stats")
+    static bool IsPrimaryStat(const FMythicStatLine &Line) {
+        return Line.Category == EMythicStatCategory::Primary;
+    }
+
     // Progressive disclosure: off by default, the sheet shows only stats that are non-zero or actively modified.
     // Turning it on reveals every attribute including the ~30 that are inert for this build.
     UFUNCTION(BlueprintCallable, Category = "Mythic|Stats")

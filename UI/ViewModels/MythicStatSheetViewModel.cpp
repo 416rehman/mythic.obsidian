@@ -1,6 +1,8 @@
 // Copyright Stellar Games. All Rights Reserved.
 
 #include "MythicStatSheetViewModel.h"
+#include "Settings/MythicCombatSettings.h"
+#include "GAS/MythicStatContribution.h"
 #include "Itemization/InventoryProviderInterface.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
@@ -78,6 +80,39 @@ void UMythicStatSheetViewModel::SetShowUnmodified(bool bShow) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(bShowUnmodified);
         Rebuild();
     }
+}
+
+TArray<FMythicStatContributionLine> UMythicStatSheetViewModel::GetContributionsFor(FGameplayAttribute Stat) const {
+    TArray<FMythicStatContributionLine> Out;
+
+    const UAbilitySystemComponent *A = ASC.Get();
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    if (!A || !Settings || !Stat.IsValid()) {
+        return Out;
+    }
+
+    const float StatValue = A->GetNumericAttribute(Stat);
+    for (const FMythicStatContribution &Row : Settings->StatContributions.Contributions) {
+        if (Row.SourceStat != Stat || !FMythicStatContributionRules::IsRowLive(Row)) {
+            continue;
+        }
+
+        FMythicStatContributionLine Line;
+        // Named by the same rule table that names it everywhere else on the sheet, so the tooltip and the
+        // row below it cannot disagree about what a stat is called.
+        Line.Label = FText::FromString(MythicStatDisplay::GetRule(Row.TargetAttribute).Label);
+        if (Line.Label.IsEmpty()) {
+            Line.Label = FText::FromString(MythicStatDisplay::MakeFriendlyLabel(Row.TargetAttribute.GetName()));
+        }
+        Line.Fraction = FMythicStatContributionRules::ResolveRow(Row, StatValue);
+        Line.Value = MythicStatDisplay::FormatBonus(Line.Fraction, EMythicStatFormat::Percent);
+
+        const float Undiminished = FMath::Max(0.0f, StatValue) * Row.PerPoint;
+        Line.bDiminished = Undiminished - Line.Fraction > KINDA_SMALL_NUMBER;
+
+        Out.Add(Line);
+    }
+    return Out;
 }
 
 void UMythicStatSheetViewModel::GatherGearContributions(const UAbilitySystemComponent *InASC,
@@ -213,6 +248,7 @@ void UMythicStatSheetViewModel::Rebuild() {
     }
 
     static const EMythicStatCategory Order[] = {
+        EMythicStatCategory::Primary,
         EMythicStatCategory::Vitality,
         EMythicStatCategory::Offense,
         EMythicStatCategory::Defense,
