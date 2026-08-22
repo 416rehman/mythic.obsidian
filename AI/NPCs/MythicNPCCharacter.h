@@ -171,6 +171,23 @@ protected:
 
     FGameplayAbilitySpecHandle AttackAbilityHandle;
 
+public:
+    /**
+     * The attack this NPC was authored with, and the effects that give it its stats. Public because
+     * "can this pawn actually fight?" is worth asserting: an NPC with no attack ability and no stat
+     * baseline spawns, walks up to you and does nothing, which reads as broken AI rather than empty data.
+     */
+    UFUNCTION(BlueprintPure, Category = "Mythic NPC | Combat")
+    TSubclassOf<UMythicGameplayAbility> GetAttackAbility() const { return AttackAbility; }
+
+    UFUNCTION(BlueprintPure, Category = "Mythic NPC | Combat")
+    const TArray<TSubclassOf<UGameplayEffect>> &GetDefaultGameplayEffects() const { return DefaultGameplayEffects; }
+
+    UFUNCTION(BlueprintPure, Category = "Mythic NPC | Combat")
+    FGameplayTag GetEnemyTier() const { return EnemyTier; }
+
+protected:
+
     // Designer-assigned default attribute-init effects applied to this NPC's own ASC on combat init (mirrors
     // AMythicPlayerState::DefaultGameplayEffects). This is the per-BP-class combat baseline (MaxHealth / Offense /
     // Defense) and is the ONLY stat source for MASS-embodied NPCs (which carry no NPCData.Proficiencies). Empty =
