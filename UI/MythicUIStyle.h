@@ -66,6 +66,41 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Buttons")
     FName MenuButtonValueName = TEXT("Text_ActionValue");
 
+    // ── Metrics ──
+    /**
+     * One spacing scale for every generated screen.
+     *
+     * The steps grow rather than step evenly, because equal gaps read as one undifferentiated list: the eye
+     * groups by relative distance, so a heading needs several times the gap of a row, not a little more.
+     * Anything laying out a list in C++ takes its gaps from here so screens cannot drift apart.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Metrics")
+    float SpaceXS = 4.0f;
+
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Metrics")
+    float SpaceS = 8.0f;
+
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Metrics")
+    float SpaceM = 14.0f;
+
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Metrics")
+    float SpaceL = 24.0f;
+
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Metrics")
+    float SpaceXL = 40.0f;
+
+    /** Gap above a section heading: wide, because a heading breaks from what came before. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Metrics")
+    float SectionGap = 40.0f;
+
+    /** Gap under a section heading: tight, because the heading belongs to the rows beneath it. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Metrics")
+    float SectionHeadingGap = 6.0f;
+
+    /** Every generated list scrolls with the same bar. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Metrics")
+    float ScrollBarThickness = 6.0f;
+
     // ── Semantic colours ──
     // Kept separate from the accent hue on purpose: these mean something, they are not decoration.
     /** An improvement: a bonus, a completed objective, a repair. */

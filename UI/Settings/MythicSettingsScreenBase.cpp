@@ -10,6 +10,8 @@
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
+#include "UI/MythicUIStyle.h"
 #include "UI/Settings/MythicSettingAccess.h"
 #include "UI/Settings/MythicSettingRowBase.h"
 #include "UI/Settings/MythicUserSettings.h"
@@ -114,7 +116,17 @@ void UMythicSettingsScreenBase::BuildScreen() {
             }
             UMythicSettingRowBase *Row = WidgetTree->ConstructWidget<UMythicSettingRowBase>(RowClass);
             Row->SetDefinition(Def, this);
-            Container->AddChild(Row);
+            UPanelSlot *Added = Container->AddChild(Row);
+            if (UVerticalBoxSlot *VSlot = Cast<UVerticalBoxSlot>(Added)) {
+                // Wide above a heading, tight below it. Every row butted against the next before this, so
+                // five sections read as one long list and the headings looked like rows that had lost
+                // their control.
+                const bool bHeading = IsGroupHeading(Def);
+                const bool bFirst = Container->GetChildrenCount() <= 1;
+                const UMythicUIStyleSettings &S = FMythicUIStyle::Get();
+                VSlot->SetPadding(FMargin(0.0f, (bHeading && !bFirst) ? S.SectionGap : 0.0f,
+                                          0.0f, bHeading ? S.SectionHeadingGap : 0.0f));
+            }
         }
     }
 
