@@ -40,6 +40,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = MythicActivatableWidget)
 	void RegisterInputBinding(FGameplayTag InputTag, EInputEvent InputType, const FInputActionExecutedDelegate& Callback, bool ShowInActionBar, FInputActionBindingHandle& BindingHandle);
 
+	/**
+	 * Bind a real Enhanced Input action, which is what the bound action bar can actually display.
+	 *
+	 * The bar drops any binding it cannot prove is reachable on the current device, and it proves that by
+	 * asking Enhanced Input which keys map to the binding's UInputAction. A tag with ini key rows is the
+	 * legacy path: it drives the press fine and shows nothing, which is why no prompt has ever appeared.
+	 */
+	UFUNCTION(BlueprintCallable, Category = MythicActivatableWidget)
+	void RegisterInputActionBinding(UInputAction* InputAction, EInputEvent InputType,
+	                                const FInputActionExecutedDelegate& Callback, bool ShowInActionBar,
+	                                FInputActionBindingHandle& BindingHandle);
+
 	UFUNCTION(BlueprintCallable, Category = MythicActivatableWidget)
 	void UnregisterInputBinding(FInputActionBindingHandle BindingHandle);
 
@@ -47,6 +59,26 @@ public:
 	void UnregisterAllBindings();
 
     virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override;
+
+protected:
+    /**
+     * Mapping context added while this screen is up, removed when it closes.
+     *
+     * Enhanced Input only reports keys for an action inside an ACTIVE context, so a screen whose actions
+     * are never mapped anywhere has prompts the bar refuses to draw. Opt-in per screen: leave it unset and
+     * nothing changes.
+     */
+    UPROPERTY(EditDefaultsOnly, Category = Input)
+    TSoftObjectPtr<class UInputMappingContext> UIInputContext;
+
+    /** Priority for the context above. Above gameplay, because a menu is on top of the world. */
+    UPROPERTY(EditDefaultsOnly, Category = Input)
+    int32 UIInputContextPriority = 100;
+
+    void AddUIInputContext();
+    void RemoveUIInputContext();
+
+public:
 
 private:
     UPROPERTY()

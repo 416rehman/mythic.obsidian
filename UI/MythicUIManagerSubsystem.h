@@ -57,6 +57,9 @@ public:
     UPROPERTY(Transient)
     TMap<FGameplayTag, ESlateVisibility> LayerVisibilityMap;
 
+    UPROPERTY(Transient)
+    TMap<TObjectPtr<UCommonActivatableWidget>, ESlateVisibility> LayerContentVisibilityMap;
+
     // Will set the visibility of Otherlayers to OtherLayersVisibility when ModalLayer has any active widgets.
     UFUNCTION(BlueprintCallable, Category = "Mythic UI Manager")
     void SetModalAffectsOtherLayers(bool bInModalAffectsOtherLayers, FGameplayTag InModalLayer, FGameplayTagContainer InOtherLayers,

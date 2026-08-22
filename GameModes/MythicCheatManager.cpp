@@ -1,6 +1,8 @@
 #include "MythicCheatManager.h"
 #include "UObject/UObjectIterator.h"
 #include "UI/MythicHUDLayout.h"
+#include "CommonUIExtensions.h"
+#include "UI/Menu/MythicEscapeMenuWidget.h"
 #include "Mythic/Subsystem/SaveSystem/MythicSaveGameSubsystem.h"
 #include "Mythic/World/EnvironmentController/MythicEnvironmentSubsystem.h"
 #include "Mythic/World/EnvironmentController/MythicEnvironmentController.h"
@@ -26,6 +28,14 @@
 #include "GameplayEffect.h"
 #include "ScalableFloat.h"
 #include "Mythic/Mythic.h"
+#include "Input/CommonUIActionRouterBase.h"
+#include "Input/UIActionBinding.h"
+#include "CommonInputSubsystem.h"
+#include "CommonUITypes.h"
+#include "EnhancedInputSubsystems.h"
+#include "PrimaryGameLayout.h"
+#include "Widgets/CommonActivatableWidgetContainer.h"
+#include "UI/MythicActivatableWidget.h"
 #include "Mythic/World/LivingWorld/LivingWorldSubsystem.h"
 #include "Mythic/World/LivingWorld/Factions/FactionDatabase.h"
 #include "Mythic/World/LivingWorld/Territory/TerritoryGrid.h"
@@ -101,6 +111,35 @@ void UMythicCheatManager::MythHelp() {
     UE_LOG(Myth, Warning, TEXT(""));
 }
 
+
+void UMythicCheatManager::MythSettings() {
+    /**
+     * Runs the REAL route, not a second one.
+     *
+     * This used to push the settings screen straight onto a layer, which meant the command exercised a
+     * path no player ever takes - and hid the very bug it was meant to catch, because pushing to the
+     * layer is exactly what broke pause and the cursor. It now asks the live escape menu to open settings
+     * the way its own button does, so a green result here means the real thing works.
+     */
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) {
+        return;
+    }
+
+    for (TObjectIterator<UMythicEscapeMenuWidget> It; It; ++It) {
+        UMythicEscapeMenuWidget *Menu = *It;
+        if (!Menu || Menu->HasAnyFlags(RF_ClassDefaultObject) || Menu->GetWorld() != PC->GetWorld()) {
+            continue;
+        }
+        if (Menu->IsActivated()) {
+            Menu->RunAction(EMythicEscapeAction::Settings);
+            return;
+        }
+    }
+
+    UE_LOG(Myth, Warning,
+           TEXT("MythSettings: no active escape menu. Press Escape first - settings opens inside it."));
+}
 
 void UMythicCheatManager::MythSaveCharacter(const FString &SlotName) {
     APlayerController *PC = GetOuterAPlayerController();
@@ -1610,4 +1649,84 @@ void UMythicCheatManager::MythOpenMenu(const FString &PageId) {
     }
     Layout->OpenMenuOnPage(PageId.IsEmpty() ? NAME_None : FName(*PageId));
     UE_LOG(Myth, Warning, TEXT(">>> MythOpenMenu: '%s'"), PageId.IsEmpty() ? TEXT("(default)") : *PageId);
+}
+
+
+void UMythicCheatManager::MythDumpActions() {
+    const ULocalPlayer *LP = GetOuterAPlayerController() ? GetOuterAPlayerController()->GetLocalPlayer() : nullptr;
+    if (!LP) {
+        UE_LOG(Myth, Warning, TEXT("DumpActions: no local player"));
+        return;
+    }
+    const UCommonUIActionRouterBase *Router = ULocalPlayer::GetSubsystem<UCommonUIActionRouterBase>(LP);
+    if (!Router) {
+        UE_LOG(Myth, Warning, TEXT("DumpActions: no action router"));
+        return;
+    }
+
+    const UCommonInputSubsystem &Input = Router->GetInputSubsystem();
+    UE_LOG(Myth, Warning, TEXT("DumpActions: enhancedInputSupport=%d inputType=%d leafmost=%s"),
+           CommonUI::IsEnhancedInputSupportEnabled() ? 1 : 0,
+           static_cast<int32>(Input.GetCurrentInputType()),
+           *GetNameSafe(Router->GetLeafmostActivatableWidget()));
+
+    // Which layer holds what. A screen that is visible but absent here was never pushed - it was parented
+    // into some panel instead, and the action router cannot see it or anything it hosts.
+    if (UPrimaryGameLayout *Layout = UPrimaryGameLayout::GetPrimaryGameLayout(GetOuterAPlayerController())) {
+        static const TCHAR *LayerNames[] = {TEXT("UI.Layer.Game"), TEXT("UI.Layer.GameMenu"),
+                                            TEXT("UI.Layer.Menu"), TEXT("UI.Layer.Modal")};
+        for (const TCHAR *Name : LayerNames) {
+            const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(Name), false);
+            UCommonActivatableWidgetContainerBase *Layer =
+                Tag.IsValid() ? Layout->GetLayerWidget(Tag) : nullptr;
+            const TSharedPtr<SWidget> LayerSlate = Layer ? Layer->GetCachedWidget() : nullptr;
+            UE_LOG(Myth, Warning, TEXT("   layer %-18s %s active=%-24s containerPaintLayer=%d vis=%s"), Name,
+                   Layer ? TEXT("present") : TEXT("MISSING"),
+                   Layer ? *GetNameSafe(Layer->GetActiveWidget()) : TEXT("-"),
+                   (LayerSlate.IsValid() && LayerSlate->GetVisibility().IsVisible())
+                       ? LayerSlate->GetPersistentState().LayerId : INDEX_NONE,
+                   LayerSlate.IsValid() ? *LayerSlate->GetVisibility().ToString() : TEXT("-"));
+        }
+    }
+    else {
+        UE_LOG(Myth, Warning, TEXT("   no PrimaryGameLayout"));
+    }
+
+    for (TObjectIterator<UMythicActivatableWidget> It; It; ++It) {
+        const UMythicActivatableWidget *W = *It;
+        if (!W || W->HasAnyFlags(RF_ClassDefaultObject) || W->GetWorld() != GetWorld()) {
+            continue;
+        }
+        const FString N = W->GetName();
+        if (!N.Contains(TEXT("EscapeMenu")) && !N.Contains(TEXT("PlayerHUD")) && !N.Contains(TEXT("Settings"))) {
+            continue;
+        }
+        // Reproduces FActivatableTreeNode::GetLastPaintLayer: a cached Slate widget that is not visible
+        // scores INDEX_NONE, so its root can never out-rank the layer below it no matter how it is stacked.
+        const TSharedPtr<SWidget> Cached = W->GetCachedWidget();
+        const bool bVisible = Cached.IsValid() && Cached->GetVisibility().IsVisible();
+        const int32 PaintLayer = bVisible ? Cached->GetPersistentState().LayerId : INDEX_NONE;
+        UE_LOG(Myth, Warning, TEXT("   widget %-30s activated=%d inActiveRoot=%d cached=%d vis=%s paintLayer=%d"),
+               *W->GetName(), W->IsActivated() ? 1 : 0, Router->IsWidgetInActiveRoot(W) ? 1 : 0,
+               Cached.IsValid() ? 1 : 0,
+               Cached.IsValid() ? *UEnum::GetValueAsString(W->GetVisibility()) : TEXT("-"), PaintLayer);
+    }
+
+    const TArray<FUIActionBindingHandle> Handles = Router->GatherActiveBindings();
+    UE_LOG(Myth, Warning, TEXT("DumpActions: %d active bindings"), Handles.Num());
+
+    UEnhancedInputLocalPlayerSubsystem *EI = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>();
+    for (const FUIActionBindingHandle &Handle : Handles) {
+        const TSharedPtr<FUIActionBinding> Binding = FUIActionBinding::FindBinding(Handle);
+        if (!Binding.IsValid()) {
+            UE_LOG(Myth, Warning, TEXT("   <stale handle>"));
+            continue;
+        }
+        const UInputAction *Action = Binding->InputAction.Get();
+        const int32 Keys = (Action && EI) ? EI->QueryKeysMappedToAction(Action).Num() : -1;
+        UE_LOG(Myth, Warning, TEXT("   '%s' inActionBar=%d action=%s keys=%d validForInput=%d"),
+               *Binding->ActionName.ToString(), Binding->bDisplayInActionBar ? 1 : 0,
+               *GetNameSafe(Action), Keys,
+               CommonUI::ActionValidForInputType(LP, Input.GetCurrentInputType(), Action) ? 1 : 0);
+    }
 }

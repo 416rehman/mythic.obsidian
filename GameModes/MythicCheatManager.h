@@ -22,6 +22,16 @@ public:
     void MythObjective(const FString &Text, int32 Have = 0, int32 Need = 1, int32 bDone = 0, const FString &Quest = TEXT(""));
 
 
+    /**
+     * Open the settings screen directly.
+     *
+     * Settings lives on the escape menu, two key presses deep, and automated input into a running game is
+     * unreliable enough that "did the screen actually draw" kept going unverified. One command reaches it
+     * from anywhere, including the death screen - which is the case that moved it off the player menu.
+     */
+    UFUNCTION(Exec)
+    void MythSettings();
+
     UFUNCTION(Exec)
     void MythSaveCharacter(
         const FString &SlotName = TEXT("DebugCharacter"));
@@ -168,4 +178,7 @@ public:
 
     UFUNCTION(Exec)
     void MythAdvanceWorldTier();
+
+    UFUNCTION(Exec)
+    void MythDumpActions();
 };

@@ -176,6 +176,19 @@ void UMythicInputGlyph::GatherKeys(TArray<FKey> &OutKeys) const {
 
     if (BindingHandle.IsValid()) {
         if (const TSharedPtr<FUIActionBinding> Binding = FUIActionBinding::FindBinding(BindingHandle)) {
+            // An enhanced-input binding carries no key mappings of its own - NormalMappings is the legacy
+            // tag path. Its keys live in the input subsystem, keyed by the action asset.
+            if (const UInputAction *Action = Binding->InputAction.Get()) {
+                if (const ULocalPlayer *LocalPlayer = GetOwningLocalPlayer()) {
+                    if (const UEnhancedInputLocalPlayerSubsystem *Enhanced =
+                            LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>()) {
+                        OutKeys = Enhanced->QueryKeysMappedToAction(Action);
+                        if (OutKeys.Num() > 0) {
+                            return;
+                        }
+                    }
+                }
+            }
             for (const FUIActionKeyMapping &Mapping : Binding->NormalMappings) {
                 OutKeys.Add(Mapping.Key);
             }

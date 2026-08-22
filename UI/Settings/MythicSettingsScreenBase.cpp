@@ -1,6 +1,9 @@
 
 #include "UI/Settings/MythicSettingsScreenBase.h"
 
+#include "Groups/CommonButtonGroupBase.h"
+#include "InputAction.h"
+
 #include "Blueprint/WidgetTree.h"
 #include "CommonButtonBase.h"
 #include "CommonTextBlock.h"
@@ -10,6 +13,19 @@
 #include "UI/Settings/MythicSettingAccess.h"
 #include "UI/Settings/MythicSettingRowBase.h"
 #include "UI/Settings/MythicUserSettings.h"
+
+namespace {
+const FGameplayTag TagApply = FGameplayTag::RequestGameplayTag(FName("UI.Action.ApplySettings"), false);
+const FGameplayTag TagRestore = FGameplayTag::RequestGameplayTag(FName("UI.Action.RestoreDefaults"), false);
+}
+
+void UMythicSettingsScreenBase::HandleApplyAction() {
+    ApplyAndSave();
+}
+
+void UMythicSettingsScreenBase::HandleRestoreDefaultsAction() {
+    RestoreDefaults();
+}
 
 UMythicSettingsCatalog *UMythicSettingsScreenBase::GetCatalog() const {
     return Catalog.IsNull() ? nullptr : Catalog.LoadSynchronous();
@@ -30,6 +46,30 @@ void UMythicSettingsScreenBase::NativeOnActivated() {
     // exist yet focuses nothing and never gets asked again.
     BuildScreen();
     Super::NativeOnActivated();
+
+    // Everything from here is a preview until Apply. Opening the screen is the baseline.
+    UMythicSettingAccess::BeginStaging();
+
+    // The UI context has to be live before the bar looks, or Enhanced Input reports no keys for these
+    // actions and the bar filters both prompts out.
+    AddUIInputContext();
+
+    if (UInputAction *Apply = ApplyInputAction.LoadSynchronous()) {
+        FInputActionExecutedDelegate OnApply;
+        OnApply.BindDynamic(this, &UMythicSettingsScreenBase::HandleApplyAction);
+        RegisterInputActionBinding(Apply, IE_Pressed, OnApply, /*ShowInActionBar*/ true, ApplyBinding);
+    }
+    if (UInputAction *Restore = RestoreDefaultsInputAction.LoadSynchronous()) {
+        FInputActionExecutedDelegate OnRestore;
+        OnRestore.BindDynamic(this, &UMythicSettingsScreenBase::HandleRestoreDefaultsAction);
+        RegisterInputActionBinding(Restore, IE_Pressed, OnRestore, /*ShowInActionBar*/ true, RestoreBinding);
+    }
+
+    UE_LOG(Myth, Log, TEXT("Settings activated: apply action %s (handle %s), restore action %s (handle %s)"),
+           ApplyInputAction.IsNull() ? TEXT("UNSET") : TEXT("ok"),
+           ApplyBinding.Handle.IsValid() ? TEXT("ok") : TEXT("INVALID"),
+           RestoreDefaultsInputAction.IsNull() ? TEXT("UNSET") : TEXT("ok"),
+           RestoreBinding.Handle.IsValid() ? TEXT("ok") : TEXT("INVALID"));
 }
 
 void UMythicSettingsScreenBase::BuildScreen() {
@@ -45,6 +85,10 @@ void UMythicSettingsScreenBase::BuildScreen() {
     const TArray<FMythicSettingCategory> Cats = GetCategories();
     for (int32 CatIndex = 0; CatIndex < Cats.Num(); ++CatIndex) {
         if (Rail && TabButtonClass) {
+            if (!RailGroup) {
+                RailGroup = NewObject<UCommonButtonGroupBase>(this);
+                RailGroup->SetSelectionRequired(true);
+            }
             UCommonButtonBase *Button = WidgetTree->ConstructWidget<UCommonButtonBase>(TabButtonClass);
             if (UWidget *Found = Button->GetWidgetFromName(TabLabelWidgetName)) {
                 if (UTextBlock *Label = Cast<UTextBlock>(Found)) {
@@ -54,6 +98,7 @@ void UMythicSettingsScreenBase::BuildScreen() {
             Button->SetIsSelectable(true);
             Button->OnClicked().AddUObject(this, &UMythicSettingsScreenBase::HandleTabClicked, CatIndex);
             Rail->AddChild(Button);
+            RailGroup->AddWidget(Button);
             TabButtons.Add(Button);
         }
 
@@ -73,8 +118,8 @@ void UMythicSettingsScreenBase::BuildScreen() {
         }
     }
 
-    LabelButton(Btn_Apply, ApplyLabel);
-    LabelButton(Btn_Defaults, DefaultsLabel);
+    // No hand-placed buttons: Apply and Restore Defaults are CommonUI actions on the bound action bar, so
+    // they carry the glyph for whatever the player is holding and work identically on a pad.
     ApplyCategoryVisibility();
 }
 
@@ -92,6 +137,8 @@ void UMythicSettingsScreenBase::LabelButton(UCommonButtonBase *Button, const FTe
 }
 
 void UMythicSettingsScreenBase::PushChrome() {
+    bPendingApply = UMythicSettingAccess::HasStagedChanges();
+
     const TArray<FMythicSettingCategory> Cats = GetCategories();
 
     if (Text_Title) {
@@ -117,7 +164,15 @@ void UMythicSettingsScreenBase::PushChrome() {
         }
     }
     if (Text_Status) {
-        Text_Status->SetText(bPendingApply ? PendingApplyHint : FText::GetEmpty());
+        // Apply is meaningless unless the screen says something is waiting for it. Counting them also
+        // tells the player how much they are about to discard if they back out.
+        const bool bPending = UMythicSettingAccess::HasStagedChanges();
+        Text_Status->SetText(bPending
+                                 ? NSLOCTEXT("MythicSettings", "PendingApply",
+                                             "Unapplied changes — press Apply to confirm")
+                                 : FText::GetEmpty());
+        Text_Status->SetVisibility(bPending ? ESlateVisibility::HitTestInvisible
+                                            : ESlateVisibility::Collapsed);
     }
 }
 
@@ -142,10 +197,10 @@ void UMythicSettingsScreenBase::ApplyCategoryVisibility() {
         }
     }
 
-    for (int32 Index = 0; Index < TabButtons.Num(); ++Index) {
-        if (TabButtons[Index]) {
-            TabButtons[Index]->SetIsSelected(Index == ActiveCategory, false);
-        }
+    // The group deselects whatever was selected before; asking each button to drop its own state does not
+    // work when the button is neither toggleable nor grouped.
+    if (RailGroup && TabButtons.IsValidIndex(ActiveCategory)) {
+        RailGroup->SelectButtonAtIndex(ActiveCategory, false);
     }
 
     PushChrome();
@@ -222,6 +277,20 @@ TArray<FMythicSettingDefinition> UMythicSettingsScreenBase::GetRowsForCategory(i
         }
     }
 
+    // A heading is only worth its line when there is more than one group to tell apart. With a single
+    // group it restates the category the rail already has selected - a section inside a section of one,
+    // which is what makes the page read as over-structured.
+    int32 LiveGroups = 0;
+    for (const FText &GroupName : Order) {
+        for (const FMythicSettingDefinition &Def : Loaded->Settings) {
+            if (Def.Category == Category.Id && Def.Group.EqualTo(GroupName)) {
+                ++LiveGroups;
+                break;
+            }
+        }
+    }
+    const bool bShowHeadings = LiveGroups > 1;
+
     for (const FText &GroupName : Order) {
         TArray<FMythicSettingDefinition> InGroup;
         for (const FMythicSettingDefinition &Def : Loaded->Settings) {
@@ -233,11 +302,13 @@ TArray<FMythicSettingDefinition> UMythicSettingsScreenBase::GetRowsForCategory(i
             continue;
         }
 
-        FMythicSettingDefinition Heading;
-        Heading.Group = GroupName;
-        Heading.Label = GroupName;
-        Heading.Category = Category.Id;
-        Rows.Add(Heading);
+        if (bShowHeadings) {
+            FMythicSettingDefinition Heading;
+            Heading.Group = GroupName;
+            Heading.Label = GroupName;
+            Heading.Category = Category.Id;
+            Rows.Add(Heading);
+        }
         Rows.Append(InGroup);
     }
 
@@ -259,7 +330,18 @@ void UMythicSettingsScreenBase::MarkPendingApply() {
     OnPendingApplyChanged();
 }
 
+void UMythicSettingsScreenBase::NativeOnDeactivated() {
+    // Leaving without applying puts everything back. A settings screen that keeps changes you walked away
+    // from is how players end up with a renderer they never chose and cannot retrace.
+    // Nothing was applied, so discarding is just forgetting - no restore pass to get wrong.
+    RemoveUIInputContext();
+    UMythicSettingAccess::RevertStaged();
+    bPendingApply = false;
+    Super::NativeOnDeactivated();
+}
+
 void UMythicSettingsScreenBase::ApplyAndSave() {
+    UMythicSettingAccess::CommitStaged();
     if (UMythicUserSettings *Settings = UMythicUserSettings::Get()) {
         Settings->ApplySettings(false);
         Settings->SaveSettings();

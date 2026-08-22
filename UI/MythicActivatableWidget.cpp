@@ -1,5 +1,8 @@
 ﻿
 #include "MythicActivatableWidget.h"
+#include "EnhancedInputSubsystems.h"
+#include "InputMappingContext.h"
+#include "InputAction.h"
 
 #include "CommonUITypes.h"
 #include "ICommonInputModule.h"
@@ -46,6 +49,63 @@ void UMythicActivatableWidget::RegisterInputBinding(FGameplayTag InputTag, EInpu
     arg.KeyEvent = InputType;
     BindingHandle.Handle = RegisterUIActionBinding(arg);
     BindingHandles.Add(BindingHandle.Handle);
+}
+
+void UMythicActivatableWidget::RegisterInputActionBinding(UInputAction *InputAction, EInputEvent InputType,
+                                                          const FInputActionExecutedDelegate &Callback,
+                                                          bool ShowInActionBar,
+                                                          FInputActionBindingHandle &BindingHandle) {
+    if (!InputAction) {
+        UE_LOG(Myth, Warning, TEXT("RegisterInputActionBinding called with no input action"));
+        return;
+    }
+    FBindUIActionArgs Args(InputAction, ShowInActionBar, FSimpleDelegate::CreateLambda(
+                               [Callback]() { Callback.ExecuteIfBound(); }));
+    Args.KeyEvent = InputType;
+    BindingHandle.Handle = RegisterUIActionBinding(Args);
+    BindingHandles.Add(BindingHandle.Handle);
+}
+
+void UMythicActivatableWidget::AddUIInputContext() {
+    if (UIInputContext.IsNull()) {
+        return;
+    }
+    if (const ULocalPlayer *LP = GetOwningLocalPlayer()) {
+        if (UEnhancedInputLocalPlayerSubsystem *Sub =
+                LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>()) {
+            if (UInputMappingContext *Context = UIInputContext.LoadSynchronous()) {
+                /**
+                 * Forced immediately, because Enhanced Input defers its control-mapping rebuild.
+                 *
+                 * Without this the context is registered but QueryKeysMappedToAction still answers zero
+                 * for the rest of the frame - and the action bar, which filters out any binding it cannot
+                 * map to a key on the current device, drops every prompt before the rebuild ever lands.
+                 */
+                FModifyContextOptions Options;
+                Options.bForceImmediately = true;
+                Sub->AddMappingContext(Context, UIInputContextPriority, Options);
+                UE_LOG(Myth, Log, TEXT("UIInputContext '%s' added at priority %d; %d mappings"),
+                       *Context->GetName(), UIInputContextPriority, Context->GetMappings().Num());
+            }
+            else {
+                UE_LOG(Myth, Warning, TEXT("UIInputContext failed to load"));
+            }
+        }
+    }
+}
+
+void UMythicActivatableWidget::RemoveUIInputContext() {
+    if (UIInputContext.IsNull()) {
+        return;
+    }
+    if (const ULocalPlayer *LP = GetOwningLocalPlayer()) {
+        if (UEnhancedInputLocalPlayerSubsystem *Sub =
+                LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>()) {
+            if (UInputMappingContext *Context = UIInputContext.Get()) {
+                Sub->RemoveMappingContext(Context);
+            }
+        }
+    }
 }
 
 void UMythicActivatableWidget::UnregisterInputBinding(FInputActionBindingHandle BindingHandle) {

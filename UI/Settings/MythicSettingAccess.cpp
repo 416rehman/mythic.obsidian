@@ -85,6 +85,15 @@ TArray<FMythicSettingOption> UMythicSettingAccess::GetAvailableOptions(const FMy
 }
 
 float UMythicSettingAccess::ReadValue(const FMythicSettingDefinition &Def) {
+    // A buffered change is what the player asked for, so it is what the row shows. Reading past it would
+    // make every edit appear to do nothing until Apply.
+    if (const FPending *Change = PendingChanges.Find(Def.SourceName)) {
+        return Change->Value;
+    }
+    return ReadValueUncached(Def);
+}
+
+float UMythicSettingAccess::ReadValueUncached(const FMythicSettingDefinition &Def) {
     switch (Def.Source) {
         case EMythicSettingSource::CVar: {
             const IConsoleVariable *CVar = FindCVar(Def.SourceName);
@@ -114,7 +123,61 @@ float UMythicSettingAccess::ReadValue(const FMythicSettingDefinition &Def) {
     }
 }
 
+TMap<FName, UMythicSettingAccess::FPending> UMythicSettingAccess::PendingChanges;
+
+void UMythicSettingAccess::BeginStaging() {
+    PendingChanges.Empty();
+}
+
+bool UMythicSettingAccess::HasStagedChanges() {
+    return PendingChanges.Num() > 0;
+}
+
+void UMythicSettingAccess::CommitStaged() {
+    // Replay every buffered change for real, in one pass, then let the caller save. Doing the whole set
+    // at once is also why Apply costs one scalability rebuild instead of one per keystroke.
+    for (const TPair<FName, FPending> &Pair : PendingChanges) {
+        const FPending &Change = Pair.Value;
+        ApplyValueForReal(Change.Def, Change.Value);
+
+        if (Change.OptionIndex != INDEX_NONE) {
+            const TArray<FMythicSettingOption> Options = GetAvailableOptions(Change.Def);
+            if (Options.IsValidIndex(Change.OptionIndex)) {
+                // A profile rides its option: choosing GTAO also sets its angle count and spatial filter.
+                for (const TPair<FName, float> &Extra : Options[Change.OptionIndex].ExtraCVars) {
+                    if (IConsoleVariable *CVar = FindCVar(Extra.Key)) {
+                        CVar->Set(Extra.Value, ECVF_SetByGameOverride);
+                    }
+                }
+            }
+        }
+    }
+    PendingChanges.Empty();
+}
+
+void UMythicSettingAccess::RevertStaged() {
+    // Nothing was ever applied, so discarding is just forgetting. No restore pass, and therefore no way
+    // for a restore to disagree with what was actually set.
+    PendingChanges.Empty();
+}
+
+float UMythicSettingAccess::ReadCommittedValue(const FMythicSettingDefinition &Def) {
+    return ReadValueUncached(Def);
+}
+
 void UMythicSettingAccess::WriteValue(const FMythicSettingDefinition &Def, float Value) {
+    // BUFFERED, not applied. The row will read this back and show it, but the game does not hear about it
+    // until Apply. Settings that reach the renderer the instant you touch them cannot be explored.
+    if (Def.SourceName.IsNone()) {
+        return;
+    }
+    FPending &Change = PendingChanges.FindOrAdd(Def.SourceName);
+    Change.Def = Def;
+    Change.Value = Value;
+    Change.OptionIndex = INDEX_NONE;
+}
+
+void UMythicSettingAccess::ApplyValueForReal(const FMythicSettingDefinition &Def, float Value) {
     switch (Def.Source) {
         case EMythicSettingSource::CVar: {
             if (IConsoleVariable *CVar = FindCVar(Def.SourceName)) {
@@ -147,30 +210,61 @@ void UMythicSettingAccess::WriteValue(const FMythicSettingDefinition &Def, float
 }
 
 int32 UMythicSettingAccess::ReadOptionIndex(const FMythicSettingDefinition &Def) {
+    if (const FPending *Change = PendingChanges.Find(Def.SourceName)) {
+        if (Change->OptionIndex != INDEX_NONE) {
+            return Change->OptionIndex;
+        }
+    }
     const TArray<FMythicSettingOption> Options = GetAvailableOptions(Def);
     const float Current = ReadValue(Def);
+
+    /**
+     * Two options can share a primary value and differ only in the profile that rides them.
+     *
+     * Software and Hardware Ray Tracing are both r.DynamicGlobalIlluminationMethod 1; what separates them
+     * is r.Lumen.HardwareRayTracing. Matching on the primary value alone always returned the first of the
+     * pair, so choosing Hardware wrote the same 1, read back as Software, and the row snapped shut - it
+     * looked like the setting refused to change.
+     *
+     * So an option matches only when its extras match too. Exact matches are preferred over a bare
+     * value match, which keeps options that carry no profile working exactly as before.
+     */
+    int32 ValueOnlyMatch = INDEX_NONE;
     for (int32 i = 0; i < Options.Num(); ++i) {
-        if (FMath::IsNearlyEqual(Options[i].Value, Current, 0.001f)) {
+        if (!FMath::IsNearlyEqual(Options[i].Value, Current, 0.001f)) {
+            continue;
+        }
+        if (ValueOnlyMatch == INDEX_NONE) {
+            ValueOnlyMatch = i;
+        }
+        bool bExtrasMatch = true;
+        for (const TPair<FName, float> &Extra : Options[i].ExtraCVars) {
+            const IConsoleVariable *CVar = FindCVar(Extra.Key);
+            if (!CVar || !FMath::IsNearlyEqual(CVar->GetFloat(), Extra.Value, 0.001f)) {
+                bExtrasMatch = false;
+                break;
+            }
+        }
+        if (bExtrasMatch) {
             return i;
         }
     }
-    return Options.Num() > 0 ? 0 : INDEX_NONE;
+
+    // A live value matching no authored option reports NONE rather than silently claiming the first one.
+    return ValueOnlyMatch;
 }
 
 void UMythicSettingAccess::WriteOptionIndex(const FMythicSettingDefinition &Def, int32 Index) {
     const TArray<FMythicSettingOption> Options = GetAvailableOptions(Def);
-    if (!Options.IsValidIndex(Index)) {
+    if (!Options.IsValidIndex(Index) || Def.SourceName.IsNone()) {
         return;
     }
-    WriteValue(Def, Options[Index].Value);
-
-    // Extra cvars are how a profile rides an option: choosing GTAO also sets its angle count and spatial
-    // filter, authored beside the option rather than written into code.
-    for (const TPair<FName, float> &Extra : Options[Index].ExtraCVars) {
-        if (IConsoleVariable *CVar = FindCVar(Extra.Key)) {
-            CVar->Set(Extra.Value, ECVF_SetByGameOverride);
-        }
-    }
+    // Buffer the INDEX as well as the value: two options can share a value and differ only by the extra
+    // cvars they carry, so replaying on Apply needs to know which one was chosen.
+    FPending &Change = PendingChanges.FindOrAdd(Def.SourceName);
+    Change.Def = Def;
+    Change.Value = Options[Index].Value;
+    Change.OptionIndex = Index;
 }
 
 FText UMythicSettingAccess::GetDisplayText(const FMythicSettingDefinition &Def) {
@@ -181,7 +275,17 @@ FText UMythicSettingAccess::GetDisplayText(const FMythicSettingDefinition &Def) 
     }
 
     const float Scale = Def.DisplayScale != 0.0f ? Def.DisplayScale : 1.0f;
-    const float Shown = ReadValue(Def) * Scale;
+
+    /**
+     * Clamped to the authored range before it is shown.
+     *
+     * A cvar can sit outside the range a designer exposed - r.Tonemapper.Sharpen reads 2.0 against an
+     * authored 0..1 - and the row then draws its handle pinned at the far end while printing 2.00 beside
+     * it. The number and the handle disagreeing is worse than either being slightly wrong, because the
+     * player cannot tell which one the game believes.
+     */
+    const float Raw = ReadValue(Def);
+    const float Shown = (Def.MaxValue > Def.MinValue ? FMath::Clamp(Raw, Def.MinValue, Def.MaxValue) : Raw) * Scale;
 
     FNumberFormattingOptions Format;
     Format.MinimumFractionalDigits = Def.DisplayDecimals;

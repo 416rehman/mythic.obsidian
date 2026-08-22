@@ -113,6 +113,36 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours")
     FLinearColor Ink = FLinearColor(0.93f, 0.88f, 0.76f, 1.0f);
 
+    /**
+     * The rest of the neutral ramp, so a screen never has to invent one.
+     *
+     * Every widget that hardcoded its own greys drifted from every other: the settings rows alone carried
+     * eight literals that duplicated Ink and then disagreed with it. Naming them by ROLE rather than by
+     * value is what lets a retune land everywhere at once.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours")
+    FLinearColor InkLabel = FLinearColor(0.386f, 0.333f, 0.254f, 1.0f);
+
+    /** The one accent. Selection, focus, a filled bar - and nothing else, or it stops meaning "here". */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours")
+    FLinearColor Accent = FLinearColor(0.584f, 0.361f, 0.020f, 1.0f);
+
+    /** The brighter accent, for the moving part of a control: a switch knob, a slider handle. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours")
+    FLinearColor AccentBright = FLinearColor(0.807f, 0.558f, 0.102f, 1.0f);
+
+    /** One-pixel rules and control outlines. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours")
+    FLinearColor Hairline = FLinearColor(0.016f, 0.013f, 0.010f, 1.0f);
+
+    /** The band a row sits on so its label holds contrast against whatever is behind the screen. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours")
+    FLinearColor Surface = FLinearColor(0.0065f, 0.0056f, 0.0052f, 1.0f);
+
+    /** The empty half of a track or an unlit switch. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours")
+    FLinearColor Trough = FLinearColor(0.0176f, 0.0137f, 0.0097f, 1.0f);
+
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours")
     FLinearColor InkSubtle = FLinearColor(0.68f, 0.62f, 0.52f, 1.0f);
 

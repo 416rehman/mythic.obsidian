@@ -60,4 +60,53 @@ public:
 
     /** Whether the source this setting names actually resolves. Validation uses this to catch dead settings. */
     static bool ResolvesSource(const FMythicSettingDefinition &Def, FString &OutWhy);
+
+    /**
+     * Staging, so a settings screen is a proposal and NOTHING reaches the game until Apply.
+     *
+     * A change is buffered: the row shows the value you picked, the renderer never hears about it. Apply
+     * replays every buffered change for real and saves; leaving discards them. That is what makes the
+     * screen safe to explore - and it is also why changing a heavy setting no longer hitches, because
+     * stepping through five quality levels now costs five map writes rather than five scalability
+     * rebuilds.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    static void BeginStaging();
+
+    /** True once anything has been changed and not yet committed. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    static bool HasStagedChanges();
+
+    /** Keep everything currently previewing. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    static void CommitStaged();
+
+    /** Put every previewed setting back to the value it had when the screen opened. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    static void RevertStaged();
+
+    /** The value a row should display: the buffered one if the player changed it, else the live one. */
+    static float ReadCommittedValue(const FMythicSettingDefinition &Def);
+
+private:
+    /** The live value, ignoring anything buffered. */
+    static float ReadValueUncached(const FMythicSettingDefinition &Def);
+
+public:
+
+private:
+    /** One buffered change, holding enough to replay it for real on Apply. */
+    struct FPending {
+        FMythicSettingDefinition Def;
+        float Value = 0.0f;
+        int32 OptionIndex = INDEX_NONE;
+    };
+
+    /** Source name -> what the player asked for. Nothing here has touched the game yet. */
+    static TMap<FName, FPending> PendingChanges;
+
+    /** The real write. Only Apply calls this. */
+    static void ApplyValueForReal(const FMythicSettingDefinition &Def, float Value);
+
+public:
 };

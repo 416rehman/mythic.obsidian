@@ -103,6 +103,22 @@ void UMythicUIManagerSubsystem::ApplyModalLayerEffect(bool bModalShowing) {
             if (!LayerVisibilityMap.Contains(LayerTag)) {
                 LayerVisibilityMap.Add(LayerTag, Layer->GetVisibility());
             }
+            /**
+             * The content is hidden as well as the container that holds it.
+             *
+             * CommonUI picks the active input root by comparing each root's last paint layer, and it reads
+             * that from the widget's OWN visibility - never its parents'. A widget left visible inside a
+             * collapsed layer keeps reporting the layer it was painted at before it was hidden, and that
+             * stale number ties with the menu that just opened. The comparison is strictly greater, so a
+             * tie loses: the root stays on the HUD, no menu's bindings are ever active, and every bound
+             * action bar in the game renders empty.
+             */
+            if (UCommonActivatableWidget *Content = Layer->GetActiveWidget()) {
+                if (!LayerContentVisibilityMap.Contains(Content)) {
+                    LayerContentVisibilityMap.Add(Content, Content->GetVisibility());
+                }
+                Content->SetVisibility(OtherLayersVisibility);
+            }
             Layer->SetVisibility(OtherLayersVisibility);
         }
         return;
@@ -114,6 +130,13 @@ void UMythicUIManagerSubsystem::ApplyModalLayerEffect(bool bModalShowing) {
         }
     }
     LayerVisibilityMap.Empty();
+
+    for (const TPair<TObjectPtr<UCommonActivatableWidget>, ESlateVisibility> &Pair : LayerContentVisibilityMap) {
+        if (Pair.Key) {
+            Pair.Key->SetVisibility(Pair.Value);
+        }
+    }
+    LayerContentVisibilityMap.Empty();
 }
 
 void UMythicUIManagerSubsystem::NotifyPlayerRemoved(UCommonLocalPlayer *OldLocalPlayer) {

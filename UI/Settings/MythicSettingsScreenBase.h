@@ -6,6 +6,7 @@
 #include "MythicSettingsScreenBase.generated.h"
 
 class UCommonButtonBase;
+class UCommonButtonGroupBase;
 class UCommonTextBlock;
 class UMythicSettingRowBase;
 class UPanelWidget;
@@ -26,6 +27,42 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     UMythicSettingsCatalog *GetCatalog() const;
+
+protected:
+    /**
+     * Apply and Restore Defaults are real CommonUI actions, not buttons with words next to them.
+     *
+     * Bound with ShowInActionBar, so the shell's CommonBoundActionBar draws them with the correct glyph for
+     * whatever the player is holding, and the same press works on a pad without a cursor ever existing. A
+     * hand-typed legend cannot do either, and goes stale the moment a key is rebound.
+     */
+    UFUNCTION()
+    void HandleApplyAction();
+
+    UFUNCTION()
+    void HandleRestoreDefaultsAction();
+
+    /**
+     * Exclusive selection for the rail.
+     *
+     * SetIsSelected(false) is ignored by a CommonButtonBase that is neither toggleable nor in a group, so
+     * every category the player visited stayed underlined and the rail showed several active tabs at once.
+     * A button group owns that invariant instead of each button being asked to give up its own state.
+     */
+    UPROPERTY()
+    TObjectPtr<UCommonButtonGroupBase> RailGroup;
+
+    /** Enhanced Input actions for the two things this screen commits. Designer-assignable. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings|Input")
+    TSoftObjectPtr<class UInputAction> ApplyInputAction;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings|Input")
+    TSoftObjectPtr<class UInputAction> RestoreDefaultsInputAction;
+
+    FInputActionBindingHandle ApplyBinding;
+    FInputActionBindingHandle RestoreBinding;
+
+public:
 
     /** Tabs, in authored order. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
@@ -99,6 +136,7 @@ public:
 protected:
     virtual void NativeOnInitialized() override;
     virtual void NativeOnActivated() override;
+    virtual void NativeOnDeactivated() override;
     virtual UWidget *NativeGetDesiredFocusTarget() const override;
 
     /**
@@ -137,12 +175,6 @@ protected:
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> Text_Status;
-
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UCommonButtonBase> Btn_Apply;
-
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UCommonButtonBase> Btn_Defaults;
 
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
     FText ApplyLabel = NSLOCTEXT("Mythic", "SettingsApply", "Apply");
