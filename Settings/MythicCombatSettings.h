@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
 #include "GAS/Executions/MythicDamageCompose.h"
+#include "GAS/MythicStatContribution.h"
 #include "GAS/MythicHealthBands.h"
 #include "GAS/MythicStatDiminishing.h"
 #include "GAS/MythicWeatherCombatRules.h"
@@ -21,6 +22,13 @@ public:
     // Increased-vs-More damage bucket configuration. Empty buckets (default) = the compose layer is inert.
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Damage Compose")
     FMythicDamageComposeConfig DamageCompose;
+
+    /**
+     * Which primary stat feeds which derived value, and by how much. Empty means primaries contribute nothing,
+     * which is inert but honest - the damage path then uses the weapon roll alone rather than a hidden constant.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Primary Stats")
+    FMythicStatContributionConfig StatContributions;
 
     // Weather×combat elemental coupling (J1). Empty Mods (default) = weather never touches damage (byte-identical
     // pipeline). Authored rows couple the live Environment.Weather.* state to damage: e.g. rain smothers fire hits

@@ -15,6 +15,17 @@ protected:
     // Reduces incoming damage from same level or lower enemies - Increased by leveling up (i.e level 1 = 1, level 2 = 2, etc.)
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_Armor)
     FGameplayAttributeData Armor;
+
+    /**
+     * Primary stat. Rises with character level and derives MaxHealth and Armor, each through its own authored
+     * mapping in the primary stat config - the two scale independently off the same stat by design.
+     *
+     * It lives in the Defense set because both things it derives are survivability, and Defense is already on
+     * every combatant. Which set an attribute sits in is plumbing; what makes it read as PRIMARY in the UI is
+     * its stat rule category, not its home.
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_Strength)
+    FGameplayAttributeData Strength;
     // Chance to dodge incoming attack - cancels the attack
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_DodgeChance)
     FGameplayAttributeData DodgeChance;
@@ -112,6 +123,7 @@ public:
     UMythicAttributeSet_Defense();
 
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, Armor);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, Strength);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, DodgeChance);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, BurnResistance);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, BleedResistance);
@@ -150,6 +162,8 @@ public:
 
     UFUNCTION()
     virtual void OnRep_Armor(const FGameplayAttributeData &OldArmor);
+    UFUNCTION()
+    virtual void OnRep_Strength(const FGameplayAttributeData &OldStrength);
     UFUNCTION()
     virtual void OnRep_DodgeChance(const FGameplayAttributeData &OldDodgeChance);
     UFUNCTION()

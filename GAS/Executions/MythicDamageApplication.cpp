@@ -13,6 +13,7 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/Executions/MythicCombatRoll.h"
+#include "GAS/MythicStatContribution.h"
 #include "GameModes/GameState/MythicGameState.h"
 #include "Curves/RealCurve.h"
 #include "Engine/World.h"
@@ -260,8 +261,34 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
                                                                IncomingDamageMultiplier);
     IncomingDamageMultiplier = FMath::Max(0.0f, IncomingDamageMultiplier);
 
-    auto FinalDamage = FMath::Max(1.0f, Power) * FMath::RandRange(DmgPerHit, DmgPerHit * 1.5f);
-    UE_LOG(Myth, Verbose, TEXT("DamageApplication:: Damage %f = DmgPerHit (%f - %f) * Power (%f)"), FinalDamage, DmgPerHit, DmgPerHit * 1.5f, Power);
+    /**
+     * Power contributes an additive, diminished FRACTION of the weapon roll - not a bare multiplier.
+     *
+     * It used to be FMath::Max(1.0f, Power) * Roll. Weapon damage rises with item level and Power rises with
+     * character level, so multiplying them made damage grow quadratically: twice the level with twice the weapon
+     * dealt four times the damage. No tuning pass fixes a quadratic. The Max(1.0f, ...) also flattened every
+     * Power value from 0 to 1 into the same output, so early investment did nothing and any debuff below 1 was
+     * silently inert.
+     *
+     * The fraction comes from the authored mapping, so the coefficient is not a literal here, and it passes the
+     * same diminishing curve as every other stacked stat.
+     */
+    const float WeaponRoll = FMath::RandRange(DmgPerHit, DmgPerHit * 1.5f);
+    float FinalDamage = WeaponRoll;
+    if (const UMythicCombatSettings *CombatSettings = GetDefault<UMythicCombatSettings>()) {
+        FinalDamage = FMythicStatContributionRules::ApplyToBase(
+            CombatSettings->StatContributions.Contributions,
+            UMythicAttributeSet_Offense::GetDamagePerHitAttribute(), WeaponRoll,
+            [Power](const FGameplayAttribute &Attr) -> float {
+                // Only Power is captured by this execution, so any other source reads as absent rather than
+                // as zero-with-authority: a row feeding weapon damage off some stat we cannot see contributes
+                // nothing here instead of quietly cancelling itself.
+                return Attr == UMythicAttributeSet_Offense::GetPowerAttribute() ? Power : 0.0f;
+            });
+    }
+    const float PowerFraction = WeaponRoll > KINDA_SMALL_NUMBER ? (FinalDamage / WeaponRoll) - 1.0f : 0.0f;
+    UE_LOG(Myth, Verbose, TEXT("DamageApplication:: Damage %f = DmgPerHit (%f - %f) * (1 + Power %f -> +%.1f%%)"),
+           FinalDamage, DmgPerHit, DmgPerHit * 1.5f, Power, PowerFraction * 100.0f);
     if (MythicContext->IsCriticalHit()) {
         FinalDamage += FinalDamage * CriticalHitDamage;
         UE_LOG(Myth, Verbose, TEXT("DamageApplication:: Critical hit! Damage increased by %f Percent"), CriticalHitDamage * 100.0f);

@@ -91,6 +91,18 @@ struct FMythicStatContributionRules {
         return Total;
     }
 
+    /**
+     * A base value lifted by everything feeding it: Base * (1 + sum).
+     *
+     * The one place this shape lives, so the damage execution and the tests that police it cannot drift.
+     * Additive-into-one-multiplier is the whole point: it is what stops weapon damage (which rises with item
+     * level) and a primary stat (which rises with character level) multiplying into quadratic growth.
+     */
+    static float ApplyToBase(TConstArrayView<FMythicStatContribution> Rows, const FGameplayAttribute &Target,
+                             float BaseValue, TFunctionRef<float(const FGameplayAttribute &)> ReadStat) {
+        return BaseValue * (1.0f + ResolveTarget(Rows, Target, ReadStat));
+    }
+
     // Every derived value any row feeds, for UI enumeration and for the recompute pass.
     static void GatherTargets(TConstArrayView<FMythicStatContribution> Rows, TArray<FGameplayAttribute> &OutTargets) {
         OutTargets.Reset();

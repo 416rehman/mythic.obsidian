@@ -151,6 +151,7 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combat")
     TArray<FMythicEnemyTierScaling> EnemyTierScaling;
 
+
     /** Global loot table consulted by loot rewards when an item has no more specific table. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loot")
     TSoftObjectPtr<UMythicLootTable> GlobalLootTable;
