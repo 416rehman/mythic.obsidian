@@ -16,6 +16,9 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
 #include "GameModes/MythicGameMode.h"
+#include "GAS/Effects/MythicEnemyScaling.h"
+#include "GameModes/Attributes/WorldAttributes.h"
+#include "GameModes/GameState/MythicGameState.h"
 #include "Engine/World.h"
 #include "MythicAttributeSet_Defense.h"
 #include "MythicAttributeSet_Utility.h"
@@ -811,6 +814,7 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
             const FVector DropLoc = Owner->GetActorLocation();
 
             int32 EnemyTierInt = 0;
+            FGameplayTag EnemyTierTag;
             {
                 FGameplayTagContainer OwnedTags;
                 AbilitySystemComponent->GetOwnedGameplayTags(OwnedTags);
@@ -821,12 +825,31 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
                             const int32 Rank = GetAITierInt(T);
                             if (Rank > 0) {
                                 EnemyTierInt = Rank;
+                                EnemyTierTag = T;
                                 break;
                             }
                         }
                     }
                 }
             }
+
+            /**
+             * Without this every drop kept ItemLevel 0, and an item level of zero fails every affix tier gate
+             * (lowest MinItemLevel in any shipped pool is 1) and every socket cap. Three affix pools, 70 defs
+             * and 134 tiers were invisible in play, and it read as a design choice rather than a bug.
+             */
+            float WorldItemLevelBase = 1.0f;
+            if (const UWorld *World = GetWorld()) {
+                if (const AMythicGameState *GS = World->GetGameState<AMythicGameState>()) {
+                    if (const UWorldTierAttributes *WTA = GS->WorldTierAttributes) {
+                        const float Base = WTA->GetItemLevelBase();
+                        // A tier attribute that has not replicated yet reads as zero; that must not mean
+                        // "drop nothing worth having".
+                        WorldItemLevelBase = Base > 0.0f ? Base : WorldItemLevelBase;
+                    }
+                }
+            }
+            const int32 DropItemLevel = FMythicEnemyScaling::ComputeDropItemLevel(WorldItemLevelBase, EnemyTierTag);
 
             AMythicCorpse *Corpse = nullptr;
             if (UWorld *World = GetWorld()) {
@@ -896,6 +919,7 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
                             Ctx.PutInInventory = nullptr;
                             Ctx.SpawnLocation = DropLoc;
                             Ctx.EnemyTierInt = EnemyTierInt;
+                            Ctx.ItemLevel = DropItemLevel;
                             Reward->Give(Ctx);
                         }
                     }
@@ -909,6 +933,7 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
                 Ctx.PutInInventory = Corpse ? Corpse->GetContainerInventory() : nullptr;
                 Ctx.SpawnLocation = DropLoc;
                 Ctx.EnemyTierInt = EnemyTierInt;
+                Ctx.ItemLevel = DropItemLevel;
                 Reward->Give(Ctx);
             }
         }

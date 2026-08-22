@@ -30,6 +30,10 @@ void UWorldTierAttributes::OnRep_EnemyDamageMultiplier(const FGameplayAttributeD
     GAMEPLAYATTRIBUTE_REPNOTIFY(UWorldTierAttributes, EnemyDamageMultiplier, OldEnemyDamage);
 }
 
+void UWorldTierAttributes::OnRep_ItemLevelBase(const FGameplayAttributeData &OldItemLevelBase) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UWorldTierAttributes, ItemLevelBase, OldItemLevelBase);
+}
+
 void UWorldTierAttributes::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
@@ -39,4 +43,5 @@ void UWorldTierAttributes::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> 
     DOREPLIFETIME_CONDITION_NOTIFY(UWorldTierAttributes, MythicDropRateMultiplier, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UWorldTierAttributes, EnemyHealthMultiplier, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UWorldTierAttributes, EnemyDamageMultiplier, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UWorldTierAttributes, ItemLevelBase, COND_None, REPNOTIFY_Always);
 }

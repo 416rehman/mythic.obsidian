@@ -17,6 +17,7 @@
 #include "World/Hunting/MythicSpoorRules.h"
 #include "World/LivingWorld/EmergentQuests/MythicApexHuntRules.h"
 #include "World/Trading/MythicTradingConfig.h"
+#include "GAS/Effects/MythicEnemyScaling.h"
 #include "MythicDeveloperSettings.generated.h"
 
 class UMythicAbilityTagRelationshipMapping;
@@ -139,6 +140,16 @@ public:
      *  this is a within-level setback that never de-levels. genre-standard when enabled is ~0.1-0.25 */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Progression", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float DeathProficiencyPenaltyFraction = 0.0f;
+
+    /**
+     * Per-tier enemy scaling, and the item level bonus a kill of that tier adds to the world's base.
+     *
+     * These five rows were a switch of magic numbers in C++, which meant no designer could retune the
+     * tier ladder and nothing could grant a tier a better drop. Seeded with the values that switch used,
+     * so leaving this untouched behaves exactly as before.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combat")
+    TArray<FMythicEnemyTierScaling> EnemyTierScaling;
 
     /** Global loot table consulted by loot rewards when an item has no more specific table. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loot")

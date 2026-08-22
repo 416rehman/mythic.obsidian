@@ -5,6 +5,7 @@
 #include "AI/MythicTags_AI.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "Settings/MythicDeveloperSettings.h"
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_SCALING_HEALTH, "SetByCaller.Scaling.Health",
                                "Runtime health multiplier fed to the CombatScaling GE");
@@ -29,15 +30,22 @@ FVector2D FMythicEnemyScaling::ComputeStatMultiplier(int32 PartySize, float PerE
 }
 
 FMythicTierScaling FMythicEnemyScaling::GetTierScaling(const FGameplayTag &TierTag) {
-    switch (GetAITierInt(TierTag)) {
-        case 2: return FMythicTierScaling{1.5f, 1.3f, 2.0f};
-        case 3: return FMythicTierScaling{2.5f, 1.8f, 4.0f};
-        case 4: return FMythicTierScaling{5.0f, 2.5f, 8.0f};
-        case 5: return FMythicTierScaling{12.0f, 4.0f, 20.0f};
-        case 1:
-        default:
-            return FMythicTierScaling{1.0f, 1.0f, 1.0f};
+    if (const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>()) {
+        const int32 Wanted = GetAITierInt(TierTag);
+        for (const FMythicEnemyTierScaling &Row : Settings->EnemyTierScaling) {
+            if (GetAITierInt(Row.Tier) == Wanted) {
+                return FMythicTierScaling{Row.HealthMultiplier, Row.DamageMultiplier, Row.XpMultiplier,
+                                          Row.ItemLevelBonus};
+            }
+        }
     }
+    // An unconfigured tier leaves the enemy at its authored strength rather than erasing it.
+    return FMythicTierScaling{1.0f, 1.0f, 1.0f, 0};
+}
+
+int32 FMythicEnemyScaling::ComputeDropItemLevel(float WorldItemLevelBase, const FGameplayTag &TierTag) {
+    const int32 Base = FMath::RoundToInt(FMath::Max(WorldItemLevelBase, 0.0f));
+    return FMath::Max(1, Base + GetTierScaling(TierTag).ItemLevelBonus);
 }
 
 UMythicGE_CombatScaling::UMythicGE_CombatScaling() {
