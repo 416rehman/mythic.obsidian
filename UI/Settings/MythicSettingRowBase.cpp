@@ -513,9 +513,10 @@ void UMythicSettingRowBase::ResetToDefault() {
 void UMythicSettingRowBase::NotifyChanged() {
     PushToWidgets();
     if (UMythicSettingsScreenBase *Owner = Screen.Get()) {
-        if (Definition.bNeedsApply) {
-            Owner->MarkPendingApply();
-        }
+        // Unconditional: WriteValue buffers every setting without exception, so every change is one the
+        // player has to confirm. Marking only some of them meant 21 of 33 settings staged silently - you
+        // changed them, saw the new value, were never told to Apply, and lost it on the way out.
+        Owner->MarkPendingApply();
         // Re-publish to the detail panel. It was only told on focus, so the panel kept showing the value
         // the setting had when you arrived at it while the row beside it showed the new one.
         Owner->SetFocusedRow(Definition);

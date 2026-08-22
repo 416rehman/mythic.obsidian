@@ -23,7 +23,7 @@ TArray<FMythicSettingDefinition> UMythicSettingsCatalog::GetSettingsInCategory(F
 EDataValidationResult UMythicSettingsCatalog::IsDataValid(FDataValidationContext &Context) const {
     EDataValidationResult Result = Super::IsDataValid(Context);
 
-    TSet<FGameplayTag> SeenIds;
+    TSet<FName> SeenSources;
     TSet<FGameplayTag> DeclaredCategories;
     for (const FMythicSettingCategory &Category : Categories) {
         if (!Category.Id.IsValid()) {
@@ -34,7 +34,7 @@ EDataValidationResult UMythicSettingsCatalog::IsDataValid(FDataValidationContext
     }
 
     for (const FMythicSettingDefinition &Def : Settings) {
-        const FText Named = Def.Label.IsEmpty() ? FText::FromString(Def.Id.ToString()) : Def.Label;
+        const FText Named = Def.Label.IsEmpty() ? FText::FromString(Def.SourceName.ToString()) : Def.Label;
 
         // A setting nobody can reach is the failure this catalog exists to prevent: the ambient occlusion
         // setting had working code and no row for hours, and nothing could detect it.
@@ -45,11 +45,15 @@ EDataValidationResult UMythicSettingsCatalog::IsDataValid(FDataValidationContext
             Result = EDataValidationResult::Invalid;
         }
 
-        if (SeenIds.Contains(Def.Id)) {
-            Context.AddError(FText::Format(LOCTEXT("DupId", "'{0}' repeats an Id already used."), Named));
+        // Staging is keyed on SourceName, so two settings sharing one would share a single pending
+        // change - the second row would silently overwrite the first every time either was touched.
+        if (SeenSources.Contains(Def.SourceName)) {
+            Context.AddError(FText::Format(
+                LOCTEXT("DupSource", "'{0}' writes '{1}', which another setting already writes."),
+                Named, FText::FromString(Def.SourceName.ToString())));
             Result = EDataValidationResult::Invalid;
         }
-        SeenIds.Add(Def.Id);
+        SeenSources.Add(Def.SourceName);
 
         // A setting whose source does not resolve reads back its default forever and silently ignores every
         // change the player makes. A mistyped cvar looks exactly like a working row.

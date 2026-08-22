@@ -65,9 +65,6 @@ USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicSettingDefinition {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting", meta = (Categories = "Settings.Id"))
-    FGameplayTag Id;
-
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
     FText Label;
 
@@ -118,9 +115,7 @@ struct MYTHIC_API FMythicSettingDefinition {
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
     float DisplayScale = 1.0f;
 
-    /** Staged behind Apply rather than taking effect as it changes. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
-    bool bNeedsApply = false;
+
 
     /** Named requirement for the whole row. Unmet, the row is shown disabled rather than hidden. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting", meta = (Categories = "Settings.Requires"))
