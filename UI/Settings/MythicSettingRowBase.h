@@ -6,6 +6,8 @@
 #include "UI/Settings/MythicSettingDefinition.h"
 #include "MythicSettingRowBase.generated.h"
 
+class UCommonTextBlock;
+class UImage;
 class UMythicSettingsScreenBase;
 
 /**
@@ -107,6 +109,44 @@ protected:
     virtual FReply NativeOnKeyDown(const FGeometry &Geo, const FKeyEvent &Event) override;
     virtual FReply NativeOnMouseButtonDown(const FGeometry &Geo, const FPointerEvent &Event) override;
 
+    /**
+     * The Blueprint owns the tree, the art and the animation; these are only where the values land.
+     * All optional, so a row kind that has no value cell or no switch simply leaves it unbound.
+     */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UCommonTextBlock> Text_Label;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UCommonTextBlock> Text_Value;
+
+    /** Scaled horizontally to the normalised value: a render transform, not a layout change. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UImage> Img_Fill;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UImage> Img_Thumb;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UImage> Img_Switch;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UImage> FocusRing;
+
+    /** Brushes for the two switch states, so a toggle reads at a glance instead of by its words. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
+    FSlateBrush SwitchOnBrush;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
+    FSlateBrush SwitchOffBrush;
+
+    /** How far the slider thumb travels, in pixels: the trough width less the thumb. Authored per row kind. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
+    float ThumbTravel = 86.0f;
+
+    /** Dimmed when a requirement is unmet, so an unavailable row still reads but looks inert. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
+    FLinearColor UnavailableTint = FLinearColor(1.0f, 1.0f, 1.0f, 0.35f);
+
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Settings")
     FMythicSettingDefinition Definition;
 
@@ -115,4 +155,7 @@ protected:
 
     /** Tells the screen a staged change is waiting, and redraws this row. */
     void NotifyChanged();
+
+    /** Pushes label, value and control state into whichever of the bound widgets exist. */
+    void PushToWidgets();
 };

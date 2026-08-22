@@ -1,6 +1,8 @@
 
 #include "UI/Settings/MythicSettingRowBase.h"
 
+#include "CommonTextBlock.h"
+#include "Components/Image.h"
 #include "UI/Kit/MythicKitInputs.h"
 #include "UI/Settings/MythicSettingAccess.h"
 #include "UI/Settings/MythicSettingsScreenBase.h"
@@ -11,9 +13,13 @@ void UMythicSettingRowBase::NativeConstruct() {
     // A heading is text, not a stop. Letting it take focus makes a pad feel broken: the row lights up and
     // then answers nothing.
     SetIsFocusable(!UMythicSettingsScreenBase::IsGroupHeading(Definition));
+    PushToWidgets();
 }
 
 FReply UMythicSettingRowBase::NativeOnFocusReceived(const FGeometry &Geo, const FFocusEvent &Event) {
+    if (FocusRing) {
+        FocusRing->SetVisibility(ESlateVisibility::HitTestInvisible);
+    }
     if (UMythicSettingsScreenBase *Owner = Screen.Get()) {
         Owner->SetFocusedRow(Definition);
     }
@@ -22,6 +28,9 @@ FReply UMythicSettingRowBase::NativeOnFocusReceived(const FGeometry &Geo, const 
 }
 
 void UMythicSettingRowBase::NativeOnFocusLost(const FFocusEvent &Event) {
+    if (FocusRing) {
+        FocusRing->SetVisibility(ESlateVisibility::Collapsed);
+    }
     OnFocusChanged(false);
     Super::NativeOnFocusLost(Event);
 }
@@ -51,8 +60,49 @@ FReply UMythicSettingRowBase::NativeOnKeyDown(const FGeometry &Geo, const FKeyEv
 }
 
 void UMythicSettingRowBase::Redraw() {
-    OnDefinitionSet();
+    PushToWidgets();
     OnValueChanged();
+}
+
+void UMythicSettingRowBase::PushToWidgets() {
+    const bool bHeading = UMythicSettingsScreenBase::IsGroupHeading(Definition);
+
+    if (Text_Label) {
+        Text_Label->SetText(Definition.Label);
+    }
+
+    if (Text_Value) {
+        // A heading has no value; collapsing rather than blanking keeps the cell from reserving width.
+        Text_Value->SetVisibility(bHeading ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+        if (!bHeading) {
+            Text_Value->SetText(GetValueText());
+        }
+    }
+
+    if (Img_Switch) {
+        const bool bOn = GetOptionIndex() > 0;
+        const FSlateBrush &Brush = bOn ? SwitchOnBrush : SwitchOffBrush;
+        if (Brush.GetResourceObject()) {
+            Img_Switch->SetBrush(Brush);
+        }
+    }
+
+    if (Img_Fill) {
+        // Scale from the left edge so the bar grows rightward instead of from its centre.
+        Img_Fill->SetRenderTransformPivot(FVector2D(0.0f, 0.5f));
+        FWidgetTransform Transform;
+        Transform.Scale = FVector2D(GetNormalisedValue(), 1.0f);
+        Img_Fill->SetRenderTransform(Transform);
+    }
+
+    if (Img_Thumb) {
+        Img_Thumb->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+        FWidgetTransform Transform;
+        Transform.Translation = FVector2D(GetNormalisedValue() * ThumbTravel, 0.0f);
+        Img_Thumb->SetRenderTransform(Transform);
+    }
+
+    SetRenderOpacity(IsAvailable() ? 1.0f : UnavailableTint.A);
 }
 
 void UMythicSettingRowBase::Nudge(int32 Delta) {
@@ -102,6 +152,7 @@ void UMythicSettingRowBase::SetDefinition(const FMythicSettingDefinition &InDefi
                                           UMythicSettingsScreenBase *InScreen) {
     Definition = InDefinition;
     Screen = InScreen;
+    PushToWidgets();
     OnDefinitionSet();
 }
 
@@ -171,6 +222,7 @@ void UMythicSettingRowBase::ResetToDefault() {
 }
 
 void UMythicSettingRowBase::NotifyChanged() {
+    PushToWidgets();
     if (Definition.bNeedsApply) {
         if (UMythicSettingsScreenBase *Owner = Screen.Get()) {
             Owner->MarkPendingApply();

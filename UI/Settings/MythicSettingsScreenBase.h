@@ -6,6 +6,7 @@
 #include "MythicSettingsScreenBase.generated.h"
 
 class UCommonButtonBase;
+class UCommonTextBlock;
 class UMythicSettingRowBase;
 class UPanelWidget;
 class UVerticalBox;
@@ -117,6 +118,45 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Settings")
     FName TabLabelWidgetName = TEXT("Text_ActionName");
 
+    /** Names the tab you are on. The shell header names the screen; this names the section. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UCommonTextBlock> Text_Title;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UCommonTextBlock> Text_Breadcrumb;
+
+    /** The detail panel: what the focused row is, what it does, and what it is set to. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UCommonTextBlock> Text_DetailTitle;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UCommonTextBlock> Text_DetailBody;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UCommonTextBlock> Text_DetailValue;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UCommonTextBlock> Text_Status;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UCommonButtonBase> Btn_Apply;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UCommonButtonBase> Btn_Defaults;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
+    FText ApplyLabel = NSLOCTEXT("Mythic", "SettingsApply", "Apply");
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
+    FText DefaultsLabel = NSLOCTEXT("Mythic", "SettingsDefaults", "Restore Defaults");
+
+    /** Shown when nothing has focus yet, so the detail panel is never three empty lines. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
+    FText EmptyDetailHint = NSLOCTEXT("Mythic", "SettingsHint", "Choose a setting to read what it does.");
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
+    FText PendingApplyHint = NSLOCTEXT("Mythic", "SettingsPending", "Some changes need Apply.");
+
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UPanelWidget> Rail;
 
@@ -141,6 +181,11 @@ private:
     void BuildScreen();
 
     void ApplyCategoryVisibility();
+
+    /** Pushes title, detail panel and footer text into whichever bound widgets exist. */
+    void PushChrome();
+
+    void LabelButton(UCommonButtonBase *Button, const FText &Label) const;
 
     void HandleTabClicked(int32 CategoryIndex);
 

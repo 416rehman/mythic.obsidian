@@ -3,6 +3,7 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "CommonButtonBase.h"
+#include "CommonTextBlock.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -72,7 +73,52 @@ void UMythicSettingsScreenBase::BuildScreen() {
         }
     }
 
+    LabelButton(Btn_Apply, ApplyLabel);
+    LabelButton(Btn_Defaults, DefaultsLabel);
     ApplyCategoryVisibility();
+}
+
+void UMythicSettingsScreenBase::LabelButton(UCommonButtonBase *Button, const FText &Label) const {
+    if (!Button) {
+        return;
+    }
+    // Same lookup the menu shell uses for tab labels: the button class names its own text widget, so a
+    // different button only needs a config change.
+    if (UWidget *Found = Button->GetWidgetFromName(TabLabelWidgetName)) {
+        if (UTextBlock *Text = Cast<UTextBlock>(Found)) {
+            Text->SetText(Label);
+        }
+    }
+}
+
+void UMythicSettingsScreenBase::PushChrome() {
+    const TArray<FMythicSettingCategory> Cats = GetCategories();
+
+    if (Text_Title) {
+        Text_Title->SetText(Cats.IsValidIndex(ActiveCategory) ? Cats[ActiveCategory].Label : FText::GetEmpty());
+    }
+    if (Text_Breadcrumb) {
+        // The shell header already says SETTINGS. A second copy of it is noise.
+        Text_Breadcrumb->SetVisibility(ESlateVisibility::Collapsed);
+    }
+
+    const bool bHasFocus = !FocusedRow.Label.IsEmpty();
+    if (Text_DetailTitle) {
+        Text_DetailTitle->SetText(bHasFocus ? FocusedRow.Label : FText::GetEmpty());
+    }
+    if (Text_DetailBody) {
+        Text_DetailBody->SetText(bHasFocus ? FocusedRow.Description : EmptyDetailHint);
+    }
+    if (Text_DetailValue) {
+        Text_DetailValue->SetVisibility(bHasFocus ? ESlateVisibility::HitTestInvisible
+                                                  : ESlateVisibility::Collapsed);
+        if (bHasFocus) {
+            Text_DetailValue->SetText(UMythicSettingAccess::GetDisplayText(FocusedRow));
+        }
+    }
+    if (Text_Status) {
+        Text_Status->SetText(bPendingApply ? PendingApplyHint : FText::GetEmpty());
+    }
 }
 
 void UMythicSettingsScreenBase::ApplyCategoryVisibility() {
@@ -101,6 +147,8 @@ void UMythicSettingsScreenBase::ApplyCategoryVisibility() {
             TabButtons[Index]->SetIsSelected(Index == ActiveCategory, false);
         }
     }
+
+    PushChrome();
 }
 
 void UMythicSettingsScreenBase::SetActiveCategoryIndex(int32 Index) {
@@ -198,6 +246,7 @@ TArray<FMythicSettingDefinition> UMythicSettingsScreenBase::GetRowsForCategory(i
 
 void UMythicSettingsScreenBase::SetFocusedRow(const FMythicSettingDefinition &Row) {
     FocusedRow = Row;
+    PushChrome();
     OnFocusedRowChanged();
 }
 
@@ -206,6 +255,7 @@ void UMythicSettingsScreenBase::MarkPendingApply() {
         return;
     }
     bPendingApply = true;
+    PushChrome();
     OnPendingApplyChanged();
 }
 
