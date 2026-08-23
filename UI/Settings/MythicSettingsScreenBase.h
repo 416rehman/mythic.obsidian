@@ -176,6 +176,10 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> Text_Status;
 
+    /** The "CURRENTLY" label. Bound so it can be hidden with the value it introduces. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UCommonTextBlock> Text_DetailNow;
+
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
     FText ApplyLabel = NSLOCTEXT("Mythic", "SettingsApply", "Apply");
 

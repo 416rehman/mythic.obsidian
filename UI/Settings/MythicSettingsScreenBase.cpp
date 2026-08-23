@@ -168,6 +168,11 @@ void UMythicSettingsScreenBase::PushChrome() {
     if (Text_DetailBody) {
         Text_DetailBody->SetText(bHasFocus ? FocusedRow.Description : EmptyDetailHint);
     }
+    if (Text_DetailNow) {
+        // A label introducing nothing. With no row focused the panel read "CURRENTLY" over blank space.
+        Text_DetailNow->SetVisibility(bHasFocus ? ESlateVisibility::HitTestInvisible
+                                                : ESlateVisibility::Collapsed);
+    }
     if (Text_DetailValue) {
         Text_DetailValue->SetVisibility(bHasFocus ? ESlateVisibility::HitTestInvisible
                                                   : ESlateVisibility::Collapsed);
@@ -213,6 +218,21 @@ void UMythicSettingsScreenBase::ApplyCategoryVisibility() {
     // work when the button is neither toggleable nor grouped.
     if (RailGroup && TabButtons.IsValidIndex(ActiveCategory)) {
         RailGroup->SelectButtonAtIndex(ActiveCategory, false);
+    }
+
+    /**
+     * Move the detail panel to this tab's first real setting.
+     *
+     * FocusedRow survived a tab change, so the panel went on describing a setting from the tab you had
+     * just left - Controls open, the panel explaining Always Show HUD. Headings are skipped for the same
+     * reason focus skips them: a heading has nothing to say about a value.
+     */
+    FocusedRow = FMythicSettingDefinition();
+    for (UMythicSettingRowBase *Row : ActiveRows) {
+        if (Row && !IsGroupHeading(Row->GetDefinition())) {
+            FocusedRow = Row->GetDefinition();
+            break;
+        }
     }
 
     PushChrome();
