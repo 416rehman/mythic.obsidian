@@ -259,10 +259,6 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
     float KnobSize = 12.0f;
 
-    /** How far the slider thumb travels, in pixels: the trough width less the thumb. Authored per row kind. */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
-    float ThumbTravel = 86.0f;
-
     /** Dimmed when a requirement is unmet, so an unavailable row still reads but looks inert. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
     FLinearColor UnavailableTint = FLinearColor(1.0f, 1.0f, 1.0f, 0.35f);
