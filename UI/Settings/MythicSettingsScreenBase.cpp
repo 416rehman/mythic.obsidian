@@ -228,10 +228,39 @@ void UMythicSettingsScreenBase::ApplyCategoryVisibility() {
      * reason focus skips them: a heading has nothing to say about a value.
      */
     FocusedRow = FMythicSettingDefinition();
+    UMythicSettingRowBase *FirstSetting = nullptr;
     for (UMythicSettingRowBase *Row : ActiveRows) {
         if (Row && !IsGroupHeading(Row->GetDefinition())) {
             FocusedRow = Row->GetDefinition();
+            FirstSetting = Row;
             break;
+        }
+    }
+
+    /**
+     * Explicit rail <-> list navigation, because the geometric default cannot be trusted here.
+     *
+     * Slate picks the nearest widget in the pressed direction. The list scrolls, so "nearest" changes as
+     * you move through it, and the rows a tab away are still in the tree - a pad could land anywhere or
+     * nowhere. Right leaves the rail for this tab's first real setting; Left returns to the tab that is
+     * currently selected. Headings are skipped on the way in for the same reason focus skips them.
+     *
+     * Set here rather than in BuildScreen: both the rows and the tab buttons are built at runtime, and the
+     * target changes every time the category does.
+     */
+    UCommonButtonBase *ActiveTab = TabButtons.IsValidIndex(ActiveCategory) ? TabButtons[ActiveCategory].Get() : nullptr;
+    if (FirstSetting) {
+        for (const TObjectPtr<UCommonButtonBase> &Tab : TabButtons) {
+            if (Tab) {
+                Tab->SetNavigationRuleExplicit(EUINavigation::Right, FirstSetting);
+            }
+        }
+    }
+    if (ActiveTab) {
+        for (UMythicSettingRowBase *Row : ActiveRows) {
+            if (Row) {
+                Row->SetNavigationRuleExplicit(EUINavigation::Left, ActiveTab);
+            }
         }
     }
 

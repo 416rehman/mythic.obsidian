@@ -180,7 +180,9 @@ FMythicStatRowWidgets &UMythicStatSheetWidget::GetOrCreateRow(int32 Index) {
     Row.Bar->SetVisibility(ESlateVisibility::Collapsed);
     if (UOverlaySlot *BarSlot = Row.ValueBox->AddChildToOverlay(Row.Bar)) {
         BarSlot->SetHorizontalAlignment(HAlign_Fill);
-        BarSlot->SetVerticalAlignment(VAlign_Center);
+        // Under the number, not through it. Centred, the bar's own centreline landed in the middle of a
+        // top-aligned value and every gauged stat read as struck-through text.
+        BarSlot->SetVerticalAlignment(VAlign_Bottom);
     }
 
     Row.Value = FMythicUIStyle::MakeText(this, EMythicTextRole::Body);
@@ -189,6 +191,8 @@ FMythicStatRowWidgets &UMythicStatSheetWidget::GetOrCreateRow(int32 Index) {
     if (UOverlaySlot *ValueSlot = Row.ValueBox->AddChildToOverlay(Row.Value)) {
         ValueSlot->SetHorizontalAlignment(HAlign_Right);
         ValueSlot->SetVerticalAlignment(VAlign_Top);
+        // Clears the gauge sitting on the row's baseline.
+        ValueSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, Sheet_BarHeight + 2.0f));
     }
     if (UHorizontalBoxSlot *BoxSlot = Cast<UHorizontalBoxSlot>(Row.Box->AddChild(Row.ValueBox))) {
         BoxSlot->SetHorizontalAlignment(HAlign_Right);
