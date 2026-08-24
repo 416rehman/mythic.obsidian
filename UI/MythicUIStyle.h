@@ -66,6 +66,13 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Buttons")
     FName MenuButtonValueName = TEXT("Text_ActionValue");
 
+    /**
+     * The component catalogue. Everything the UI is allowed to draw lives here, generated from the
+     * material kit, so a screen picks a catalogued component instead of inventing a brush.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Kit")
+    TSoftObjectPtr<class UMythicUIKit> Kit;
+
     // ── Metrics ──
     /**
      * One spacing scale for every generated screen.
