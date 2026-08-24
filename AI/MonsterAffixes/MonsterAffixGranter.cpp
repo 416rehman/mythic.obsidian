@@ -4,6 +4,7 @@
 #include "AI/MonsterAffixes/MonsterAffixTypes.h"
 
 #include "AbilitySystemComponent.h"
+#include "GAS/Abilities/MythicGameplayAbility.h"
 #include "NativeGameplayTags.h"
 
 #include "World/LivingWorld/Territory/MythicDanger.h"
@@ -78,7 +79,7 @@ FMonsterAffixGrantHandles FMonsterAffixGranter::GrantMonsterAffixes(UAbilitySyst
         }
 
         if (Def->GrantedAbility) {
-            const FGameplayAbilitySpec Spec(Def->GrantedAbility.GetDefaultObject(), 1, INDEX_NONE, Owner);
+            const FGameplayAbilitySpec Spec(Def->GrantedAbility, 1, INDEX_NONE, Owner);
             const FGameplayAbilitySpecHandle H = NpcASC->GiveAbility(Spec);
             if (H.IsValid()) {
                 Out.AbilityHandles.Add(H);

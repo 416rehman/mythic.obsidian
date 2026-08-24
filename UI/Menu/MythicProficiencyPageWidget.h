@@ -9,10 +9,25 @@
 
 class UImage;
 class UMaterialInstanceDynamic;
+class UMythicSectionHeader;
 class UPanelWidget;
 class UTextBlock;
+class UUniformGridPanel;
+class UVerticalBox;
 struct FGameplayEventData;
 struct FProficiencySummary;
+
+/** One authored family of tracks: the label the section announces, and the tracks that belong under it. */
+USTRUCT()
+struct FMythicProficiencyFamily {
+    GENERATED_BODY()
+
+    UPROPERTY(EditDefaultsOnly, Category = "Family")
+    FText Label;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Family", meta = (Categories = "Proficiency"))
+    TArray<FGameplayTag> Tracks;
+};
 
 USTRUCT()
 struct FMythicProficiencyRow {
@@ -41,11 +56,19 @@ struct FMythicProficiencyRow {
 
     UPROPERTY()
     TObjectPtr<UMaterialInstanceDynamic> BarMaterial;
+
+    /** Which family grid and cell this card currently sits in, so a refresh re-parents only on change. */
+    int32 FamilyIndex = INDEX_NONE;
+
+    int32 CellIndex = INDEX_NONE;
 };
 
 UCLASS()
 class MYTHIC_API UMythicProficiencyPageWidget : public UCommonActivatableWidget {
     GENERATED_BODY()
+
+public:
+    UMythicProficiencyPageWidget();
 
 protected:
     virtual void NativeConstruct() override;
@@ -79,6 +102,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency", meta = (ClampMin = "0"))
     int32 PrewarmRowCount = 16;
 
+    /** Columns the track grid uses. The grid sizes its own cells, so this is a shape, not a width. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency", meta = (ClampMin = "1", ClampMax = "6"))
+    int32 TrackColumns = 4;
+
     /** The bar's slot fills the row, so this is only its minimum — the track grows with the page. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
     float BarWidth = 220.0f;
@@ -108,6 +135,17 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
     float RowGap = 7.0f;
 
+    /**
+     * The families the page groups tracks under, in display order. A track no family claims lands in a
+     * trailing "More" section rather than vanishing, so new content is visible before it is curated.
+     */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
+    TArray<FMythicProficiencyFamily> Families;
+
+    /** The house section header, shared with the stat sheet and the character page. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
+    TSubclassOf<UMythicSectionHeader> SectionHeaderClass;
+
 private:
     void Refresh();
     void Bind();
@@ -119,6 +157,17 @@ private:
 
     UPROPERTY()
     TArray<FMythicProficiencyRow> RowPool;
+
+    void EnsureSections();
+
+    UPROPERTY()
+    TObjectPtr<UVerticalBox> SectionStack;
+
+    UPROPERTY()
+    TArray<TObjectPtr<UMythicSectionHeader>> SectionHeaders;
+
+    UPROPERTY()
+    TArray<TObjectPtr<UUniformGridPanel>> FamilyGrids;
 
     FDelegateHandle EventHandle;
     bool bBound = false;

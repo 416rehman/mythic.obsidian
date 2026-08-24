@@ -218,7 +218,11 @@ void UMythicInteractionComponent::InitializeInteraction(AActor *NewFocusedActor)
         this->InteractionPromptWidget->SetInteractionData(InteractionData, NewFocusedActor, this->OwningController, this->UI_LayerRootWidget);
 
         UWidgetComponent *newWidgetComponent = NewObject<UWidgetComponent>(NewFocusedActor, UWidgetComponent::StaticClass());
-        newWidgetComponent->SetDrawAtDesiredSize(true);
+        // A compact pill, not a draw-at-desired-size widget: the prompt's desired width resolved to ~600px
+        // and rendered as a grey bar across the top of the screen. A fixed screen-space draw size keeps it a
+        // tidy "press E" callout; the plate and content fill it.
+        newWidgetComponent->SetDrawAtDesiredSize(false);
+        newWidgetComponent->SetDrawSize(FVector2D(240.0f, 60.0f));
         newWidgetComponent->SetWidget(this->InteractionPromptWidget);
         newWidgetComponent->SetVisibility(true);
         newWidgetComponent->RegisterComponent();

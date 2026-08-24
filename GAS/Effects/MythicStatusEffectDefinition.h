@@ -77,6 +77,16 @@ public:
     FRollDefinition DurationSeconds;
 
     /**
+     * Strength of a control status, rolled per application - the slow's bite, the weaken's penalty, the terrify's
+     * damage bump - as a 0..1 fraction. This is the third axis, separate from damage and duration, so a slow build
+     * can bite harder rather than only last longer. Leave Min and Max at zero to fall back to the effect's own
+     * authored constant, so nothing regresses before a band is tuned. Reaches the effect through the
+     * SetByCaller.Status.ControlMagnitude tag.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
+    FRollDefinition ControlMagnitude;
+
+    /**
      * Applier stat added on top of Power-scaled base damage, named by data exactly as BuildupAttribute and
      * ResistanceAttribute are. This is a Bonus stat, so it is a fraction: 0.4 means +40%. Leave it unset on a
      * status with no damage band - a stat pointed at a band of zero would validate green and do nothing.
@@ -87,6 +97,11 @@ public:
     // Applier stat that scales DurationSeconds. Same rule: unset means the authored band is the whole story.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FGameplayAttribute DurationMultiplierAttribute;
+
+    // Applier stat that scales ControlMagnitude, so gear can make a slow bite harder. A Bonus* fraction, diminished
+    // like the others. Unset means the authored band is the whole story; a control status with no band ignores it.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
+    FGameplayAttribute ControlMagnitudeAttribute;
 
     // Hard crowd control. Obeys HardCC immunity and the diminishing-returns escalation rules.
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")

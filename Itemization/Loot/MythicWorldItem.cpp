@@ -21,9 +21,9 @@ class UNavigationSystemV1;
 void AMythicWorldItem::BeginPlay() {
     Super::BeginPlay();
 
-    if (HasAuthority() && StaticMesh) {
+    if (HasAuthority() && IsValid(StaticMesh)) {
         StaticMesh->SetGenerateOverlapEvents(true);
-        StaticMesh->OnComponentBeginOverlap.AddDynamic(this, &AMythicWorldItem::OnPickupOverlap);
+        StaticMesh->OnComponentBeginOverlap.AddUniqueDynamic(this, &AMythicWorldItem::OnPickupOverlap);
     }
 }
 

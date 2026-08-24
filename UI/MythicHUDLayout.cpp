@@ -13,6 +13,7 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "GameFramework/PlayerController.h"
+#include "UObject/UObjectIterator.h"
 #include "GameFramework/PlayerState.h"
 #include "GAS/MythicTags_GAS.h"
 #include "TimerManager.h"
@@ -224,8 +225,13 @@ bool UMythicHUDLayout::ShouldRevealEverything() const {
     return bHUDRevealed || (Settings && Settings->GetAlwaysShowHUD());
 }
 
+float UMythicHUDLayout::AccessibilityHUDOpacity() {
+    const UMythicUserSettings *UserSettings = UMythicUserSettings::Get();
+    return UserSettings ? UserSettings->GetHUDOpacity() : 1.0f;
+}
+
 float UMythicHUDLayout::TargetOpacityFor(EMythicHUDSalience Want) const {
-    return SalienceTargetAlpha(Want, ShouldRevealEverything());
+    return SalienceTargetAlpha(Want, ShouldRevealEverything()) * AccessibilityHUDOpacity();
 }
 
 void UMythicHUDLayout::RegisterHUDElement(UWidget *Element, EMythicHUDSalience InitialSalience) {
@@ -240,7 +246,7 @@ void UMythicHUDLayout::RegisterHUDElement(UWidget *Element, EMythicHUDSalience I
         }
     }
     const bool bRevealAll = ShouldRevealEverything();
-    const float StartAlpha = SalienceTargetAlpha(InitialSalience, bRevealAll);
+    const float StartAlpha = SalienceTargetAlpha(InitialSalience, bRevealAll) * AccessibilityHUDOpacity();
     Element->SetRenderOpacity(StartAlpha);
     SetWidgetTint(Element, SalienceTargetTint(InitialSalience, bRevealAll, DimOpacity));
     Element->SetVisibility(StartAlpha > 0.0f ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
@@ -324,7 +330,7 @@ void UMythicHUDLayout::TickSalience(float DeltaSeconds) {
         }
 
         const EMythicHUDSalience Want = HUDElements[Index].Want;
-        const float TargetAlpha = SalienceTargetAlpha(Want, bRevealAll);
+        const float TargetAlpha = SalienceTargetAlpha(Want, bRevealAll) * AccessibilityHUDOpacity();
         const float DimTint = HUDElements[Index].DimTintOverride >= 0.0f ? HUDElements[Index].DimTintOverride : DimOpacity;
         const float TargetTint = SalienceTargetTint(Want, bRevealAll, DimTint);
 
@@ -445,3 +451,40 @@ void UMythicHUDLayout::HandleEscapeAction() {
         UCommonUIExtensions::PushStreamedContentToLayer_ForPlayer(GetOwningLocalPlayer(), TAG_UI_LAYER_MENU, EscapeMenuClass);
     }
 }
+
+static void MythicOpenMenu(const TArray<FString> &Args, UWorld *World) {
+    if (!World) {
+        UE_LOG(LogTemp, Warning, TEXT("Mythic.OpenMenu: no world"));
+        return;
+    }
+
+    const APlayerController *PC = World->GetFirstPlayerController();
+    if (!PC) {
+        UE_LOG(LogTemp, Warning, TEXT("Mythic.OpenMenu: no player controller - is PIE running?"));
+        return;
+    }
+
+    for (TObjectIterator<UMythicHUDLayout> It; It; ++It) {
+        UMythicHUDLayout *Layout = *It;
+        if (!IsValid(Layout) || Layout->HasAnyFlags(RF_ClassDefaultObject) || Layout->GetOwningPlayer() != PC) {
+            continue;
+        }
+        const FString Arg = Args.Num() > 0 ? Args[0] : FString(TEXT("Character"));
+        if (Arg.Equals(TEXT("Escape"), ESearchCase::IgnoreCase)) {
+            UE_LOG(LogTemp, Log, TEXT("Mythic.OpenMenu: opening the escape menu"));
+            Layout->HandleEscapeAction();
+            return;
+        }
+        UE_LOG(LogTemp, Log, TEXT("Mythic.OpenMenu: opening page '%s'"), *Arg);
+        Layout->OpenMenuOnPage(FName(*Arg));
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Mythic.OpenMenu: no HUD layout for the local player"));
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GMythicOpenMenuCmd(
+    TEXT("Mythic.OpenMenu"),
+    TEXT("Open the menu shell on a page id (default Character). The menu is a widget, so no aiming or key "
+         "injection is involved - this is how a UI change gets verified in one step."),
+    FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&MythicOpenMenu));

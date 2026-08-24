@@ -419,9 +419,6 @@ public:
 
     static bool IsWithinStationRange(float DistSq, float RangeSq);
 
-    UFUNCTION(Client, Reliable, Category = "Zone")
-    void ClientNotifyZoneEntry(const FText &SettlementName);
-
     /**
      * The first time a status is inflicted on this player, name it and say what it does. Sent once per status per
      * character — the codex glossary is what remembers, so it survives a reload and never fires twice.

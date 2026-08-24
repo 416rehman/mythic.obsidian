@@ -143,7 +143,7 @@ bool UMythicObjectiveTrackerWidget::AnyRowInUse() const {
 }
 
 void UMythicObjectiveTrackerWidget::HandleNotice(const FMythicHudNotice &Notice) {
-    if (Notice.Kind != EMythicNoticeKind::Objective || Lines.Num() == 0) {
+    if (!FMythicHudNoticeRules::GoesToObjectiveTracker(Notice.Kind) || Lines.Num() == 0) {
         return;
     }
     const bool bWasEmpty = !AnyRowInUse();

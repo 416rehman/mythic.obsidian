@@ -4,7 +4,11 @@
 #include "CoreMinimal.h"
 #include "AttributeSet.h"
 #include "Engine/DeveloperSettings.h"
+#include "GameplayTagContainer.h"
 #include "MythicStatDisplay.generated.h"
+
+class UMythicStatSummaryLibrary;
+class UTexture2D;
 
 UENUM(BlueprintType)
 enum class EMythicStatFormat : uint8 {
@@ -76,6 +80,35 @@ struct MYTHIC_API FMythicStatLine {
 
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     int32 SortOrder = 1000;
+
+    // Which attribute this line shows, so the view can ask follow-up questions (contribution tooltips) about it.
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FGameplayAttribute Attribute;
+};
+
+/** One headline card: a summary's display-ready state, computed by its authored calculation. */
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicStatSummaryLine {
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FGameplayTag SummaryId;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FText Label;
+
+    // Preformatted through the same formatter as every other stat on the sheet.
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FText Value;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FText Description;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    TSoftObjectPtr<UTexture2D> Icon;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    float RawValue = 0.0f;
 };
 
 USTRUCT()
@@ -127,6 +160,10 @@ public:
     // rows (unrolled magic find, unused weapon-family bonuses) out of the player's face until something grants them.
     UPROPERTY(EditAnywhere, Config, Category = "Stat Display")
     bool bHideUnmodifiedZeroStats = true;
+
+    // The headline summaries the sheet shows, in display order. Unset means no cards — the section collapses.
+    UPROPERTY(EditAnywhere, Config, Category = "Stat Display")
+    TSoftObjectPtr<UMythicStatSummaryLibrary> SummaryLibrary;
 };
 
 /** One line of a primary stat's tooltip: what it feeds, and how much it is feeding it right now. */

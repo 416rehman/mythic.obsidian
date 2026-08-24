@@ -4,6 +4,7 @@
 
 #include "Mythic.h"
 #include "GAS/MythicAbilitySystemComponent.h"
+#include "GAS/Effects/MythicStatusRegistry.h"
 #include "GAS/MythicTags_GAS.h"
 #include "GAS/MythicHealthBands.h"
 #include "Settings/MythicCombatSettings.h"
@@ -1114,11 +1115,13 @@ void UMythicLifeComponent::ReevaluateCrowdControl() {
     if (Move->MovementMode == MOVE_None) {
         Move->SetMovementMode(MOVE_Walking);
     }
-    const bool bSlowed = AbilitySystemComponent->HasMatchingGameplayTag(GAS_DEBUFF_SLOWED);
     const bool bHasted = AbilitySystemComponent->HasMatchingGameplayTag(GAS_BUFF_HASTE);
     float SpeedScale = 1.0f;
-    if (bSlowed) {
-        SpeedScale *= SlowMultiplier;
+    // Each active slow carries its own rolled bite; they stack multiplicatively and can never fully stop the target.
+    // Falls back to the flat SlowMultiplier when no active slow has an authored band. Gated on the tag so an
+    // unslowed pawn never pays for the active-effect walk.
+    if (AbilitySystemComponent->HasMatchingGameplayTag(GAS_DEBUFF_SLOWED)) {
+        SpeedScale *= UMythicStatusRegistry::GetControlReductionMultiplier(AbilitySystemComponent, GAS_DEBUFF_SLOWED, 1.0f - SlowMultiplier);
     }
     if (bHasted) {
         SpeedScale *= HasteMultiplier;

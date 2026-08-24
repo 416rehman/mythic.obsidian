@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "AbilitySystemInterface.h"
 #include "AttributeSet.h"
 #include "GameplayEffectTypes.h"
@@ -19,6 +20,10 @@ struct FProficiencySummary {
     // name of the proficiency track
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     FText Name;
+
+    // Stable identity of the track, so a consumer can group or look one up without matching display names.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
+    FGameplayTag TrackTag;
 
     // description of the proficiency track
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")

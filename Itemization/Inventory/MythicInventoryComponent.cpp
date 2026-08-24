@@ -116,6 +116,23 @@ void FMythicInventoryFastArray::AddSlot(const FMythicInventorySlotEntry &NewSlot
     }
 }
 
+void FMythicInventoryFastArray::AddSlotSilent(const FMythicInventorySlotEntry &NewSlot) {
+    FMythicInventorySlotEntry &AddedItem = Items.Add_GetRef(NewSlot);
+    MarkItemDirty(AddedItem);
+}
+
+void FMythicInventoryFastArray::NotifyServerBatchAdded(int32 StartIndex) {
+    if (!Owner || Owner->GetNetMode() == NM_Client || Items.Num() <= StartIndex) {
+        return;
+    }
+    TArray<int32> AddedIndices;
+    AddedIndices.Reserve(Items.Num() - StartIndex);
+    for (int32 i = StartIndex; i < Items.Num(); ++i) {
+        AddedIndices.Add(i);
+    }
+    PostReplicatedAdd(AddedIndices, Items.Num());
+}
+
 void FMythicInventoryFastArray::RemoveSlotAt(int32 Index) {
     if (Items.IsValidIndex(Index)) {
         if (Owner && Owner->GetNetMode() != NM_Client) {
@@ -218,11 +235,13 @@ void UMythicInventoryComponent::InitializeSlots() {
                 SlotEntry.bCanPlayerTake = Group.bCanPlayerTake;
                 SlotEntry.bCanPlayerPut = Group.bCanPlayerPut;
 
-                Slots.AddSlot(SlotEntry);
+                Slots.AddSlotSilent(SlotEntry);
             }
             ++EntryIndex;
         }
     }
+    // DestroyAllSlots emptied the array, so every current entry is new.
+    Slots.NotifyServerBatchAdded(0);
 
     const int32 NewSlotsSize = Slots.Num();
     UE_LOG(Myth, Verbose, TEXT("Initialized Inventory from %d to %d slots"), OldSlotsSize, NewSlotsSize);

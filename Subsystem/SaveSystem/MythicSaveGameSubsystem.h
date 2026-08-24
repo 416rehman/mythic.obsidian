@@ -58,9 +58,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Save System | Manifest")
     TArray<FMythicCharacterMetadata> GetCharacterList();
 
-    // Creates a new character slot and updates the manifest. Returns the generated SlotName (CharacterID).
+    // Creates a new character slot and updates the manifest. Returns the SlotName (CharacterID).
+    // ExplicitCharacterID reuses a deterministic slot instead of minting a GUID.
     UFUNCTION(BlueprintCallable, Category = "Save System | Manifest")
-    FString CreateNewCharacter(const FString &DisplayName, const FString &ClassName, bool bHardcore);
+    FString CreateNewCharacter(const FString &DisplayName, const FString &ClassName, bool bHardcore, const FString &ExplicitCharacterID = TEXT(""));
 
     // Deletes a character and their save file.
     UFUNCTION(BlueprintCallable, Category = "Save System | Manifest")

@@ -4,6 +4,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Resources/MythicResourceManagerComponent.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Subsystem/SaveSystem/MythicSaveGameSubsystem.h"
 
@@ -115,4 +116,16 @@ void AMythicGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &Out
 
 TArray<FTrackedDestructibleData> AMythicGameState::GetTrackedDestructibles() const {
     return this->ResourceManagerComponent->GetTrackedDestructibles();
+}
+
+float AMythicGameState::EvaluateArmorMitigation(const UObject *WorldContextObject, float Armor) {
+    const UWorld *World = GEngine ? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull) : nullptr;
+    const AMythicGameState *GS = World ? World->GetGameState<AMythicGameState>() : nullptr;
+    if (!GS) {
+        return 0.0f;
+    }
+    if (const FRealCurve *Curve = GS->ArmorMitigationCurveRowHandle.GetCurve(TEXT("EvaluateArmorMitigation"))) {
+        return FMath::Clamp(Curve->Eval(Armor), 0.0f, 0.85f);
+    }
+    return 0.0f;
 }

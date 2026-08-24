@@ -160,7 +160,7 @@ void UMythicUserSettings::ApplyDLSS() const {
         static bool bDeferred = false;
         if (!bDeferred) {
             bDeferred = true;
-            FCoreDelegates::OnPostEngineInit.AddLambda([]() {
+            FCoreDelegates::GetOnPostEngineInit().AddLambda([]() {
                 if (UMythicUserSettings *Settings = UMythicUserSettings::Get()) {
                     Settings->ApplyDLSS();
                 }

@@ -43,5 +43,25 @@ bool FMythicStatusTeachingTest::RunTest(const FString &Parameters) {
         TestFalse(TEXT("a different status does not merge into it"), FMythicHudNoticeRules::CanMerge(A, Other));
     }
 
+    // Every notice kind must reach a surface. The routing bug that stranded Status hid here: teaching, lifetime and
+    // merge were all covered, but nothing asserted a raised notice is actually shown anywhere.
+    {
+        const EMythicNoticeKind AllKinds[] = {
+            EMythicNoticeKind::Loot, EMythicNoticeKind::Objective, EMythicNoticeKind::Progression,
+            EMythicNoticeKind::Combat, EMythicNoticeKind::Warning, EMythicNoticeKind::Celebration,
+            EMythicNoticeKind::Status,
+        };
+        for (const EMythicNoticeKind Kind : AllKinds) {
+            TestTrue(*FString::Printf(TEXT("notice kind %d reaches a surface"), static_cast<int32>(Kind)),
+                     FMythicHudNoticeRules::ReachesSurface(Kind));
+        }
+
+        // A status is a sentence to read, so it belongs on the banner, not the transient glance feed.
+        TestTrue(TEXT("a status notice is routed to the banner"),
+                 FMythicHudNoticeRules::GoesToBanner(EMythicNoticeKind::Status));
+        TestFalse(TEXT("a status notice does not go to the glance feed"),
+                  FMythicHudNoticeRules::GoesToFeed(EMythicNoticeKind::Status));
+    }
+
     return true;
 }

@@ -382,6 +382,7 @@ FProficiencySummary UProficiencyComponent::GetSummary(int32 Index) const {
     }
 
     Summary.Name = Prof.Definition->Name;
+    Summary.TrackTag = Prof.Definition->TrackTag;
     Summary.Description = Prof.Definition->Description;
     Summary.Icon = Prof.Definition->Icon;
 

@@ -9,6 +9,7 @@
 #include "Engine/GameInstance.h"
 #include "GAS/Effects/MythicStatusEffectDefinition.h"
 #include "GAS/Effects/MythicStatusRegistry.h"
+#include "Settings/MythicCombatSettings.h"
 #include "GAS/Effects/MythicCrowdControl.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/Feedback/MythicTags_FeedbackCues.h"
@@ -136,7 +137,10 @@ void UMythicAttributeSet_Defense::PostGameplayEffectExecute(const FGameplayEffec
     FMythicCcEscalationConfig CcCfg;
     FMythicCcResolution CcRes;
     if (bHardCC) {
-        CcCfg = FMythicCrowdControlRules::ConfigForTier(ResolveTargetTierInt(TargetASC));
+        static const TArray<FMythicCcTierEscalation> EmptyCcTable;
+        const UMythicCombatSettings *CcSettings = GetDefault<UMythicCombatSettings>();
+        CcCfg = FMythicCrowdControlRules::ConfigForTier(
+            CcSettings ? CcSettings->CcEscalationByTier : EmptyCcTable, ResolveTargetTierInt(TargetASC));
         const float Now = World ? World->GetTimeSeconds() : 0.0f;
         CcRes = FMythicCrowdControlRules::ResolveCcTrigger(CcHardTrackStates.FindRef(Definition->StatusType), CcCfg, Now);
         EffectiveThreshold = Threshold * CcRes.EffectiveThresholdMultiplier;

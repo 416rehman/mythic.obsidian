@@ -15,6 +15,9 @@ UCommonButtonBase *UMythicInteractionPromptWidget::GetOrCreateActionButton(int32
         return nullptr;
     }
     Button->SetVisibility(ESlateVisibility::Collapsed);
+    // The shared action button carries a 200px MinWidth for the action bar; a "press E" pill must hug its
+    // key and verb instead, or the prompt renders as a wide grey bar across the top of the screen.
+    Button->SetMinDimensions(0, 0);
     this->VerticalBox->AddChild(Button);
     ActionButtonPool.Add(Button);
     return Button;

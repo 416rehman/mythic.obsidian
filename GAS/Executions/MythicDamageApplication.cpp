@@ -4,6 +4,7 @@
 
 #include "Mythic.h"
 #include "GAS/MythicGameplayEffectContext.h"
+#include "GAS/Effects/MythicStatusRegistry.h"
 #include "GAS/MythicTags_GAS.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/Feedback/MythicTags_FeedbackCues.h"
@@ -22,6 +23,7 @@
 #include "AbilitySystemComponent.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "Settings/MythicCombatSettings.h"
+#include "GAS/MythicStatDiminishing.h"
 #include "GAS/Executions/MythicDamageCompose.h"
 #include "GAS/MythicWeatherCombatRules.h"
 #include "World/EnvironmentController/MythicEnvironmentSubsystem.h"
@@ -289,8 +291,17 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     const float PowerFraction = WeaponRoll > KINDA_SMALL_NUMBER ? (FinalDamage / WeaponRoll) - 1.0f : 0.0f;
     UE_LOG(Myth, Verbose, TEXT("DamageApplication:: Damage %f = DmgPerHit (%f - %f) * (1 + Power %f -> +%.1f%%)"),
            FinalDamage, DmgPerHit, DmgPerHit * 1.5f, Power, PowerFraction * 100.0f);
+    // Every damage-affecting fraction below is a stacked 0.0-based bonus, so each rides its authored diminishing
+    // curve before it multiplies. A stat with no curve passes through unchanged, so this is a no-op until one is
+    // authored - the curves in UMythicCombatSettings::StatDiminishing are the brake, not this call.
+    const UMythicCombatSettings *CurveSettings = GetDefault<UMythicCombatSettings>();
+    auto CurveBonus = [CurveSettings](const FGameplayAttribute &Attribute, float RawBonus) {
+        return CurveSettings ? FMythicStatDiminishingRules::ApplyToBonus(CurveSettings->StatDiminishing, Attribute, RawBonus)
+                             : 1.0f + FMath::Max(0.0f, RawBonus);
+    };
+
     if (MythicContext->IsCriticalHit()) {
-        FinalDamage += FinalDamage * CriticalHitDamage;
+        FinalDamage = FMath::Max(0.0f, FinalDamage * CurveBonus(UMythicAttributeSet_Offense::GetCriticalHitDamageAttribute(), CriticalHitDamage));
         UE_LOG(Myth, Verbose, TEXT("DamageApplication:: Critical hit! Damage increased by %f Percent"), CriticalHitDamage * 100.0f);
     }
 
@@ -300,10 +311,10 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         float StatusMult = 1.0f;
         if (SourceTags) {
             if (SourceTags->HasTag(GAS_BUFF_RAGE)) { StatusMult *= (1.0f + GS->RageDamageBonus); }
-            if (SourceTags->HasTag(GAS_DEBUFF_WEAKENED)) { StatusMult *= FMath::Max(0.0f, 1.0f - GS->WeakenedDamagePenalty); }
+            if (SourceTags->HasTag(GAS_DEBUFF_WEAKENED)) { StatusMult *= UMythicStatusRegistry::GetControlReductionMultiplier(SourceASC, GAS_DEBUFF_WEAKENED, GS->WeakenedDamagePenalty); }
         }
         if (TargetTags) {
-            if (TargetTags->HasTag(GAS_DEBUFF_TERRIFIED)) { StatusMult *= (1.0f + GS->TerrifiedDamageBonus); }
+            if (TargetTags->HasTag(GAS_DEBUFF_TERRIFIED)) { StatusMult *= UMythicStatusRegistry::GetControlBonusMultiplier(TargetASC, GAS_DEBUFF_TERRIFIED, GS->TerrifiedDamageBonus); }
             if (TargetTags->HasTag(GAS_BUFF_FORTIFY)) { StatusMult *= FMath::Max(0.0f, 1.0f - GS->FortifyDamageReduction); }
         }
         FinalDamage = FMath::Max(0.0f, FinalDamage * StatusMult);
@@ -312,7 +323,8 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     static const FGameplayTag DebuffParent = GAS_DEBUFF;
 
     if (TargetTags && IncreasedDamageToEnemiesUnderStatusEffects != 0.0f && DebuffParent.IsValid() && TargetTags->HasTag(DebuffParent)) {
-        FinalDamage = FMath::Max(0.0f, FinalDamage * (1.0f + IncreasedDamageToEnemiesUnderStatusEffects));
+        FinalDamage = FMath::Max(0.0f, FinalDamage * CurveBonus(UMythicAttributeSet_Offense::GetIncreasedDamageToEnemiesUnderStatusEffectsAttribute(),
+                                                                IncreasedDamageToEnemiesUnderStatusEffects));
     }
 
     if (SourceTags && DebuffParent.IsValid() && SourceTags->HasTag(DebuffParent)) {
@@ -325,14 +337,15 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     }
 
     if (SourceTags) {
+        using Off = UMythicAttributeSet_Offense;
         float WeaponMult = 1.0f;
-        if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SWORD)) { WeaponMult = (1.0f + BonusSwordDamage); }
-        else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_AXE)) { WeaponMult = (1.0f + BonusAxeDamage); }
-        else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_DAGGERS)) { WeaponMult = (1.0f + BonusDaggerDamage); }
-        else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SICKLE)) { WeaponMult = (1.0f + BonusSickleDamage); }
-        else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SPEAR)) { WeaponMult = (1.0f + BonusSpearDamage); }
+        if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SWORD)) { WeaponMult = CurveBonus(Off::GetBonusSwordDamageAttribute(), BonusSwordDamage); }
+        else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_AXE)) { WeaponMult = CurveBonus(Off::GetBonusAxeDamageAttribute(), BonusAxeDamage); }
+        else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_DAGGERS)) { WeaponMult = CurveBonus(Off::GetBonusDaggerDamageAttribute(), BonusDaggerDamage); }
+        else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SICKLE)) { WeaponMult = CurveBonus(Off::GetBonusSickleDamageAttribute(), BonusSickleDamage); }
+        else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SPEAR)) { WeaponMult = CurveBonus(Off::GetBonusSpearDamageAttribute(), BonusSpearDamage); }
         else
-            if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_HAMMER)) { WeaponMult = (1.0f + BonusHammerDamage); }
+            if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_HAMMER)) { WeaponMult = CurveBonus(Off::GetBonusHammerDamageAttribute(), BonusHammerDamage); }
         if (WeaponMult != 1.0f) {
             FinalDamage = FMath::Max(0.0f, FinalDamage * WeaponMult);
         }
@@ -340,7 +353,10 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
 
     if (SourceTags && BonusSkillDamage != 0.0f) {
         const bool bIsSkillHit = SourceTags->HasTag(GAS_ABILITY_TYPE_SKILL);
-        FinalDamage = ApplySkillDamageBonus(FinalDamage, bIsSkillHit, BonusSkillDamage);
+        // Curve the raw bonus, then hand the bent fraction to the (1+x) skill helper so stacked skill damage bends
+        // like every other stacked stat while ApplySkillDamageBonus keeps its own tested contract.
+        const float CurvedSkillBonus = CurveBonus(UMythicAttributeSet_Offense::GetBonusSkillDamageAttribute(), BonusSkillDamage) - 1.0f;
+        FinalDamage = ApplySkillDamageBonus(FinalDamage, bIsSkillHit, CurvedSkillBonus);
     }
 
     FGameplayTag SuperiorRoot = AI_TIER_SUPERIOR;
@@ -357,7 +373,8 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         }
     }
     if (bIsSuperior && BonusDamageToSuperiorEnemies != 0.0f) {
-        FinalDamage = FMath::Max(0.0f, FinalDamage * (1.0f + BonusDamageToSuperiorEnemies));
+        FinalDamage = FMath::Max(0.0f, FinalDamage * CurveBonus(UMythicAttributeSet_Offense::GetBonusDamageToSuperiorEnemiesAttribute(),
+                                                                BonusDamageToSuperiorEnemies));
     }
 
     if (const UMythicCombatSettings *CombatSettings = GetDefault<UMythicCombatSettings>()) {

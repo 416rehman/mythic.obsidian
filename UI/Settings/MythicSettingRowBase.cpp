@@ -5,6 +5,8 @@
 #include "Components/Button.h"
 #include "Components/EditableTextBox.h"
 #include "Components/Image.h"
+#include "Components/HorizontalBoxSlot.h"
+#include "Components/SizeBox.h"
 #include "Components/Slider.h"
 #include "UI/Kit/MythicKitInputs.h"
 #include "UI/MythicUIStyle.h"
@@ -13,6 +15,15 @@
 
 void UMythicSettingRowBase::NativeConstruct() {
     Super::NativeConstruct();
+
+    // The label owns the leftover width and truncates with an ellipsis; the value cell hugs its content. Enforced
+    // here because a style reapply or a WBP slot left at Auto lets a long label paint into the value.
+    if (Text_Label) {
+        if (UHorizontalBoxSlot *LabelSlot = Cast<UHorizontalBoxSlot>(Text_Label->Slot)) {
+            LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        }
+        Text_Label->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+    }
 
     if (Img_Ground) {
         Img_Ground->SetVisibility(ESlateVisibility::HitTestInvisible);
@@ -300,6 +311,9 @@ void UMythicSettingRowBase::PushToWidgets() {
 
     if (Text_Label) {
         Text_Label->SetText(Definition.Label);
+        // After the CommonUI style applies: a long label truncates with an ellipsis instead of painting into
+        // the value cell ("Global Illumination Met|Hardware RT" was the 10-foot type ramp's first casualty).
+        Text_Label->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
     }
 
     if (Text_Value) {

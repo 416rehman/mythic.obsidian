@@ -1,6 +1,7 @@
 // Copyright Stellar Games. All Rights Reserved.
 
 #include "MythicDamageNumberSubsystem.h"
+#include "UI/Settings/MythicUserSettings.h"
 #include "GAS/MythicGameplayEffectContext.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "Engine/Canvas.h"
@@ -72,6 +73,13 @@ void UMythicDamageNumberSubsystem::CleanupExpired() {
 }
 
 void UMythicDamageNumberSubsystem::AddDamageNumber(FVector WorldLocation, float Magnitude, const FGameplayEffectContextHandle &EffectContext, bool bIsHeal) {
+    // The accessibility settings own whether numbers show at all. Mode 0 = off; scale rides the font multiplier
+    // where the numbers are drawn. Read per-add: it is a few loads, and the settings screen applies instantly.
+    if (const UMythicUserSettings *UserSettings = UMythicUserSettings::Get()) {
+        if (UserSettings->GetDamageNumberMode() == 0) {
+            return;
+        }
+    }
     CleanupExpired();
     FMythicDamageNumberData NewData;
     NewData.WorldLocation = WorldLocation;
@@ -146,7 +154,10 @@ void UMythicDamageNumberSubsystem::DrawDamageNumbers(UCanvas *Canvas, APlayerCon
         Font = GEngine->GetSmallFont();
     }
 
-    const float BaseScale = Config ? Config->FontScaleMultiplier : 1.0f;
+    float BaseScale = Config ? Config->FontScaleMultiplier : 1.0f;
+    if (const UMythicUserSettings *UserSettings = UMythicUserSettings::Get()) {
+        BaseScale *= UserSettings->GetDamageNumberScale();
+    }
     const bool bOutline = Config ? Config->bEnableOutline : true;
     const FLinearColor OutlineColor = Config ? Config->OutlineColor : FLinearColor::Black;
     const float CritScaleMultiplier = Config ? Config->CriticalHitScaleMultiplier : 1.3f;

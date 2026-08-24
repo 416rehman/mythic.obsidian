@@ -11,6 +11,7 @@ class UCommonTextBlock;
 class UMythicSettingRowBase;
 class UPanelWidget;
 class UVerticalBox;
+class UHorizontalBox;
 
 /**
  * Behaviour for the settings screen. Constructs no widget trees: the Widget Blueprint owns the rail, the
@@ -227,7 +228,7 @@ private:
 
     /** One container per tab, parented to RowList in authored order. */
     UPROPERTY()
-    TArray<TObjectPtr<UVerticalBox>> CategoryContainers;
+    TArray<TObjectPtr<UPanelWidget>> CategoryContainers;
 
     UPROPERTY()
     TArray<TObjectPtr<UCommonButtonBase>> TabButtons;

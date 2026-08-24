@@ -20,6 +20,16 @@ FMythicHealthBand MakeBand(const FGameplayTag &Tag, float Min, float Max) {
     Band.MaxFraction = Max;
     return Band;
 }
+
+FMythicCcTierEscalation MakeCcTier(int32 Tier, float Step, int32 ImmunityAt, float Window, float Immune) {
+    FMythicCcTierEscalation Row;
+    Row.Tier = Tier;
+    Row.Config.ThresholdEscalationStep = Step;
+    Row.Config.ImmunityTriggerCount = ImmunityAt;
+    Row.Config.RollingWindowSeconds = Window;
+    Row.Config.ImmuneSeconds = Immune;
+    return Row;
+}
 }
 
 UMythicCombatSettings::UMythicCombatSettings() {
@@ -51,5 +61,35 @@ UMythicCombatSettings::UMythicCombatSettings() {
         // an unbreakable one is not.
         MakeCurve(Off::GetFreezeDurationMultiplierAttribute(), 0.2f, 0.5f),
         MakeCurve(Off::GetStunDurationMultiplierAttribute(), 0.2f, 0.5f),
+
+        // Weapon-class bonus is the primary damage of a weapon-specialised build, and the narrowest, most
+        // stackable damage stat in the game - one family, so every roll concentrates. It gets the specialist's
+        // runway (face value to +100%, bending toward but never reaching +400%), never an unbounded stack.
+        MakeCurve(Off::GetBonusSwordDamageAttribute(), 1.0f, 4.0f),
+        MakeCurve(Off::GetBonusAxeDamageAttribute(), 1.0f, 4.0f),
+        MakeCurve(Off::GetBonusDaggerDamageAttribute(), 1.0f, 4.0f),
+        MakeCurve(Off::GetBonusSickleDamageAttribute(), 1.0f, 4.0f),
+        MakeCurve(Off::GetBonusSpearDamageAttribute(), 1.0f, 4.0f),
+        MakeCurve(Off::GetBonusHammerDamageAttribute(), 1.0f, 4.0f),
+
+        // Skill damage and the two conditional damage bonuses ride the same specialist runway as weapon class.
+        MakeCurve(Off::GetBonusSkillDamageAttribute(), 1.0f, 4.0f),
+        MakeCurve(Off::GetControlPotencyAttribute(), 1.0f, 4.0f),
+        MakeCurve(Off::GetIncreasedDamageToEnemiesUnderStatusEffectsAttribute(), 1.0f, 4.0f),
+        MakeCurve(Off::GetBonusDamageToSuperiorEnemiesAttribute(), 1.0f, 4.0f),
+
+        // Critical damage is its own build archetype and gets the longest runway of any stat - face value to
+        // +300%, approaching but never reaching +1000% - so a crit build stays strong while stacking still bends.
+        MakeCurve(Off::GetCriticalHitDamageAttribute(), 3.0f, 10.0f),
+    };
+
+    // Higher tiers shrug off repeat crowd control faster: a boss escalates hard and goes immune after two stuns,
+    // a trash mob barely resists. One row per AI tier (1..5); an unlisted tier uses the struct's gentle defaults.
+    CcEscalationByTier = {
+        MakeCcTier(1, 0.25f, 8, 6.0f, 2.0f),
+        MakeCcTier(2, 0.35f, 6, 8.0f, 3.5f),
+        MakeCcTier(3, 0.5f, 4, 10.0f, 5.0f),
+        MakeCcTier(4, 0.75f, 3, 10.0f, 6.0f),
+        MakeCcTier(5, 1.0f, 2, 12.0f, 8.0f),
     };
 }

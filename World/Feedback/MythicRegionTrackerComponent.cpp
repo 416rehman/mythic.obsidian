@@ -9,6 +9,7 @@
 #include "GameplayEffectTypes.h"
 
 #include "Player/MythicPlayerState.h"
+#include "Player/MythicPlayerController.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/Feedback/MythicTags_FeedbackCues.h"
 #include "Settings/MythicDeveloperSettings.h"
@@ -40,6 +41,18 @@ bool UMythicRegionTrackerComponent::IsDangerIncrease(EMythicDangerTier NewTier, 
         return false;
     }
     return static_cast<uint8>(NewTier) > static_cast<uint8>(LastTier);
+}
+
+FMythicHudNotice UMythicRegionTrackerComponent::BuildRegionNotice(const FText &Region, EMythicDangerTier Tier) {
+    FMythicHudNotice Notice;
+    Notice.Kind = EMythicNoticeKind::Progression;
+    Notice.Text = Region;
+    if (Tier > EMythicDangerTier::Safe && Tier < EMythicDangerTier::COUNT) {
+        Notice.Detail = FText::Format(LOCTEXT("RegionDangerDetail", "Danger: {0}"), UEnum::GetDisplayValueAsText(Tier));
+    }
+    // Border flapping merges into one banner instead of queueing four.
+    Notice.StackKey = FName(TEXT("RegionEntry"));
+    return Notice;
 }
 
 FText UMythicRegionTrackerComponent::ResolveRegionName(bool bInSettlement, const FText &SettlementName, EMythicBiome Biome) {
@@ -142,8 +155,22 @@ void UMythicRegionTrackerComponent::BroadcastIfChanged(bool bIsInitialSeed) {
     }
     LastBroadcastTier = CurrentDangerTier;
     LastBroadcastRegion = CurrentRegionName;
-    if (!bIsInitialSeed) {
-        OnRegionDangerChanged.Broadcast(CurrentRegionName, CurrentDangerTier);
+    // The seed still reaches passive readouts (a widget may have bound before the first sample); it only
+    // skips the banner, so spawning in a region never plays as entering it.
+    OnRegionDangerChanged.Broadcast(CurrentRegionName, CurrentDangerTier);
+    if (bIsInitialSeed) {
+        LastBannerRegion = CurrentRegionName;
+        return;
+    }
+
+    if (LastBannerRegion.EqualTo(CurrentRegionName)) {
+        return;
+    }
+    LastBannerRegion = CurrentRegionName;
+    const AMythicPlayerState *PS = GetOwner<AMythicPlayerState>();
+    AMythicPlayerController *PC = PS ? Cast<AMythicPlayerController>(PS->GetPlayerController()) : nullptr;
+    if (PC && PC->IsLocalController()) {
+        PC->RaiseHudNotice(BuildRegionNotice(CurrentRegionName, CurrentDangerTier));
     }
 }
 

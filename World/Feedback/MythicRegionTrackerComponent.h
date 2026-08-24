@@ -6,6 +6,7 @@
 #include "Internationalization/Text.h"
 #include "World/LivingWorld/Territory/MythicDanger.h"
 #include "World/LivingWorld/Territory/MythicBiome.h"
+#include "UI/HUD/MythicHudNotice.h"
 #include "MythicRegionTrackerComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMythicOnRegionDangerChanged, FText, Region, EMythicDangerTier, Tier);
@@ -24,6 +25,8 @@ public:
     static bool IsDangerIncrease(EMythicDangerTier NewTier, EMythicDangerTier LastTier);
 
     static FText ResolveRegionName(bool bInSettlement, const FText &SettlementName, EMythicBiome Biome);
+
+    static FMythicHudNotice BuildRegionNotice(const FText &Region, EMythicDangerTier Tier);
 
     // ── Reads (server + owning client) ──
     UFUNCTION(BlueprintPure, Category = "World|Region")
@@ -70,4 +73,7 @@ private:
     bool bClientSeeded = false;
     EMythicDangerTier LastBroadcastTier = EMythicDangerTier::COUNT;
     FText LastBroadcastRegion;
+
+    // Tier-only steps re-tint the compass readout but do not deserve a title card; only a new NAME earns the banner.
+    FText LastBannerRegion;
 };

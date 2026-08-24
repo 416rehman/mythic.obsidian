@@ -12,6 +12,7 @@ class UCommonTextBlock;
 class UImage;
 class UPanelWidget;
 class UTexture2D;
+class UMaterialInterface;
 class UMythicMapPageWidget;
 
 UCLASS()
@@ -85,6 +86,9 @@ protected:
     virtual void NativeOnActivated() override;
 
     virtual void OnWarMapTextureReady_Implementation(UTexture2D *Texture) override;
+
+    /** Points the terrain layer at the live minimap, cropped to the grid region. Idempotent. */
+    void SetupTerrainLayer();
     virtual void OnWarMapDataRefreshed_Implementation(const TArray<FMythicWarMapLegendEntry> &Legend,
                                                       const TArray<FMythicWarMapMarker> &Markers,
                                                       const FMythicWarMapMarker &PlayerMarker) override;
@@ -93,6 +97,15 @@ protected:
     /** The territory texture. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UImage> MapImage;
+
+    /**
+     * The terrain layer: the live World Partition minimap, cropped to the grid and stylized to parchment.
+     *
+     * Dynamic by construction - it samples the minimap texture the level build produces, so rebuilding the
+     * minimap after a level change updates the map with no UI work and no bake.
+     */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UImage> MapTerrain;
 
     /** Pins are placed here in normalized space, so the map scales with the panel. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
@@ -113,6 +126,14 @@ protected:
      * Fallback pin art, used only if a kit mark material is missing. The pins normally draw the kit's procedural
      * cartographer's marks (M_UI_MapMark, one instance per marker kind, tint = faction colour).
      */
+    /** Runtime parchment stylizer fed the live minimap. Defaults to M_UI_MapParchment. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Map")
+    TSoftObjectPtr<UMaterialInterface> MapTerrainMaterial;
+
+    /** The grid whose bounds the terrain is cropped to. Defaults to DA_TerritoryGridSettings. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Map")
+    TSoftObjectPtr<class UMythicTerritoryGridSettings> TerritoryGrid;
+
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Map")
     TObjectPtr<UTexture2D> PinTexture;
 

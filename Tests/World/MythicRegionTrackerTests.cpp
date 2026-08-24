@@ -1,5 +1,6 @@
 
 #include "Misc/AutomationTest.h"
+#include "UI/HUD/MythicHudNotice.h"
 #include "World/Feedback/MythicRegionTrackerComponent.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -72,6 +73,32 @@ bool FMythicRegionTrackerTest::RunTest(const FString &Parameters) {
     }
     TestEqual(TEXT("gate fires once per genuine change (4 of 8 samples)"), Announcements, 4);
     TestEqual(TEXT("exactly one danger-increase across the run"), Increases, 1);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicRegionNoticeTest,
+    "Mythic.World.RegionTracker.Notice",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicRegionNoticeTest::RunTest(const FString &Parameters) {
+    const FText Avalon = FText::FromString(TEXT("City of Avalon"));
+
+    const FMythicHudNotice SafeEntry = UMythicRegionTrackerComponent::BuildRegionNotice(Avalon, EMythicDangerTier::Safe);
+    TestTrue(TEXT("region entry routes to the banner"), FMythicHudNoticeRules::GoesToBanner(SafeEntry.Kind));
+    TestTrue(TEXT("region entry reaches a surface"), FMythicHudNoticeRules::ReachesSurface(SafeEntry.Kind));
+    TestEqual(TEXT("title is the region name"), SafeEntry.Text.ToString(), FString(TEXT("City of Avalon")));
+    TestTrue(TEXT("Safe tier gets no detail line"), SafeEntry.Detail.IsEmpty());
+    TestFalse(TEXT("stack key is set"), SafeEntry.StackKey.IsNone());
+
+    const FMythicHudNotice HighEntry =
+        UMythicRegionTrackerComponent::BuildRegionNotice(FText::FromString(TEXT("Wasteland")), EMythicDangerTier::High);
+    TestFalse(TEXT("dangerous tier gets a detail line"), HighEntry.Detail.IsEmpty());
+    TestTrue(TEXT("detail names the tier"), HighEntry.Detail.ToString().Contains(TEXT("High")));
+
+    TestTrue(TEXT("two rapid entries merge instead of queueing banners"),
+             FMythicHudNoticeRules::CanMerge(SafeEntry, HighEntry));
 
     return true;
 }

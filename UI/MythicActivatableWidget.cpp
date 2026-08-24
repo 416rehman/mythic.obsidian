@@ -25,6 +25,20 @@ void UMythicActivatableWidget::NativeConstruct() {
     }
 }
 
+void UMythicActivatableWidget::NativeOnAddedToFocusPath(const FFocusEvent &InFocusEvent) {
+    Super::NativeOnAddedToFocusPath(InFocusEvent);
+    if (UWidget *Ring = GetWidgetFromName(TEXT("FocusRing"))) {
+        Ring->SetVisibility(ESlateVisibility::HitTestInvisible);
+    }
+}
+
+void UMythicActivatableWidget::NativeOnRemovedFromFocusPath(const FFocusEvent &InFocusEvent) {
+    Super::NativeOnRemovedFromFocusPath(InFocusEvent);
+    if (UWidget *Ring = GetWidgetFromName(TEXT("FocusRing"))) {
+        Ring->SetVisibility(ESlateVisibility::Collapsed);
+    }
+}
+
 void UMythicActivatableWidget::NativeDestruct() {
     for (FUIActionBindingHandle Handle : BindingHandles) {
         if (Handle.IsValid()) {

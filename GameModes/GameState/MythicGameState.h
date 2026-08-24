@@ -42,6 +42,13 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     FCurveTableRowHandle ArmorMitigationCurveRowHandle;
 
+    /**
+     * The one authored armor curve, readable by UI and summary calculations so a displayed mitigation can
+     * never drift from what the damage execution applies. Returns the same clamped fraction it uses.
+     */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Combat", meta = (WorldContext = "WorldContextObject"))
+    static float EvaluateArmorMitigation(const UObject *WorldContextObject, float Armor);
+
     // post-mitigation damage floor: high armor can never reduce a non-zero hit below this (keeps targets killable)
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float MinChipDamage = 1.0f;

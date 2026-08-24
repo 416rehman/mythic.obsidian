@@ -8,6 +8,7 @@
 #include "GAS/MythicHealthBands.h"
 #include "GAS/MythicStatDiminishing.h"
 #include "GAS/MythicWeatherCombatRules.h"
+#include "GAS/Effects/MythicCrowdControl.h"
 #include "MythicCombatSettings.generated.h"
 
 UCLASS(config = Game, defaultconfig, meta = (DisplayName = "Mythic Combat"))
@@ -77,4 +78,12 @@ public:
 
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0"))
     float StatusDurationScale = 1.0f;
+
+    /**
+     * How hard each enemy tier resists repeat hard crowd control. One row per AI tier (1..5); a tier with no row
+     * falls back to the gentlest defaults. This is the retune knob for CC feel, kept beside the stun-duration curve
+     * in StatDiminishing so both halves of the mechanic live in one place.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Crowd Control")
+    TArray<FMythicCcTierEscalation> CcEscalationByTier;
 };

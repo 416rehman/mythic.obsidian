@@ -4,12 +4,14 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "UI/WarMap/MythicWarMapTypes.h"
+#include "World/LivingWorld/Territory/MythicDanger.h"
 #include "MythicCompassWidget.generated.h"
 
 class UCanvasPanel;
 class UCommonTextBlock;
 class UImage;
 class UMaterialInterface;
+class UMythicRegionTrackerComponent;
 class UMythicWarMapSubsystem;
 
 USTRUCT()
@@ -21,6 +23,17 @@ struct FMythicCompassTick {
 
     UPROPERTY()
     TObjectPtr<UCommonTextBlock> Label;
+};
+
+USTRUCT(BlueprintType)
+struct FMythicCompassDangerStyle {
+    GENERATED_BODY()
+
+    UPROPERTY(EditDefaultsOnly, Category = "Compass")
+    EMythicDangerTier Tier = EMythicDangerTier::Safe;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Compass")
+    FLinearColor Colour = FLinearColor::White;
 };
 
 USTRUCT(BlueprintType)
@@ -55,6 +68,10 @@ protected:
     /** The canvas every tick and marker is placed into. Without it the compass draws nothing. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UCanvasPanel> Strip;
+
+    /** Optional: the current region/settlement name under the strip, tinted by danger tier. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UCommonTextBlock> Txt_Region;
 
     /** Optional: the bearing readout under the strip, e.g. "NE  042". */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
@@ -92,6 +109,10 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Compass")
     TArray<FMythicCompassKindStyle> KindStyles;
+
+    /** Ink colour for Txt_Region per danger tier. Authored in the WBP; a tier with no row stays white. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Compass")
+    TArray<FMythicCompassDangerStyle> DangerStyles;
 
     /** The eight cardinal/ordinal letters. Colour and size are shared; they are structure, not content. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Compass")
@@ -145,14 +166,30 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<class UMaterialInstanceDynamic> RodMID;
 
+    void BindRegionTracker();
+
+    void ApplyRegion(const FText &Region, EMythicDangerTier Tier) const;
+
+    FLinearColor DangerColourForTier(EMythicDangerTier Tier) const;
+
+    UPROPERTY(Transient)
+    TWeakObjectPtr<UMythicRegionTrackerComponent> RegionTracker;
+
+    FTimerHandle RegionBindTimer;
+    int32 RegionBindAttempts = 0;
+
     float SinceMarkerRefresh = 0.0f;
     float LastViewportScale = -1.0f;
     bool bPoolsBuilt = false;
     bool bBoundToWarMap = false;
     bool bLastDigitsLit = false;
+    bool bLastRegionLit = false;
 
     int32 LastPrintedBearing = MIN_int32;
 
     UFUNCTION()
     void HandleWarMapChanged();
+
+    UFUNCTION()
+    void HandleRegionChanged(FText Region, EMythicDangerTier Tier);
 };

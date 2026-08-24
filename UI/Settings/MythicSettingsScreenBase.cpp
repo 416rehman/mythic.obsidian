@@ -10,6 +10,8 @@
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
+#include "Components/HorizontalBoxSlot.h"
+#include "Components/HorizontalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "UI/MythicUIStyle.h"
 #include "UI/Settings/MythicSettingAccess.h"
@@ -104,11 +106,22 @@ void UMythicSettingsScreenBase::BuildScreen() {
             TabButtons.Add(Button);
         }
 
+        /**
+         * One full-width column per category, and the list scrolls.
+         *
+         * The owner's call (2026-08-24): full-width controls, no columnar packing. Two balanced columns kept
+         * every setting on screen at once, but squeezed rows until labels collided with their values at the
+         * 10-foot type sizes. Full width gives the label and the control all the room they need, and the
+         * settings screen is the sanctioned scrolling surface.
+         */
         UVerticalBox *Container = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
         RowList->AddChild(Container);
         CategoryContainers.Add(Container);
 
-        for (const FMythicSettingDefinition &Def : GetRowsForCategory(CatIndex)) {
+        const TArray<FMythicSettingDefinition> CatRows = GetRowsForCategory(CatIndex);
+
+        for (const FMythicSettingDefinition &Def : CatRows) {
+            UVerticalBox *Column = Container;
             const TSubclassOf<UMythicSettingRowBase> RowClass =
                 IsGroupHeading(Def) ? GroupHeadingClass : GetRowClassFor(Def.Control);
             if (!RowClass) {
@@ -116,13 +129,13 @@ void UMythicSettingsScreenBase::BuildScreen() {
             }
             UMythicSettingRowBase *Row = WidgetTree->ConstructWidget<UMythicSettingRowBase>(RowClass);
             Row->SetDefinition(Def, this);
-            UPanelSlot *Added = Container->AddChild(Row);
+            UPanelSlot *Added = Column->AddChild(Row);
             if (UVerticalBoxSlot *VSlot = Cast<UVerticalBoxSlot>(Added)) {
                 // Wide above a heading, tight below it. Every row butted against the next before this, so
                 // five sections read as one long list and the headings looked like rows that had lost
                 // their control.
                 const bool bHeading = IsGroupHeading(Def);
-                const bool bFirst = Container->GetChildrenCount() <= 1;
+                const bool bFirst = Column->GetChildrenCount() <= 1;
                 const UMythicUIStyleSettings &S = FMythicUIStyle::Get();
                 VSlot->SetPadding(FMargin(0.0f, (bHeading && !bFirst) ? S.SectionGap : 0.0f,
                                           0.0f, bHeading ? S.SectionHeadingGap : 0.0f));
@@ -196,7 +209,7 @@ void UMythicSettingsScreenBase::PushChrome() {
 void UMythicSettingsScreenBase::ApplyCategoryVisibility() {
     ActiveRows.Reset();
     for (int32 Index = 0; Index < CategoryContainers.Num(); ++Index) {
-        UVerticalBox *Container = CategoryContainers[Index];
+        UPanelWidget *Container = CategoryContainers[Index];
         if (!Container) {
             continue;
         }
@@ -207,9 +220,15 @@ void UMythicSettingsScreenBase::ApplyCategoryVisibility() {
         if (!bActive) {
             continue;
         }
-        for (UWidget *Child : Container->GetAllChildren()) {
-            if (UMythicSettingRowBase *Row = Cast<UMythicSettingRowBase>(Child)) {
-                ActiveRows.Add(Row);
+        for (UWidget *ColumnWidget : Container->GetAllChildren()) {
+            UVerticalBox *Column = Cast<UVerticalBox>(ColumnWidget);
+            if (!Column) {
+                continue;
+            }
+            for (UWidget *Child : Column->GetAllChildren()) {
+                if (UMythicSettingRowBase *Row = Cast<UMythicSettingRowBase>(Child)) {
+                    ActiveRows.Add(Row);
+                }
             }
         }
     }

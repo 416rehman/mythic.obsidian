@@ -355,6 +355,9 @@ void UInventoryVM::RefreshSlotFromInventory(UMythicInventoryComponent *Inventory
         UE_LOG(Myth, Error, TEXT("Slot %d has no definition for %s's inventory"), AbsoluteIndex, *OwnerName);
         SlotVM->Initialize(Entry.SlottedItemInstance, this, nullptr, AbsoluteIndex);
     }
+
+    // Item changes arrive per slot; without this the used/weight readouts only update on a full rebuild.
+    RefreshAggregates(Inventory);
 }
 
 void UInventoryVM::RefreshAllItemsFromInventory(UMythicInventoryComponent *Inventory) {

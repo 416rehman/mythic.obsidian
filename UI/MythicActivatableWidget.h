@@ -36,6 +36,13 @@ protected:
     virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 
+    /**
+     * A child named FocusRing lights while this widget is anywhere in the focus path. List entries and other
+     * leaf widgets get a visible controller focus state by authoring that one child, no wiring per widget.
+     */
+    virtual void NativeOnAddedToFocusPath(const FFocusEvent &InFocusEvent) override;
+    virtual void NativeOnRemovedFromFocusPath(const FFocusEvent &InFocusEvent) override;
+
 public:
 	UFUNCTION(BlueprintCallable, Category = MythicActivatableWidget)
 	void RegisterInputBinding(FGameplayTag InputTag, EInputEvent InputType, const FInputActionExecutedDelegate& Callback, bool ShowInActionBar, FInputActionBindingHandle& BindingHandle);

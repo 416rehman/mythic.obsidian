@@ -85,6 +85,16 @@ struct FMythicInventoryFastArray : public FFastArraySerializer {
 
     void AddSlot(const FMythicInventorySlotEntry &NewSlot);
 
+    /** Add without the per-slot server notify; pair with NotifyServerBatchAdded after the last add. */
+    void AddSlotSilent(const FMythicInventorySlotEntry &NewSlot);
+
+    /**
+     * One server-side callback for every slot added since StartIndex, matching how replication batches the
+     * same adds for clients. The per-add path rebuilt the local ViewModel once per slot - a hundred-slot
+     * init meant a hundred full rebuilds.
+     */
+    void NotifyServerBatchAdded(int32 StartIndex);
+
     void RemoveSlotAt(int32 Index);
 
     void ModifySlotAtIndex(int32 Index, const TFunction<void(FMythicInventorySlotEntry &SlotData)> &Modifier);

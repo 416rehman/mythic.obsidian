@@ -23,4 +23,8 @@ public:
      */
     UFUNCTION(BlueprintPure, Category = "Mythic|UI", meta = (DisplayName = "Slot Backing Tint"))
     static FLinearColor SlotBackingTint(FSlateColor RarityColor);
+
+    /** The slot's display brush from its view model's already-resolved icon; no-draw while the slot is bare. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|UI", meta = (DisplayName = "Slot Icon Brush"))
+    static FSlateBrush SlotIconBrush(class UItemSlotVM *SlotVM);
 };

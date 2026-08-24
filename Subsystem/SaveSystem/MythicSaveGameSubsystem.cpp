@@ -462,8 +462,8 @@ TArray<FMythicCharacterMetadata> UMythicSaveGameSubsystem::GetCharacterList() {
     return Result;
 }
 
-FString UMythicSaveGameSubsystem::CreateNewCharacter(const FString &DisplayName, const FString &ClassName, bool bHardcore) {
-    FString NewSlotName = FGuid::NewGuid().ToString();
+FString UMythicSaveGameSubsystem::CreateNewCharacter(const FString &DisplayName, const FString &ClassName, bool bHardcore, const FString &ExplicitCharacterID) {
+    const FString NewSlotName = ExplicitCharacterID.IsEmpty() ? FGuid::NewGuid().ToString() : SanitizeSlotName(ExplicitCharacterID);
 
     FMythicCharacterMetadata NewChar;
     NewChar.CharacterID = NewSlotName;
@@ -477,6 +477,16 @@ FString UMythicSaveGameSubsystem::CreateNewCharacter(const FString &DisplayName,
     if (NewSave) {
         NewSave->SaveSlotName = NewSlotName;
         NewSave->CreationTime = NewChar.LastPlayed;
+        NewSave->CharacterData.CharacterID = NewSlotName;
+        NewSave->CharacterData.CharacterName = DisplayName;
+        NewSave->CharacterData.DataVersion = static_cast<int32>(CurrentCharacterSaveVersion);
+
+        TArray<uint8> TempBuffer;
+        FMemoryWriter MemWriter(TempBuffer);
+        FObjectAndNameAsStringProxyArchive Ar(MemWriter, false);
+        NewSave->Serialize(Ar);
+        NewSave->DataChecksum = ComputeChecksum(TempBuffer);
+
         UGameplayStatics::SaveGameToSlot(NewSave, NewSlotName, 0);
     }
 

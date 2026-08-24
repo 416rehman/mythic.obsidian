@@ -26,18 +26,26 @@
 void UMythicNarrativeImportSubsystem::Initialize(FSubsystemCollectionBase &Collection) {
     Super::Initialize(Collection);
 
-    ReloadCommand = IConsoleManager::Get().RegisterConsoleCommand(
-        TEXT("Mythic.ReloadNarrative"),
-        TEXT("Re-scan <ProjectContentDir>/Story for *.json storyline files and rebuild narrative definitions."),
-        FConsoleCommandDelegate::CreateWeakLambda(this, [this]() { ReloadNarrative(); }),
-        ECVF_Default);
+    // Register only when no other instance already owns the name. Two PIE game instances in one editor
+    // process both registering (and later both unregistering) the same command is how a stale pointer walks
+    // the console registry and takes the whole editor down on PIE teardown.
+    if (!IConsoleManager::Get().FindConsoleObject(TEXT("Mythic.ReloadNarrative"))) {
+        ReloadCommand = IConsoleManager::Get().RegisterConsoleCommand(
+            TEXT("Mythic.ReloadNarrative"),
+            TEXT("Re-scan <ProjectContentDir>/Story for *.json storyline files and rebuild narrative definitions."),
+            FConsoleCommandDelegate::CreateWeakLambda(this, [this]() { ReloadNarrative(); }),
+            ECVF_Default);
+    }
 
     ReloadNarrative();
 }
 
 void UMythicNarrativeImportSubsystem::Deinitialize() {
     if (ReloadCommand) {
-        IConsoleManager::Get().UnregisterConsoleObject(ReloadCommand);
+        // Unregister only if our object is still the one registered; a sibling instance may have torn it down.
+        if (IConsoleManager::Get().FindConsoleObject(TEXT("Mythic.ReloadNarrative")) == ReloadCommand) {
+            IConsoleManager::Get().UnregisterConsoleObject(ReloadCommand);
+        }
         ReloadCommand = nullptr;
     }
     ClearBuiltDefinitions();

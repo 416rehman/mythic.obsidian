@@ -10,6 +10,7 @@
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/Abilities/MythicAbilityRollSource.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "GAS/MythicStatContribution.h"
 #include "GAS/MythicGameplayEffectContext.h"
 #include "Knowledge/MythicCodexComponent.h"
 #include "Player/MythicPlayerController.h"
@@ -20,6 +21,8 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_STATUS_DAMAGE, "SetByCaller.Statu
                                "Per-tick damage handed to an authored status effect");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_STATUS_DURATION, "SetByCaller.Status.Duration",
                                "Seconds handed to an authored status effect");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_STATUS_CONTROL_MAGNITUDE, "SetByCaller.Status.ControlMagnitude",
+                               "Rolled control strength (slow/weaken/terrify fraction) handed to a control status effect");
 
 void UMythicStatusRegistry::BuildIndex() {
     const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
@@ -184,6 +187,72 @@ float UMythicStatusRegistry::ResolveApplierBonus(const AActor *Instigator, const
                     : 1.0f + FMath::Max(0.0f, Raw);
 }
 
+float UMythicStatusRegistry::ResolveApplierPowerMultiplier(const AActor *Instigator) {
+    float Power = 0.0f;
+    if (!TryReadApplierStat(Instigator, UMythicAttributeSet_Offense::GetPowerAttribute(), Power)) {
+        return 1.0f;
+    }
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    if (!Settings) {
+        return 1.0f;
+    }
+    // Ride the authored Power -> weapon-damage contribution, so a status's base damage scales with Power exactly as a
+    // weapon roll does - one curve for a designer to tune, and no second convention for Power to drift against.
+    return FMythicStatContributionRules::ApplyToBase(
+        Settings->StatContributions.Contributions, UMythicAttributeSet_Offense::GetDamagePerHitAttribute(), 1.0f,
+        [Power](const FGameplayAttribute &Attr) -> float {
+            return Attr == UMythicAttributeSet_Offense::GetPowerAttribute() ? Power : 0.0f;
+        });
+}
+
+namespace {
+// Walks the active control statuses of one kind on a target and folds their per-application ControlMagnitudes into a
+// single ready-to-multiply factor. Applications that authored no band are ignored here; the caller substitutes the
+// pre-band constant only when none carried a magnitude, so today's flat behaviour holds until content is tuned.
+float CombineControlMagnitudes(const UAbilitySystemComponent *ASC, const FGameplayTag &StateTag, float FallbackMagnitude, bool bBonus) {
+    if (!ASC || !StateTag.IsValid()) {
+        return 1.0f;
+    }
+    const FGameplayEffectQuery Query = FGameplayEffectQuery::MakeQuery_MatchAnyOwningTags(FGameplayTagContainer(StateTag));
+    const TArray<FActiveGameplayEffectHandle> Handles = ASC->GetActiveEffects(Query);
+    if (Handles.Num() == 0) {
+        return 1.0f;
+    }
+
+    float Combined = 1.0f;
+    bool bAnyAuthored = false;
+    for (const FActiveGameplayEffectHandle &Handle : Handles) {
+        const FActiveGameplayEffect *Effect = ASC->GetActiveGameplayEffect(Handle);
+        if (!Effect) {
+            continue;
+        }
+        const float Mag = Effect->Spec.GetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_CONTROL_MAGNITUDE, false, -1.0f);
+        if (Mag < 0.0f) {
+            continue;
+        }
+        bAnyAuthored = true;
+        const float Clamped = FMath::Max(0.0f, Mag);
+        // One application can never fully stop on its own; the stacked product is floored below.
+        Combined *= bBonus ? (1.0f + Clamped) : (1.0f - FMath::Min(Clamped, 0.95f));
+    }
+
+    if (!bAnyAuthored) {
+        const float Base = FMath::Max(0.0f, FallbackMagnitude);
+        return bBonus ? (1.0f + Base) : FMath::Max(0.0f, 1.0f - FMath::Min(Base, 0.95f));
+    }
+    // A slow stack, however deep, always leaves the target a sliver of movement.
+    return bBonus ? Combined : FMath::Max(0.05f, Combined);
+}
+}
+
+float UMythicStatusRegistry::GetControlReductionMultiplier(const UAbilitySystemComponent *TargetASC, FGameplayTag StateTag, float FallbackMagnitude) {
+    return CombineControlMagnitudes(TargetASC, StateTag, FallbackMagnitude, false);
+}
+
+float UMythicStatusRegistry::GetControlBonusMultiplier(const UAbilitySystemComponent *TargetASC, FGameplayTag StateTag, float FallbackMagnitude) {
+    return CombineControlMagnitudes(TargetASC, StateTag, FallbackMagnitude, true);
+}
+
 float UMythicStatusRegistry::RollMagnitudeOrBase(const FRollDefinition &Range, float BaseWhenUnauthored, float Scale, float Roll01) {
     const bool bAuthored = Range.Min > 0.0f || Range.Max > 0.0f;
     if (!bAuthored) {
@@ -213,8 +282,10 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
     const float BaseDuration = CombatSettings ? CombatSettings->StatusBaseDurationSeconds : 5.0f;
 
     // Two applications differ by the roll AND by what the applier has stacked, so a poison build hits harder than
-    // a passer-by inflicting the same poison. The global scale is the one knob that moves every status at once.
+    // a passer-by inflicting the same poison. The global scale is the one knob that moves every status at once, Power
+    // keeps the base pacing with the character, and the applier's per-status bonus rewards specialising into it.
     const float DamageScale = (CombatSettings ? CombatSettings->StatusDamageScale : 1.0f)
+        * ResolveApplierPowerMultiplier(Instigator)
         * ResolveApplierBonus(Instigator, Definition->BonusDamageAttribute);
     const float Damage = RollMagnitudeOrBase(Definition->DamagePerTick, BaseDamage, DamageScale, FMath::FRand());
     if (Damage > 0.0f) {
@@ -225,6 +296,16 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
     const float Duration = RollMagnitudeOrBase(Definition->DurationSeconds, BaseDuration, DurationScale, FMath::FRand());
     if (Duration > 0.0f) {
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_DURATION, Duration);
+    }
+
+    // The control axis - a slow's bite, a weaken's penalty, a terrify's bump - rolled per application and scaled by
+    // the applier's gear. Only handed over when a band is authored; without one the effect keeps its own constant, so
+    // nothing regresses before content is tuned. Consumers apply their own bound (a slow can never reach a full stop).
+    const bool bControlAuthored = Definition->ControlMagnitude.Min > 0.0f || Definition->ControlMagnitude.Max > 0.0f;
+    if (bControlAuthored) {
+        const float ControlScale = ResolveApplierBonus(Instigator, Definition->ControlMagnitudeAttribute);
+        const float ControlMag = RollMagnitudeOrBase(Definition->ControlMagnitude, 0.0f, ControlScale, FMath::FRand());
+        Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_CONTROL_MAGNITUDE, ControlMag);
     }
 
     TargetASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());

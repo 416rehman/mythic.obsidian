@@ -140,6 +140,25 @@ bool FMythicStatusApplierScaleTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("and cannot reach a stun the player cannot act out of"),
              UMythicStatusRegistry::ResolveApplierMultiplier(Applier, StunDuration) < 1.5f);
 
+    // Power lifts a status's base damage through the authored contribution, so a damage-over-time build keeps pace
+    // with the character instead of dealing the same few points at level 200 (issue #115).
+    ASC->SetNumericAttributeBase(UMythicAttributeSet_Offense::GetPowerAttribute(), 0.0f);
+    TestEqual(TEXT("no Power leaves the base unscaled"),
+              UMythicStatusRegistry::ResolveApplierPowerMultiplier(Applier), 1.0f);
+    TestEqual(TEXT("a source with no ability system scales by one"),
+              UMythicStatusRegistry::ResolveApplierPowerMultiplier(Bare), 1.0f);
+
+    ASC->SetNumericAttributeBase(UMythicAttributeSet_Offense::GetPowerAttribute(), 100.0f);
+    const float PowerMult = UMythicStatusRegistry::ResolveApplierPowerMultiplier(Applier);
+    TestTrue(TEXT("Power raises status base damage"), PowerMult > 1.0f);
+
+    ASC->SetNumericAttributeBase(UMythicAttributeSet_Offense::GetPowerAttribute(), 400.0f);
+    const float MorePower = UMythicStatusRegistry::ResolveApplierPowerMultiplier(Applier);
+    TestTrue(TEXT("more Power is more status damage"), MorePower > PowerMult);
+    // Same authored curve as a weapon roll, so it decelerates rather than running away.
+    TestTrue(TEXT("Power's status contribution decelerates as it stacks"),
+             (MorePower - 1.0f) < 4.0f * (PowerMult - 1.0f));
+
     return true;
 }
 

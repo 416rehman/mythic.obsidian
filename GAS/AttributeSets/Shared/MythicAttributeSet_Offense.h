@@ -63,6 +63,10 @@ protected:
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_ApplyTerrifyOnHitChance)
     FGameplayAttributeData ApplyTerrifyOnHitChance;
 
+    // Strengthens applied control statuses (slow, weaken, terrify) - the applier stat their rolled magnitude scales by
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_ControlPotency)
+    FGameplayAttributeData ControlPotency;
+
     // Increase damage from skills - If a skill was used to deal damage, this attribute increases the damage dealt
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BonusSkillDamage)
     FGameplayAttributeData BonusSkillDamage;
@@ -170,6 +174,7 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, ApplyStunOnHitChance);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, ApplyWeakenOnHitChance);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, ApplyTerrifyOnHitChance);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, ControlPotency);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusSkillDamage);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusSwordDamage);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusAxeDamage);
@@ -229,6 +234,8 @@ public:
     virtual void OnRep_ApplyWeakenOnHitChance(const FGameplayAttributeData &OldApplyWeakenOnHitChance);
     UFUNCTION()
     virtual void OnRep_ApplyTerrifyOnHitChance(const FGameplayAttributeData &OldApplyTerrifyOnHitChance);
+    UFUNCTION()
+    virtual void OnRep_ControlPotency(const FGameplayAttributeData &OldControlPotency);
     UFUNCTION()
     virtual void OnRep_BonusSkillDamage(const FGameplayAttributeData &OldBonusSkillDamage);
     UFUNCTION()

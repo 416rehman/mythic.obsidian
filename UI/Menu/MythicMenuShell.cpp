@@ -4,10 +4,12 @@
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
+#include "Animation/WidgetAnimation.h"
 #include "CommonActivatableWidgetSwitcher.h"
 #include "CommonTabListWidgetBase.h"
 #include "CommonButtonBase.h"
 #include "CommonTextBlock.h"
+#include "Components/Image.h"
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
@@ -139,6 +141,16 @@ void UMythicMenuShell::RegisterTabs() {
                 UE_LOG(Myth, Warning, TEXT("MenuShell: tab button for '%s' has no text widget named '%s'; its label is unset."),
                        *Page.PageId.ToString(), *TabLabelWidgetName.ToString());
             }
+
+            if (UImage *Emblem = Cast<UImage>(TabButton->GetWidgetFromName(TabIconWidgetName))) {
+                if (UTexture2D *Icon = Page.TabIcon.LoadSynchronous()) {
+                    Emblem->SetBrushFromTexture(Icon, false);
+                    Emblem->SetVisibility(ESlateVisibility::HitTestInvisible);
+                }
+                else {
+                    Emblem->SetVisibility(ESlateVisibility::Collapsed);
+                }
+            }
         }
     }
 
@@ -170,6 +182,9 @@ bool UMythicMenuShell::IsPageUnlocked(const FMythicMenuPage &Page) const {
 void UMythicMenuShell::NativeOnActivated() {
     Super::NativeOnActivated();
     OpenPage(ActivePageId.IsNone() ? DefaultPageId : ActivePageId);
+    if (IntroAnim) {
+        PlayAnimation(IntroAnim);
+    }
 }
 
 void UMythicMenuShell::NativeOnDeactivated() {

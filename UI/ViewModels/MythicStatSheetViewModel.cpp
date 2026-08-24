@@ -3,6 +3,7 @@
 #include "MythicStatSheetViewModel.h"
 #include "Settings/MythicCombatSettings.h"
 #include "GAS/MythicStatContribution.h"
+#include "GAS/MythicStatSummary.h"
 #include "Itemization/InventoryProviderInterface.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
@@ -167,6 +168,7 @@ void UMythicStatSheetViewModel::Rebuild() {
     UAbilitySystemComponent *A = ASC.Get();
     if (!A) {
         SetSections({});
+        SetSummaries({});
         SetModifiedStatCount(0);
         return;
     }
@@ -203,6 +205,7 @@ void UMythicStatSheetViewModel::Rebuild() {
 
         FMythicStatLine Line;
         Line.Label = FText::FromString(Rule.Label);
+        Line.Attribute = Attr;
         Line.Category = Rule.Category;
         Line.Format = Rule.Format;
         Line.SortOrder = Rule.SortOrder;
@@ -273,13 +276,50 @@ void UMythicStatSheetViewModel::Rebuild() {
         NewSections.Add(MoveTemp(Section));
     }
 
+    TArray<FMythicStatSummaryLine> NewSummaries;
+    if (const UMythicStatSummaryLibrary *Library = ResolveSummaryLibrary()) {
+        NewSummaries.Reserve(Library->Summaries.Num());
+        for (const UMythicStatSummaryDefinition *Definition : Library->Summaries) {
+            if (!Definition) {
+                continue;
+            }
+            FMythicStatSummaryLine Card;
+            Card.SummaryId = Definition->SummaryId;
+            Card.Label = Definition->Label;
+            Card.Description = Definition->Description;
+            Card.Icon = Definition->Icon;
+            Card.RawValue = Definition->Compute(A);
+            Card.Value = MythicStatDisplay::FormatValue(Card.RawValue, Definition->Format);
+            NewSummaries.Add(MoveTemp(Card));
+        }
+    }
+
     SetSections(MoveTemp(NewSections));
+    SetSummaries(MoveTemp(NewSummaries));
     SetModifiedStatCount(ModifiedCount);
+}
+
+const UMythicStatSummaryLibrary *UMythicStatSheetViewModel::ResolveSummaryLibrary() {
+    if (SummaryLibrary || bSummaryLibraryTried) {
+        return SummaryLibrary;
+    }
+    bSummaryLibraryTried = true;
+    if (const UMythicStatDisplaySettings *Settings = GetDefault<UMythicStatDisplaySettings>()) {
+        if (!Settings->SummaryLibrary.IsNull()) {
+            SummaryLibrary = Settings->SummaryLibrary.LoadSynchronous();
+        }
+    }
+    return SummaryLibrary;
 }
 
 void UMythicStatSheetViewModel::SetSections(TArray<FMythicStatSection> &&In) {
     Sections = MoveTemp(In);
     UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Sections);
+}
+
+void UMythicStatSheetViewModel::SetSummaries(TArray<FMythicStatSummaryLine> &&In) {
+    Summaries = MoveTemp(In);
+    UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Summaries);
 }
 
 void UMythicStatSheetViewModel::SetModifiedStatCount(int32 In) {

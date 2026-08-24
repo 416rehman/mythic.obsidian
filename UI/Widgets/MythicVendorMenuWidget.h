@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "FieldNotification/FieldId.h"
+#include "FieldNotificationId.h"
 #include "MythicVendorMenuWidget.generated.h"
 
 class AMythicPlayerController;

@@ -4,19 +4,25 @@
 
 #include "CoreMinimal.h"
 #include "CommonActivatableWidget.h"
-#include "FieldNotification/FieldId.h"
+#include "FieldNotificationId.h"
+#include "UI/ViewModels/MythicStatDisplay.h"
 #include "MythicStatSheetWidget.generated.h"
 
 class UMythicStatSheetViewModel;
+class UBorder;
 class UHorizontalBox;
 class UImage;
-class UOverlay;
+class UVerticalBox;
 class UPanelWidget;
 class UTextBlock;
 
 USTRUCT()
 struct FMythicStatRowWidgets {
     GENERATED_BODY()
+
+    /** The row's plate and its one hit-taking node. Draws nothing for derived rows, the kit plate for primaries. */
+    UPROPERTY()
+    TObjectPtr<UBorder> Backing;
 
     UPROPERTY()
     TObjectPtr<UHorizontalBox> Box;
@@ -25,7 +31,7 @@ struct FMythicStatRowWidgets {
     TObjectPtr<UTextBlock> Label;
 
     UPROPERTY()
-    TObjectPtr<UOverlay> ValueBox;
+    TObjectPtr<UVerticalBox> ValueBox;
 
     UPROPERTY()
     TObjectPtr<UImage> Bar;
@@ -35,6 +41,57 @@ struct FMythicStatRowWidgets {
 
     UPROPERTY()
     TObjectPtr<UTextBlock> Bonus;
+};
+
+USTRUCT()
+struct FMythicSummaryCardWidgets {
+    GENERATED_BODY()
+
+    UPROPERTY()
+    TObjectPtr<UBorder> Plate;
+
+    UPROPERTY()
+    TObjectPtr<UImage> Icon;
+
+    UPROPERTY()
+    TObjectPtr<UTextBlock> Value;
+
+    UPROPERTY()
+    TObjectPtr<UTextBlock> Label;
+};
+
+USTRUCT()
+struct FMythicStatTooltipLineWidgets {
+    GENERATED_BODY()
+
+    UPROPERTY()
+    TObjectPtr<UHorizontalBox> Box;
+
+    UPROPERTY()
+    TObjectPtr<UTextBlock> Label;
+
+    UPROPERTY()
+    TObjectPtr<UTextBlock> Value;
+
+    UPROPERTY()
+    TObjectPtr<UTextBlock> Diminished;
+};
+
+USTRUCT()
+struct FMythicStatTooltipWidgets {
+    GENERATED_BODY()
+
+    UPROPERTY()
+    TObjectPtr<UBorder> Plate;
+
+    UPROPERTY()
+    TObjectPtr<UVerticalBox> Lines;
+
+    UPROPERTY()
+    TObjectPtr<UTextBlock> Title;
+
+    UPROPERTY()
+    TArray<FMythicStatTooltipLineWidgets> LinePool;
 };
 
 UCLASS()
@@ -56,7 +113,7 @@ protected:
     virtual void NativeOnDeactivated() override;
     virtual void SetVisibility(ESlateVisibility InVisibility) override;
 
-    /** Rows are added here. The shipped Blueprint uses the VerticalBox inside its ScrollBox. */
+    /** Rows are added here, top to bottom. The shipped Blueprint uses the VerticalBox in its ScrollBox. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UPanelWidget> StatList;
 
@@ -64,34 +121,44 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> SummaryText;
 
+    /** The headline card rail, above the list. Absent from the Blueprint means no cards, never an error. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UPanelWidget> SummaryCards;
+
     /** One font for every row. A single size keeps the whole sheet inside one font-atlas entry. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
     FSlateFontInfo RowFont;
 
+    /** Primaries read one step larger. The second — and last — atlas entry the sheet pays for. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
-    FSlateFontInfo HeadingFont;
+    FSlateFontInfo PrimaryRowFont;
 
+    /** Sections that start closed. Later drawers a player opens on demand, not walls they scroll past. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
-    FLinearColor HeadingColor = FLinearColor(0.381326f, 0.234551f, 0.088656f, 1.0f);
-
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
-    FLinearColor LabelColor = FLinearColor(0.72f, 0.66f, 0.55f, 1.0f);
-
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
-    FLinearColor ValueColor = FLinearColor(0.94f, 0.90f, 0.82f, 1.0f);
-
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
-    FLinearColor BonusColor = FLinearColor(0.45f, 0.72f, 0.42f, 1.0f);
-
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
-    FLinearColor PenaltyColor = FLinearColor(0.78f, 0.35f, 0.30f, 1.0f);
+    TArray<EMythicStatCategory> DefaultCollapsedSections = {
+        EMythicStatCategory::Utility, EMythicStatCategory::Survival, EMythicStatCategory::Proficiency};
 
     /**
-     * Space above each category heading. Without it the sheet is one unbroken column of ~30 lines and a player
-     * cannot see where Vitality ends and Offense begins.
+     * The house section header, shared with every other screen.
+     *
+     * The sheet used to draw its own: a stat row re-texted in its own font and colour. That made a third
+     * heading style beside the settings screen's and the header component's, so three screens announcing a
+     * group looked like three products.
      */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats", meta = (ClampMin = "0"))
-    float HeadingTopPadding = 10.0f;
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
+    TSubclassOf<class UMythicSectionHeader> SectionHeaderClass;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
+    FLinearColor LabelColor = FLinearColor(0.910f, 0.886f, 0.839f, 0.80f);
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
+    FLinearColor ValueColor = FLinearColor(0.910f, 0.886f, 0.839f, 1.0f);
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
+    FLinearColor BonusColor = FLinearColor(0.788f, 0.663f, 0.416f, 1.0f);
+
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
+    FLinearColor PenaltyColor = FLinearColor(0.651f, 0.357f, 0.294f, 1.0f);
 
     /**
      * Rows built up front at construct. Widget creation is a frame spike, so the pool is filled once and then only
@@ -111,14 +178,46 @@ private:
 
     void SetRowGap(FMythicStatRowWidgets &Row, float TopGap);
 
-    void ApplyHeading(FMythicStatRowWidgets &Row, const FText &Heading);
+    class UMythicSectionHeader *GetOrCreateHeader(int32 Index);
+
+    /** Re-parents pooled widgets only when the section shape changed - child order is the costliest invalidation. */
+    void ReorderIfShapeChanged(const TArray<int32> &NewShape);
     void ApplyLine(FMythicStatRowWidgets &Row, const struct FMythicStatLine &Line);
+
+    void BuildSummaryCardPool();
+    void BuildTooltipPool();
+    void ApplySummaries();
+    void ApplyPrimaryTooltip(FMythicStatRowWidgets &Row, const struct FMythicStatLine &Line);
+
+    UFUNCTION()
+    void HandleSectionToggled(class UMythicSectionHeader *Header);
 
     UPROPERTY()
     TObjectPtr<UMythicStatSheetViewModel> ViewModel;
 
     UPROPERTY()
     TArray<FMythicStatRowWidgets> RowPool;
+
+    UPROPERTY()
+    TArray<TObjectPtr<class UMythicSectionHeader>> HeaderPool;
+
+    UPROPERTY()
+    TArray<FMythicSummaryCardWidgets> CardPool;
+
+    UPROPERTY()
+    TArray<FMythicStatTooltipWidgets> TooltipPool;
+
+    /** Line count per section as last built. Same shape means re-text only. */
+    TArray<int32> Shape;
+
+    /** Category behind each pooled header, rebuilt every Rebuild, so a header click knows its drawer. */
+    TArray<EMythicStatCategory> HeaderCategories;
+
+    TSet<EMythicStatCategory> CollapsedSections;
+
+    int32 UsedPrimaryTooltips = 0;
+
+    bool bCollapseInitialized = false;
 
     bool bBound = false;
 };

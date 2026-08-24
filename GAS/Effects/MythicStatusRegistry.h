@@ -13,6 +13,7 @@
 // Magnitudes an authored status effect reads so the same effect can carry a different number per application.
 MYTHIC_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_STATUS_DAMAGE);
 MYTHIC_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_STATUS_DURATION);
+MYTHIC_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_STATUS_CONTROL_MAGNITUDE);
 
 class UAbilitySystemComponent;
 class UMythicStatusEffectDefinition;
@@ -70,6 +71,24 @@ public:
     static float ResolveApplierMultiplier(const AActor *Instigator, const FGameplayAttribute &Attribute);
 
     static float ResolveApplierBonus(const AActor *Instigator, const FGameplayAttribute &Attribute);
+
+    /**
+     * How much the applier's Power lifts a status's base damage, through the same authored contribution a weapon
+     * roll rides. Returns 1.0 for a source with no Power (a trap, a hazard, a scripted tick), so those still deal
+     * their authored band. This is what keeps a damage-over-time build's ticks scaling with the character instead
+     * of dealing the same few points at level 200.
+     */
+    static float ResolveApplierPowerMultiplier(const AActor *Instigator);
+
+    /**
+     * The combined strength of every active control status of one kind on a target, read from the per-application
+     * ControlMagnitude each carries, returned as a ready-to-multiply factor. Reductions (slow, weaken) stack
+     * multiplicatively and are floored so they can never reach a full stop; bonuses (terrify) stack the same way
+     * upward. When no active application carries a magnitude the pre-band constant is used once, so nothing
+     * regresses before a band is authored. Returns 1.0 when the target carries no status of this kind.
+     */
+    static float GetControlReductionMultiplier(const UAbilitySystemComponent *TargetASC, FGameplayTag StateTag, float FallbackMagnitude);
+    static float GetControlBonusMultiplier(const UAbilitySystemComponent *TargetASC, FGameplayTag StateTag, float FallbackMagnitude);
 
     // Shared by both: the applier's raw stat value, or a sentinel when there is no stat to read.
     static bool TryReadApplierStat(const AActor *Instigator, const FGameplayAttribute &Attribute, float &OutRaw);

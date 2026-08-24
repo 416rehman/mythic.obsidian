@@ -9,6 +9,7 @@
 
 class UAbilitySystemComponent;
 class UMythicAttributeSet;
+class UMythicStatSummaryLibrary;
 
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicStatSection {
@@ -78,6 +79,15 @@ public:
         return Sections;
     }
 
+    // The headline cards — Damage / Toughness / Recovery-style — from the configured summary library, computed
+    // against the live ASC. Empty when no library is configured, so the cards section simply does not exist.
+    UPROPERTY(BlueprintReadOnly, FieldNotify, Getter, meta = (AllowPrivateAccess))
+    TArray<FMythicStatSummaryLine> Summaries;
+
+    const TArray<FMythicStatSummaryLine> &GetSummaries() const {
+        return Summaries;
+    }
+
     // How many stats your gear, talents and buffs are currently changing. Drives a "12 stats modified" summary line —
     // a single number that tells a player their build is doing something before they read any of it.
     UPROPERTY(BlueprintReadOnly, FieldNotify, Getter, meta = (AllowPrivateAccess))
@@ -97,9 +107,17 @@ private:
     void Rebuild();
 
     void SetSections(TArray<FMythicStatSection> &&In);
+    void SetSummaries(TArray<FMythicStatSummaryLine> &&In);
     void SetModifiedStatCount(int32 In);
 
+    const UMythicStatSummaryLibrary *ResolveSummaryLibrary();
+
     TWeakObjectPtr<UAbilitySystemComponent> ASC;
+
+    UPROPERTY()
+    TObjectPtr<const UMythicStatSummaryLibrary> SummaryLibrary;
+
+    bool bSummaryLibraryTried = false;
 
     static void GatherGearContributions(const UAbilitySystemComponent *InASC,
                                         TMap<FGameplayAttribute, float> &OutByAttribute);

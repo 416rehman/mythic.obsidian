@@ -11,21 +11,37 @@
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_IMMUNE_HARDCC);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_CCIMMUNE_DURATION);
 
-USTRUCT()
+// How hard one enemy tier resists repeat crowd control. CC feel is among the most-retuned numbers in an ARPG, so
+// these are authored data (a per-tier row in Mythic Combat settings), never a constant in C++.
+USTRUCT(BlueprintType)
 struct FMythicCcEscalationConfig {
     GENERATED_BODY()
 
-    UPROPERTY()
+    // Each repeat CC within the window raises the buildup threshold by this fraction (0.25 = +25% per stack).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CrowdControl", meta = (ClampMin = "0.0"))
     float ThresholdEscalationStep = 0.25f;
 
-    UPROPERTY()
+    // Reaching this many triggers within the window grants hard-CC immunity instead of applying the status.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CrowdControl", meta = (ClampMin = "1"))
     int32 ImmunityTriggerCount = 8;
 
-    UPROPERTY()
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CrowdControl", meta = (ClampMin = "0.0"))
     float RollingWindowSeconds = 6.0f;
 
-    UPROPERTY()
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CrowdControl", meta = (ClampMin = "0.0"))
     float ImmuneSeconds = 2.0f;
+};
+
+// One authored row of the CC escalation ladder: the tier (AI tier as an int, 1..5) and how it resists.
+USTRUCT(BlueprintType)
+struct FMythicCcTierEscalation {
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CrowdControl", meta = (ClampMin = "1"))
+    int32 Tier = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CrowdControl")
+    FMythicCcEscalationConfig Config;
 };
 
 USTRUCT()
@@ -84,42 +100,16 @@ struct FMythicCrowdControlRules {
         return Out;
     }
 
-    static FMythicCcEscalationConfig ConfigForTier(int32 EnemyTierInt) {
-        FMythicCcEscalationConfig Cfg;
-        switch (EnemyTierInt) {
-            case 5:
-                Cfg.ThresholdEscalationStep = 1.0f;
-                Cfg.ImmunityTriggerCount = 2;
-                Cfg.RollingWindowSeconds = 12.0f;
-                Cfg.ImmuneSeconds = 8.0f;
-                break;
-            case 4:
-                Cfg.ThresholdEscalationStep = 0.75f;
-                Cfg.ImmunityTriggerCount = 3;
-                Cfg.RollingWindowSeconds = 10.0f;
-                Cfg.ImmuneSeconds = 6.0f;
-                break;
-            case 3:
-                Cfg.ThresholdEscalationStep = 0.5f;
-                Cfg.ImmunityTriggerCount = 4;
-                Cfg.RollingWindowSeconds = 10.0f;
-                Cfg.ImmuneSeconds = 5.0f;
-                break;
-            case 2:
-                Cfg.ThresholdEscalationStep = 0.35f;
-                Cfg.ImmunityTriggerCount = 6;
-                Cfg.RollingWindowSeconds = 8.0f;
-                Cfg.ImmuneSeconds = 3.5f;
-                break;
-            case 1:
-            default:
-                Cfg.ThresholdEscalationStep = 0.25f;
-                Cfg.ImmunityTriggerCount = 8;
-                Cfg.RollingWindowSeconds = 6.0f;
-                Cfg.ImmuneSeconds = 2.0f;
-                break;
+    // The escalation rules for an enemy tier, read from the authored table. An unlisted tier falls back to the
+    // gentlest defaults (the struct's own initialisers) rather than resisting nothing, so a new tier is playable
+    // before it is tuned.
+    static FMythicCcEscalationConfig ConfigForTier(TConstArrayView<FMythicCcTierEscalation> Table, int32 EnemyTierInt) {
+        for (const FMythicCcTierEscalation &Row : Table) {
+            if (Row.Tier == EnemyTierInt) {
+                return Row.Config;
+            }
         }
-        return Cfg;
+        return FMythicCcEscalationConfig();
     }
 };
 

@@ -11,12 +11,16 @@
 #include "Engine/LocalPlayer.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Engine/Texture2D.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
+#include "TimerManager.h"
 #include "UI/MythicHUDLayout.h"
 #include "UI/MythicUIStyle.h"
 #include "UI/WarMap/MythicCompass.h"
 #include "UI/WarMap/MythicWarMapSubsystem.h"
 #include "UObject/UObjectIterator.h"
+#include "World/Feedback/MythicRegionTrackerComponent.h"
 
 
 namespace {
@@ -105,23 +109,27 @@ void UMythicCompassWidget::NativeConstruct() {
     Super::NativeConstruct();
 
     if (UImage *Plate = Cast<UImage>(GetWidgetFromName(TEXT("Plate")))) {
-        if (UMaterialInterface *Rod = Compass_LoadMaterial(Compass_RodPath)) {
+        // The rail is a static bronze band texture; the cardinal marks scroll on the Strip canvas above it
+        // (see UpdateStrip / CompassStripX). The old material instance was mis-parented to M_UI_ItemSlot and
+        // drew a flat grey bar, so the compass read as an unfinished placeholder.
+        static const FSoftObjectPath BandPath(
+            TEXT("/Game/Mythic/UI/Globals/textures/T_UI_CompassBand.T_UI_CompassBand"));
+        if (UTexture2D *Band = Cast<UTexture2D>(BandPath.TryLoad())) {
             FSlateBrush Brush = Plate->GetBrush();
-            Brush.SetResourceObject(Rod);
+            Brush.SetResourceObject(Band);
             Brush.DrawAs = ESlateBrushDrawType::Image;
             Brush.TintColor = FSlateColor(FLinearColor::White);
             Plate->SetBrush(Brush);
             Plate->SetVisibility(ESlateVisibility::HitTestInvisible);
-            RodMID = Plate->GetDynamicMaterial();
-            if (RodMID) {
-                RodMID->SetScalarParameterValue(Compass_HalfArcParam, HalfArcDegrees);
-            }
         }
     }
 
     if (UMythicHUDLayout *Layout = FindHUDLayout()) {
         if (Txt_Bearing) {
             Layout->RegisterHUDElement(Txt_Bearing, EMythicHUDSalience::Hidden);
+        }
+        if (Txt_Region) {
+            Layout->RegisterHUDElement(Txt_Region, EMythicHUDSalience::Dim);
         }
     }
 
@@ -132,6 +140,7 @@ void UMythicCompassWidget::NativeConstruct() {
         }
     }
     RefreshMarkers();
+    BindRegionTracker();
 }
 
 void UMythicCompassWidget::NativeDestruct() {
@@ -141,9 +150,18 @@ void UMythicCompassWidget::NativeDestruct() {
         }
         bBoundToWarMap = false;
     }
+    if (const UWorld *World = GetWorld()) {
+        World->GetTimerManager().ClearTimer(RegionBindTimer);
+    }
+    if (UMythicRegionTrackerComponent *Tracker = RegionTracker.Get()) {
+        Tracker->OnRegionDangerChanged.RemoveDynamic(this, &UMythicCompassWidget::HandleRegionChanged);
+    }
     if (UMythicHUDLayout *Layout = HUDLayout.Get()) {
         if (Txt_Bearing) {
             Layout->UnregisterHUDElement(Txt_Bearing);
+        }
+        if (Txt_Region) {
+            Layout->UnregisterHUDElement(Txt_Region);
         }
     }
     Super::NativeDestruct();
@@ -151,6 +169,55 @@ void UMythicCompassWidget::NativeDestruct() {
 
 void UMythicCompassWidget::HandleWarMapChanged() {
     RefreshMarkers();
+}
+
+void UMythicCompassWidget::BindRegionTracker() {
+    constexpr int32 MaxRegionBindAttempts = 20;
+
+    if (!Txt_Region) {
+        return;
+    }
+    const APlayerController *PC = GetOwningPlayer();
+    const APlayerState *PS = PC ? PC->PlayerState : nullptr;
+    UMythicRegionTrackerComponent *Tracker = PS ? PS->FindComponentByClass<UMythicRegionTrackerComponent>() : nullptr;
+    if (!Tracker) {
+        // The component reaches the client after the PlayerState replicates; the widget can construct first.
+        if (UWorld *World = GetWorld(); World && ++RegionBindAttempts <= MaxRegionBindAttempts) {
+            World->GetTimerManager().SetTimer(RegionBindTimer, FTimerDelegate::CreateWeakLambda(this, [this]() {
+                BindRegionTracker();
+            }), 0.25f, false);
+        }
+        return;
+    }
+
+    RegionTracker = Tracker;
+    Tracker->OnRegionDangerChanged.AddDynamic(this, &UMythicCompassWidget::HandleRegionChanged);
+    // The initial replication never broadcasts, so the first readout must be pulled, not pushed.
+    ApplyRegion(Tracker->GetCurrentRegionName(), Tracker->GetCurrentDangerTier());
+}
+
+void UMythicCompassWidget::ApplyRegion(const FText &Region, EMythicDangerTier Tier) const {
+    if (!Txt_Region) {
+        return;
+    }
+    Txt_Region->SetText(Region);
+    Txt_Region->SetColorAndOpacity(FSlateColor(DangerColourForTier(Tier)));
+}
+
+FLinearColor UMythicCompassWidget::DangerColourForTier(EMythicDangerTier Tier) const {
+    for (const FMythicCompassDangerStyle &Style : DangerStyles) {
+        if (Style.Tier == Tier) {
+            return Style.Colour;
+        }
+    }
+    return FLinearColor::White;
+}
+
+void UMythicCompassWidget::HandleRegionChanged(FText Region, EMythicDangerTier Tier) {
+    ApplyRegion(Region, Tier);
+    if (UMythicHUDLayout *Layout = FindHUDLayout()) {
+        Layout->PokeElement(this);
+    }
 }
 
 UMythicWarMapSubsystem *UMythicCompassWidget::GetWarMap() const {
@@ -508,6 +575,16 @@ void UMythicCompassWidget::NativeTick(const FGeometry &MyGeometry, float InDelta
             if (Bearing != LastPrintedBearing) {
                 LastPrintedBearing = Bearing;
                 Txt_Bearing->SetText(FText::FromString(FString::Printf(TEXT("%03d"), Bearing)));
+            }
+        }
+    }
+
+    if (Txt_Region) {
+        if (UMythicHUDLayout *Layout = FindHUDLayout()) {
+            const bool bLit = Layout->GetElementSalience(this) == EMythicHUDSalience::Lit;
+            if (bLit != bLastRegionLit) {
+                bLastRegionLit = bLit;
+                Layout->SetElementSalience(Txt_Region, bLit ? EMythicHUDSalience::Lit : EMythicHUDSalience::Dim);
             }
         }
     }

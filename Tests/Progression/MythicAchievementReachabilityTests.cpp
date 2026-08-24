@@ -134,3 +134,70 @@ bool FMythicAchievementReachabilityTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("at least one achievement threshold was checked"), Checked > 0);
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicStatCounterReachabilityTest,
+    "Mythic.Progression.StatCounterReachability",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicStatCounterReachabilityTest::RunTest(const FString &Parameters) {
+    FString Source;
+    if (!MythicTest::LoadModuleSource(Source)) {
+        AddInfo(TEXT("Module source not present; skipping recorder check."));
+        return true;
+    }
+    if (!TestTrue(TEXT("module source loaded, or every counter would look unrecorded"), Source.Len() > 10000)) {
+        return false;
+    }
+    TestTrue(TEXT("the scan finds a known recorder"), Source.Contains(TEXT("RecordStat(STAT_KILL_GENERIC")));
+
+    // Counters with no producer yet. A merciful or violent act is undefined until the deed system exists, so these
+    // are dead by design, not by omission. Listed explicitly so a NEW counter added without a recorder fails this
+    // test instead of joining a silent graveyard. Drop an entry the moment it earns a RecordStat site.
+    const TSet<FString> KnownUnproduced = {TEXT("Stat.Deed.Mercy"), TEXT("Stat.Deed.Violence")};
+
+    const UGameplayTagsManager &Tags = UGameplayTagsManager::Get();
+    FGameplayTagContainer AllTags;
+    Tags.RequestAllGameplayTags(AllTags, false);
+
+    int32 Checked = 0;
+    for (const FGameplayTag &Tag : AllTags) {
+        const FString Name = Tag.ToString();
+        if (!Name.StartsWith(TEXT("Stat."))) {
+            continue;
+        }
+        // Stat.Summary.* are the stat sheet's headline-card identities, computed on read - not ledger
+        // counters, so nothing should ever RecordStat them.
+        if (Name.StartsWith(TEXT("Stat.Summary."))) {
+            continue;
+        }
+        // A counter is a leaf. Stat.Trade is a category over Stat.Trade.Profit and friends, not a recorded number.
+        if (Tags.RequestGameplayTagChildren(Tag).Num() > 0) {
+            continue;
+        }
+
+        const bool bRecorded = MythicTest::HasRecorderFor(Source, Tag);
+        if (KnownUnproduced.Contains(Name)) {
+            // Keep the exclusion honest: if one of these quietly gains a recorder, this fails so the list is trimmed.
+            TestFalse(*FString::Printf(TEXT("known-unproduced %s is still unrecorded (remove it from the list once it has a producer)"), *Name),
+                      bRecorded);
+            continue;
+        }
+
+        ++Checked;
+        // The failure this guards: a registered counter nothing writes reads zero forever, so any threshold on it
+        // silently never passes and any content gated behind it is unreachable, with no error at runtime.
+        TestTrue(*FString::Printf(TEXT("registered counter %s has a RecordStat site (or belongs on the known-unproduced list)"), *Name),
+                 bRecorded);
+    }
+
+    // Guard the exclusion list itself against rot: a stale entry naming a counter that no longer exists would mask
+    // a future real counter of the same name.
+    for (const FString &Name : KnownUnproduced) {
+        TestTrue(*FString::Printf(TEXT("known-unproduced entry %s names a registered counter"), *Name),
+                 Tags.RequestGameplayTag(FName(*Name), false).IsValid());
+    }
+
+    TestTrue(TEXT("the walk actually found live counters to check"), Checked >= 10);
+    return true;
+}

@@ -1352,7 +1352,6 @@ void AMythicPlayerController::CheckZoneEntry() {
         LastSettlementId = NewSettlementId;
         if (NewSettlementId != INDEX_NONE) {
             DiscoveredSettlements.Add(NewSettlementId);
-            ClientNotifyZoneEntry(Data.DisplayName);
         }
     }
 
@@ -1503,9 +1502,6 @@ void AMythicPlayerController::ClientNotifyFastTravelRefused_Implementation(const
     Notice.Accent = FLinearColor(0.85f, 0.70f, 0.30f);
     Notice.StackKey = FName(TEXT("FastTravelRefused"));
     RaiseHudNotice(Notice);
-}
-
-void AMythicPlayerController::ClientNotifyZoneEntry_Implementation(const FText &SettlementName) {
 }
 
 void AMythicPlayerController::ClientNotifyStatusLearned_Implementation(const FText &StatusName, const FText &Description,

@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "FieldNotification/FieldId.h"
+#include "FieldNotificationId.h"
 #include "MythicBarWidget.generated.h"
 
 class UImage;

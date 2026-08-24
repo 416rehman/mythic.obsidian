@@ -11,6 +11,7 @@ class UCommonActivatableWidgetSwitcher;
 class UCommonButtonBase;
 class UMythicInputGlyph;
 class UCommonTabListWidgetBase;
+class UTexture2D;
 class UCommonTextBlock;
 class UTextBlock;
 
@@ -24,6 +25,10 @@ struct FMythicMenuPage {
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Menu")
     FText TabLabel;
+
+    /** Emblem drawn on the tab. A strip of emblems reads at a glance where a strip of words has to be parsed. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Menu")
+    TSoftObjectPtr<UTexture2D> TabIcon;
 
     /** The screen itself. Every page is a CommonActivatableWidget so the switcher can deactivate the ones off screen. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Menu")
@@ -98,6 +103,10 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UCommonTabListWidgetBase> TabList;
 
+    /** Played once when the menu opens - a fade + subtle scale-up so the shell arrives rather than pops in. */
+    UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
+    TObjectPtr<class UWidgetAnimation> IntroAnim;
+
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UCommonActivatableWidgetSwitcher> ContentSwitcher;
 
@@ -147,6 +156,10 @@ protected:
      */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Menu")
     FName TabLabelWidgetName = TEXT("Text_ActionName");
+
+    /** Name of the image inside the tab button that carries the page emblem. */
+    UPROPERTY(EditDefaultsOnly, Category = "Menu")
+    FName TabIconWidgetName = TEXT("Img_Emblem");
 
 private:
     void BuildPages();

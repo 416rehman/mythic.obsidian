@@ -117,6 +117,10 @@ public:
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     int32 Value = 0;
 
+    // stack count as display text: empty at 0 or 1 so single items carry no badge
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
+    FText QuantityText;
+
     void SetIcon(UTexture2D *InIcon);
     UTexture2D *GetIcon() const;
 
@@ -169,6 +173,8 @@ public:
     float GetWeight() const;
     void SetValue(int32 InValue);
     int32 GetValue() const;
+    void SetQuantityText(FText InQuantityText);
+    FText GetQuantityText() const;
 
     void Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *InParentVM, UInventorySlotDefinition *InSlotDefinition, int32 InAbsoluteIndex);
 

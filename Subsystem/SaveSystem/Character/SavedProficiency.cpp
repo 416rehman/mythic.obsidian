@@ -50,6 +50,10 @@ void FSerializedProficiencyHelper::Deserialize(UProficiencyComponent *Component,
         return;
     }
 
+    // The authored defaults survive the load: a save knows the XP of the tracks it recorded, never the roster.
+    // Replacing the roster with the save's list made every track vanish for a fresh character (empty stub save)
+    // and would silently drop any proficiency added to the game after a save was written.
+    TArray<FProficiency> Authored = MoveTemp(Component->Proficiencies);
     Component->Proficiencies.Empty();
 
     for (const FSerializedProficiencyData &Data : InData) {
@@ -86,6 +90,14 @@ void FSerializedProficiencyHelper::Deserialize(UProficiencyComponent *Component,
 
         UE_LOG(MythSaveLoad, Log, TEXT("SavedProficiency::Deserialize - Restored %s (XP: %.1f)"),
                *Prof.Definition->GetName(), Prof.SavedXP);
+    }
+
+    for (FProficiency &Default : Authored) {
+        const bool bRestored = Default.Definition && Component->Proficiencies.ContainsByPredicate(
+            [&Default](const FProficiency &P) { return P.Definition == Default.Definition; });
+        if (Default.Definition && !bRestored) {
+            Component->Proficiencies.Add(MoveTemp(Default));
+        }
     }
 
     UE_LOG(MythSaveLoad, Log, TEXT("SavedProficiency::Deserialize - Restored %d proficiencies"), Component->Proficiencies.Num());

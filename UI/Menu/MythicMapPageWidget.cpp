@@ -120,6 +120,7 @@ void UMythicMapPageWidget::NativeConstruct() {
 
 void UMythicMapPageWidget::NativeOnActivated() {
     Super::NativeOnActivated();
+    SetupTerrainLayer();
     RefreshFromSubsystem();
 }
 
@@ -235,6 +236,42 @@ void UMythicMapPageWidget::PlaceOnCanvas(UWidget *Widget, const FVector2D &Norma
     S->SetAlignment(FVector2D(0.5f, 0.5f));
     S->SetAutoSize(false);
     S->SetOffsets(FMargin(0.0f, VerticalNudge, Size.X, Size.Y));
+}
+
+void UMythicMapPageWidget::SetupTerrainLayer() {
+    if (!MapTerrain) {
+        return;
+    }
+
+    // The grid region of the World Partition minimap, exported to a standalone asset by
+    // scratchpad/export_minimap_crop.py after Build > Build Minimap. A standalone asset resolves in PIE and
+    // packaged builds where the editor-only WorldPartitionMiniMap actor does not; rerun the export when the
+    // level changes and the map follows, no bake and no hand-work. The material stylizes it to parchment.
+    static const FSoftObjectPath TerrainPath(
+        TEXT("/Game/Mythic/UI/Globals/textures/T_UI_WorldMinimap.T_UI_WorldMinimap"));
+    UTexture2D *Texture = Cast<UTexture2D>(TerrainPath.TryLoad());
+    UMaterialInterface *Base = MapTerrainMaterial.LoadSynchronous();
+    if (!Texture || !Base) {
+        MapTerrain->SetVisibility(ESlateVisibility::Collapsed);
+        return;
+    }
+
+    UMaterialInstanceDynamic *MID = Cast<UMaterialInstanceDynamic>(MapTerrain->GetBrush().GetResourceObject());
+    if (!MID || MID->Parent != Base) {
+        FSlateBrush Brush = MapTerrain->GetBrush();
+        Brush.SetResourceObject(Base);
+        Brush.DrawAs = ESlateBrushDrawType::Image;
+        Brush.TintColor = FSlateColor(FLinearColor::White);
+        MapTerrain->SetBrush(Brush);
+        MID = MapTerrain->GetDynamicMaterial();
+    }
+    if (MID) {
+        // The asset is already cropped to the grid, so the material samples its full extent.
+        MID->SetTextureParameterValue(TEXT("MiniMap"), Texture);
+        MID->SetVectorParameterValue(TEXT("UVMin"), FLinearColor(0.0f, 0.0f, 0.0f, 1.0f));
+        MID->SetVectorParameterValue(TEXT("UVSize"), FLinearColor(1.0f, 1.0f, 0.0f, 1.0f));
+    }
+    MapTerrain->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
 void UMythicMapPageWidget::OnWarMapTextureReady_Implementation(UTexture2D *Texture) {

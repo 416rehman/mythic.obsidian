@@ -96,6 +96,18 @@ struct MYTHIC_API FMythicHudNoticeRules {
     }
 
     static bool GoesToBanner(EMythicNoticeKind Kind) {
-        return Kind == EMythicNoticeKind::Progression || Kind == EMythicNoticeKind::Celebration;
+        return Kind == EMythicNoticeKind::Progression
+               || Kind == EMythicNoticeKind::Celebration
+               || Kind == EMythicNoticeKind::Status;
+    }
+
+    // The objective tracker is the persistent home for objective beats, so they take neither the feed nor the banner.
+    static bool GoesToObjectiveTracker(EMythicNoticeKind Kind) {
+        return Kind == EMythicNoticeKind::Objective;
+    }
+
+    // Every raised notice must land on exactly one surface. Kept here so a new kind cannot be added without a home.
+    static bool ReachesSurface(EMythicNoticeKind Kind) {
+        return GoesToFeed(Kind) || GoesToBanner(Kind) || GoesToObjectiveTracker(Kind);
     }
 };

@@ -56,11 +56,22 @@ FSlateColor UItemSlotVM::GetBackgroundColor() const {
 void UItemSlotVM::SetQuantity(int32 InQuantity) {
     if (UE_MVVM_SET_PROPERTY_VALUE(Quantity, InQuantity)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(Quantity);
+        SetQuantityText(InQuantity > 1 ? FText::AsNumber(InQuantity) : FText::GetEmpty());
     }
 }
 
 int32 UItemSlotVM::GetQuantity() const {
     return Quantity;
+}
+
+void UItemSlotVM::SetQuantityText(FText InQuantityText) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(QuantityText, InQuantityText)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(QuantityText);
+    }
+}
+
+FText UItemSlotVM::GetQuantityText() const {
+    return QuantityText;
 }
 
 void UItemSlotVM::SetIsLocked(bool bInLocked) {

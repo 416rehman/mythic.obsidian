@@ -74,8 +74,10 @@ public:
     UFUNCTION(BlueprintImplementableEvent, Category = MythicHUDLayout)
     bool PreEscapeMenuOpen();
 
-protected:
+    /** Public so Mythic.OpenMenu Escape can reach it; a UI change that cannot be opened cannot be checked. */
     void HandleEscapeAction();
+
+protected:
 
     UPROPERTY(EditDefaultsOnly)
     TSoftClassPtr<UCommonActivatableWidget> EscapeMenuClass;
@@ -259,6 +261,9 @@ private:
     bool ShouldRevealEverything() const;
 
     float TargetOpacityFor(EMythicHUDSalience Want) const;
+
+    // The accessibility HUD-opacity cap every salience level multiplies by.
+    static float AccessibilityHUDOpacity();
 
     FMythicHUDElementState *FindElementState(const UWidget *Element);
 };

@@ -18,12 +18,25 @@
 #include "Itemization/Loot/MythicWorldItem.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "Subsystem/SaveSystem/MythicSaveGameSubsystem.h"
 #include "Player/MythicPlayerState.h"
 #include "UObject/Package.h"
 
 namespace {
     const FString WorldSaveSlot = UMythicSaveGameSubsystem::DebugWorldSlot;
+
+    FString DefaultCharacterName(const AController *Player) {
+        const APlayerController *PC = Cast<APlayerController>(Player);
+        if (PC && PC->IsLocalController()) {
+            const FString OSUser = FPlatformProcess::UserName();
+            const FString MachineName = FPlatformProcess::ComputerName();
+            if (!OSUser.IsEmpty() && !(!MachineName.IsEmpty() && OSUser.StartsWith(MachineName))) {
+                return OSUser;
+            }
+        }
+        return TEXT("Adventurer");
+    }
 }
 
 void AMythicGameMode::RequestRespawn(AController *Controller, float Delay) {
@@ -129,7 +142,11 @@ void AMythicGameMode::OnPostLogin(AController *NewPlayer) {
         return;
     }
     if (UMythicSaveGameSubsystem *SaveSys = GetSaveSubsystem()) {
-        SaveSys->LoadCharacter(NewPlayer->PlayerState, GetCharacterSlotForPlayer(NewPlayer->PlayerState));
+        const FString Slot = GetCharacterSlotForPlayer(NewPlayer->PlayerState);
+        if (!UGameplayStatics::DoesSaveGameExist(Slot, 0)) {
+            SaveSys->CreateNewCharacter(DefaultCharacterName(NewPlayer), TEXT(""), false, Slot);
+        }
+        SaveSys->LoadCharacter(NewPlayer->PlayerState, Slot);
     }
 }
 

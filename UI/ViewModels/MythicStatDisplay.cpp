@@ -54,6 +54,7 @@ namespace MythicStatDisplay {
         Add(M, TEXT("CriticalHitDamage"), TEXT("Critical Hit Damage"), EMythicStatCategory::Offense, EMythicStatFormat::Percent, 50);
         Add(M, TEXT("OutgoingDamageMultiplier"), TEXT("Outgoing Damage"), EMythicStatCategory::Offense, EMythicStatFormat::Multiplier, 60);
         Add(M, TEXT("BonusSkillDamage"), TEXT("Skill Damage"), EMythicStatCategory::Offense, EMythicStatFormat::Percent, 70);
+        Add(M, TEXT("ControlPotency"), TEXT("Control Potency"), EMythicStatCategory::Offense, EMythicStatFormat::Percent, 71);
         Add(M, TEXT("IncreasedDamageToEnemiesUnderStatusEffects"), TEXT("Damage vs Afflicted"), EMythicStatCategory::Offense, EMythicStatFormat::Percent, 80);
         Add(M, TEXT("BonusDamageToSuperiorEnemies"), TEXT("Damage vs Superior"), EMythicStatCategory::Offense, EMythicStatFormat::Percent, 90);
 
