@@ -468,6 +468,17 @@ float UMythicUserSettings::GetRenderScale() const {
 void UMythicUserSettings::ApplySettings(bool bCheckForCommandLineOverrides) {
     ScalabilityQuality.ResolutionQuality = GetRenderScale();
     Super::ApplySettings(bCheckForCommandLineOverrides);
+}
+
+/**
+ * All the custom pushes live here, not in ApplySettings: the engine's boot path applies loaded settings through
+ * this virtual, so a method chosen last session (anti-aliasing, ambient occlusion, global illumination...) only
+ * reaches the renderer on the next launch if this override carries it. With them in ApplySettings alone the game
+ * booted on renderer defaults while the ini held the player's choices - the settings screen then read that gap as
+ * permanently "unapplied changes". ApplySettings still covers the in-session path: its Super calls back into this.
+ */
+void UMythicUserSettings::ApplyNonResolutionSettings() {
+    Super::ApplyNonResolutionSettings();
     ApplyMasterVolume();
     ApplyAudioSettings();
     ApplyImageSettings();

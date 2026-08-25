@@ -298,6 +298,7 @@ public:
     FMythicInterfaceChanged OnInterfaceChanged;
 
     virtual void ApplySettings(bool bCheckForCommandLineOverrides) override;
+    virtual void ApplyNonResolutionSettings() override;
     virtual void SetToDefaults() override;
 
     virtual void SetOverallScalabilityLevel(int32 Value) override;
