@@ -63,6 +63,9 @@
 #include "World/LivingWorld/Acquaintance/MythicAcquaintanceComponent.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "World/LivingWorld/Settlements/MythicSettlement.h"
+#include "AI/NPCs/MythicRecruitRules.h"
+#include "World/LivingWorld/LivingWorldSettings.h"
+#include "AbilitySystemGlobals.h"
 #include "World/LivingWorld/Events/ActionEventSubsystem.h"
 #include "World/LivingWorld/Events/ActionEventTypes.h"
 #include "World/LivingWorld/Morality/MoralSignature.h"
@@ -1071,6 +1074,45 @@ void AMythicPlayerController::ServerRecruitNpc_Implementation(AMythicNPCCharacte
     if (!NPC->IsActorInTradeRange(GetPawn()) || !NPC->IsRecruitable()) {
         return;
     }
+
+    // The gates UNPCDefinition documents. Neither was checked, so any recruitable NPC joined regardless of what
+    // it asked for or what its people think of you.
+    {
+        FGameplayTagContainer PlayerTags;
+        if (const UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(this)) {
+            ASC->GetOwnedGameplayTags(PlayerTags);
+        }
+
+        float Standing = 0.0f;
+        const UMythicLivingWorldSubsystem *LWS = GetGameInstance()
+                                                     ? GetGameInstance()->GetSubsystem<UMythicLivingWorldSubsystem>()
+                                                     : nullptr;
+        if (const AMythicPlayerState *PS = GetPlayerState<AMythicPlayerState>()) {
+            const UMythicFactionStandingComponent *Faction = PS->GetFactionStanding();
+            const UMythicFactionDatabase *FactionDB = LWS ? LWS->GetFactionDatabase() : nullptr;
+            if (Faction && FactionDB) {
+                Standing = Faction->GetStanding(FactionDB->FindFactionId(NPC->GetNPCDataRef().Faction));
+            }
+        }
+
+        const UMythicLivingWorldSettings *LivingWorld = LWS ? LWS->GetSettings() : nullptr;
+        // The class default carries the authored fallback, so a world with no settings asset still gates.
+        const float Threshold = (LivingWorld ? LivingWorld : GetDefault<UMythicLivingWorldSettings>())->RecruitStandingThreshold;
+
+        if (!FMythicRecruitRules::MeetsTagGate(PlayerTags, NPC->GetNPCDataRef().TagsRequiredToRecruit)) {
+            UE_LOG(Myth, Verbose, TEXT("ServerRecruitNpc: '%s' refused - the player lacks %s."),
+                   *GetNameSafe(NPC), *NPC->GetNPCDataRef().TagsRequiredToRecruit.ToStringSimple());
+            ClientReceiveRecruitResult(NPC, false);
+            return;
+        }
+        if (!FMythicRecruitRules::MeetsStandingGate(Standing, Threshold)) {
+            UE_LOG(Myth, Verbose, TEXT("ServerRecruitNpc: '%s' refused - standing %.1f is below %.1f."),
+                   *GetNameSafe(NPC), Standing, Threshold);
+            ClientReceiveRecruitResult(NPC, false);
+            return;
+        }
+    }
+
     UMythicPartySubsystem *Party = GetWorld() ? GetWorld()->GetSubsystem<UMythicPartySubsystem>() : nullptr;
     if (!Party) {
         return;

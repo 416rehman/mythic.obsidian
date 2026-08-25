@@ -74,6 +74,13 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Factions")
     TSoftObjectPtr<UMythicFactionDatabaseSettings> FactionSettings;
 
+    /**
+     * Standing a player needs with an NPC's faction before that NPC will join them, on the same [-100, 100] scale
+     * the standing component clamps to. Someone their people distrust does not follow you because you asked.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Factions", meta = (ClampMin = "-100.0", ClampMax = "100.0"))
+    float RecruitStandingThreshold = 70.0f;
+
     /** Territory grid settings (dimensions, cell size, bleed rate) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory")
     TSoftObjectPtr<UMythicTerritoryGridSettings> TerritorySettings;
