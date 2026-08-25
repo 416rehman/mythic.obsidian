@@ -13,6 +13,7 @@
 #include "Progression/Runes/MythicRuneComponent.h"
 #include "Progression/Runes/MythicRuneDefinition.h"
 #include "UI/Menu/MythicCharacterPageWidget.h"
+#include "UI/MythicUIManagerSubsystem.h"
 
 void UMythicRunePickerRowProxy::HandleClicked() {
     if (UMythicRunePickerWidget *P = Picker.Get()) {
@@ -36,9 +37,35 @@ void UMythicRunePickerWidget::OpenForSlot(int32 InSlotIndex, UMythicCharacterPag
 
     BuildRows();
     RefreshRows();
+    ShowOnLayer();
     if (!IsActivated()) {
         ActivateWidget();
     }
+}
+
+void UMythicRunePickerWidget::ShowOnLayer() {
+    if (bOnLayer || !PickerLayerTag.IsValid()) {
+        return;
+    }
+    UGameInstance *GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    UMythicUIManagerSubsystem *UIManager = GI ? GI->GetSubsystem<UMythicUIManagerSubsystem>() : nullptr;
+    if (!UIManager) {
+        return;
+    }
+    UIManager->AddWidgetInstanceToLayer(PickerLayerTag, GetOwningPlayer(), this);
+    bOnLayer = true;
+}
+
+void UMythicRunePickerWidget::HideFromLayer() {
+    if (!bOnLayer) {
+        return;
+    }
+    if (UGameInstance *GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr) {
+        if (UMythicUIManagerSubsystem *UIManager = GI->GetSubsystem<UMythicUIManagerSubsystem>()) {
+            UIManager->RemoveWidgetInstanceFromLayer(PickerLayerTag, GetOwningPlayer(), this);
+        }
+    }
+    bOnLayer = false;
 }
 
 void UMythicRunePickerWidget::BuildRows() {
@@ -150,5 +177,6 @@ void UMythicRunePickerWidget::EquipRow(int32 RowIndex) {
     if (Page) {
         Page->NotifyRunesChanged();
     }
+    HideFromLayer();
     DeactivateWidget();
 }

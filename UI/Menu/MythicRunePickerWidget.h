@@ -75,7 +75,17 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes", meta = (ClampMin = "0.1", ClampMax = "1.0"))
     float LockedRowOpacity = 0.45f;
 
+    /** The layer the picker is pushed onto. Activating a widget nothing parented puts it nowhere. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes", meta = (Categories = "UI.Layer"))
+    FGameplayTag PickerLayerTag;
+
 private:
+    void ShowOnLayer();
+
+    void HideFromLayer();
+
+    bool bOnLayer = false;
+
     struct FMythicRuneRow {
         TObjectPtr<UUserWidget> Widget;
         TObjectPtr<UMythicRunePickerRowProxy> Proxy;
