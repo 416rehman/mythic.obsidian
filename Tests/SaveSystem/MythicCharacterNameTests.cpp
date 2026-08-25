@@ -1,37 +1,63 @@
 #include "Misc/AutomationTest.h"
 
+#include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "Player/MythicPlayerState.h"
 #include "Subsystem/SaveSystem/Character/CharacterData.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicCharacterNameTest,
                                  "Mythic.SaveSystem.CharacterName",
-                                 EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+                                 EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 /**
- * A character's name has to survive a save it was not in.
+ * A name the manifest set has to survive loading a save that predates it.
  *
- * The name lives in the manifest and is applied on possession. The save carries its own copy, captured from the
- * player state at save time - so a save written before the character had a name carries an empty string, and
- * restoring it unguarded blanks the name the manifest just set, every single load.
+ * The name is applied on possession from the manifest, then the character load runs. A save written before the
+ * character had a name carries an empty string, so restoring it unguarded blanked the name every single load -
+ * which meant fixing the manifest read alone would have looked correct for exactly one frame.
+ *
+ * This drives the real Deserialize path on a real player state, because the previous version of this test
+ * asserted properties of the FString it had just constructed and stayed green with the guard deleted.
  */
 bool FMythicCharacterNameTest::RunTest(const FString &Parameters) {
-    // The guard is a plain emptiness check, so it is testable without a world, a player state or a save file.
+    if (!TestNotNull(TEXT("engine is available"), GEngine)) {
+        return false;
+    }
+
+    UGameInstance *GameInstance = NewObject<UGameInstance>(GEngine);
+    GameInstance->InitializeStandalone();
+    UWorld *World = GameInstance->GetWorld();
+    if (!TestNotNull(TEXT("standalone world exists"), World)) {
+        return false;
+    }
+
+    AMythicPlayerState *PlayerState = World->SpawnActor<AMythicPlayerState>();
+    if (!TestNotNull(TEXT("the player state spawned"), PlayerState)) {
+        return false;
+    }
+
     const FString FromManifest = TEXT("Rhoslyn");
 
-    FSerializedCharacterData Fresh;
-    TestTrue(TEXT("a save written before naming carries no character name"), Fresh.CharacterName.IsEmpty());
-    TestFalse(TEXT("so restoring it must not be allowed to overwrite the manifest name"),
-              !Fresh.CharacterName.IsEmpty());
+    // What OnPostLogin does before the load: the manifest name reaches the player state.
+    PlayerState->SetPlayerName(FromManifest);
+    TestEqual(TEXT("the manifest name is on the player state before loading"),
+              PlayerState->GetPlayerName(), FromManifest);
 
+    // A save written before this character had a name. Deserialize must not apply the empty string.
+    FSerializedCharacterData Older;
+    Older.CharacterName = FString();
+    FSerializedCharacterData::Deserialize(PlayerState, Older);
+    TestEqual(TEXT("a save with no name leaves the manifest name standing"),
+              PlayerState->GetPlayerName(), FromManifest);
+
+    // A save that does carry a name is still allowed to restore it, or renaming could never persist.
     FSerializedCharacterData Named;
-    Named.CharacterName = FromManifest;
-    TestTrue(TEXT("a save that does carry a name is allowed to restore it"), !Named.CharacterName.IsEmpty());
-    TestEqual(TEXT("and restores exactly what was captured"), Named.CharacterName, FromManifest);
-
-    // The machine-name guard on the character page is the symptom, not the bug, and must keep working - so a
-    // name that was never set has to stay distinguishable from one that was.
-    TestNotEqual(TEXT("an unnamed save is distinguishable from a named one"), Fresh.CharacterName, Named.CharacterName);
+    Named.CharacterName = TEXT("Aldreth");
+    FSerializedCharacterData::Deserialize(PlayerState, Named);
+    TestEqual(TEXT("a save that carries a name restores it"), PlayerState->GetPlayerName(), TEXT("Aldreth"));
 
     return true;
 }

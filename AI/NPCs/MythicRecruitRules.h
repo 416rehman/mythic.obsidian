@@ -21,9 +21,4 @@ struct MYTHIC_API FMythicRecruitRules {
     static bool MeetsStandingGate(float Standing, float Threshold) {
         return Standing >= Threshold;
     }
-
-    static bool CanRecruit(const FGameplayTagContainer &PlayerTags, const FGameplayTagContainer &RequiredTags,
-                           float Standing, float Threshold) {
-        return MeetsTagGate(PlayerTags, RequiredTags) && MeetsStandingGate(Standing, Threshold);
-    }
 };

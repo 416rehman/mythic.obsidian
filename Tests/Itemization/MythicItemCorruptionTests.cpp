@@ -1,7 +1,10 @@
 #include "Misc/AutomationTest.h"
 
+#include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "Itemization/Inventory/Fragments/Passive/AffixesFragment.h"
-#include "Settings/MythicDeveloperSettings.h"
+#include "Itemization/Loot/MythicWorldItem.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -10,38 +13,69 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicItemCorruptionTest,
                                  EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 /**
- * Corruption is the risk half of crafting: it has to actually refuse the crafting.
+ * Corruption is the risk half of crafting, so it has to refuse the actual craft verbs.
  *
- * The flag was replicated and saved on every item while nothing wrote it and nothing read it, and the comment
- * beside it described a gate function that had never been written. State that costs bandwidth and refuses
- * nothing is worse than no feature, because the settings page reports it as on.
+ * Testing CanApplyCraftOp alone proves nothing: the verbs are what a player reaches, and deleting their calls to
+ * the gate left the suite green. Both verbs early-out without an authoritative owner, so the fragment is given a
+ * real one rather than tested in isolation.
  */
 bool FMythicItemCorruptionTest::RunTest(const FString &Parameters) {
-    UAffixesFragment *Fragment = NewObject<UAffixesFragment>();
-    if (!TestNotNull(TEXT("an affixes fragment can be constructed"), Fragment)) {
+    if (!TestNotNull(TEXT("engine is available"), GEngine)) {
         return false;
     }
 
+    UGameInstance *GameInstance = NewObject<UGameInstance>(GEngine);
+    GameInstance->InitializeStandalone();
+    UWorld *World = GameInstance->GetWorld();
+    if (!TestNotNull(TEXT("standalone world exists"), World)) {
+        return false;
+    }
+
+    // A world item is what actually owns an item's fragments, and SetOwner requires an owner that replicates
+    // subobjects through the registered list - which a player state does not.
+    AActor *Owner = World->SpawnActor<AMythicWorldItem>();
+    if (!TestNotNull(TEXT("an owner spawned"), Owner) || !TestTrue(TEXT("the owner holds authority"), Owner->HasAuthority())) {
+        return false;
+    }
+    if (!TestTrue(TEXT("the owner replicates subobjects through the registered list"),
+                  Owner->IsUsingRegisteredSubObjectList())) {
+        return false;
+    }
+
+    UAffixesFragment *Fragment = NewObject<UAffixesFragment>(Owner);
+    Fragment->SetOwner(Owner);
+    if (!TestNotNull(TEXT("the fragment has an authoritative owner"), Fragment->GetOwningActor())) {
+        return false;
+    }
+
+    FRolledAffix Affix;
+    Affix.bIsLocked = false;
+    Fragment->AffixesRuntimeReplicatedData.RolledAffixes.Add(Affix);
+
     FText Reason;
 
-    TestFalse(TEXT("a fresh item is not corrupted"), Fragment->IsCorrupted());
-    TestTrue(TEXT("and accepts a craft op"), Fragment->CanApplyCraftOp(Reason));
-    TestTrue(TEXT("with no refusal to explain"), Reason.IsEmpty());
-
-    Fragment->AffixesRuntimeReplicatedData.bCorrupted = true;
-
-    TestTrue(TEXT("a corrupted item reports itself corrupted"), Fragment->IsCorrupted());
-    TestFalse(TEXT("and refuses a craft op"), Fragment->CanApplyCraftOp(Reason));
-
-    // A refusal the player cannot read is a bug report waiting to happen.
-    TestFalse(TEXT("and says why it refused"), Reason.IsEmpty());
-
-    // The settings flag has to mean something, or the settings page lies about the feature being on.
-    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
-    if (TestNotNull(TEXT("developer settings resolve"), Settings)) {
-        AddInfo(FString::Printf(TEXT("item corruption enabled: %s"),
-                                Settings->bItemCorruptionEnabled ? TEXT("true") : TEXT("false")));
+    // The verb works before corruption, or a refusal afterwards proves nothing.
+    TestTrue(TEXT("a clean item accepts a craft op"), Fragment->CanApplyCraftOp(Reason));
+    Fragment->SetAffixLocked(0, true);
+    if (!TestTrue(TEXT("locking an affix on a clean item takes effect"),
+                  Fragment->AffixesRuntimeReplicatedData.RolledAffixes[0].bIsLocked)) {
+        return false;
     }
+
+    // The writer the flag never had.
+    Fragment->ServerCorruptItem();
+    TestTrue(TEXT("corrupting the item sets the flag"), Fragment->IsCorrupted());
+    TestFalse(TEXT("and the gate now refuses"), Fragment->CanApplyCraftOp(Reason));
+    TestFalse(TEXT("with a reason a player can read"), Reason.IsEmpty());
+
+    // The point of the whole feature: the verb itself is refused, not merely the gate function.
+    Fragment->SetAffixLocked(0, false);
+    TestTrue(TEXT("unlocking is refused on a corrupted item, so the lock still stands"),
+             Fragment->AffixesRuntimeReplicatedData.RolledAffixes[0].bIsLocked);
+
+    // Corruption is one-way; nothing may lift it.
+    Fragment->ServerCorruptItem();
+    TestTrue(TEXT("corruption stays set"), Fragment->IsCorrupted());
 
     return true;
 }

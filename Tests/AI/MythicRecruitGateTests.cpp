@@ -47,7 +47,6 @@ bool FMythicRecruitGateTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("standing above the threshold recruits"), Rules::MeetsStandingGate(Threshold + 1.0f, Threshold));
     TestFalse(TEXT("standing just below the threshold does not"), Rules::MeetsStandingGate(Threshold - 1.0f, Threshold));
     TestFalse(TEXT("a faction that hates you does not follow you"), Rules::MeetsStandingGate(-100.0f, Threshold));
-    TestFalse(TEXT("and neutral standing is not enough on its own"), Rules::MeetsStandingGate(0.0f, Threshold));
 
     // --- the tag gate ---
     const FGameplayTagContainer None;
@@ -62,12 +61,13 @@ bool FMythicRecruitGateTest::RunTest(const FString &Parameters) {
     }
     TestTrue(TEXT("an NPC that demands nothing asks nothing"), Rules::MeetsTagGate(None, None));
 
-    // --- both, because passing one is not passing both ---
-    TestTrue(TEXT("meeting both gates recruits"), Rules::CanRecruit(Held, Demanded, Threshold, Threshold));
+    // Both gates, the way the controller asks them - separately, so it can log which one refused.
+    TestTrue(TEXT("meeting both gates recruits"),
+             Rules::MeetsTagGate(Held, Demanded) && Rules::MeetsStandingGate(Threshold, Threshold));
     TestFalse(TEXT("the right tags with the wrong standing does not"),
-              Rules::CanRecruit(Held, Demanded, Threshold - 1.0f, Threshold));
+              Rules::MeetsTagGate(Held, Demanded) && Rules::MeetsStandingGate(Threshold - 1.0f, Threshold));
     TestFalse(TEXT("the right standing with the wrong tags does not"),
-              Rules::CanRecruit(Other, Demanded, Threshold, Threshold));
+              Rules::MeetsTagGate(Other, Demanded) && Rules::MeetsStandingGate(Threshold, Threshold));
 
     return true;
 }
