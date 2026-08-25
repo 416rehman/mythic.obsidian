@@ -1075,8 +1075,18 @@ void AMythicPlayerController::ServerRecruitNpc_Implementation(AMythicNPCCharacte
         return;
     }
 
-    // The gates UNPCDefinition documents. Neither was checked, so any recruitable NPC joined regardless of what
-    // it asked for or what its people think of you.
+    UMythicPartySubsystem *Party = GetWorld() ? GetWorld()->GetSubsystem<UMythicPartySubsystem>() : nullptr;
+    if (!Party) {
+        return;
+    }
+    OfferNpcQuestIfAny(NPC);
+    if (Party->IsInParty(NPC)) {
+        ClientReceiveNpcDialogue(NPC, NPC->SelectDialogueFor(this));
+        return;
+    }
+    // The gates UNPCDefinition documents. Checked here rather than on entry: this RPC is the ONLY interaction verb
+    // a recruitable NPC has (MythicNPCCharacter routes every interact through it and returns), so refusing early
+    // left them mute - no dialogue, no quest - instead of merely unrecruited.
     {
         FGameplayTagContainer PlayerTags;
         if (const UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(this)) {
@@ -1113,15 +1123,6 @@ void AMythicPlayerController::ServerRecruitNpc_Implementation(AMythicNPCCharacte
         }
     }
 
-    UMythicPartySubsystem *Party = GetWorld() ? GetWorld()->GetSubsystem<UMythicPartySubsystem>() : nullptr;
-    if (!Party) {
-        return;
-    }
-    OfferNpcQuestIfAny(NPC);
-    if (Party->IsInParty(NPC)) {
-        ClientReceiveNpcDialogue(NPC, NPC->SelectDialogueFor(this));
-        return;
-    }
     if (!NPC->CognitiveBrain) {
         UE_LOG(Myth, Warning, TEXT("ServerRecruitNpc: '%s' is recruitable but has no cognitive brain — cannot be a companion."), *GetNameSafe(NPC));
         return;

@@ -85,6 +85,10 @@ void AMythicNPCCharacter::OnSpawnedFromPool(const struct FMythicNPCData &InNPCDa
     // scaling GE holds level-1 multipliers. Now that the stamped data is in, apply the real ones.
     ApplyCombatScaling();
 
+    // Same reason: NPCType is the one identity tag read off the stamped data, so publishing it during that
+    // first CombatInit published nothing and every cold-pool kill credited the generic bestiary page.
+    PublishIdentityTags();
+
     GrantAttackAbility();
 
     if (AbilitySystemComponent && !NPCData.Traits.IsEmpty()) {
@@ -276,24 +280,20 @@ void AMythicNPCCharacter::PublishIdentityTags() {
         return;
     }
 
-    if (CreatureKind.IsValid()) {
-        AbilitySystemComponent->AddLooseGameplayTag(CreatureKind);
-    }
+    auto PublishOnce = [this](const FGameplayTag &Tag) {
+        if (Tag.IsValid() && !AbilitySystemComponent->HasMatchingGameplayTag(Tag)) {
+            AbilitySystemComponent->AddLooseGameplayTag(Tag);
+        }
+    };
 
-    if (EnemyTier.IsValid()) {
-        AbilitySystemComponent->AddLooseGameplayTag(EnemyTier);
-    }
+    PublishOnce(CreatureKind);
+    PublishOnce(EnemyTier);
 
     // CodexBestiaryKey is the explicit override and the mapper reads it first. Without the type published too,
     // there was nothing to derive from when no override was authored - which was every NPC, since the key is
     // assigned nowhere - so every humanoid kill credited the generic page.
-    if (NPCData.NPCType.IsValid()) {
-        AbilitySystemComponent->AddLooseGameplayTag(NPCData.NPCType);
-    }
-
-    if (CodexBestiaryKey.IsValid()) {
-        AbilitySystemComponent->AddLooseGameplayTag(CodexBestiaryKey);
-    }
+    PublishOnce(NPCData.NPCType);
+    PublishOnce(CodexBestiaryKey);
 }
 
 void AMythicNPCCharacter::ApplyCombatScaling() {
