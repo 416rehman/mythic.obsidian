@@ -139,8 +139,11 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
                 OutData.EquippedSkills.Add(Skill.ToSoftObjectPath());
             }
             OutData.UnlockedSkillSlots = SkillComp->GetUnlockedSlots();
-            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d skill slots (%d open)"),
-                   OutData.EquippedSkills.Num(), OutData.UnlockedSkillSlots);
+            OutData.SkillProgress = SkillComp->GetSkillProgress();
+            OutData.SkillModifierCapacity = SkillComp->GetModifierCapacity();
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d skill slots (%d open), %d levelled skills (%d modifiers at once)"),
+                   OutData.EquippedSkills.Num(), OutData.UnlockedSkillSlots, OutData.SkillProgress.Num(),
+                   OutData.SkillModifierCapacity);
         }
 
         if (const UMythicCodexComponent *CodexComp = MythPS->GetCodexComponent()) {
@@ -383,6 +386,13 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
             SkillComp->RestoreSkills(SavedSkills, InData.UnlockedSkillSlots);
             UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d skill slots (%d open)"),
                    InData.EquippedSkills.Num(), InData.UnlockedSkillSlots);
+        }
+
+        // Growth is keyed on the skill, not the slot, so it restores whether or not the bar above filled.
+        if (SkillComp && InData.SkillModifierCapacity > 0) {
+            SkillComp->RestoreSkillProgress(InData.SkillProgress, InData.SkillModifierCapacity);
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d levelled skills (%d modifiers at once)"),
+                   InData.SkillProgress.Num(), InData.SkillModifierCapacity);
         }
     }
 

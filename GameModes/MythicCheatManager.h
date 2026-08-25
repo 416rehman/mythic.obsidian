@@ -93,6 +93,17 @@ public:
     void MythGiveTalent(const FString &TalentName);
 
     UFUNCTION(Exec)
+    void MythListSkills();
+
+    // Runs the real levelling route Count times. Server/standalone only - a skill levels on the server or nowhere.
+    UFUNCTION(Exec)
+    void MythPracticeSkill(const FString &SkillName, int32 Count = 1);
+
+    // Hands over levels without the practice, for reaching a build faster than a test session allows.
+    UFUNCTION(Exec)
+    void MythLevelSkill(const FString &SkillName, int32 Levels = 1);
+
+    UFUNCTION(Exec)
     void MythClearInventory();
 
     UFUNCTION(Exec)

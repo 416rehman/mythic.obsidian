@@ -10,7 +10,10 @@
 #include "Mythic/Narrative/MythicNarrativeStateComponent.h"
 #include "Mythic/Player/MythicPlayerState.h"
 #include "Mythic/Progression/MythicAchievementComponent.h"
+#include "Mythic/Progression/MythicStatLedgerComponent.h"
+#include "Mythic/Progression/MythicTags_MetaProgression.h"
 #include "Mythic/Progression/MythicUnlockComponent.h"
+#include "Mythic/Settings/MythicDeveloperSettings.h"
 #include "Net/UnrealNetwork.h"
 
 UMythicSkillComponent::UMythicSkillComponent() {
@@ -24,6 +27,8 @@ void UMythicSkillComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME_CONDITION(UMythicSkillComponent, EquippedSkills, COND_OwnerOnly);
     DOREPLIFETIME_CONDITION(UMythicSkillComponent, UnlockedSlots, COND_OwnerOnly);
+    DOREPLIFETIME_CONDITION(UMythicSkillComponent, SkillProgress, COND_OwnerOnly);
+    DOREPLIFETIME_CONDITION(UMythicSkillComponent, ModifierCapacity, COND_OwnerOnly);
 }
 
 void UMythicSkillComponent::BeginPlay() {
@@ -142,6 +147,394 @@ void UMythicSkillComponent::GrantSlot() {
         return;
     }
     UnlockedSlots++;
+    OnSkillsChanged.Broadcast();
+}
+
+int32 UMythicSkillComponent::GetModifierCapacity() const {
+    const int32 Ceiling = FMath::Max(MaxModifierCapacity, 1);
+    const int32 Floor = FMath::Clamp(BaseModifierCapacity, 1, Ceiling);
+    return FMath::Clamp(ModifierCapacity, Floor, Ceiling);
+}
+
+void UMythicSkillComponent::GrantModifierCapacity() {
+    const AActor *Owner = GetOwner();
+    if (!Owner || !Owner->HasAuthority()) {
+        return;
+    }
+    const int32 Ceiling = FMath::Max(MaxModifierCapacity, 1);
+    const int32 Current = GetModifierCapacity();
+    if (Current >= Ceiling) {
+        UE_LOG(Myth, Verbose, TEXT("Skills: modifier capacity grant ignored — already carrying %d at once."), Ceiling);
+        return;
+    }
+    ModifierCapacity = Current + 1;
+    OnSkillsChanged.Broadcast();
+}
+
+FMythicSkillProgress *UMythicSkillComponent::FindProgress(const FSoftObjectPath &SkillPath) {
+    if (SkillPath.IsNull()) {
+        return nullptr;
+    }
+    return SkillProgress.FindByPredicate([&SkillPath](const FMythicSkillProgress &Entry) {
+        return Entry.Skill.ToSoftObjectPath() == SkillPath;
+    });
+}
+
+const FMythicSkillProgress *UMythicSkillComponent::FindProgress(const FSoftObjectPath &SkillPath) const {
+    return const_cast<UMythicSkillComponent *>(this)->FindProgress(SkillPath);
+}
+
+FMythicSkillProgress &UMythicSkillComponent::FindOrAddProgress(UMythicSkillDefinition *Skill) {
+    const FSoftObjectPath SkillPath(Skill);
+    if (FMythicSkillProgress *Existing = FindProgress(SkillPath)) {
+        return *Existing;
+    }
+    FMythicSkillProgress &Added = SkillProgress.AddDefaulted_GetRef();
+    Added.Skill = Skill;
+    return Added;
+}
+
+void UMythicSkillComponent::PruneProgress(const FSoftObjectPath &SkillPath) {
+    SkillProgress.RemoveAll([&SkillPath](const FMythicSkillProgress &Entry) {
+        return Entry.Skill.ToSoftObjectPath() == SkillPath && Entry.Level <= 1 && Entry.ActiveModifiers.Num() == 0
+            && Entry.Uses <= 0;
+    });
+}
+
+// A stored index the definition no longer has costs nothing: the modifier it paid for is gone with it.
+int32 UMythicSkillComponent::PointCostOf(const UMythicSkillDefinition *Skill, int32 ModifierIndex) {
+    return Skill && Skill->Modifiers.IsValidIndex(ModifierIndex)
+               ? FMath::Max(Skill->Modifiers[ModifierIndex].PointCost, 1)
+               : 0;
+}
+
+int32 UMythicSkillComponent::GetMaxSkillLevel(const UMythicSkillDefinition *Skill) const {
+    if (!Skill) {
+        return 0;
+    }
+    return FMath::Clamp(Skill->Modifiers.Num(), 1, FMath::Max(MaxSkillLevel, 1));
+}
+
+int32 UMythicSkillComponent::GetSkillLevel(const UMythicSkillDefinition *Skill) const {
+    if (!Skill) {
+        return 0;
+    }
+    const FMythicSkillProgress *Entry = FindProgress(FSoftObjectPath(Skill));
+    return Entry ? FMath::Clamp(Entry->Level, 1, GetMaxSkillLevel(Skill)) : 1;
+}
+
+int32 UMythicSkillComponent::GetSkillUses(const UMythicSkillDefinition *Skill) const {
+    const FMythicSkillProgress *Entry = Skill ? FindProgress(FSoftObjectPath(Skill)) : nullptr;
+    return Entry ? FMath::Max(Entry->Uses, 0) : 0;
+}
+
+int32 UMythicSkillComponent::GetUsesForNextLevel(const UMythicSkillDefinition *Skill) const {
+    if (!Skill || GetSkillLevel(Skill) >= GetMaxSkillLevel(Skill)) {
+        return 0;
+    }
+    TArray<int32> Thresholds;
+    float TailGrowth = 1.0f;
+    ResolveUseLadder(Thresholds, TailGrowth);
+
+    const int64 Needed = UsesToReachLevel(Thresholds, TailGrowth, GetSkillLevel(Skill) + 1);
+    return Needed >= MAX_int32 ? 0 : static_cast<int32>(Needed);
+}
+
+int32 UMythicSkillComponent::GetGrantedPoints(const UMythicSkillDefinition *Skill) const {
+    return GetSkillLevel(Skill);
+}
+
+int32 UMythicSkillComponent::GetSpentPoints(const UMythicSkillDefinition *Skill) const {
+    const FMythicSkillProgress *Entry = Skill ? FindProgress(FSoftObjectPath(Skill)) : nullptr;
+    if (!Entry) {
+        return 0;
+    }
+    int32 Spent = 0;
+    for (const int32 Index : Entry->ActiveModifiers) {
+        Spent += PointCostOf(Skill, Index);
+    }
+    return Spent;
+}
+
+int32 UMythicSkillComponent::GetAvailablePoints(const UMythicSkillDefinition *Skill) const {
+    return FMath::Max(GetGrantedPoints(Skill) - GetSpentPoints(Skill), 0);
+}
+
+TArray<int32> UMythicSkillComponent::GetActiveModifiers(const UMythicSkillDefinition *Skill) const {
+    TArray<int32> Active;
+    const FMythicSkillProgress *Entry = Skill ? FindProgress(FSoftObjectPath(Skill)) : nullptr;
+    if (!Entry) {
+        return Active;
+    }
+    Active.Reserve(Entry->ActiveModifiers.Num());
+    // Filtered on the way out, so content that lost a modifier can never make the ability read past the end.
+    for (const int32 Index : Entry->ActiveModifiers) {
+        if (Skill->Modifiers.IsValidIndex(Index)) {
+            Active.Add(Index);
+        }
+    }
+    return Active;
+}
+
+bool UMythicSkillComponent::IsModifierActive(const UMythicSkillDefinition *Skill, int32 ModifierIndex) const {
+    if (!Skill || !Skill->Modifiers.IsValidIndex(ModifierIndex)) {
+        return false;
+    }
+    const FMythicSkillProgress *Entry = FindProgress(FSoftObjectPath(Skill));
+    return Entry && Entry->ActiveModifiers.Contains(ModifierIndex);
+}
+
+void UMythicSkillComponent::ResolveUseLadder(TArray<int32> &OutThresholds, float &OutTailGrowth) {
+    OutThresholds.Reset();
+    OutTailGrowth = 1.0f;
+    if (const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>()) {
+        OutThresholds = Settings->SkillLevelUseThresholds;
+        OutTailGrowth = Settings->SkillLevelUseTailGrowth;
+    }
+}
+
+int64 UMythicSkillComponent::UsesToReachLevel(const TArray<int32> &Thresholds, float TailGrowth, int32 Level) {
+    if (Level <= 1) {
+        return 0;
+    }
+    if (Thresholds.Num() == 0) {
+        return TNumericLimits<int64>::Max();
+    }
+
+    const double Growth = FMath::Clamp(static_cast<double>(TailGrowth), 1.0, 100.0);
+    int64 Running = 0;
+    for (int32 Step = 0; Step < Level - 1; Step++) {
+        // +1 every rung whatever the table says, so a row authored flat or backwards still costs practice.
+        const double Grown = FMath::Min(Running * Growth, static_cast<double>(MAX_int32));
+        Running = Thresholds.IsValidIndex(Step)
+                      ? FMath::Max<int64>(Running + 1, Thresholds[Step])
+                      : FMath::Max<int64>(Running + 1, static_cast<int64>(FMath::CeilToDouble(Grown)));
+    }
+    return Running;
+}
+
+int32 UMythicSkillComponent::LevelFromUses(const TArray<int32> &Thresholds, float TailGrowth, int32 Ceiling, int64 Uses) {
+    const int32 Top = FMath::Max(Ceiling, 1);
+    int32 Level = 1;
+    while (Level < Top && Uses >= UsesToReachLevel(Thresholds, TailGrowth, Level + 1)) {
+        Level++;
+    }
+    return Level;
+}
+
+UMythicStatLedgerComponent *UMythicSkillComponent::ResolveStatLedger() const {
+    const AMythicPlayerState *PS = Cast<AMythicPlayerState>(GetOwner());
+    return PS ? PS->GetStatLedgerComponent() : nullptr;
+}
+
+void UMythicSkillComponent::RecordSkillUse(UMythicSkillDefinition *Skill) {
+    const AActor *Owner = GetOwner();
+    if (!Owner || !Owner->HasAuthority()) {
+        return;
+    }
+    if (!Skill) {
+        UE_LOG(Myth, Warning, TEXT("Skills: use not recorded — no skill given."));
+        return;
+    }
+    if (!IsSkillUnlocked(Skill)) {
+        UE_LOG(Myth, Warning, TEXT("Skills: use not recorded — '%s' needs %s, which this player has not earned."),
+               *GetNameSafe(Skill), *Skill->RequiredTag.ToString());
+        return;
+    }
+
+    TArray<int32> Thresholds;
+    float TailGrowth = 1.0f;
+    ResolveUseLadder(Thresholds, TailGrowth);
+
+    {
+        FMythicSkillProgress &Entry = FindOrAddProgress(Skill);
+        Entry.Uses = FMath::Max(Entry.Uses, 0) + 1;
+
+        const int32 Earned = LevelFromUses(Thresholds, TailGrowth, GetMaxSkillLevel(Skill), Entry.Uses);
+        if (Earned > Entry.Level) {
+            UE_LOG(Myth, Log, TEXT("Skills: '%s' reached level %d on %d uses."), *GetNameSafe(Skill), Earned, Entry.Uses);
+            Entry.Level = Earned;
+        }
+    }
+
+    // Last, and outside the row's lifetime: the ledger fans out to achievements and unlocks, which grant back into
+    // this component. A reference into SkillProgress must not be alive while that runs.
+    if (UMythicStatLedgerComponent *Ledger = ResolveStatLedger()) {
+        Ledger->RecordStat(STAT_SKILL_USED);
+    }
+
+    OnSkillsChanged.Broadcast();
+}
+
+void UMythicSkillComponent::GrantSkillLevel(UMythicSkillDefinition *Skill, int32 Levels) {
+    const AActor *Owner = GetOwner();
+    if (!Owner || !Owner->HasAuthority()) {
+        return;
+    }
+    if (!Skill || Levels <= 0) {
+        return;
+    }
+
+    const int32 Ceiling = GetMaxSkillLevel(Skill);
+    const int32 Current = GetSkillLevel(Skill);
+    if (Current >= Ceiling) {
+        UE_LOG(Myth, Verbose, TEXT("Skills: level grant ignored — '%s' is already at level %d, its ceiling."),
+               *GetNameSafe(Skill), Ceiling);
+        return;
+    }
+
+    FMythicSkillProgress &Entry = FindOrAddProgress(Skill);
+    Entry.Level = FMath::Min(Current + Levels, Ceiling);
+
+    // The uses catch up to the granted level, so a granted rank is never re-earned and the practice bar reads true.
+    TArray<int32> Thresholds;
+    float TailGrowth = 1.0f;
+    ResolveUseLadder(Thresholds, TailGrowth);
+    const int64 Owed = UsesToReachLevel(Thresholds, TailGrowth, Entry.Level);
+    if (Owed < TNumericLimits<int64>::Max()) {
+        Entry.Uses = FMath::Max<int32>(Entry.Uses, static_cast<int32>(FMath::Min<int64>(Owed, MAX_int32)));
+    }
+
+    OnSkillsChanged.Broadcast();
+}
+
+void UMythicSkillComponent::ServerSetModifierActive_Implementation(UMythicSkillDefinition *Skill, int32 ModifierIndex, bool bActive) {
+    const AActor *Owner = GetOwner();
+    if (!Owner || !Owner->HasAuthority()) {
+        return;
+    }
+    if (!Skill) {
+        UE_LOG(Myth, Warning, TEXT("Skills: modifier change refused — no skill given."));
+        return;
+    }
+    if (!Skill->Modifiers.IsValidIndex(ModifierIndex)) {
+        UE_LOG(Myth, Warning, TEXT("Skills: modifier change refused — '%s' has no modifier %d (it has %d)."),
+               *GetNameSafe(Skill), ModifierIndex, Skill->Modifiers.Num());
+        return;
+    }
+
+    const FSoftObjectPath SkillPath(Skill);
+
+    if (!bActive) {
+        FMythicSkillProgress *Entry = FindProgress(SkillPath);
+        if (!Entry || Entry->ActiveModifiers.Remove(ModifierIndex) == 0) {
+            return;
+        }
+        PruneProgress(SkillPath);
+        OnSkillsChanged.Broadcast();
+        return;
+    }
+
+    if (!IsSkillUnlocked(Skill)) {
+        UE_LOG(Myth, Warning, TEXT("Skills: modifier refused — '%s' needs %s, which this player has not earned."),
+               *GetNameSafe(Skill), *Skill->RequiredTag.ToString());
+        return;
+    }
+    if (IsModifierActive(Skill, ModifierIndex)) {
+        return;
+    }
+    if (!Skill->Modifiers[ModifierIndex].HasEffect()) {
+        UE_LOG(Myth, Error, TEXT("Skills: modifier refused — '%s' modifier %d changes nothing, so a point spent on it buys nothing."),
+               *GetNameSafe(Skill), ModifierIndex);
+        return;
+    }
+
+    const int32 Capacity = GetModifierCapacity();
+    if (GetActiveModifiers(Skill).Num() >= Capacity) {
+        UE_LOG(Myth, Warning, TEXT("Skills: modifier refused — '%s' already carries %d at once."), *GetNameSafe(Skill), Capacity);
+        return;
+    }
+
+    const int32 Cost = PointCostOf(Skill, ModifierIndex);
+    const int32 Available = GetAvailablePoints(Skill);
+    if (Cost > Available) {
+        UE_LOG(Myth, Warning, TEXT("Skills: modifier refused — '%s' modifier %d costs %d point(s), %d left."),
+               *GetNameSafe(Skill), ModifierIndex, Cost, Available);
+        return;
+    }
+
+    FindOrAddProgress(Skill).ActiveModifiers.Add(ModifierIndex);
+    OnSkillsChanged.Broadcast();
+}
+
+void UMythicSkillComponent::RestoreSkillProgress(const TArray<FMythicSkillProgress> &SavedProgress, int32 SavedModifierCapacity) {
+    const AActor *Owner = GetOwner();
+    if (!Owner || !Owner->HasAuthority()) {
+        return;
+    }
+
+    const int32 Ceiling = FMath::Max(MaxModifierCapacity, 1);
+    const int32 Floor = FMath::Clamp(BaseModifierCapacity, 1, Ceiling);
+    ModifierCapacity = FMath::Clamp(SavedModifierCapacity, Floor, Ceiling);
+
+    SkillProgress.Reset();
+
+    const int32 Capacity = GetModifierCapacity();
+
+    TArray<int32> Thresholds;
+    float TailGrowth = 1.0f;
+    ResolveUseLadder(Thresholds, TailGrowth);
+
+    for (const FMythicSkillProgress &Saved : SavedProgress) {
+        const FSoftObjectPath SavedPath = Saved.Skill.ToSoftObjectPath();
+        if (SavedPath.IsNull()) {
+            continue;
+        }
+        if (FindProgress(SavedPath)) {
+            UE_LOG(Myth, Warning, TEXT("Skills: dropped a second progress row for '%s'."), *SavedPath.ToString());
+            continue;
+        }
+
+        UMythicSkillDefinition *Skill = Saved.Skill.LoadSynchronous();
+        if (!Skill) {
+            UE_LOG(Myth, Warning, TEXT("Skills: dropped saved progress for '%s' — it no longer resolves to a skill."),
+                   *SavedPath.ToString());
+            continue;
+        }
+
+        const int32 LevelCeiling = GetMaxSkillLevel(Skill);
+
+        FMythicSkillProgress Entry;
+        Entry.Skill = Skill;
+        Entry.Uses = FMath::Max(Saved.Uses, 0);
+
+        // The practice on file is the floor, so a ladder retuned cheaper pays out on load; a level granted outright
+        // sits above the practice and is kept. The skill's own modifier count is what clamps both.
+        Entry.Level = FMath::Clamp(FMath::Max(Saved.Level, LevelFromUses(Thresholds, TailGrowth, LevelCeiling, Entry.Uses)),
+                                   1, LevelCeiling);
+
+        // Re-run the live gates rather than trusting the file: a ceiling that moved or content that lost a modifier
+        // must not hand back a build the player could not buy today.
+        int32 Budget = Entry.Level;
+        for (const int32 Index : Saved.ActiveModifiers) {
+            if (!Skill->Modifiers.IsValidIndex(Index) || Entry.ActiveModifiers.Contains(Index)) {
+                continue;
+            }
+            if (!Skill->Modifiers[Index].HasEffect()) {
+                UE_LOG(Myth, Warning, TEXT("Skills: dropped modifier %d on '%s' — it changes nothing, so the point it charges buys nothing."),
+                       Index, *GetNameSafe(Skill));
+                continue;
+            }
+            if (Entry.ActiveModifiers.Num() >= Capacity) {
+                UE_LOG(Myth, Warning, TEXT("Skills: dropped modifier %d on '%s' — only %d can be carried at once."),
+                       Index, *GetNameSafe(Skill), Capacity);
+                break;
+            }
+            const int32 Cost = FMath::Max(Skill->Modifiers[Index].PointCost, 1);
+            if (Cost > Budget) {
+                UE_LOG(Myth, Warning, TEXT("Skills: dropped modifier %d on '%s' — it costs %d point(s), %d left."),
+                       Index, *GetNameSafe(Skill), Cost, Budget);
+                continue;
+            }
+            Budget -= Cost;
+            Entry.ActiveModifiers.Add(Index);
+        }
+
+        if (Entry.Level > 1 || Entry.ActiveModifiers.Num() > 0 || Entry.Uses > 0) {
+            SkillProgress.Add(MoveTemp(Entry));
+        }
+    }
+
     OnSkillsChanged.Broadcast();
 }
 

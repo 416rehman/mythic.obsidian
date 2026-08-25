@@ -9,6 +9,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerState.h"
 #include "GameFramework/RootMotionSource.h"
 
 #include "GAS/Abilities/MythicGA_Triggered.h"
@@ -17,6 +18,7 @@
 #include "GAS/Executions/MythicCombatRoll.h"
 #include "GAS/Executions/MythicDamageApplication.h"
 #include "GAS/MythicTags_GAS.h"
+#include "Progression/Skills/MythicSkillComponent.h"
 #include "Settings/MythicDeveloperSettings.h"
 
 float FMythicSkillTargeting::CosineHalfAngle(float AngleDegrees) {
@@ -79,22 +81,54 @@ void FMythicSkillTargeting::SelectTargets(const FMythicSkillShape &Shape, const 
     }
 }
 
-float UMythicGA_Skill::ScaleRadius(float Authored, float Bonus) {
-    return FMath::Max(0.0f, Authored + Bonus);
+FMythicSkillModifierTotals FMythicSkillModifierTotals::Sum(const TArray<FMythicSkillModifier> &Modifiers, const TArray<int32> &ActiveIndices) {
+    FMythicSkillModifierTotals Totals;
+
+    for (const int32 Index : ActiveIndices) {
+        if (!Modifiers.IsValidIndex(Index)) {
+            continue;
+        }
+        const FMythicSkillModifier &Modifier = Modifiers[Index];
+
+        Totals.RadiusDelta += Modifier.RadiusDelta;
+        Totals.TargetCountDelta += Modifier.TargetCountDelta;
+        Totals.DurationDelta += Modifier.DurationDelta;
+        Totals.MovementDistanceDelta += Modifier.MovementDistanceDelta;
+        Totals.StatusChanceDelta += Modifier.StatusChanceDelta;
+        if (Modifier.StatusOverride.IsValid()) {
+            Totals.StatusOverride = Modifier.StatusOverride;
+        }
+    }
+
+    return Totals;
 }
 
-int32 UMythicGA_Skill::ScaleTargetCount(int32 Authored, float Bonus) {
+float UMythicGA_Skill::ScaleRadius(float Authored, float Bonus, float ModifierDelta) {
+    return FMath::Max(0.0f, Authored + ModifierDelta + Bonus);
+}
+
+int32 UMythicGA_Skill::ScaleTargetCount(int32 Authored, float Bonus, int32 ModifierDelta) {
+    // The gate is the authored number alone. Summing the delta in first would let a modifier that takes a target
+    // away from a one-target skill read as 0 - uncapped - and turn a thrust into a skill that hits the whole room.
     if (Authored <= 0) {
         return 0;
     }
-    return FMath::Max(1, Authored + FMath::RoundToInt(Bonus));
+    return FMath::Max(1, Authored + ModifierDelta + FMath::RoundToInt(Bonus));
 }
 
-float UMythicGA_Skill::ScaleDuration(float Authored, float Bonus) {
+float UMythicGA_Skill::ScaleDuration(float Authored, float Bonus, float ModifierDelta) {
     // Floors at a tick rather than 0. A reduction big enough to zero the duration must still read as "very short";
     // returning 0 would mean "instant" to GAS and "leave it alone" to the caller, both of which are longer, not
     // shorter, than what the stat asked for.
-    return Authored > 0.0f ? FMath::Max(MinScaledDuration, Authored + Bonus) : 0.0f;
+    return Authored > 0.0f ? FMath::Max(MinScaledDuration, Authored + ModifierDelta + Bonus) : 0.0f;
+}
+
+float UMythicGA_Skill::ScaleMovementDistance(float Authored, float ModifierDelta) {
+    return Authored > 0.0f ? FMath::Max(0.0f, Authored + ModifierDelta) : 0.0f;
+}
+
+float UMythicGA_Skill::ScaleStatusChance(float Authored, float ModifierDelta) {
+    return MythicCombat::ClampProbability(Authored + ModifierDelta);
 }
 
 float UMythicGA_Skill::GetSkillDurationBonus() const {
@@ -115,23 +149,69 @@ const UMythicAttributeSet_Offense *UMythicGA_Skill::GetOffenseSet() const {
     return ASC ? ASC->GetSet<UMythicAttributeSet_Offense>() : nullptr;
 }
 
+UMythicSkillDefinition *UMythicGA_Skill::GetSkillDefinition() const {
+    return Cast<UMythicSkillDefinition>(GetCurrentSourceObject());
+}
+
+UMythicSkillComponent *UMythicGA_Skill::GetSkillComponent() const {
+    const FGameplayAbilityActorInfo *Info = GetCurrentActorInfo();
+    if (!Info) {
+        return nullptr;
+    }
+
+    // The component sits beside the ASC on the player state. Asking the avatar's own state as well keeps the fold
+    // working wherever the ASC lives, rather than going quietly inert if it ever moves onto the pawn.
+    if (const AActor *Owner = Info->OwnerActor.Get()) {
+        if (UMythicSkillComponent *Found = Owner->FindComponentByClass<UMythicSkillComponent>()) {
+            return Found;
+        }
+    }
+    const APawn *Avatar = Cast<APawn>(Info->AvatarActor.Get());
+    const APlayerState *PlayerState = Avatar ? Avatar->GetPlayerState() : nullptr;
+    return PlayerState ? PlayerState->FindComponentByClass<UMythicSkillComponent>() : nullptr;
+}
+
+FMythicSkillModifierTotals UMythicGA_Skill::GetModifierTotals() const {
+    const UMythicSkillDefinition *Definition = GetSkillDefinition();
+    const UMythicSkillComponent *Skills = Definition ? GetSkillComponent() : nullptr;
+    if (!Skills) {
+        return FMythicSkillModifierTotals();
+    }
+    return FMythicSkillModifierTotals::Sum(Definition->Modifiers, Skills->GetActiveModifiers(Definition));
+}
+
 FMythicSkillShape UMythicGA_Skill::ResolveShape() const {
     FMythicSkillShape Resolved = Shape;
 
+    const FMythicSkillModifierTotals Totals = GetModifierTotals();
     const UMythicAttributeSet_Offense *Offense = GetOffenseSet();
     const float RadiusBonus = Offense ? Offense->GetSkillRadiusBonus() : 0.0f;
     const float CountBonus = Offense ? Offense->GetSkillTargetCountBonus() : 0.0f;
 
-    Resolved.Radius = ScaleRadius(Shape.Radius, RadiusBonus);
-    // A single-target skill is one target by definition, whatever the asset typed in MaxTargets. Count gear is
-    // still allowed to add to that, which is what turns a thrust into a piercing thrust.
-    Resolved.MaxTargets = ScaleTargetCount(Shape.Shape == EMythicSkillShape::Single ? 1 : Shape.MaxTargets, CountBonus);
+    Resolved.Radius = ScaleRadius(Shape.Radius, RadiusBonus, Totals.RadiusDelta);
+    // A single-target skill is one target by definition, whatever the asset typed in MaxTargets. Count gear and a
+    // count modifier are still allowed to add to that, which is what turns a thrust into a piercing thrust.
+    Resolved.MaxTargets = ScaleTargetCount(Shape.Shape == EMythicSkillShape::Single ? 1 : Shape.MaxTargets, CountBonus,
+                                           Totals.TargetCountDelta);
 
     return Resolved;
 }
 
 float UMythicGA_Skill::ResolveSelfEffectDuration() const {
-    return ScaleDuration(SelfEffectDuration, GetSkillDurationBonus());
+    return ScaleDuration(SelfEffectDuration, GetSkillDurationBonus(), GetModifierTotals().DurationDelta);
+}
+
+float UMythicGA_Skill::ResolveMovementDistance() const {
+    return ScaleMovementDistance(MovementDistance, GetModifierTotals().MovementDistanceDelta);
+}
+
+FGameplayTag UMythicGA_Skill::ResolveStatusToApply() const {
+    const FGameplayTag Override = GetModifierTotals().StatusOverride;
+    return Override.IsValid() ? Override : StatusToApply;
+}
+
+float UMythicGA_Skill::ResolveStatusChance() const {
+    return ScaleStatusChance(StatusChance, GetModifierTotals().StatusChanceDelta);
 }
 
 void UMythicGA_Skill::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo,
@@ -141,6 +221,14 @@ void UMythicGA_Skill::ActivateAbility(const FGameplayAbilitySpecHandle Handle, c
     if (!CommitAbility(Handle, ActorInfo, ActivationInfo)) {
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
+    }
+
+    // One cast is one use, so it is counted here and not in ExecutePayload: a montage carrying three impact notifies
+    // runs the payload three times, and a skill that finds nobody has still been practised. Authority mode only, so
+    // the predicting client counts nothing there is no way to take back.
+    UMythicSkillDefinition *Practised = HasAuthority(&ActivationInfo) ? GetSkillDefinition() : nullptr;
+    if (UMythicSkillComponent *Skills = Practised ? GetSkillComponent() : nullptr) {
+        Skills->RecordSkillUse(Practised);
     }
 
     UAbilityTask_ApplyRootMotionMoveToForce *Dash = StartMovement();
@@ -188,11 +276,12 @@ void UMythicGA_Skill::OnSkillFinished() {
 
 UAbilityTask_ApplyRootMotionMoveToForce *UMythicGA_Skill::StartMovement() {
     ACharacter *Character = Cast<ACharacter>(GetAvatarActorFromActorInfo());
-    if (!Character || Movement == EMythicSkillMovement::None || MovementDistance <= 0.0f) {
+    const float Distance = ResolveMovementDistance();
+    if (!Character || Movement == EMythicSkillMovement::None || Distance <= 0.0f) {
         return nullptr;
     }
 
-    const FVector Destination = ComputeMovementDestination(Character->GetActorLocation(), Character->GetActorForwardVector(), MovementDistance);
+    const FVector Destination = ComputeMovementDestination(Character->GetActorLocation(), Character->GetActorForwardVector(), Distance);
 
     if (Movement == EMythicSkillMovement::Teleport) {
         // No prediction on a blink: a client that guesses a destination the server refuses snaps back through
@@ -243,8 +332,9 @@ void UMythicGA_Skill::ExecutePayload() {
         ApplyDamageContainerSpec(Spec);
     }
 
-    if (StatusToApply.IsValid()) {
-        ApplyStatus(Hits, Owner);
+    const FGameplayTag Status = ResolveStatusToApply();
+    if (Status.IsValid()) {
+        ApplyStatus(Hits, Owner, Status, ResolveStatusChance());
     }
 }
 
@@ -310,15 +400,13 @@ void UMythicGA_Skill::ApplySelfEffect() {
     // zero. Reading it back is what keeps a +2s bonus from replacing a 15s stance with a 2s one.
     const float Authored = SelfEffectDuration > 0.0f ? SelfEffectDuration : SpecHandle.Data->GetDuration();
     if (Authored > 0.0f) {
-        SpecHandle.Data->SetDuration(ScaleDuration(Authored, GetSkillDurationBonus()), true);
+        SpecHandle.Data->SetDuration(ScaleDuration(Authored, GetSkillDurationBonus(), GetModifierTotals().DurationDelta), true);
     }
 
     K2_ApplyGameplayEffectSpecToOwner(SpecHandle);
 }
 
-void UMythicGA_Skill::ApplyStatus(const TArray<FHitResult> &Hits, AActor *Instigator) const {
-    const float Chance = MythicCombat::ClampProbability(StatusChance);
-
+void UMythicGA_Skill::ApplyStatus(const TArray<FHitResult> &Hits, AActor *Instigator, const FGameplayTag &Status, float Chance) const {
     for (const FHitResult &Hit : Hits) {
         AActor *Target = Hit.GetActor();
         if (!Target) {
@@ -329,11 +417,11 @@ void UMythicGA_Skill::ApplyStatus(const TArray<FHitResult> &Hits, AActor *Instig
         }
         // The resistance gate a weapon proc passes through, so a skill cannot ignore what a proc respects.
         const float Survives = UMythicGA_Triggered::SurviveChanceFromResistance(
-            UMythicGA_Triggered::GetStatusResistance(Target, StatusToApply));
+            UMythicGA_Triggered::GetStatusResistance(Target, Status));
         if (!MythicCombat::RollSucceeds(Survives, FMath::FRand())) {
             continue;
         }
-        UMythicStatusRegistry::ApplyStatusToActor(Target, StatusToApply, Instigator);
+        UMythicStatusRegistry::ApplyStatusToActor(Target, Status, Instigator);
     }
 }
 

@@ -16,7 +16,8 @@ enum class EMythicUnlockEffect : uint8 {
     UnlockFastTravel,
     GrantReward,
     GrantPerkSlot,
-    GrantSkillSlot
+    GrantSkillSlot,
+    GrantSkillModifierSlot
 };
 
 struct FMythicUnlockEngine {

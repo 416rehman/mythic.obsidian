@@ -15,6 +15,11 @@ void UMythicSaveGame::FixupData() {
                 CharacterData.AppliedUnlockRules);
         }
 
+        if (CharacterData.DataVersion <= static_cast<int32>(EMythicCharacterSaveVersion::PreSkillModifiers)) {
+            CharacterData.SkillModifierCapacity = FMythicCharacterSaveMigration::SkillModifierCapacityFromAppliedRules(
+                CharacterData.AppliedUnlockRules);
+        }
+
         CharacterData.DataVersion = static_cast<int32>(CurrentCharacterSaveVersion);
     }
 }

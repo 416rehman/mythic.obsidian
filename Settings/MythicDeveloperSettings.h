@@ -120,6 +120,24 @@ public:
     int32 MaxLevel = 60;
 
     /**
+     * The ladder a skill climbs by being used. Row 0 is the running total of uses that earns level two, row 1 the
+     * total that earns level three, and so on, so the table reads as "how much practice is a rank worth" rather
+     * than as a sum a designer has to do in their head.
+     *
+     * Rows are forced strictly increasing when read, so a mis-typed row costs one extra use rather than a free level.
+     * An EMPTY table means no skill ever levels from use — the honest inert state, not a hidden one-use-per-level.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Progression|Skills")
+    TArray<int32> SkillLevelUseThresholds;
+
+    /**
+     * Per-level growth of the running total past the last authored row. Skill ceilings come from how many modifiers
+     * a skill authors, so a content edit that adds one must not run off the end of the table.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Progression|Skills", meta = (ClampMin = "1.0"))
+    float SkillLevelUseTailGrowth = 1.5f;
+
+    /**
      * Default renown tier table (7 ascending value boundaries -> 8 tiers, vendor discounts, per-tier payloads) the
      * per-player UMythicRenownComponent resolves when it has no component-level override. Unset = built-in code-default
      * curve (renown still fully works; only the authored per-tier payloads need an asset). Preloaded at startup.

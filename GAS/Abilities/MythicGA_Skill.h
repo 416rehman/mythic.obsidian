@@ -4,10 +4,12 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "GAS/Abilities/MythicGameplayAbility.h"
+#include "Progression/Skills/MythicSkillDefinition.h"
 #include "MythicGA_Skill.generated.h"
 
 class UAbilityTask_ApplyRootMotionMoveToForce;
 class UAnimMontage;
+class UMythicSkillComponent;
 
 UENUM(BlueprintType)
 enum class EMythicSkillShape : uint8 {
@@ -91,18 +93,56 @@ struct MYTHIC_API FMythicSkillTargeting {
 };
 
 /**
+ * What the modifiers a character has switched on add up to. A skill can carry several at once, so the ability folds
+ * one set of numbers rather than walking the list at every resolve point.
+ */
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicSkillModifierTotals {
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Skill")
+    float RadiusDelta = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Skill")
+    int32 TargetCountDelta = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Skill")
+    float DurationDelta = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Skill")
+    float MovementDistanceDelta = 0.0f;
+
+    // Two modifiers naming a status is a choice between them, not a sum, so the later one wins.
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Skill")
+    FGameplayTag StatusOverride;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Skill")
+    float StatusChanceDelta = 0.0f;
+
+    /**
+     * What the modifiers at ActiveIndices change, summed. An index the definition no longer has contributes nothing,
+     * so content that dropped a modifier cannot make a saved character's build read past the end of the list.
+     */
+    static FMythicSkillModifierTotals Sum(const TArray<FMythicSkillModifier> &Modifiers, const TArray<int32> &ActiveIndices);
+};
+
+/**
  * Active skill. One class backs all sixteen: what a skill does is the shape it queries, the damage container it
  * applies, the status it inflicts and the way it moves you, all authored on a Blueprint child that carries no
  * graph.
  *
  * Three quantifiers take a bonus attribute off the caster - Radius, MaxTargets and the self-effect duration - so
- * gear moves what a skill does without the skill being re-authored. Shape angle, forward offset, status chance and
- * movement distance are authored-only for now; each needs its own attribute before gear can move it, and adding one
- * means adding the attribute beside the other three rather than borrowing a neighbour's.
+ * gear moves what a skill does without the skill being re-authored. The modifiers the caster has bought on this
+ * skill move those three as well, and movement distance, status chance and which status lands with them. A modifier
+ * folds in beside the attribute, never instead of it: authored, then the modifiers, then the attribute, then the
+ * clamp. Shape angle and forward offset are authored-only; neither an attribute nor a modifier reaches them yet.
  *
  * Damage is deliberately not scaled here. BonusSkillDamage is applied inside the damage execution to any hit tagged
  * GAS.Ability.Type.Skill, which this ability marks its own damage with, so scaling the container here would pay the
  * stat twice.
+ *
+ * A skill levels by being cast. One committed activation is one use, recorded on the authority copy only, and the
+ * skill component decides what that use is worth. Nothing a client sends raises a level.
  */
 UCLASS()
 class MYTHIC_API UMythicGA_Skill : public UMythicGameplayAbility {
@@ -161,21 +201,47 @@ public:
     virtual void ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo,
                                  const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData *TriggerEventData) override;
 
-    // The authored shape with the caster's bonus attributes folded in. What the query actually uses.
+    // What the caster's active modifiers on this skill add up to. Empty for a caster with no skill component.
+    UFUNCTION(BlueprintPure, Category = "Mythic|Skill")
+    FMythicSkillModifierTotals GetModifierTotals() const;
+
+    // The authored shape with the active modifiers and the caster's bonus attributes folded in. What the query uses.
     UFUNCTION(BlueprintPure, Category = "Mythic|Skill")
     FMythicSkillShape ResolveShape() const;
 
-    // SelfEffectDuration with SkillDurationBonus folded in.
+    // SelfEffectDuration with the active modifiers and SkillDurationBonus folded in.
     UFUNCTION(BlueprintPure, Category = "Mythic|Skill")
     float ResolveSelfEffectDuration() const;
 
+    // MovementDistance with the active modifiers folded in. No attribute moves it yet.
+    UFUNCTION(BlueprintPure, Category = "Mythic|Skill")
+    float ResolveMovementDistance() const;
+
+    // The Status.Type.* this skill inflicts once an active modifier has had its say.
+    UFUNCTION(BlueprintPure, Category = "Mythic|Skill")
+    FGameplayTag ResolveStatusToApply() const;
+
+    // StatusChance with the active modifiers folded in. No attribute moves it yet.
+    UFUNCTION(BlueprintPure, Category = "Mythic|Skill")
+    float ResolveStatusChance() const;
+
     // Never negative: a cursed radius shrinks a skill, it does not turn it inside out.
-    static float ScaleRadius(float Authored, float Bonus);
+    static float ScaleRadius(float Authored, float Bonus, float ModifierDelta = 0.0f);
 
-    // An uncapped skill (0) stays uncapped. A capped one never falls below a single target.
-    static int32 ScaleTargetCount(int32 Authored, float Bonus);
+    /**
+     * An uncapped skill (0) stays uncapped: only the authored number says whether the skill has a cap at all, so a
+     * modifier that takes targets away caps a skill harder rather than uncapping it. A capped one never falls below
+     * a single target.
+     */
+    static int32 ScaleTargetCount(int32 Authored, float Bonus, int32 ModifierDelta = 0);
 
-    static float ScaleDuration(float Authored, float Bonus);
+    static float ScaleDuration(float Authored, float Bonus, float ModifierDelta = 0.0f);
+
+    // An authored 0 means the skill does not move you, so no modifier can make it dash.
+    static float ScaleMovementDistance(float Authored, float ModifierDelta);
+
+    // Stays a probability: stacked chance modifiers can reach certainty, never pass it.
+    static float ScaleStatusChance(float Authored, float ModifierDelta);
 
     /** Shortest a scaled duration may become. Zero would read as "instant" to GAS. */
     static constexpr float MinScaledDuration = 0.1f;
@@ -197,7 +263,7 @@ protected:
 
     void ApplySelfEffect();
 
-    void ApplyStatus(const TArray<FHitResult> &Hits, AActor *Instigator) const;
+    void ApplyStatus(const TArray<FHitResult> &Hits, AActor *Instigator, const FGameplayTag &Status, float Chance) const;
 
     // Marks both specs as skill-delivered so the damage execution's BonusSkillDamage gate can see them.
     static void MarkSpecAsSkill(FMythicDamageContainerSpec &Spec);
@@ -215,4 +281,10 @@ private:
     const class UMythicAttributeSet_Offense *GetOffenseSet() const;
 
     float GetSkillDurationBonus() const;
+
+    // The definition this ability was granted from. It is the spec's source object, so a skill fired from a slot
+    // knows which set of authored modifiers is its own.
+    UMythicSkillDefinition *GetSkillDefinition() const;
+
+    UMythicSkillComponent *GetSkillComponent() const;
 };

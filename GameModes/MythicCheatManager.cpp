@@ -17,6 +17,8 @@
 #include "Mythic/GAS/AttributeSets/Shared/MythicLifeComponent.h"
 #include "Mythic/GameModes/GameState/MythicGameState.h"
 #include "Mythic/Settings/MythicDeveloperSettings.h"
+#include "Mythic/Progression/Skills/MythicSkillComponent.h"
+#include "Mythic/Progression/Skills/MythicSkillDefinition.h"
 #include "Mythic/Player/Proficiency/ProficiencyComponent.h"
 #include "Mythic/Player/Proficiency/ProficiencyDefinition.h"
 #include "Mythic/GAS/MythicAbilitySystemComponent.h"
@@ -103,6 +105,11 @@ void UMythicCheatManager::MythHelp() {
     UE_LOG(Myth, Warning, TEXT("--- PROFICIENCIES ---"));
     UE_LOG(Myth, Warning, TEXT("  MythListProficiencies              - List proficiencies and progress"));
     UE_LOG(Myth, Warning, TEXT("  MythGiveProficiency <Name> <Amt>   - Give proficiency progress"));
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("--- SKILLS (server/standalone only) ---"));
+    UE_LOG(Myth, Warning, TEXT("  MythListSkills                     - Level, ceiling and practice per skill"));
+    UE_LOG(Myth, Warning, TEXT("  MythPracticeSkill <Name> [Count]   - Use a skill Count times, the real levelling route"));
+    UE_LOG(Myth, Warning, TEXT("  MythLevelSkill <Name> [Levels]     - Hand over levels without the practice"));
     UE_LOG(Myth, Warning, TEXT(""));
     UE_LOG(Myth, Warning, TEXT("--- LIVING WORLD ---"));
     UE_LOG(Myth, Warning, TEXT("  MythLivingWorldStatus              - System status (thread, fabric, factions, territory)"));
@@ -440,6 +447,87 @@ void UMythicCheatManager::MythGiveItem(const FString &ItemName, int32 Count, int
     else {
         UE_LOG(Myth, Warning, TEXT(">>> Gave %d x %s"), Count, *MatchedItem->Name.ToString());
     }
+}
+
+namespace {
+TArray<UMythicSkillDefinition *> Cheat_AllSkills() {
+    FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry &Registry = Module.Get();
+    Registry.SearchAllAssets(true);
+
+    TArray<FAssetData> Assets;
+    Registry.GetAssetsByClass(UMythicSkillDefinition::StaticClass()->GetClassPathName(), Assets);
+
+    TArray<UMythicSkillDefinition *> Out;
+    for (const FAssetData &Asset : Assets) {
+        if (UMythicSkillDefinition *Skill = Cast<UMythicSkillDefinition>(Asset.GetAsset())) {
+            Out.Add(Skill);
+        }
+    }
+    Out.Sort([](const UMythicSkillDefinition &A, const UMythicSkillDefinition &B) { return A.GetName() < B.GetName(); });
+    return Out;
+}
+
+// Every skill verb decides on the server, so a cheat run from a client would look like it worked and change nothing.
+UMythicSkillComponent *Cheat_AuthoritativeSkills(APlayerController *PC) {
+    AMythicPlayerState *PS = PC ? Cast<AMythicPlayerState>(PC->PlayerState) : nullptr;
+    if (!PS) {
+        UE_LOG(Myth, Error, TEXT(">>> No Mythic player state"));
+        return nullptr;
+    }
+    if (!PS->HasAuthority()) {
+        UE_LOG(Myth, Error, TEXT(">>> Skill cheats decide on the server. Run this on the host or in standalone."));
+        return nullptr;
+    }
+    return PS->GetSkillComponent();
+}
+
+UMythicSkillDefinition *Cheat_FindSkill(const FString &SkillName) {
+    for (UMythicSkillDefinition *Skill : Cheat_AllSkills()) {
+        if (Skill->GetName().Contains(SkillName) || Skill->Name.ToString().Contains(SkillName)) {
+            return Skill;
+        }
+    }
+    UE_LOG(Myth, Error, TEXT(">>> No skill matching '%s'. MythListSkills for the list."), *SkillName);
+    return nullptr;
+}
+}
+
+void UMythicCheatManager::MythListSkills() {
+    UMythicSkillComponent *Skills = Cheat_AuthoritativeSkills(GetOuterAPlayerController());
+    const TArray<UMythicSkillDefinition *> All = Cheat_AllSkills();
+    UE_LOG(Myth, Warning, TEXT(">>> %d skills, %d modifiers carried at once"), All.Num(),
+           Skills ? Skills->GetModifierCapacity() : 0);
+    for (UMythicSkillDefinition *Skill : All) {
+        UE_LOG(Myth, Warning, TEXT("  %-26s lvl %d/%d  %d uses (next at %d)  %d modifiers"), *Skill->GetName(),
+               Skills ? Skills->GetSkillLevel(Skill) : 0, Skills ? Skills->GetMaxSkillLevel(Skill) : 0,
+               Skills ? Skills->GetSkillUses(Skill) : 0, Skills ? Skills->GetUsesForNextLevel(Skill) : 0,
+               Skill->Modifiers.Num());
+    }
+}
+
+void UMythicCheatManager::MythPracticeSkill(const FString &SkillName, int32 Count) {
+    UMythicSkillComponent *Skills = Cheat_AuthoritativeSkills(GetOuterAPlayerController());
+    UMythicSkillDefinition *Skill = Skills ? Cheat_FindSkill(SkillName) : nullptr;
+    if (!Skill) {
+        return;
+    }
+    for (int32 i = 0; i < FMath::Max(Count, 1); i++) {
+        Skills->RecordSkillUse(Skill);
+    }
+    UE_LOG(Myth, Warning, TEXT(">>> %s: %d uses, level %d/%d"), *Skill->GetName(), Skills->GetSkillUses(Skill),
+           Skills->GetSkillLevel(Skill), Skills->GetMaxSkillLevel(Skill));
+}
+
+void UMythicCheatManager::MythLevelSkill(const FString &SkillName, int32 Levels) {
+    UMythicSkillComponent *Skills = Cheat_AuthoritativeSkills(GetOuterAPlayerController());
+    UMythicSkillDefinition *Skill = Skills ? Cheat_FindSkill(SkillName) : nullptr;
+    if (!Skill) {
+        return;
+    }
+    Skills->GrantSkillLevel(Skill, FMath::Max(Levels, 1));
+    UE_LOG(Myth, Warning, TEXT(">>> %s: level %d/%d, %d points to spend"), *Skill->GetName(), Skills->GetSkillLevel(Skill),
+           Skills->GetMaxSkillLevel(Skill), Skills->GetAvailablePoints(Skill));
 }
 
 void UMythicCheatManager::MythClearInventory() {

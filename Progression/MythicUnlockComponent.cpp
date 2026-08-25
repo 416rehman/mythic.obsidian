@@ -210,6 +210,13 @@ void UMythicUnlockComponent::ApplyRule(const UMythicUnlockRule &Rule) {
                 }
             }
             break;
+        case EMythicUnlockEffect::GrantSkillModifierSlot:
+            if (const AMythicPlayerState *PS = Cast<AMythicPlayerState>(GetOwner())) {
+                if (UMythicSkillComponent *SkillComp = PS->GetSkillComponent()) {
+                    SkillComp->GrantModifierCapacity();
+                }
+            }
+            break;
         case EMythicUnlockEffect::GrantPerkSlot:
             if (const AMythicPlayerState *PS = Cast<AMythicPlayerState>(GetOwner())) {
                 if (UMythicRuneComponent *Runes = PS->GetRuneComponent()) {

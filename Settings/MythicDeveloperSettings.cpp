@@ -23,6 +23,12 @@ UMythicDeveloperSettings::UMythicDeveloperSettings() {
         EnemyTierScaling.Add(Row(AI_TIER_BOSS, 12.0f, 4.0f, 20.0f, 20));
     }
 
+    // A rank costs roughly twice the practice the one before it did, so the first rank arrives in a fight or two
+    // and the last is a campaign's worth of using that skill by choice.
+    if (SkillLevelUseThresholds.Num() == 0) {
+        SkillLevelUseThresholds = {10, 25, 50, 90, 150, 240, 370};
+    }
+
     // The two families a player takes straight out of the world. Overridable in Project Settings.
     GatheredItemTypes.AddTag(FGameplayTag::RequestGameplayTag(FName("Itemization.Type.Farming"), false));
     GatheredItemTypes.AddTag(FGameplayTag::RequestGameplayTag(FName("Itemization.Type.Mining"), false));

@@ -8,6 +8,7 @@
 #include "SavedQuestJournal.h"
 #include "SavedFactionStanding.h"
 #include "Progression/MythicStatCounterTypes.h"
+#include "Progression/Skills/MythicSkillProgressTypes.h"
 #include "Knowledge/MythicCodexTypes.h"
 #include "GAS/Progression/MythicRenownTypes.h"
 #include "GAS/Mounts/MythicMountTypes.h"
@@ -34,6 +35,7 @@ enum class EMythicCharacterSaveVersion : uint8 {
     PreWholeNumberRolls,
     PreRunes,
     PreSkills,
+    PreSkillModifiers,
     LatestVersion,
     VersionPlusOne
 };
@@ -201,6 +203,20 @@ struct FSerializedCharacterData {
     UPROPERTY(BlueprintReadWrite)
     int32 UnlockedSkillSlots = 0;
 
+    // Per-player SKILL GROWTH — one row per skill that has been levelled or has a modifier switched on, keyed on the
+    // definition rather than a slot so a skill keeps its build while unequipped. Persists UMythicSkillComponent's
+    // levels and active modifier indices. Empty for pre-SkillModifiers saves, which is exactly right: every skill
+    // reads back at level one with nothing active. Restored via RestoreSkillProgress, which re-runs the capacity and
+    // point gates rather than trusting the file.
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FMythicSkillProgress> SkillProgress;
+
+    // How many modifiers one skill may carry at once. Zero means the count is absent, which FixupData rebuilds from
+    // the applied Unlock.Rule.SkillModifier* rules before load — the same trap the rune sockets hit, since those
+    // rules latch in AppliedUnlockRules and never fire twice.
+    UPROPERTY(BlueprintReadWrite)
+    int32 SkillModifierCapacity = 0;
+
 
     // Last world transform of the player's pawn, so a reload restores position/rotation instead of respawning at
     // the default PlayerStart. Gated by bHasSavedTransform so saves written before this field existed (which would
@@ -249,5 +265,24 @@ struct MYTHIC_API FMythicCharacterSaveMigration {
             }
         }
         return Slots;
+    }
+
+    /**
+     * How many modifiers a pre-SkillModifiers save had earned the right to carry at once. Rebuilt from the rules for
+     * the same reason the two counts above are: an applied rule is latched and never fires again. One is free; each
+     * applied Unlock.Rule.SkillModifier* adds another.
+     *
+     * Unlock.Rule.SkillSlot* shares the Unlock.Rule parent and must not be counted here — a loose prefix would hand
+     * out a modifier slot for every ability slot.
+     */
+    static int32 SkillModifierCapacityFromAppliedRules(TConstArrayView<FGameplayTag> AppliedRules) {
+        static const FName RuleParent(TEXT("Unlock.Rule.SkillModifier"));
+        int32 Capacity = 1;
+        for (const FGameplayTag &Rule : AppliedRules) {
+            if (Rule.IsValid() && Rule.GetTagName().ToString().StartsWith(RuleParent.ToString(), ESearchCase::CaseSensitive)) {
+                ++Capacity;
+            }
+        }
+        return Capacity;
     }
 };
