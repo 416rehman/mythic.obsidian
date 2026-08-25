@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 
 #include "GAS/Abilities/MythicGA_Skill.h"
+#include "GAS/Effects/MythicStatusEffectDefinition.h"
 #include "Progression/Skills/MythicSkillDefinition.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -107,6 +108,115 @@ bool FMythicSkillContentTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("skills that move exist"), Moving > 0);
     TestTrue(TEXT("skills that carry a status exist"), WithStatus > 0);
     TestTrue(TEXT("not every skill reaches, so the defensive and movement ones are real"), Reaching < Skills.Num());
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicSkillModifierContentTest,
+                                 "Mythic.Progression.SkillModifierContent",
+                                 EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * Every authored modifier must change the skill it sits on.
+ *
+ * A modifier costs a point and a skill level, so one that changes nothing sells both for nothing. Two ways to
+ * write one: leave every delta at zero, which HasEffect catches, or set a delta the ability never reads on
+ * that skill, which it does not. The ability folds RadiusDelta only where the shape has a radius,
+ * TargetCountDelta only where MaxTargets is already capped (an uncapped skill early-returns, since there is
+ * nothing to add to "everyone"), DurationDelta only through a SelfEffect, and MovementDistanceDelta only
+ * where the skill moves you. So the lever has to be checked against the skill, not on its own.
+ */
+bool FMythicSkillModifierContentTest::RunTest(const FString &Parameters) {
+    TArray<UMythicSkillDefinition *> Skills;
+    LoadSkillDefinitions(Skills);
+    if (!TestEqual(TEXT("every authored skill is present"), Skills.Num(), ExpectedSkills)) {
+        return false;
+    }
+
+    // StatusOverride is matched against the registry's StatusType, not the GAS.Debuff.* state an afflicted actor
+    // ends up owning. Both are registered tags, so naming the wrong one passes every tag check and applies nothing.
+    FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    TSet<FGameplayTag> StatusKeys;
+    TArray<FAssetData> StatusAssets;
+    Module.Get().GetAssetsByClass(UMythicStatusEffectDefinition::StaticClass()->GetClassPathName(), StatusAssets, true);
+    for (const FAssetData &Asset : StatusAssets) {
+        if (const UMythicStatusEffectDefinition *Status = Cast<UMythicStatusEffectDefinition>(Asset.GetAsset())) {
+            if (Status->StatusType.IsValid()) {
+                StatusKeys.Add(Status->StatusType);
+            }
+        }
+    }
+    if (!TestTrue(TEXT("the status registry has keys to match against"), StatusKeys.Num() > 0)) {
+        return false;
+    }
+
+    int32 Total = 0;
+    int32 WithStatus = 0;
+    int32 SkillsWithNone = 0;
+
+    for (const UMythicSkillDefinition *Skill : Skills) {
+        const FString Name = Skill->GetName();
+        if (!Skill->Ability) {
+            continue;
+        }
+        const UMythicGA_Skill *Ability = Cast<UMythicGA_Skill>(Skill->Ability->GetDefaultObject());
+        if (!Ability) {
+            continue;
+        }
+
+        if (Skill->Modifiers.Num() == 0) {
+            ++SkillsWithNone;
+            continue;
+        }
+
+        // The ceiling is derived from this list, so an empty one means a skill that can never be levelled.
+        const bool bReaches = Ability->Shape.Radius > 0.0f;
+        const bool bCapped = Ability->Shape.MaxTargets > 0;
+        const bool bHasSelfEffect = Ability->SelfEffect != nullptr;
+        const bool bMoves = Ability->Movement != EMythicSkillMovement::None && Ability->MovementDistance > 0.0f;
+
+        for (int32 Index = 0; Index < Skill->Modifiers.Num(); ++Index) {
+            const FMythicSkillModifier &Mod = Skill->Modifiers[Index];
+            const FString Where = FString::Printf(TEXT("%s modifier %d (%s)"), *Name, Index, *Mod.Name.ToString());
+            ++Total;
+
+            TestFalse(*FString::Printf(TEXT("%s is named"), *Where), Mod.Name.IsEmpty());
+            TestFalse(*FString::Printf(TEXT("%s is described"), *Where), Mod.Description.IsEmpty());
+            TestTrue(*FString::Printf(TEXT("%s costs at least one point"), *Where), Mod.PointCost >= 1);
+            TestTrue(*FString::Printf(TEXT("%s changes something"), *Where), Mod.HasEffect());
+
+            if (!FMath::IsNearlyZero(Mod.RadiusDelta)) {
+                TestTrue(*FString::Printf(TEXT("%s moves a radius its skill has"), *Where), bReaches);
+            }
+            if (Mod.TargetCountDelta != 0) {
+                TestTrue(*FString::Printf(TEXT("%s moves a target cap its skill has"), *Where), bCapped);
+            }
+            if (!FMath::IsNearlyZero(Mod.DurationDelta)) {
+                TestTrue(*FString::Printf(TEXT("%s moves a duration its skill has"), *Where), bHasSelfEffect);
+            }
+            if (!FMath::IsNearlyZero(Mod.MovementDistanceDelta)) {
+                TestTrue(*FString::Printf(TEXT("%s moves a distance its skill travels"), *Where), bMoves);
+            }
+            if (Mod.StatusOverride.IsValid()) {
+                ++WithStatus;
+                TestTrue(*FString::Printf(TEXT("%s names a status the registry can apply"), *Where),
+                         StatusKeys.Contains(Mod.StatusOverride));
+                TestTrue(*FString::Printf(TEXT("%s applies its status to something it reaches"), *Where), bReaches);
+            }
+            if (!FMath::IsNearlyZero(Mod.StatusChanceDelta)) {
+                TestTrue(*FString::Printf(TEXT("%s moves a chance on a skill that can inflict"), *Where),
+                         bReaches && (Mod.StatusOverride.IsValid() || Ability->StatusToApply.IsValid()));
+            }
+        }
+    }
+
+    AddInfo(FString::Printf(TEXT("%d skills, %d modifiers, %d status overrides, checked against %d registry keys"),
+                            Skills.Num(), Total, WithStatus, StatusKeys.Num()));
+
+    // A sweep over an empty set passes everything above, which is the same shape as the bug it guards.
+    TestTrue(TEXT("modifiers were actually found to check"), Total > 0);
+    TestEqual(TEXT("every skill carries at least one modifier"), SkillsWithNone, 0);
+    TestTrue(TEXT("status overrides exist, so the registry check is exercised"), WithStatus > 0);
 
     return true;
 }
