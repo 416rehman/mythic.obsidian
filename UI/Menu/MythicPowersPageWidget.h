@@ -7,7 +7,7 @@
 #include "UI/MythicActivatableWidget.h"
 #include "MythicPowersPageWidget.generated.h"
 
-class UCommonTextBlock;
+class UTextBlock;
 class UImage;
 class UMythicPowersPageWidget;
 class UMythicSectionHeader;
@@ -81,14 +81,14 @@ protected:
     TObjectPtr<UPanelWidget> ModifierHost;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UCommonTextBlock> Txt_SelectedName;
+    TObjectPtr<UTextBlock> Txt_SelectedName;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UCommonTextBlock> Txt_SelectedDescription;
+    TObjectPtr<UTextBlock> Txt_SelectedDescription;
 
     /** "Level 3 - 1 point unspent". Empty when nothing is selected. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    TObjectPtr<UCommonTextBlock> Txt_Progress;
+    TObjectPtr<UTextBlock> Txt_Progress;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UImage> Img_SelectedIcon;

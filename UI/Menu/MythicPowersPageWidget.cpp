@@ -5,7 +5,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Blueprint/WidgetTree.h"
-#include "CommonTextBlock.h"
+#include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Components/Image.h"
 #include "Components/PanelWidget.h"
@@ -110,7 +110,7 @@ void UMythicPowersPageWidget::SetRowText(UUserWidget *RowWidget, FName SlotName,
     if (!RowWidget) {
         return;
     }
-    if (UCommonTextBlock *Block = Cast<UCommonTextBlock>(RowWidget->GetWidgetFromName(SlotName))) {
+    if (UTextBlock *Block = Cast<UTextBlock>(RowWidget->GetWidgetFromName(SlotName))) {
         Block->SetText(Text);
     }
 }
