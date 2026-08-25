@@ -26,7 +26,7 @@ struct MYTHIC_API FMythicCoreAffixScaling {
     float BaseMax = 0.0f;
 };
 
-UCLASS(config = Game, defaultconfig, meta = (DisplayName = "Mythic Combat"))
+UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic Combat"))
 class MYTHIC_API UMythicCombatSettings : public UDeveloperSettings {
     GENERATED_BODY()
 

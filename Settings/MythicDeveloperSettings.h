@@ -35,7 +35,7 @@ class UGameplayEffect;
 class AMythicMount;
 class UProficiencyDefinition;
 
-UCLASS(config = Game, defaultconfig, meta = (DisplayName = "Mythic"))
+UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic"))
 class MYTHIC_API UMythicDeveloperSettings : public UDeveloperSettings {
     GENERATED_BODY()
 

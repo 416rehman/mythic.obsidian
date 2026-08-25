@@ -6,7 +6,7 @@
 
 class UMythicAffixCatalogue;
 
-UCLASS(config = Game, defaultconfig, meta = (DisplayName = "Mythic Loot Settings"))
+UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic Loot"))
 class MYTHIC_API UMythicLootSettings : public UDeveloperSettings {
     GENERATED_BODY()
 

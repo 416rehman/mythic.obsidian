@@ -9,7 +9,7 @@
 
 class AMythicPlayerGravestone;
 
-UCLASS(config = Game, defaultconfig, meta = (DisplayName = "Mythic Death Stake"))
+UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic Death Stake"))
 class MYTHIC_API UMythicDeathStakeSettings : public UDeveloperSettings {
     GENERATED_BODY()
 

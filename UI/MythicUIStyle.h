@@ -14,7 +14,7 @@ class UCommonTextBlock;
 class UUserWidget;
 class UWidget;
 
-UCLASS(config = Game, defaultconfig, meta = (DisplayName = "Mythic UI Style"))
+UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic UI Style"))
 class MYTHIC_API UMythicUIStyleSettings : public UDeveloperSettings {
     GENERATED_BODY()
 
