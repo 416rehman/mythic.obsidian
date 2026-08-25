@@ -203,6 +203,9 @@ void UMythicMenuShell::OpenPage(FName PageId) {
 
     UCommonActivatableWidget *Target = GetPageWidget(PageId);
     if (!Target) {
+        // Falling back silently is how a hotkey wired to a page that does not exist reads as a working key that
+        // happens to open the wrong screen, which is far harder to notice than a key that says it missed.
+        UE_LOG(Myth, Warning, TEXT("MenuShell: no page '%s'; opening the first tab instead."), *PageId.ToString());
         for (const FMythicMenuPage &Page : Pages) {
             if (UCommonActivatableWidget *Fallback = GetPageWidget(Page.PageId)) {
                 Target = Fallback;

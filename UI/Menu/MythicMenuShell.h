@@ -55,6 +55,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Menu")
     void OpenPage(FName PageId);
 
+    /** Read-only, for the validator that checks tab ids and the hotkeys aimed at them. */
+    const TArray<FMythicMenuPage> &GetPages() const { return Pages; }
+
     UFUNCTION(BlueprintPure, Category = "Mythic|Menu")
     FName GetActivePageId() const { return ActivePageId; }
 
