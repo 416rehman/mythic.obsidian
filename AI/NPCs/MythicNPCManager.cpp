@@ -10,6 +10,8 @@
 #include "Settings/MythicCombatSettings.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "NPCDefinition.h"
 
 int32 UMythicNPCManager::ResolveCombatLevelAt(const FVector &SpawnLocation) const {
     return MythicCombat::ResolveCombatLevelAt(GetWorld(), SpawnLocation);
@@ -60,6 +62,49 @@ void UMythicNPCManager::ReturnToPool(AMythicNPCCharacter *NPC, bool bShouldCache
     NPCCharacterPool.Add(NPC);
 
     UE_LOG(Myth, Verbose, TEXT("NPC returned to pool (ID: %s)"), *NPCId.ToString());
+}
+
+void UMythicNPCManager::BuildDefinitionIndex() {
+    if (bDefinitionIndexBuilt) {
+        return;
+    }
+    bDefinitionIndexBuilt = true;
+
+    const FAssetRegistryModule &Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+    TArray<FAssetData> Assets;
+    Registry.Get().GetAssetsByClass(UNPCDefinition::StaticClass()->GetClassPathName(), Assets, true);
+
+    int32 Indexed = 0;
+    for (const FAssetData &Asset : Assets) {
+        UNPCDefinition *Def = Cast<UNPCDefinition>(Asset.GetAsset());
+        if (!Def || !Def->NPCType.IsValid()) {
+            continue;
+        }
+        DefinitionsByType.FindOrAdd(Def->NPCType).Defs.Add(Def);
+        ++Indexed;
+    }
+    UE_LOG(Myth, Log, TEXT("NPCManager: definition index built - %d definitions across %d types."),
+           Indexed, DefinitionsByType.Num());
+}
+
+int32 UMythicNPCManager::CountDefinitionsForType(const FGameplayTag NPCType) {
+    BuildDefinitionIndex();
+    int32 Count = 0;
+    for (const TPair<FGameplayTag, FMythicNPCDefinitionBucket> &Bucket : DefinitionsByType) {
+        if (Bucket.Key.MatchesTag(NPCType)) {
+            Count += Bucket.Value.Defs.Num();
+        }
+    }
+    return Count;
+}
+
+bool UMythicNPCManager::ReclaimNPC(AMythicNPCCharacter *NPC) {
+    if (!NPC || !ActiveNPCs.Contains(NPC->GetNPCId())) {
+        return false;
+    }
+    // Emergent NPCs die and are done: no cache, straight back to the pool for the next ambush.
+    ReturnToPool(NPC, false);
+    return true;
 }
 
 AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDef, FVector SpawnLocation, FRotator SpawnRotation) {
@@ -123,6 +168,24 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnRandomNPC(FGameplayTag NPCType, FVe
     }
 
 
+    // A random spawn is a fresh individual of the requested type: pick among every authored definition
+    // whose type sits under the request, so asking for NPC.Type.Bandit can produce any bandit variant.
+    BuildDefinitionIndex();
+    TArray<UNPCDefinition *> Candidates;
+    for (const TPair<FGameplayTag, FMythicNPCDefinitionBucket> &Bucket : DefinitionsByType) {
+        if (Bucket.Key.MatchesTag(NPCType)) {
+            for (const TObjectPtr<UNPCDefinition> &Def : Bucket.Value.Defs) {
+                Candidates.Add(Def);
+            }
+        }
+    }
+    if (Candidates.Num() == 0) {
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnRandomNPC: no NPCDefinition authored for type %s."),
+               *NPCType.ToString());
+        return nullptr;
+    }
+    UNPCDefinition *Chosen = Candidates[FMath::RandRange(0, Candidates.Num() - 1)];
+
     AMythicNPCCharacter *SpawnedNPC = GetFromPool(NPCType);
 
     FActorSpawnParameters SpawnInfo;
@@ -143,7 +206,14 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnRandomNPC(FGameplayTag NPCType, FVe
         UE_LOG(Myth, Log, TEXT("Spawned new NPC %s for Random Type %s."), *SpawnedNPC->GetName(), *NPCType.ToString());
     }
 
+    // The definition is the template, not the individual: a fresh id per spawn so two bandits from one
+    // definition never collide in the active map, and the ambush in Extreme territory fights at its level.
+    FMythicNPCData Data(Chosen);
+    Data.NPCId = FGuid::NewGuid();
+    Data.CombatLevel = ResolveCombatLevelAt(SpawnLocation);
+    SpawnedNPC->OnSpawnedFromPool(Data);
 
+    ActiveNPCs.Add(Data.NPCId, SpawnedNPC);
     return SpawnedNPC;
 }
 

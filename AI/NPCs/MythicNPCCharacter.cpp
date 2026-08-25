@@ -2,6 +2,8 @@
 
 #include "MythicNPCCharacter.h"
 
+#include "MythicNPCManager.h"
+
 #include "Mythic.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
@@ -56,6 +58,11 @@ void AMythicNPCCharacter::OnSpawnedFromPool(const struct FMythicNPCData &InNPCDa
         return;
     }
     this->NPCData = InNPCData;
+
+    // Waking from the pool: visible and solid again before anything else runs.
+    SetActorHiddenInGame(false);
+    SetActorEnableCollision(true);
+
     this->InitializeASC();
 
     SeedAttributesFromData();
@@ -346,6 +353,10 @@ void AMythicNPCCharacter::OnReturnedToPool() {
             AIController->UnPossess();
         }
     }
+
+    // Pooled actors must not linger in the world: invisible, intangible, and parked until reuse.
+    SetActorHiddenInGame(true);
+    SetActorEnableCollision(false);
 
     bCombatInitialized = false;
     if (AbilitySystemComponent && AttackAbilityHandle.IsValid()) {
@@ -689,7 +700,19 @@ void AMythicNPCCharacter::HandleNPCDeath(AActor *DeadActor) {
 
     if (UWorld *World = GetWorld()) {
         World->GetTimerManager().SetTimer(CorpseTimerHandle,
-                                          FTimerDelegate::CreateWeakLambda(this, [this]() { Destroy(); }),
+                                          FTimerDelegate::CreateWeakLambda(this, [this]() {
+                                              // The manager reclaims its own; anything else (Mass embodiment)
+                                              // owns its lifecycle and tears down as before.
+                                              if (const UWorld *W = GetWorld()) {
+                                                  UGameInstance *GI = W->GetGameInstance();
+                                                  if (UMythicNPCManager *Mgr = GI ? GI->GetSubsystem<UMythicNPCManager>() : nullptr) {
+                                                      if (Mgr->ReclaimNPC(this)) {
+                                                          return;
+                                                      }
+                                                  }
+                                              }
+                                              Destroy();
+                                          }),
                                           CorpseLifetime, false);
     }
 }

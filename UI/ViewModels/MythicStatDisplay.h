@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "AttributeSet.h"
+#include "Engine/DataTable.h"
 #include "Engine/DeveloperSettings.h"
 #include "GameplayTagContainer.h"
 #include "MythicStatDisplay.generated.h"
@@ -37,6 +38,35 @@ enum class EMythicStatCategory : uint8 {
      * renumbering would silently repoint existing rows. The panel orders tiers explicitly instead.
      */
     Primary
+};
+
+/**
+ * One row of the stat display registry, authored as data. The row NAME is the attribute name; everything
+ * the sheet needs to place and format that attribute lives in the row. This table is the single source -
+ * moving a stat between sections or renaming its label is a cell edit, never a code change.
+ */
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicStatDisplayRow : public FTableRowBase {
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stat Display")
+    FString Label;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stat Display")
+    EMythicStatCategory Category = EMythicStatCategory::Hidden;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stat Display")
+    EMythicStatFormat Format = EMythicStatFormat::Flat;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stat Display")
+    int32 SortOrder = 0;
+
+    // The paired capacity attribute for "current / max" rows, empty for plain values.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stat Display")
+    FString MaxAttribute;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stat Display")
+    bool bHidden = false;
 };
 
 USTRUCT(BlueprintType)
@@ -164,6 +194,14 @@ public:
     // The headline summaries the sheet shows, in display order. Unset means no cards — the section collapses.
     UPROPERTY(EditAnywhere, Config, Category = "Stat Display")
     TSoftObjectPtr<UMythicStatSummaryLibrary> SummaryLibrary;
+
+    /**
+     * The stat display registry as data (rows of FMythicStatDisplayRow, row name = attribute name). When
+     * authored this is the single source; the compiled-in list is only the fallback for a project without
+     * the table, and its use is logged so it can never be mistaken for the real thing.
+     */
+    UPROPERTY(config, EditAnywhere, Category = "Stats", meta = (RequiredAssetDataTags = "RowStructure=/Script/Mythic.MythicStatDisplayRow"))
+    TSoftObjectPtr<UDataTable> DisplayTable;
 };
 
 /** One line of a primary stat's tooltip: what it feeds, and how much it is feeding it right now. */

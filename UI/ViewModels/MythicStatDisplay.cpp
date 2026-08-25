@@ -29,9 +29,46 @@ namespace MythicStatDisplay {
         Map.Add(R.Attribute, R);
     }
 
+    /** True when the authored registry table filled the rules; false falls back to the compiled list. */
+    static bool BuildFromTable(TMap<FString, FMythicStatRule> &M) {
+        const UMythicStatDisplaySettings *Settings = GetDefault<UMythicStatDisplaySettings>();
+        if (!Settings || Settings->DisplayTable.IsNull()) {
+            return false;
+        }
+        const UDataTable *Table = Settings->DisplayTable.LoadSynchronous();
+        if (!Table || Table->GetRowMap().Num() == 0) {
+            return false;
+        }
+        for (const TPair<FName, uint8 *> &Pair : Table->GetRowMap()) {
+            const FMythicStatDisplayRow *Row = reinterpret_cast<const FMythicStatDisplayRow *>(Pair.Value);
+            if (!Row) {
+                continue;
+            }
+            FMythicStatRule R;
+            R.Attribute = Pair.Key.ToString();
+            R.Label = Row->Label.IsEmpty() ? MakeFriendlyLabel(R.Attribute) : Row->Label;
+            R.Category = Row->Category;
+            R.Format = Row->Format;
+            R.SortOrder = Row->SortOrder;
+            R.MaxAttribute = Row->MaxAttribute;
+            R.bHidden = Row->bHidden;
+            M.Add(R.Attribute, R);
+        }
+        return true;
+    }
+
     static void BuildTable() {
         TMap<FString, FMythicStatRule> &M = GRules;
         M.Reset();
+
+        // The authored table is the single source of truth. The compiled block below survives only as the
+        // fallback for a project without the asset, and says so out loud when it runs.
+        if (BuildFromTable(M)) {
+            GBuilt = true;
+            return;
+        }
+        UE_LOG(LogTemp, Warning,
+               TEXT("MythicStatDisplay: no DisplayTable authored in MythicStatDisplaySettings - using the compiled-in fallback registry."));
 
         Add(M, TEXT("Health"), TEXT("Health"), EMythicStatCategory::Vitality, EMythicStatFormat::Integer, 10, TEXT("MaxHealth"));
         Add(M, TEXT("Shield"), TEXT("Shield"), EMythicStatCategory::Vitality, EMythicStatFormat::Integer, 20, TEXT("MaxShield"));
@@ -87,7 +124,7 @@ namespace MythicStatDisplay {
         Add(M, TEXT("SlowResistance"), TEXT("Slow Resistance"), EMythicStatCategory::Defense, EMythicStatFormat::Percent, 140);
         Add(M, TEXT("StunResistance"), TEXT("Stun Resistance"), EMythicStatCategory::Defense, EMythicStatFormat::Percent, 150);
 
-        Add(M, TEXT("Resolve"), TEXT("Resolve"), EMythicStatCategory::Utility, EMythicStatFormat::Integer, 10);
+        Add(M, TEXT("Resolve"), TEXT("Resolve"), EMythicStatCategory::Primary, EMythicStatFormat::Integer, 10);
         Add(M, TEXT("CooldownReduction"), TEXT("Cooldown Reduction"), EMythicStatCategory::Utility, EMythicStatFormat::Percent, 20);
         Add(M, TEXT("MaxCooldownReduction"), TEXT("Cooldown Reduction Cap"), EMythicStatCategory::Utility, EMythicStatFormat::Percent, 30);
         Add(M, TEXT("StaminaCostReduction"), TEXT("Stamina Cost Reduction"), EMythicStatCategory::Utility, EMythicStatFormat::Percent, 40);

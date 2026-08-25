@@ -27,6 +27,14 @@ struct FMythicCachedNPCData {
     }
 };
 
+USTRUCT()
+struct FMythicNPCDefinitionBucket {
+    GENERATED_BODY()
+
+    UPROPERTY()
+    TArray<TObjectPtr<UNPCDefinition>> Defs;
+};
+
 UCLASS()
 class MYTHIC_API UMythicNPCManager : public UGameInstanceSubsystem {
     GENERATED_BODY()
@@ -56,6 +64,17 @@ protected:
 
     void ReturnToPool(AMythicNPCCharacter *NPC, bool bShouldCache = true);
 
+    /**
+     * Definitions bucketed by NPCType, built lazily from the asset registry on the first random spawn.
+     * One scan for the world's lifetime, so emergent spawns cost a map lookup and never a registry walk.
+     */
+    UPROPERTY()
+    TMap<FGameplayTag, FMythicNPCDefinitionBucket> DefinitionsByType;
+
+    bool bDefinitionIndexBuilt = false;
+
+    void BuildDefinitionIndex();
+
 public:
     UFUNCTION(BlueprintCallable, Category = "NPC Manager|Spawning")
     AMythicNPCCharacter *SpawnPredefinedNPC(UNPCDefinition *NPCDef, FVector SpawnLocation, FRotator SpawnRotation);
@@ -72,6 +91,17 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "NPC Manager|Spawning")
     int32 ResolveCombatLevelAt(const FVector &SpawnLocation) const;
+
+    /**
+     * Take a finished NPC back into the pool instead of destroying it. True when this manager owned the
+     * actor; false means another system (Mass embodiment) owns its lifecycle and the caller should proceed
+     * with its own teardown.
+     */
+    bool ReclaimNPC(AMythicNPCCharacter *NPC);
+
+    /** Authored definitions whose type sits under this tag. Builds the index on first use. */
+    UFUNCTION(BlueprintCallable, Category = "NPC Manager|Spawning")
+    int32 CountDefinitionsForType(FGameplayTag NPCType);
 
     UFUNCTION(BlueprintCallable, Category= "NPC Manager")
     bool GetCachedNPCData(FGuid NPCType, FMythicNPCData &NPCData);
