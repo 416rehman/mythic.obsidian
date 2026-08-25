@@ -167,7 +167,17 @@ public:
     void RollAffixesTiered(int ItemLevel, int TotalCount, const FGameplayTagContainer &TypeProbe,
                            const class UMythicAffixPoolDataAsset *Pool);
 
+    void RollAffixesTiered(int ItemLevel, int TotalCount, const FGameplayTagContainer &TypeProbe,
+                           TConstArrayView<FMythicTieredAffixDef> Defs);
+
     void RollCoreAffixes(int ItemLevel);
+
+    // Core affixes are GUARANTEED: every def rolls, none compete for a weighted slot, and Applicability does not
+    // filter them - a designer naming a core def means it rolls. Each still picks a tier from its own ladder, and
+    // each rolls LOCKED so a Refine reroll cannot take the item's core stats. TypeProbe is carried for symmetry
+    // with the random roller, not used as a filter.
+    void RollCoreAffixesTiered(int ItemLevel, const FGameplayTagContainer &TypeProbe,
+                               TConstArrayView<FMythicTieredAffixDef> Defs);
 
     static void ApplyAffixes(UAbilitySystemComponent *ASC, TArray<FRolledAffix> &InRolledAffixes);
     static void RemoveAffixes(UAbilitySystemComponent *ASC, TArray<FRolledAffix> &InRolledAffixes);
@@ -216,14 +226,22 @@ public:
 
 inline void UAffixesFragment::RollAffixesTiered(int ItemLevel, int TotalCount, const FGameplayTagContainer &TypeProbe,
                                                 const UMythicAffixPoolDataAsset *Pool) {
-    if (!Pool || Pool->Defs.Num() == 0 || TotalCount <= 0) {
+    if (!Pool) {
+        return;
+    }
+    RollAffixesTiered(ItemLevel, TotalCount, TypeProbe, Pool->Defs);
+}
+
+inline void UAffixesFragment::RollAffixesTiered(int ItemLevel, int TotalCount, const FGameplayTagContainer &TypeProbe,
+                                                TConstArrayView<FMythicTieredAffixDef> Defs) {
+    if (Defs.Num() == 0 || TotalCount <= 0) {
         return;
     }
 
     TArray<int32> EligibleDefs;
-    EligibleDefs.Reserve(Pool->Defs.Num());
-    for (int32 i = 0; i < Pool->Defs.Num(); ++i) {
-        const FMythicTieredAffixDef &Def = Pool->Defs[i];
+    EligibleDefs.Reserve(Defs.Num());
+    for (int32 i = 0; i < Defs.Num(); ++i) {
+        const FMythicTieredAffixDef &Def = Defs[i];
         if (!Def.Attribute.IsValid()) {
             continue;
         }
@@ -248,8 +266,11 @@ inline void UAffixesFragment::RollAffixesTiered(int ItemLevel, int TotalCount, c
         TArray<float, TInlineAllocator<16>> Weights;
         TArray<int32, TInlineAllocator<16>> Candidates;
         for (const int32 DefIdx : EligibleDefs) {
-            const FMythicTieredAffixDef &Def = Pool->Defs[DefIdx];
-            if (IsAffixRolled(Def.Attribute, this->AffixesRuntimeReplicatedData.RolledAffixes)) {
+            const FMythicTieredAffixDef &Def = Defs[DefIdx];
+            // Core rolls first and owns its attributes: rolling one again here would apply the stat twice, print
+            // it twice on the tooltip, and let a Refine reroll only half of it.
+            if (IsAffixRolled(Def.Attribute, this->AffixesRuntimeReplicatedData.RolledAffixes)
+                || IsAffixRolled(Def.Attribute, this->AffixesRuntimeReplicatedData.RolledCoreAffixes)) {
                 continue;
             }
             if (!FMythicAffixTierMath::BudgetAllows(Def.Group, PrefixAdded, SuffixAdded, Budget)) {
@@ -266,7 +287,7 @@ inline void UAffixesFragment::RollAffixesTiered(int ItemLevel, int TotalCount, c
         if (Picked < 0) {
             break;
         }
-        const FMythicTieredAffixDef &Def = Pool->Defs[Candidates[Picked]];
+        const FMythicTieredAffixDef &Def = Defs[Candidates[Picked]];
 
         const int32 TierIdx = FMythicAffixTierMath::SelectTierIndex(ItemLevel, Def.Tiers, FMath::FRand());
         if (!Def.Tiers.IsValidIndex(TierIdx)) {

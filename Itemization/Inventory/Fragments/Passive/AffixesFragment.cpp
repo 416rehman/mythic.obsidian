@@ -4,6 +4,7 @@
 #include "Mythic/Itemization/Inventory/MythicItemInstance.h"
 #include "AbilitySystemGlobals.h"
 #include "GameModes/GameState/MythicGameState.h"
+#include "Itemization/Affixes/MythicAffixCatalogue.h"
 #include "Itemization/MythicLootSettings.h"
 #include "Mythic/Mythic.h"
 #include "GameFramework/Pawn.h"
@@ -30,7 +31,10 @@ void UAffixesFragment::RollAffixes(int ItemLevel, int Qty) {
                 break;
             }
 
-            if (IsAffixRolled(AffixKey, this->AffixesRuntimeReplicatedData.RolledAffixes)) {
+            // Core rolls first and owns its attributes: rolling one again here would apply the stat twice, print
+            // it twice on the tooltip, and let a Refine reroll only half of it.
+            if (IsAffixRolled(AffixKey, this->AffixesRuntimeReplicatedData.RolledAffixes)
+                || IsAffixRolled(AffixKey, this->AffixesRuntimeReplicatedData.RolledCoreAffixes)) {
                 continue;
             }
 
@@ -87,17 +91,16 @@ void UAffixesFragment::OnDurabilityBrokenStateChanged(bool bBroken) {
 void UAffixesFragment::RollCoreAffixes(int ItemLevel) {
     auto CoreAffixes = this->AffixesBuildData.CoreAffixes;
 
-    if (CoreAffixes.Num() == 0) {
-        UE_LOG(Myth, Warning, TEXT("AffixesInstFragment::OnInstanced: No core stats to roll."));
-        return;
-    }
     for (auto &CoreStat : CoreAffixes) {
         if (!CoreStat.Key.IsValid()) {
             UE_LOG(Myth, Error, TEXT("AffixesInstFragment::OnInstanced: Invalid core stat attribute."));
             continue;
         }
 
-        if (IsAffixRolled(CoreStat.Key, this->AffixesRuntimeReplicatedData.RolledCoreAffixes)) {
+        // Both arrays: this roller is public and ungated, so it can run after the random half. An attribute on
+        // either list must not land twice, or the stat applies twice and a Refine reroll touches only one copy.
+        if (IsAffixRolled(CoreStat.Key, this->AffixesRuntimeReplicatedData.RolledCoreAffixes)
+            || IsAffixRolled(CoreStat.Key, this->AffixesRuntimeReplicatedData.RolledAffixes)) {
             continue;
         }
 
@@ -116,16 +119,115 @@ void UAffixesFragment::RollCoreAffixes(int ItemLevel) {
             RollDef.Max = CentralMax;
             RollDef.LevelScaling = 0.0f;
         }
-        this->AffixesRuntimeReplicatedData.RolledCoreAffixes.Add(FRolledAffix(Attribute, ItemLevel, RollDef, true));
+        FRolledAffix NewAffix(Attribute, ItemLevel, RollDef, true);
+        // A zero multiply wipes the attribute to 0, and ComputeReversedModValue refuses to reverse it, so unequipping
+        // never gives it back. A whole-number roll on a sub-1 band rounds to exactly zero about half the time.
+        if ((RollDef.Modifier == EGameplayModOp::Multiplicitive || RollDef.Modifier == EGameplayModOp::Division)
+            && FMath::IsNearlyZero(NewAffix.Value)) {
+            NewAffix.Value = KINDA_SMALL_NUMBER;
+        }
+        this->AffixesRuntimeReplicatedData.RolledCoreAffixes.Add(NewAffix);
     }
 }
+
+namespace {
+int32 LowestTierIndex(TConstArrayView<FMythicAffixTier> Tiers) {
+    int32 Lowest = INDEX_NONE;
+    for (int32 i = 0; i < Tiers.Num(); ++i) {
+        if (Lowest == INDEX_NONE || Tiers[i].MinItemLevel < Tiers[Lowest].MinItemLevel) {
+            Lowest = i;
+        }
+    }
+    return Lowest;
+}
+}
+
+void UAffixesFragment::RollCoreAffixesTiered(int ItemLevel, const FGameplayTagContainer &TypeProbe,
+                                             TConstArrayView<FMythicTieredAffixDef> Defs) {
+    for (const FMythicTieredAffixDef &Def : Defs) {
+        if (!Def.Attribute.IsValid()) {
+            UE_LOG(Myth, Error, TEXT("AffixesInstFragment::RollCoreAffixesTiered: Invalid core stat attribute."));
+            continue;
+        }
+        // Both arrays: this roller is public and ungated, so it can run after the random half. An attribute on
+        // either list must not land twice, or the stat applies twice and a Refine reroll touches only one copy.
+        if (IsAffixRolled(Def.Attribute, this->AffixesRuntimeReplicatedData.RolledCoreAffixes)
+            || IsAffixRolled(Def.Attribute, this->AffixesRuntimeReplicatedData.RolledAffixes)) {
+            continue;
+        }
+
+        int32 TierIdx = FMythicAffixTierMath::SelectTierIndex(ItemLevel, Def.Tiers, FMath::FRand());
+        if (!Def.Tiers.IsValidIndex(TierIdx)) {
+            // A core affix is guaranteed, so an item level below every rung still rolls the lowest one rather
+            // than dropping the stat.
+            TierIdx = LowestTierIndex(Def.Tiers);
+        }
+        if (!Def.Tiers.IsValidIndex(TierIdx)) {
+            UE_LOG(Myth, Error, TEXT("AffixesInstFragment::RollCoreAffixesTiered: core affix %s has an empty tier ladder."),
+                   *Def.Attribute.GetName());
+            continue;
+        }
+        const FMythicAffixTier &Tier = Def.Tiers[TierIdx];
+
+        FRollDefinition RollDef;
+        RollDef.Min = Tier.Min;
+        RollDef.Max = Tier.Max;
+        RollDef.Modifier = Def.ModOp;
+        RollDef.LevelScaling = Tier.LevelScaling;
+        RollDef.bWholeNumber = Def.bWholeNumber;
+
+        // Centrally scaled families derive their band from combat settings: the shared level curve consumes the
+        // item level, so the private linear LevelScaling is zeroed to keep it from applying a second time. The
+        // authored tier still supplies presentation and the modifier op; attributes without a central row roll
+        // exactly as authored.
+        FMythicAffixTier RollTier = Tier;
+        float CentralMin = 0.0f;
+        float CentralMax = 0.0f;
+        if (MythicCombat::ResolveCoreAffixBand(Def.Attribute, Tier.Min, Tier.Max,
+                                               static_cast<float>(ItemLevel), CentralMin, CentralMax)) {
+            RollDef.Min = CentralMin;
+            RollDef.Max = CentralMax;
+            RollDef.LevelScaling = 0.0f;
+            RollTier.Min = CentralMin;
+            RollTier.Max = CentralMax;
+            RollTier.LevelScaling = 0.0f;
+        }
+
+        FRolledAffix NewAffix(Def.Attribute, ItemLevel, RollDef, true);
+        // The tier roll overwrites the ctor's value, so the whole-number snap must re-apply here.
+        NewAffix.Value = FMythicAffixTierMath::RollValueInTier(RollTier, ItemLevel, FMath::FRand());
+        if (RollDef.bWholeNumber) {
+            NewAffix.Value = FMath::RoundToFloat(NewAffix.Value);
+        }
+        if ((RollDef.Modifier == EGameplayModOp::Multiplicitive || RollDef.Modifier == EGameplayModOp::Division)
+            && FMath::IsNearlyZero(NewAffix.Value)) {
+            NewAffix.Value = KINDA_SMALL_NUMBER;
+        }
+        NewAffix.TierIndex = TierIdx;
+        NewAffix.TierLabel = Tier.TierLabel;
+
+        this->AffixesRuntimeReplicatedData.RolledCoreAffixes.Add(NewAffix);
+    }
+}
+
 #if WITH_EDITOR
 bool UAffixesFragment::IsValidFragment(FText &OutErrorMessage) const {
-    auto AffixPoolMap = this->AffixesBuildData.AffixPoolMap;
-    auto CoreAffixes = this->AffixesBuildData.CoreAffixes;
-    if (AffixPoolMap.Num() == 0 && CoreAffixes.Num() == 0) {
-        OutErrorMessage = FText::FromString("No affixes to roll. Add some affixes to roll.");
-        return false;
+    const TMap<FGameplayAttribute, FRollDefinition> &AffixPoolMap = this->AffixesBuildData.AffixPoolMap;
+    const TMap<FGameplayAttribute, FRollDefinition> &CoreAffixes = this->AffixesBuildData.CoreAffixes;
+    const UMythicAffixPoolDataAsset *TieredPool = this->AffixesBuildData.TieredAffixPool;
+
+    // Authoring nothing is a valid shape ONLY because the shared catalogue fills both halves at OnInstanced.
+    // With no catalogue configured nothing fills them and the item ships with zero core stats and zero affixes.
+    const bool bAuthorsNothing = AffixPoolMap.Num() == 0 && CoreAffixes.Num() == 0
+        && (!TieredPool || TieredPool->Defs.Num() == 0);
+    if (bAuthorsNothing) {
+        const UMythicLootSettings *LootSettings = GetDefault<UMythicLootSettings>();
+        if (!LootSettings || LootSettings->AffixCatalogue.IsNull()) {
+            OutErrorMessage = FText::FromString(
+                "This fragment authors no core stats and no affix pool, and no affix catalogue is set in Mythic Loot "
+                "Settings to fill them, so the item would roll nothing.");
+            return false;
+        }
     }
 
     for (auto &Affix : AffixPoolMap) {
@@ -150,6 +252,38 @@ bool UAffixesFragment::IsValidFragment(FText &OutErrorMessage) const {
         }
     }
 
+    if (TieredPool) {
+        for (const FMythicTieredAffixDef &Def : TieredPool->Defs) {
+            if (!Def.Attribute.IsValid()) {
+                OutErrorMessage = FText::FromString("Invalid affix attribute in tiered affix pool.");
+                return false;
+            }
+            if (Def.Tiers.Num() == 0) {
+                OutErrorMessage = FText::FromString(FString::Printf(
+                    TEXT("Tiered affix '%s' has an empty tier ladder, so it can never roll."), *Def.Attribute.GetName()));
+                return false;
+            }
+            for (int32 TierIdx = 0; TierIdx < Def.Tiers.Num(); ++TierIdx) {
+                const FMythicAffixTier &Tier = Def.Tiers[TierIdx];
+                // This pool feeds the RANDOM roller, which takes the band verbatim - there is no central base to
+                // fall back on. A level-scaled tier still rolls ItemLevel * LevelScaling from a 0/0 band, so only
+                // all three at zero rolls nothing and lets a Multiplicitive op wipe the attribute.
+                if (Tier.Min == 0.0f && Tier.Max == 0.0f && Tier.LevelScaling == 0.0f) {
+                    OutErrorMessage = FText::FromString(FString::Printf(
+                        TEXT("Tiered affix '%s' tier %d has no roll band and no level scaling, so it always rolls 0."),
+                        *Def.Attribute.GetName(), TierIdx));
+                    return false;
+                }
+                if (Tier.Max < Tier.Min) {
+                    OutErrorMessage = FText::FromString(FString::Printf(
+                        TEXT("Tiered affix '%s' tier %d has Max %g below Min %g."),
+                        *Def.Attribute.GetName(), TierIdx, Tier.Max, Tier.Min));
+                    return false;
+                }
+            }
+        }
+    }
+
     return Super::IsValidFragment(OutErrorMessage);
 }
 #endif
@@ -163,16 +297,63 @@ void UAffixesFragment::OnInstanced(UMythicItemInstance *Instance) {
                             ? LootSettings->AffixCountByRarity[RarityValue]
                             : (1 + RarityValue);
 
+    const int ItemLevel = Instance->GetItemLevel();
+    FGameplayTagContainer TypeProbe;
+    Instance->GetTypeProbe(TypeProbe);
+
     const UMythicAffixPoolDataAsset *TieredPool = this->AffixesBuildData.TieredAffixPool;
-    if (TieredPool && TieredPool->Defs.Num() > 0) {
-        FGameplayTagContainer TypeProbe;
-        Instance->GetTypeProbe(TypeProbe);
-        RollAffixesTiered(Instance->GetItemLevel(), AffixesToRoll, TypeProbe, TieredPool);
+    const bool bHasOwnTieredPool = TieredPool && TieredPool->Defs.Num() > 0;
+    const bool bHasOwnFlatPool = this->AffixesBuildData.AffixPoolMap.Num() > 0;
+    const bool bHasOwnRandom = bHasOwnTieredPool || bHasOwnFlatPool;
+    const bool bHasOwnCore = this->AffixesBuildData.CoreAffixes.Num() > 0;
+
+    // An item that authors both halves itself never pays to load the shared catalogue.
+    const UMythicAffixCatalogue *Catalogue = (LootSettings && (!bHasOwnRandom || !bHasOwnCore))
+                                                 ? LootSettings->GetAffixCatalogue()
+                                                 : nullptr;
+    const FGameplayTag ItemType = Instance->GetItemDefinition()->ItemType;
+
+    // Core rolls FIRST so the random half can de-dupe against it: an attribute must never land on one item twice.
+    if (bHasOwnCore) {
+        RollCoreAffixes(ItemLevel);
     }
     else {
-        RollAffixes(Instance->GetItemLevel(), AffixesToRoll);
+        TArray<FMythicTieredAffixDef> CoreDefs;
+        if (Catalogue) {
+            Catalogue->BuildCoreDefs(ItemType, TypeProbe, CoreDefs);
+        }
+        if (CoreDefs.Num() > 0) {
+            RollCoreAffixesTiered(ItemLevel, TypeProbe, CoreDefs);
+        }
+        else {
+            UE_LOG(Myth, Warning, TEXT("AffixesInstFragment::OnInstanced: No core stats to roll."));
+        }
     }
-    RollCoreAffixes(Instance->GetItemLevel());
+
+    // Hand-authored content beats the catalogue on this half too, or assigning a catalogue would silently kill
+    // every flat pool a designer wrote by hand.
+    if (bHasOwnTieredPool) {
+        RollAffixesTiered(ItemLevel, AffixesToRoll, TypeProbe, TieredPool);
+    }
+    else if (bHasOwnFlatPool) {
+        RollAffixes(ItemLevel, AffixesToRoll);
+    }
+    else {
+        TArray<FMythicTieredAffixDef> RandomDefs;
+        if (Catalogue) {
+            Catalogue->BuildRandomDefs(ItemType, TypeProbe, RandomDefs);
+        }
+        RollAffixesTiered(ItemLevel, AffixesToRoll, TypeProbe, RandomDefs);
+    }
+
+    // Count what LANDED, not what was offered. A pool can be non-empty and still roll nothing when every ladder is
+    // gated above the item level or the core half already took the attributes.
+    const int32 RolledRandom = this->AffixesRuntimeReplicatedData.RolledAffixes.Num();
+    if (RolledRandom < AffixesToRoll) {
+        UE_LOG(Myth, Warning,
+               TEXT("AffixesInstFragment::OnInstanced: %s rolled %d of %d random affixes at item level %d."),
+               *ItemType.ToString(), RolledRandom, AffixesToRoll, ItemLevel);
+    }
 }
 
 void UAffixesFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
