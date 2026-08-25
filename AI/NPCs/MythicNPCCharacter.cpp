@@ -60,6 +60,10 @@ void AMythicNPCCharacter::OnSpawnedFromPool(const struct FMythicNPCData &InNPCDa
 
     SeedAttributesFromData();
 
+    // Possession inside SpawnActor already ran CombatInit with a default-constructed NPCData, so the
+    // scaling GE holds level-1 multipliers. Now that the stamped data is in, apply the real ones.
+    ApplyCombatScaling();
+
     GrantAttackAbility();
 
     if (LifeAttributes) {
@@ -224,16 +228,21 @@ void AMythicNPCCharacter::ApplyCombatScaling() {
 
     // The level half: the GameState's min/max curves sampled at this NPC's combat level, rolled once per spawn so
     // two same-level wolves are not clones. Unauthored curves read 1.0 and the level term vanishes.
+    //
+    // Combatants only. A living world spawns merchants, farmers and wanderers from these same pools, and their
+    // disposition is flee-or-talk, not fight - an authored attack ability is what marks an entity as combat-trained, so a
+    // civilian keeps its authored stats no matter how dangerous its home territory is. CombatLevel
+    // still stamps on everyone: it is world context (loot, trade stock, XP), not a threat statement.
     float LevelHealthMult = 1.0f;
     float LevelDamageMult = 1.0f;
-    if (const UWorld *World = GetWorld()) {
+    if (const UWorld *World = AttackAbility ? GetWorld() : nullptr) {
         if (const AMythicGameState *GS = World->GetGameState<AMythicGameState>()) {
             const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
             const float Level = static_cast<float>(FMath::Max(1, NPCData.CombatLevel));
-            const float HealthLow = MythicCombat::SampleOpenEnded(GS->HealthMinCurveRowHandle, Level, Settings->EnemyHealthTailGrowth);
-            const float HealthHigh = MythicCombat::SampleOpenEnded(GS->HealthMaxCurveRowHandle, Level, Settings->EnemyHealthTailGrowth);
-            const float DamageLow = MythicCombat::SampleOpenEnded(GS->DamageMinCurveRowHandle, Level, Settings->EnemyDamageTailGrowth);
-            const float DamageHigh = MythicCombat::SampleOpenEnded(GS->DamageMaxCurveRowHandle, Level, Settings->EnemyDamageTailGrowth);
+            const float HealthLow = MythicCombat::SampleOpenEnded(GS->HealthMinCurveRowHandle, Level, Settings->CombatantHealthTailGrowth);
+            const float HealthHigh = MythicCombat::SampleOpenEnded(GS->HealthMaxCurveRowHandle, Level, Settings->CombatantHealthTailGrowth);
+            const float DamageLow = MythicCombat::SampleOpenEnded(GS->DamageMinCurveRowHandle, Level, Settings->CombatantDamageTailGrowth);
+            const float DamageHigh = MythicCombat::SampleOpenEnded(GS->DamageMaxCurveRowHandle, Level, Settings->CombatantDamageTailGrowth);
             LevelHealthMult = FMath::FRandRange(FMath::Min(HealthLow, HealthHigh), FMath::Max(HealthLow, HealthHigh));
             LevelDamageMult = FMath::FRandRange(FMath::Min(DamageLow, DamageHigh), FMath::Max(DamageLow, DamageHigh));
         }
@@ -242,6 +251,10 @@ void AMythicNPCCharacter::ApplyCombatScaling() {
     const float HealthMult = static_cast<float>(PartyWorldMult.X) * Tier.HealthMult * LevelHealthMult;
     const float DamageMult = static_cast<float>(PartyWorldMult.Y) * Tier.DamageMult * LevelDamageMult;
 
+    if (CombatScalingHandle.IsValid()) {
+        AbilitySystemComponent->RemoveActiveGameplayEffect(CombatScalingHandle);
+        CombatScalingHandle.Invalidate();
+    }
     FGameplayEffectContextHandle Ctx = AbilitySystemComponent->MakeEffectContext();
     Ctx.AddSourceObject(this);
     const FGameplayEffectSpecHandle Spec =
@@ -249,7 +262,7 @@ void AMythicNPCCharacter::ApplyCombatScaling() {
     if (Spec.IsValid()) {
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_SCALING_HEALTH, HealthMult);
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_SCALING_DAMAGE, DamageMult);
-        AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
+        CombatScalingHandle = AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
     }
 
     if (LifeComponent) {
@@ -335,6 +348,11 @@ void AMythicNPCCharacter::OnReturnedToPool() {
     }
 
     bCombatInitialized = false;
+    if (AbilitySystemComponent && AttackAbilityHandle.IsValid()) {
+        // CancelAllAbilities stops the activation; only ClearAbility releases the spec. Without this every
+        // pooled reuse re-granted on top of the old grant and the spec list grew for the actor's lifetime.
+        AbilitySystemComponent->ClearAbility(AttackAbilityHandle);
+    }
     AttackAbilityHandle = FGameplayAbilitySpecHandle();
 }
 
@@ -736,6 +754,18 @@ void AMythicNPCCharacter::InitializeFromMassEntity(const FMassEntityHandle &InEn
     if (IdentityFrag) {
         ApplyAppearanceFromIdentity(*IdentityFrag);
     }
+
+    // Mass embodiment never passes through the NPC manager, so the level stamp happens here: the territory
+    // danger at the embodiment site through the same resolver, then the scaling GE re-applies with it.
+    StampCombatLevel(MythicCombat::ResolveCombatLevelAt(GetWorld(), GetActorLocation()));
+}
+
+void AMythicNPCCharacter::StampCombatLevel(const int32 Level) {
+    if (!HasAuthority()) {
+        return;
+    }
+    NPCData.CombatLevel = FMath::Max(1, Level);
+    ApplyCombatScaling();
 }
 
 void AMythicNPCCharacter::OnRep_Appearance() {

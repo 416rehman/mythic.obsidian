@@ -115,6 +115,13 @@ struct MYTHIC_API FMythicSettingDefinition {
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
     float DisplayScale = 1.0f;
 
+    /**
+     * Added to the stored value BEFORE DisplayScale, so a range that does not start at zero can still read
+     * as a percentage: display gamma 1.8..2.6 with Bias -1.8 and Scale 125 reads 0..100%.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
+    float DisplayBias = 0.0f;
+
 
 
     /** Named requirement for the whole row. Unmet, the row is shown disabled rather than hidden. */

@@ -88,7 +88,7 @@ void UMythicCheatManager::MythHelp() {
     UE_LOG(Myth, Warning, TEXT(""));
     UE_LOG(Myth, Warning, TEXT("--- ITEMS ---"));
     UE_LOG(Myth, Warning, TEXT("  MythListItems                      - List all item definitions"));
-    UE_LOG(Myth, Warning, TEXT("  MythGiveItem <Name> [Count]        - Give item by name (partial match)"));
+    UE_LOG(Myth, Warning, TEXT("  MythGiveItem <Name> [Count] [Lvl]  - Give item by name (partial match)"));
     UE_LOG(Myth, Warning, TEXT("  MythClearInventory                 - Clear all inventory items"));
     UE_LOG(Myth, Warning, TEXT(""));
     UE_LOG(Myth, Warning, TEXT("--- ATTRIBUTES ---"));
@@ -385,7 +385,7 @@ void UMythicCheatManager::MythListItems() {
     }
 }
 
-void UMythicCheatManager::MythGiveItem(const FString &ItemName, int32 Count) {
+void UMythicCheatManager::MythGiveItem(const FString &ItemName, int32 Count, int32 ItemLevel) {
     APlayerController *PC = GetOuterAPlayerController();
     if (!PC) {
         return;
@@ -428,7 +428,7 @@ void UMythicCheatManager::MythGiveItem(const FString &ItemName, int32 Count) {
         FMath::Max(1, Count),
         PC,
         PC,
-        1
+        FMath::Max(1, ItemLevel)
         );
 
     if (Dropped) {

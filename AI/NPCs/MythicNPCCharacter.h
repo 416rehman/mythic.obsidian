@@ -171,6 +171,10 @@ protected:
 
     FGameplayAbilitySpecHandle AttackAbilityHandle;
 
+    // The one live combat-scaling effect. Re-applying scaling (pool reuse, the post-stamp re-run after
+    // OnSpawnedFromPool, Mass embodiment) removes this first so multipliers can never stack.
+    FActiveGameplayEffectHandle CombatScalingHandle;
+
 public:
     /**
      * The attack this NPC was authored with, and the effects that give it its stats. Public because
@@ -333,6 +337,13 @@ public:
     // Get NPC Data
     UFUNCTION(BlueprintCallable, Category = "Mythic NPC | Data")
     const FMythicNPCData GetNPCData() const;
+
+    /**
+     * Write the combat level and re-apply the scaling effect with it. Every spawn path that does not run
+     * through OnSpawnedFromPool (Mass embodiment, creatures, designer spawns) stamps through this one door,
+     * so the level a fight carries can never depend on which system placed the entity.
+     */
+    void StampCombatLevel(int32 Level);
 
     // The actor this NPC is currently fighting (replicated mirror of the server AI's hostile target; null = not engaged).
     // Client-visible, so the contextual nameplate system shows plates for everyone, not just the host.

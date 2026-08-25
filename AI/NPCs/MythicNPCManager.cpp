@@ -12,34 +12,7 @@
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 
 int32 UMythicNPCManager::ResolveCombatLevelAt(const FVector &SpawnLocation) const {
-    EMythicDangerTier Tier = EMythicDangerTier::Safe;
-    if (const UWorld *World = GetWorld()) {
-        if (const UGameInstance *GI = World->GetGameInstance()) {
-            if (const UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
-                if (const UMythicTerritoryGrid *Grid = LWS->GetTerritoryGrid()) {
-                    Tier = Grid->GetCellDangerTier(Grid->WorldToCell(SpawnLocation));
-                }
-            }
-        }
-    }
-
-    int32 Level = 1;
-    if (const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>()) {
-        if (const int32 *Base = Settings->EnemyLevelByDangerTier.Find(Tier)) {
-            Level = FMath::Max(1, *Base);
-        }
-    }
-
-    if (const UWorld *World = GetWorld()) {
-        if (const AMythicGameState *GS = World->GetGameState<AMythicGameState>()) {
-            if (const UWorldTierAttributes *WTA = GS->WorldTierAttributes) {
-                // ItemLevelBase is the world tier's floor for dropped gear; enemies stand on the same floor so a
-                // higher world raises the fight and the reward together.
-                Level += FMath::Max(0, FMath::RoundToInt(WTA->GetItemLevelBase()) - 1);
-            }
-        }
-    }
-    return Level;
+    return MythicCombat::ResolveCombatLevelAt(GetWorld(), SpawnLocation);
 }
 
 void UMythicNPCManager::Initialize(FSubsystemCollectionBase &Collection) {

@@ -82,7 +82,7 @@ public:
     void MythListItems();
 
     UFUNCTION(Exec)
-    void MythGiveItem(const FString &ItemName, int32 Count = 1);
+    void MythGiveItem(const FString &ItemName, int32 Count = 1, int32 ItemLevel = 1);
 
     UFUNCTION(Exec)
     void MythClearInventory();

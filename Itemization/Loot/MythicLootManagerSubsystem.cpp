@@ -1,4 +1,6 @@
 #include "MythicLootManagerSubsystem.h"
+
+#include "Player/MythicPlayerController.h"
 #include "../Loot/MythicWorldItem.h"
 #include "Engine/World.h"
 #include "GameFramework/GameState.h"
@@ -64,6 +66,14 @@ AMythicWorldItem *UMythicLootManagerSubsystem::CreateAndGive(UItemDefinition *It
         return nullptr;
     }
 
+    // Level 0 is the documented sentinel every reward path passes: "the recipient's own level". Nothing ever
+    // implemented it, so quest, dialogue and achievement rewards rolled level-0 items that no affix tier
+    // accepts. Resolved here, at the one entry every giver funnels through.
+    if (Lvl <= 0) {
+        const AMythicPlayerController *RecipientPC = Cast<AMythicPlayerController>(TargetRecipient);
+        Lvl = RecipientPC ? FMath::Max(1, RecipientPC->GetPlayerLevel()) : 1;
+    }
+
     auto Inventory = InventoryProvider.GetInterface()->GetInventoryForItemDefinition(ItemDef);
     if (!Inventory) {
         UE_LOG(Myth, Warning, TEXT("InventoryProvider does not have an inventory for item definition %s"), *ItemDef->GetName());
@@ -80,6 +90,7 @@ AMythicWorldItem *UMythicLootManagerSubsystem::Spawn(UMythicItemInstance *item, 
         UE_LOG(Myth, Warning, TEXT("Default world item class is not set - Use SetDefaultWorldItemClass to set it."));
         return nullptr;
     }
+
     if (!item) {
         UE_LOG(Myth, Warning, TEXT("Item instance is null"));
         return nullptr;

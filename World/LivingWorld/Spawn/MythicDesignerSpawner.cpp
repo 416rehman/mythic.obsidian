@@ -1,5 +1,6 @@
 
 #include "World/LivingWorld/Spawn/MythicDesignerSpawner.h"
+#include "Settings/MythicCombatSettings.h"
 
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
@@ -267,6 +268,7 @@ void AMythicDesignerSpawner::SpawnNPC() {
         return;
     }
     NPC->FinishSpawning(SpawnTransform);
+    NPC->StampCombatLevel(MythicCombat::ResolveCombatLevelAt(World, SpawnTransform.GetLocation()));
 
     uint8 FactionIndex = 0;
     if (UMythicLivingWorldSubsystem *LWS = GetLWS()) {

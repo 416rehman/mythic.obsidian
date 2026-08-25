@@ -1,10 +1,23 @@
 
 #include "Settings/MythicCombatSettings.h"
 
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
 #include "GAS/MythicTags_GAS.h"
+#include "GameModes/Attributes/WorldAttributes.h"
+#include "GameModes/GameState/MythicGameState.h"
+#include "World/LivingWorld/LivingWorldSubsystem.h"
+#include "World/LivingWorld/Territory/TerritoryGrid.h"
 
 namespace {
+FMythicCoreAffixScaling MakeCoreBand(const float BaseMin, const float BaseMax) {
+    FMythicCoreAffixScaling Band;
+    Band.BaseMin = BaseMin;
+    Band.BaseMax = BaseMax;
+    return Band;
+}
+
 FMythicStatDiminishing MakeCurve(const FGameplayAttribute &Attribute, float SoftCap, float Ceiling) {
     FMythicStatDiminishing Curve;
     Curve.Attribute = Attribute;
@@ -93,9 +106,35 @@ UMythicCombatSettings::UMythicCombatSettings() {
         MakeCcTier(5, 1.0f, 2, 12.0f, 8.0f),
     };
 
+    // The central level-1 bands every core affix rolls from, seeded to the exact values the 40 shipped item
+    // definitions authored by hand - migration changes no level-1 roll, it only replaces each item's private
+    // linear LevelScaling with the shared open-ended curve. Armor's base is the lightest slot; heavier slots
+    // keep their own authored bands as identity.
+    {
+        using Def = UMythicAttributeSet_Defense;
+        using Off = UMythicAttributeSet_Offense;
+        using Util = UMythicAttributeSet_Utility;
+        CoreAffixScaling = {
+            {Off::GetBonusSwordDamageAttribute(), MakeCoreBand(0.10f, 0.25f)},
+            {Off::GetBonusAxeDamageAttribute(), MakeCoreBand(0.10f, 0.25f)},
+            {Off::GetBonusDaggerDamageAttribute(), MakeCoreBand(0.10f, 0.25f)},
+            {Off::GetBonusHammerDamageAttribute(), MakeCoreBand(0.10f, 0.25f)},
+            {Off::GetBonusSickleDamageAttribute(), MakeCoreBand(0.10f, 0.25f)},
+            {Off::GetBonusSpearDamageAttribute(), MakeCoreBand(0.10f, 0.25f)},
+            {Off::GetCriticalHitChanceAttribute(), MakeCoreBand(0.03f, 0.08f)},
+            {Off::GetApplyBurnOnHitChanceAttribute(), MakeCoreBand(0.04f, 0.10f)},
+            {Off::GetApplyFreezeOnHitChanceAttribute(), MakeCoreBand(0.04f, 0.10f)},
+            {Def::GetArmorAttribute(), MakeCoreBand(8.0f, 18.0f)},
+            {Def::GetLifePerHitAttribute(), MakeCoreBand(0.2f, 1.0f)},
+            {Util::GetItemRarityFindAttribute(), MakeCoreBand(0.05f, 0.12f)},
+            {Util::GetCooldownReductionAttribute(), MakeCoreBand(0.04f, 0.10f)},
+            {Util::GetBonusSprintSpeedAttribute(), MakeCoreBand(0.04f, 0.10f)},
+        };
+    }
+
     // Safe stays a tutorial-grade threat; each danger band opens a clear gap over the last so walking toward the
     // frontier reads as walking into a harder world.
-    EnemyLevelByDangerTier = {
+    CombatantLevelByDangerTier = {
         {EMythicDangerTier::Safe, 1},
         {EMythicDangerTier::Low, 5},
         {EMythicDangerTier::Moderate, 12},
@@ -105,6 +144,56 @@ UMythicCombatSettings::UMythicCombatSettings() {
 }
 
 namespace MythicCombat {
+int32 ResolveCombatLevelAt(const UWorld *World, const FVector &Location) {
+    EMythicDangerTier Tier = EMythicDangerTier::Safe;
+    if (World) {
+        if (const UGameInstance *GI = World->GetGameInstance()) {
+            if (const UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+                if (const UMythicTerritoryGrid *Grid = LWS->GetTerritoryGrid()) {
+                    Tier = Grid->GetCellDangerTier(Grid->WorldToCell(Location));
+                }
+            }
+        }
+    }
+
+    int32 Level = 1;
+    if (const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>()) {
+        if (const int32 *Base = Settings->CombatantLevelByDangerTier.Find(Tier)) {
+            Level = FMath::Max(1, *Base);
+        }
+    }
+
+    if (World) {
+        if (const AMythicGameState *GS = World->GetGameState<AMythicGameState>()) {
+            if (const UWorldTierAttributes *WTA = GS->WorldTierAttributes) {
+                // ItemLevelBase is the world tier's floor for dropped gear; combatants stand on the same
+                // floor so a higher world raises the fight and the reward together.
+                Level += FMath::Max(0, FMath::RoundToInt(WTA->GetItemLevelBase()) - 1);
+            }
+        }
+    }
+    return Level;
+}
+
+bool ResolveCoreAffixBand(const FGameplayAttribute &Attribute, const float AuthoredMin, const float AuthoredMax,
+                          const float ItemLevel, float &OutMin, float &OutMax) {
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    const FMythicCoreAffixScaling *Row = Settings ? Settings->CoreAffixScaling.Find(Attribute) : nullptr;
+    if (!Row) {
+        return false;
+    }
+
+    // A non-zero authored band is the item's deliberate level-1 identity; zeros mean "the central base decides".
+    const bool bAuthored = AuthoredMin != 0.0f || AuthoredMax != 0.0f;
+    const float BaseMin = bAuthored ? AuthoredMin : Row->BaseMin;
+    const float BaseMax = bAuthored ? AuthoredMax : Row->BaseMax;
+
+    const float LevelScale = SampleOpenEnded(Settings->CoreAffixLevelCurve, ItemLevel, Settings->CoreAffixTailGrowth);
+    OutMin = BaseMin * LevelScale;
+    OutMax = BaseMax * LevelScale;
+    return true;
+}
+
 float SampleOpenEnded(const FCurveTableRowHandle &Handle, const float Level, const float TailGrowth) {
     if (Handle.IsNull()) {
         return 1.0f;

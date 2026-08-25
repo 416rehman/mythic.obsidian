@@ -2,6 +2,8 @@
 
 #include "MythicLifeComponent.h"
 
+#include "AI/NPCs/MythicNPCCharacter.h"
+
 #include "Mythic.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/Effects/MythicStatusRegistry.h"
@@ -850,7 +852,14 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
                     }
                 }
             }
-            const int32 DropItemLevel = FMythicEnemyScaling::ComputeDropItemLevel(WorldItemLevelBase, EnemyTierTag);
+            // The victim's own combat level floors the drop: a level 20 frontier fight pays level 20 loot even
+            // while the world-tier attribute is unauthored or mid-replication.
+            int32 VictimLevel = 1;
+            if (const AMythicNPCCharacter *NPC = Cast<AMythicNPCCharacter>(Owner)) {
+                VictimLevel = FMath::Max(1, NPC->GetNPCData().CombatLevel);
+            }
+            const int32 DropItemLevel =
+                FMath::Max(FMythicEnemyScaling::ComputeDropItemLevel(WorldItemLevelBase, EnemyTierTag), VictimLevel);
 
             AMythicCorpse *Corpse = nullptr;
             if (UWorld *World = GetWorld()) {

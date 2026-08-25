@@ -1,5 +1,6 @@
 ﻿#include "AffixesFragment.h"
 #include "AbilitySystemComponent.h"
+#include "Settings/MythicCombatSettings.h"
 #include "Mythic/Itemization/Inventory/MythicItemInstance.h"
 #include "AbilitySystemGlobals.h"
 #include "GameModes/GameState/MythicGameState.h"
@@ -102,6 +103,19 @@ void UAffixesFragment::RollCoreAffixes(int ItemLevel) {
 
         auto Attribute = CoreStat.Key;
         auto RollDef = CoreAffixes[CoreStat.Key];
+
+        // Centrally scaled families derive their band from combat settings: the shared level curve consumes the
+        // item level, so the private linear LevelScaling is zeroed to keep it from applying a second time. The
+        // authored def still supplies presentation and the modifier op; attributes without a central row roll
+        // exactly as authored.
+        float CentralMin = 0.0f;
+        float CentralMax = 0.0f;
+        if (MythicCombat::ResolveCoreAffixBand(Attribute, RollDef.Min, RollDef.Max,
+                                               static_cast<float>(ItemLevel), CentralMin, CentralMax)) {
+            RollDef.Min = CentralMin;
+            RollDef.Max = CentralMax;
+            RollDef.LevelScaling = 0.0f;
+        }
         this->AffixesRuntimeReplicatedData.RolledCoreAffixes.Add(FRolledAffix(Attribute, ItemLevel, RollDef, true));
     }
 }

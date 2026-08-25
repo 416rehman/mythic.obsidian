@@ -187,7 +187,7 @@ void UMythicSettingRowBase::PreviewNormalised(float Normalised) {
     }
     if (Edit_Value) {
         const float Scale = Definition.DisplayScale != 0.0f ? Definition.DisplayScale : 1.0f;
-        const float Shown = FMath::Lerp(Definition.MinValue, Definition.MaxValue, Alpha) * Scale;
+        const float Shown = (FMath::Lerp(Definition.MinValue, Definition.MaxValue, Alpha) + Definition.DisplayBias) * Scale;
         FNumberFormattingOptions Fmt;
         Fmt.MinimumFractionalDigits = Definition.DisplayDecimals;
         Fmt.MaximumFractionalDigits = Definition.DisplayDecimals;
@@ -263,7 +263,7 @@ void UMythicSettingRowBase::HandleValueTyped(const FText &Text, ETextCommit::Typ
     if (LexTryParseString(Typed, *Cleaned)) {
         const float Scale = Definition.DisplayScale != 0.0f ? Definition.DisplayScale : 1.0f;
         UMythicSettingAccess::WriteValue(
-            Definition, FMath::Clamp(Typed / Scale, Definition.MinValue, Definition.MaxValue));
+            Definition, FMath::Clamp(Typed / Scale - Definition.DisplayBias, Definition.MinValue, Definition.MaxValue));
         NotifyChanged();
     }
     else {

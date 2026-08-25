@@ -13,6 +13,19 @@
 #include "GAS/Effects/MythicCrowdControl.h"
 #include "MythicCombatSettings.generated.h"
 
+/** The central band a core affix rolls from: a level-1 base scaled by the shared level curve. */
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicCoreAffixScaling {
+    GENERATED_BODY()
+
+    // The band at level 1. Units match the attribute (fractions for percentage affixes, flat for Armor).
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Core Affix")
+    float BaseMin = 0.0f;
+
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Core Affix")
+    float BaseMax = 0.0f;
+};
+
 UCLASS(config = Game, defaultconfig, meta = (DisplayName = "Mythic Combat"))
 class MYTHIC_API UMythicCombatSettings : public UDeveloperSettings {
     GENERATED_BODY()
@@ -90,23 +103,42 @@ public:
     TArray<FMythicCcTierEscalation> CcEscalationByTier;
 
     /**
-     * Base combat level an enemy spawns at per territory danger tier at its spawn site. The world already computes
+     * Base combat level a combat-capable entity spawns at per territory danger tier at its spawn site. The world already computes
      * danger from distance to civilisation and military strength; this is the one table that turns that danger into
      * a number the scaling curves can eat. A tier with no row spawns at level 1.
      */
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Enemy Level")
-    TMap<EMythicDangerTier, int32> EnemyLevelByDangerTier;
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combatant Level")
+    TMap<EMythicDangerTier, int32> CombatantLevelByDangerTier;
 
     /**
-     * Per-level growth applied beyond the last authored key of the enemy scaling curves. Keyed curves terminate
+     * Per-level growth applied beyond the last authored key of the combatant scaling curves. Keyed curves terminate
      * and levels do not; past the final key the sampled value keeps compounding at this rate, so the curves stay
      * a readable table while the progression stays open-ended.
      */
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Enemy Level", meta = (ClampMin = "1.0"))
-    float EnemyHealthTailGrowth = 1.05f;
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combatant Level", meta = (ClampMin = "1.0"))
+    float CombatantHealthTailGrowth = 1.05f;
 
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Enemy Level", meta = (ClampMin = "1.0"))
-    float EnemyDamageTailGrowth = 1.04f;
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combatant Level", meta = (ClampMin = "1.0"))
+    float CombatantDamageTailGrowth = 1.04f;
+
+    /**
+     * The one place "how hard should a core affix of this level hit" is expressed. A core affix whose attribute
+     * has a row here derives its min/max from BaseMin/BaseMax scaled by the level curve (with the same open-ended
+     * tail as combatant scaling), instead of the numbers authored on the item. An item that authors a non-zero band
+     * keeps it as its own level-1 identity - a chestplate outweighs boots - but the LEVEL dependence still comes
+     * from here alone. An item that authors zeros needs no damage authoring at all.
+     *
+     * Rarity never touches these bands: it drives affix COUNT (AffixCountByRarity), never affix size.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Core Affix Scaling")
+    TMap<FGameplayAttribute, FMythicCoreAffixScaling> CoreAffixScaling;
+
+    // Level curve + compounding tail shared by every core affix row that does not author its own.
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Core Affix Scaling")
+    FCurveTableRowHandle CoreAffixLevelCurve;
+
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Core Affix Scaling", meta = (ClampMin = "1.0"))
+    float CoreAffixTailGrowth = 1.05f;
 };
 
 namespace MythicCombat {
@@ -116,4 +148,19 @@ namespace MythicCombat {
  * so an unauthored curve scales nothing rather than zeroing what it multiplies.
  */
 MYTHIC_API float SampleOpenEnded(const FCurveTableRowHandle &Handle, float Level, float TailGrowth);
+
+/**
+ * The centrally scaled min/max a core affix of this attribute rolls at this item level, or false when the
+ * attribute has no central row (the caller keeps its authored numbers). The out-band is the settings base -
+ * or the item's own non-zero authored band, its deliberate identity - scaled by the shared level curve.
+ */
+/**
+ * The combat level an entity standing here should carry: the authored level for the territory danger tier at
+ * the position, lifted by the world tier's ItemLevelBase. Both actor spawn paths (NPC manager, Mass
+ * embodiment) resolve through this one function.
+ */
+MYTHIC_API int32 ResolveCombatLevelAt(const UWorld *World, const FVector &Location);
+
+MYTHIC_API bool ResolveCoreAffixBand(const FGameplayAttribute &Attribute, float AuthoredMin, float AuthoredMax,
+                                     float ItemLevel, float &OutMin, float &OutMax);
 }

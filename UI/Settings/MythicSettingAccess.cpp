@@ -285,7 +285,8 @@ FText UMythicSettingAccess::GetDisplayText(const FMythicSettingDefinition &Def) 
      * player cannot tell which one the game believes.
      */
     const float Raw = ReadValue(Def);
-    const float Shown = (Def.MaxValue > Def.MinValue ? FMath::Clamp(Raw, Def.MinValue, Def.MaxValue) : Raw) * Scale;
+    const float Clamped = Def.MaxValue > Def.MinValue ? FMath::Clamp(Raw, Def.MinValue, Def.MaxValue) : Raw;
+    const float Shown = (Clamped + Def.DisplayBias) * Scale;
 
     FNumberFormattingOptions Format;
     Format.MinimumFractionalDigits = Def.DisplayDecimals;
@@ -306,9 +307,11 @@ void UMythicSettingAccess::RestoreDefaults(const UMythicSettingsCatalog *Catalog
         return;
     }
     // One loop over the catalog, so a setting cannot be left out of Restore Defaults the way nine of them
-    // were when each had to be remembered by hand.
+    // were when each had to be remembered by hand. Applied FOR REAL, not staged: WriteValue only buffers,
+    // and a buffered restore was silently discarded the moment the player left the screen.
+    PendingChanges.Empty();
     for (const FMythicSettingDefinition &Def : Catalog->Settings) {
-        WriteValue(Def, Def.DefaultValue);
+        ApplyValueForReal(Def, Def.DefaultValue);
     }
     if (UMythicUserSettings *Settings = UMythicUserSettings::Get()) {
         Settings->ApplySettings(false);

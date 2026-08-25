@@ -28,7 +28,7 @@ FCurveTableRowHandle MakeHandle(UCurveTable *Table, FName RowName) {
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicOpenEndedSampleTest,
-                                 "Mythic.Combat.EnemyScaling.OpenEndedSample",
+                                 "Mythic.Combat.CombatantScaling.OpenEndedSample",
                                  EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
 bool FMythicOpenEndedSampleTest::RunTest(const FString &Parameters) {
@@ -60,7 +60,7 @@ bool FMythicOpenEndedSampleTest::RunTest(const FString &Parameters) {
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicEnemyLevelBandsTest,
-                                 "Mythic.Combat.EnemyScaling.DangerLevelBands",
+                                 "Mythic.Combat.CombatantScaling.DangerLevelBands",
                                  EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
 bool FMythicEnemyLevelBandsTest::RunTest(const FString &Parameters) {
@@ -70,7 +70,7 @@ bool FMythicEnemyLevelBandsTest::RunTest(const FString &Parameters) {
     int32 Prev = 0;
     for (const EMythicDangerTier Tier : {EMythicDangerTier::Safe, EMythicDangerTier::Low, EMythicDangerTier::Moderate,
                                          EMythicDangerTier::High, EMythicDangerTier::Extreme}) {
-        const int32 *Level = Settings->EnemyLevelByDangerTier.Find(Tier);
+        const int32 *Level = Settings->CombatantLevelByDangerTier.Find(Tier);
         if (!TestNotNull(TEXT("Danger tier has an authored level"), Level)) {
             return false;
         }
@@ -78,21 +78,21 @@ bool FMythicEnemyLevelBandsTest::RunTest(const FString &Parameters) {
         Prev = *Level;
     }
 
-    TestTrue(TEXT("Health tail growth is authored above flat"), Settings->EnemyHealthTailGrowth > 1.0f);
-    TestTrue(TEXT("Damage tail growth is authored above flat"), Settings->EnemyDamageTailGrowth > 1.0f);
+    TestTrue(TEXT("Health tail growth is authored above flat"), Settings->CombatantHealthTailGrowth > 1.0f);
+    TestTrue(TEXT("Damage tail growth is authored above flat"), Settings->CombatantDamageTailGrowth > 1.0f);
     // Health must outgrow damage in the tail or high-level fights get one-shotty in both directions.
     TestTrue(TEXT("Health compounds at least as fast as damage"),
-             Settings->EnemyHealthTailGrowth >= Settings->EnemyDamageTailGrowth);
+             Settings->CombatantHealthTailGrowth >= Settings->CombatantDamageTailGrowth);
 
     return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicEnemyLevelRatioTest,
-                                 "Mythic.Combat.EnemyScaling.EffectiveHpRatio",
+                                 "Mythic.Combat.CombatantScaling.EffectiveHpRatio",
                                  EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
 bool FMythicEnemyLevelRatioTest::RunTest(const FString &Parameters) {
-    // The acceptance shape of #119, run through the exact sampler ApplyCombatScaling uses: a level 20 enemy must
+    // The acceptance shape of #119, run through the exact sampler ApplyCombatScaling uses: a level 20 combatant must
     // carry meaningfully more health than a level 10 one, and the band's floor at 20 must clear the ceiling at 10
     // so the roll can never invert the ladder.
     UCurveTable *Table = MakeLevelTable(TEXT("HP"));

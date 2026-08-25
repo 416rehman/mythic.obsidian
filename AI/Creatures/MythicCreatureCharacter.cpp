@@ -1,5 +1,6 @@
 
 #include "AI/Creatures/MythicCreatureCharacter.h"
+#include "Settings/MythicCombatSettings.h"
 #include "MassEntitySubsystem.h"
 #include "MassEntityManager.h"
 #include "Mass/Fragments/MythicMassFragments.h"
@@ -34,4 +35,7 @@ void AMythicCreatureCharacter::InitializeFromMassEntity(const FMassEntityHandle 
     }
 
     OnCreatureInitialized(SpeciesId, PackId);
+
+    // Creatures embody through Mass like NPCs do, and their fights ride the same level ladder.
+    StampCombatLevel(MythicCombat::ResolveCombatLevelAt(World, GetActorLocation()));
 }
