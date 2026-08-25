@@ -65,6 +65,50 @@ bool FMythicEffectDescriberTest::RunTest(const FString &Parameters) {
     }
 
     {
+        const FGameplayAttribute Power = UMythicAttributeSet_Offense::GetPowerAttribute();
+        FRollDefinition Roll;
+        Roll.Min = 4.0f;
+        Roll.Max = 9.0f;
+        Roll.bWholeNumber = true;
+        const FMythicEffectLine Line = MythicEffectDescriber::DescribeRolledModifier(Power, 8.0f, Roll);
+        TestFalse(TEXT("a flat point stat carries no percent sign"), Line.Value.ToString().Contains(TEXT("%")));
+        TestEqual(TEXT("power grants whole points"), Line.Value.ToString(), FString(TEXT("+8")));
+        TestFalse(TEXT("and its range is not a percentage either"), Line.Range.ToString().Contains(TEXT("%")));
+    }
+
+    {
+        const FGameplayAttribute Dur = UMythicAttributeSet_Offense::GetBurnDurationMultiplierAttribute();
+        FRollDefinition Roll;
+        Roll.Min = 0.06f;
+        Roll.Max = 0.16f;
+        Roll.Modifier = EGameplayModOp::Additive;
+
+        const FMythicEffectLine Line = MythicEffectDescriber::DescribeRolledModifier(Dur, 0.10f, Roll);
+        TestEqual(TEXT("an additive roll on a multiplier stat reads as percentage points"),
+                  Line.Value.ToString(), FString(TEXT("+10%")));
+        TestFalse(TEXT("it never subtracts a whole multiplier from the delta"),
+                  Line.Range.ToString().Contains(TEXT("-9")));
+        TestEqual(TEXT("and its range agrees with the value"), Line.Range.ToString(), FString(TEXT("[6%-16%]")));
+    }
+
+    {
+        const FGameplayAttribute Dmg = UMythicAttributeSet_Offense::GetDamagePerHitAttribute();
+        FRollDefinition Roll;
+        Roll.Min = 6.0f;
+        Roll.Max = 11.0f;
+        Roll.LevelScaling = 1.0f;
+        Roll.bWholeNumber = true;
+
+        const FMythicEffectLine AtLevel = MythicEffectDescriber::DescribeRolledModifier(Dmg, 60.0f, Roll, 50);
+        TestEqual(TEXT("the range scales with item level, like the value it sits beside"),
+                  AtLevel.Range.ToString(), FString(TEXT("[56-61]")));
+
+        const FMythicEffectLine Unscaled = MythicEffectDescriber::DescribeRolledModifier(Dmg, 8.0f, Roll);
+        TestEqual(TEXT("and an unscaled roll still prints its authored band"),
+                  Unscaled.Range.ToString(), FString(TEXT("[6-11]")));
+    }
+
+    {
         const FMythicEffectLine Line = MythicEffectDescriber::DescribeModifier(FGameplayAttribute(), 5.0f);
         TestTrue(TEXT("an invalid attribute has no label"), Line.Label.IsEmpty());
         TestTrue(TEXT("an invalid attribute has no markup"), Line.RichText.IsEmpty());

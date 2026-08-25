@@ -5,6 +5,7 @@
 #include "AttributeSet.h"
 #include "Engine/DataTable.h"
 #include "Engine/DeveloperSettings.h"
+#include "GameplayEffectTypes.h"
 #include "GameplayTagContainer.h"
 #include "MythicStatDisplay.generated.h"
 
@@ -227,6 +228,17 @@ struct MYTHIC_API FMythicStatContributionLine {
 
 namespace MythicStatDisplay {
     MYTHIC_API FMythicStatRule GetRule(const FGameplayAttribute &Attribute);
+
+    /**
+     * How one rolled or granted modifier should read, given the attribute's registry format and the op that
+     * applies it. Every affix, effect line and comparison row resolves through here so a value and the range
+     * printed beside it can never disagree.
+     *
+     * bForcePercent is the authored FRollDefinition override, honoured only for Flat attributes.
+     */
+    MYTHIC_API EMythicStatFormat ResolveRollFormat(const FGameplayAttribute &Attribute,
+                                                   TEnumAsByte<EGameplayModOp::Type> Op,
+                                                   bool bForcePercent = false);
 
     MYTHIC_API FString MakeFriendlyLabel(const FString &PropertyName);
 

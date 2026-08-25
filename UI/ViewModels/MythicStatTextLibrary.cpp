@@ -8,11 +8,7 @@
 
 namespace {
 EMythicStatFormat FormatForRoll(FGameplayAttribute Attribute, bool bIsPercentage) {
-    const EMythicStatFormat RuleFormat = MythicStatDisplay::GetRule(Attribute).Format;
-    if (bIsPercentage && RuleFormat == EMythicStatFormat::Flat) {
-        return EMythicStatFormat::Percent;
-    }
-    return RuleFormat;
+    return MythicStatDisplay::ResolveRollFormat(Attribute, EGameplayModOp::Additive, bIsPercentage);
 }
 }
 

@@ -50,8 +50,12 @@ MYTHIC_API FText MakeRollMarkup(const FText &FormattedValue, float Min, float Ma
 MYTHIC_API FMythicEffectLine DescribeModifier(const FGameplayAttribute &Attribute, float Magnitude,
                                               TEnumAsByte<EGameplayModOp::Type> Op = EGameplayModOp::Additive);
 
+/**
+ * ItemLevel scales the printed range the same way the roll scaled the value. Passing 0 prints the authored
+ * band, which only matches the value on an unscaled roll.
+ */
 MYTHIC_API FMythicEffectLine DescribeRolledModifier(const FGameplayAttribute &Attribute, float Value,
-                                                    const FRollDefinition &Roll);
+                                                    const FRollDefinition &Roll, int32 ItemLevel = 0);
 
 MYTHIC_API TArray<FMythicEffectLine> DescribeEffect(TSubclassOf<UGameplayEffect> EffectClass);
 

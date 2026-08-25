@@ -264,6 +264,25 @@ namespace MythicStatDisplay {
         return S;
     }
 
+    EMythicStatFormat ResolveRollFormat(const FGameplayAttribute &Attribute,
+                                        TEnumAsByte<EGameplayModOp::Type> Op, bool bForcePercent) {
+        if (Op == EGameplayModOp::Multiplicitive) {
+            return EMythicStatFormat::Multiplier;
+        }
+
+        const EMythicStatFormat RuleFormat = GetRule(Attribute).Format;
+
+        // An additive roll on a multiplier stat contributes percentage points, not a multiplier. Reading it as
+        // one subtracts a whole 1.0 from the delta, so a +0.06 roll prints -94%.
+        if (RuleFormat == EMythicStatFormat::Multiplier) {
+            return EMythicStatFormat::Percent;
+        }
+        if (bForcePercent && RuleFormat == EMythicStatFormat::Flat) {
+            return EMythicStatFormat::Percent;
+        }
+        return RuleFormat;
+    }
+
     FText FormatValue(float Value, EMythicStatFormat Format) {
         switch (Format) {
             case EMythicStatFormat::Integer:

@@ -15,13 +15,6 @@ bool AttributeIsGoodWhenHigher(const FGameplayAttribute &Attribute) {
     return !LowerIsBetter.Contains(Attribute.GetName());
 }
 
-EMythicStatFormat FormatForModifier(const FGameplayAttribute &Attribute, TEnumAsByte<EGameplayModOp::Type> Op) {
-    if (Op == EGameplayModOp::Multiplicitive) {
-        return EMythicStatFormat::Multiplier;
-    }
-    return MythicStatDisplay::GetRule(Attribute).Format;
-}
-
 void BuildRichText(FMythicEffectLine &Line) {
     const FString Roll = FString::Printf(TEXT("<Roll>%s</>"), *Line.Value.ToString());
     const FString Context = Line.Range.IsEmpty() ? FString() : FString::Printf(TEXT("<Context>%s</>"), *Line.Range.ToString());
@@ -48,7 +41,7 @@ FMythicEffectLine DescribeModifier(const FGameplayAttribute &Attribute, float Ma
     }
 
     const FMythicStatRule Rule = MythicStatDisplay::GetRule(Attribute);
-    const EMythicStatFormat Format = FormatForModifier(Attribute, Op);
+    const EMythicStatFormat Format = MythicStatDisplay::ResolveRollFormat(Attribute, Op);
 
     Line.Label = FText::FromString(Rule.Label);
     Line.RawMagnitude = Magnitude;
@@ -71,20 +64,24 @@ FMythicEffectLine DescribeModifier(const FGameplayAttribute &Attribute, float Ma
     return Line;
 }
 
-FMythicEffectLine DescribeRolledModifier(const FGameplayAttribute &Attribute, float Value, const FRollDefinition &Roll) {
+FMythicEffectLine DescribeRolledModifier(const FGameplayAttribute &Attribute, float Value, const FRollDefinition &Roll,
+                                         int32 ItemLevel) {
     FMythicEffectLine Line = DescribeModifier(Attribute, Value, Roll.Modifier);
 
-    if (Roll.bIsPercentage && Line.Format == EMythicStatFormat::Flat) {
-        Line.Format = EMythicStatFormat::Percent;
-        Line.Value = MythicStatDisplay::FormatBonus(Value, EMythicStatFormat::Percent);
+    const EMythicStatFormat Forced = MythicStatDisplay::ResolveRollFormat(Attribute, Roll.Modifier, Roll.bIsPercentage);
+    if (Forced != Line.Format) {
+        Line.Format = Forced;
+        Line.Value = MythicStatDisplay::FormatBonus(Value, Forced);
     }
     if (Roll.bLowerIsBetter) {
         Line.bPositive = Value <= 0.0f;
     }
 
-    if (!FMath::IsNearlyEqual(Roll.Min, Roll.Max, 0.0001f)) {
-        const FText MinText = MythicStatDisplay::FormatValue(Roll.Min, Line.Format);
-        const FText MaxText = MythicStatDisplay::FormatValue(Roll.Max, Line.Format);
+    const float ScaledMin = Roll.GetScaledMin(ItemLevel);
+    const float ScaledMax = Roll.GetScaledMax(ItemLevel);
+    if (!FMath::IsNearlyEqual(ScaledMin, ScaledMax, 0.0001f)) {
+        const FText MinText = MythicStatDisplay::FormatValue(ScaledMin, Line.Format);
+        const FText MaxText = MythicStatDisplay::FormatValue(ScaledMax, Line.Format);
         Line.Range = FText::FromString(FString::Printf(TEXT("[%s-%s]"), *MinText.ToString(), *MaxText.ToString()));
     }
 

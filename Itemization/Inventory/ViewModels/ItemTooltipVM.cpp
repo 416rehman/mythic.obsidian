@@ -170,17 +170,18 @@ void UItemTooltipVM::SetRequiredEquipTag(FGameplayTag InRequiredEquipTag) {
 
 FGameplayTag UItemTooltipVM::GetRequiredEquipTag() const { return RequiredEquipTag; }
 
-static void CollectAffixDisplayData(const TArray<FRolledAffix> &RolledAffixes, TArray<FAffixDisplayData> &OutAffixes) {
+static void CollectAffixDisplayData(const TArray<FRolledAffix> &RolledAffixes, int32 ItemLevel,
+                                    TArray<FAffixDisplayData> &OutAffixes) {
     for (const FRolledAffix &Rolled : RolledAffixes) {
         FAffixDisplayData Entry;
         Entry.Value = Rolled.Value;
-        Entry.bIsPercentage = Rolled.Definition.bIsPercentage;
         Entry.bLowerIsBetter = Rolled.Definition.bLowerIsBetter;
 
         const FMythicEffectLine Line =
-            MythicEffectDescriber::DescribeRolledModifier(Rolled.Attribute, Rolled.Value, Rolled.Definition);
+            MythicEffectDescriber::DescribeRolledModifier(Rolled.Attribute, Rolled.Value, Rolled.Definition, ItemLevel);
         Entry.AttributeName = Line.Label.IsEmpty() ? FText::FromString(TEXT("Unknown")) : Line.Label;
         Entry.RichText = Line.RichText;
+        Entry.bIsPercentage = Line.Format == EMythicStatFormat::Percent || Line.Format == EMythicStatFormat::Multiplier;
 
         OutAffixes.Add(Entry);
     }
@@ -213,8 +214,9 @@ UItemTooltipVM *UItemTooltipVM::CreateFromItemInstance(UObject *Outer, UMythicIt
     const UAffixesFragment *AffixFrag = Item->GetFragment<UAffixesFragment>();
     if (AffixFrag) {
         TArray<FAffixDisplayData> AffixData;
-        CollectAffixDisplayData(AffixFrag->AffixesRuntimeReplicatedData.RolledCoreAffixes, AffixData);
-        CollectAffixDisplayData(AffixFrag->AffixesRuntimeReplicatedData.RolledAffixes, AffixData);
+        const int32 ItemLevel = Item->GetItemLevel();
+        CollectAffixDisplayData(AffixFrag->AffixesRuntimeReplicatedData.RolledCoreAffixes, ItemLevel, AffixData);
+        CollectAffixDisplayData(AffixFrag->AffixesRuntimeReplicatedData.RolledAffixes, ItemLevel, AffixData);
         VM->SetAffixes(AffixData);
     }
 

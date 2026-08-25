@@ -31,9 +31,10 @@ struct MYTHIC_API FRollDefinition {
     UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category="Presentation")
     bool bLowerIsBetter = false;
 
-    // Is percentage? Used in the GetRichText function to determine if the value should be multiplied by 100.
+    // Forces a percent reading on an attribute the stat registry calls Flat. The registry (DT_StatDisplay) decides
+    // units for every other format, so this stays off unless a roll genuinely needs to override it.
     UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category="Presentation")
-    bool bIsPercentage = true;
+    bool bIsPercentage = false;
 
     // Whole-number rolls: the rolled VALUE snaps to an integer at roll and reroll time, server-side.
     // For flat stats a player reads as counts (Power, Strength, Resolve, Armor) a +3.4 roll is noise
