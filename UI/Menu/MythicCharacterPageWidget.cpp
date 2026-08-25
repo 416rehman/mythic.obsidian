@@ -8,6 +8,9 @@
 #include "Components/Overlay.h"
 #include "Components/OverlaySlot.h"
 #include "UI/MythicUIKit.h"
+#include "Progression/Runes/MythicRuneComponent.h"
+#include "Progression/Runes/MythicRuneDefinition.h"
+#include "UI/Menu/MythicRunePickerWidget.h"
 #include "UI/Widgets/MythicSectionHeader.h"
 #include "UI/MythicUIStyle.h"
 #include "Components/Border.h"
@@ -36,6 +39,7 @@
 #include "GAS/MythicTags_GAS.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Player/MythicPlayerController.h"
+#include "Player/MythicPlayerState.h"
 #include "UObject/UObjectIterator.h"
 #include "UI/MythicHUDLayout.h"
 
@@ -928,11 +932,57 @@ void UMythicCharacterPageWidget::BuildSockets() {
 }
 
 void UMythicCharacterPageWidget::RefreshSockets() {
-    for (FMythicRuneSocket &Socket : Sockets) {
-        if (Socket.Mark) {
-            Socket.Mark->SetVisibility(ESlateVisibility::Collapsed);
+    const UMythicRuneComponent *Runes = nullptr;
+    if (const APlayerController *PC = GetOwningPlayer()) {
+        if (const AMythicPlayerState *PS = PC->GetPlayerState<AMythicPlayerState>()) {
+            Runes = PS->GetRuneComponent();
         }
     }
+    const UMythicUIKit *Kit = UMythicUIKit::Get();
+
+    for (FMythicRuneSocket &Socket : Sockets) {
+        const bool bUnlocked = Runes && Runes->IsSlotUnlocked(Socket.SlotIndex);
+        const UMythicRuneDefinition *Worn = Runes ? Runes->GetRuneInSlot(Socket.SlotIndex) : nullptr;
+
+        // Three states a player can tell apart at a glance: a socket they have not earned, an earned one
+        // standing empty, and one that is filled. Four identical rings say none of that.
+        if (Socket.Well && Kit) {
+            const EMythicUIState WellState = !bUnlocked ? EMythicUIState::Disabled
+                                             : Worn     ? EMythicUIState::Selected
+                                                        : EMythicUIState::Normal;
+            Socket.Well->SetBrush(Kit->MakeBrush(TEXT("SlotTex.Round"), WellState, FVector2D(64.0, 64.0)));
+        }
+
+        if (Socket.Mark) {
+            UTexture2D *Icon = Worn ? Worn->Icon.LoadSynchronous() : nullptr;
+            if (Icon) {
+                Socket.Mark->SetBrushFromTexture(Icon, true);
+                Socket.Mark->SetColorAndOpacity(RuneCategoryColour(Worn));
+                Socket.Mark->SetVisibility(ESlateVisibility::HitTestInvisible);
+            }
+            else {
+                Socket.Mark->SetVisibility(ESlateVisibility::Collapsed);
+            }
+        }
+
+        // A socket that cannot be filled yet must not answer a click, or the player learns the control lies.
+        if (Socket.Button) {
+            Socket.Button->SetVisibility(bUnlocked ? ESlateVisibility::Visible
+                                                   : ESlateVisibility::HitTestInvisible);
+            Socket.Button->SetRenderOpacity(bUnlocked ? 1.0f : 0.4f);
+        }
+    }
+}
+
+FLinearColor UMythicCharacterPageWidget::RuneCategoryColour(const UMythicRuneDefinition *Rune) const {
+    if (Rune) {
+        for (const FMythicRuneCategoryColour &Entry : RuneCategoryColours) {
+            if (Entry.Category.IsValid() && Rune->CategoryTags.HasTag(Entry.Category)) {
+                return Entry.Colour;
+            }
+        }
+    }
+    return FLinearColor::White;
 }
 
 void UMythicRuneSocketClickProxy::HandleClicked() {
@@ -942,19 +992,31 @@ void UMythicRuneSocketClickProxy::HandleClicked() {
 }
 
 void UMythicCharacterPageWidget::OpenSocketPicker(int32 SlotIndex) {
-    UMythicHUDLayout *Layout = GetTypedOuter<UMythicHUDLayout>();
-    if (!Layout) {
-        const APlayerController *PC = GetOwningPlayer();
-        for (TObjectIterator<UMythicHUDLayout> It; It; ++It) {
-            if (IsValid(*It) && !It->HasAnyFlags(RF_ClassDefaultObject) && It->GetOwningPlayer() == PC) {
-                Layout = *It;
-                break;
-            }
-        }
-    }
-    if (!Layout) {
+    if (!RunePickerClass) {
+        UE_LOG(Myth, Warning, TEXT("CharacterPage: socket %d has no rune picker class assigned."), SlotIndex);
         return;
     }
-    Layout->PendingRuneSlot = SlotIndex;
-    Layout->OpenMenuOnPage(TEXT("Powers"));
+    const UMythicRuneComponent *Runes = nullptr;
+    if (const APlayerController *PC = GetOwningPlayer()) {
+        if (const AMythicPlayerState *PS = PC->GetPlayerState<AMythicPlayerState>()) {
+            Runes = PS->GetRuneComponent();
+        }
+    }
+    if (!Runes || !Runes->IsSlotUnlocked(SlotIndex)) {
+        return;
+    }
+
+    // One picker for the page's lifetime, re-pointed at the chosen socket. Creating a widget per click is a
+    // frame spike, and the pool of one is all this needs.
+    if (!RunePicker) {
+        RunePicker = CreateWidget<UMythicRunePickerWidget>(GetOwningPlayer(), RunePickerClass);
+        if (!RunePicker) {
+            return;
+        }
+    }
+    RunePicker->OpenForSlot(SlotIndex, this);
+}
+
+void UMythicCharacterPageWidget::NotifyRunesChanged() {
+    RefreshSockets();
 }

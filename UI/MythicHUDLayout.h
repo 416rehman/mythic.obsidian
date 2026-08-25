@@ -104,8 +104,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Menu")
     void OpenMenuOnPage(FName PageId);
 
-    int32 PendingRuneSlot = INDEX_NONE;
-
 protected:
     /**
      * Route the existing Inventory key into the shell. Bound in C++ only when bRouteInventoryToShell is set, so the

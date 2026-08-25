@@ -43,12 +43,27 @@ public:
     void HandleClicked();
 };
 
+/** What colour a rune's category draws in. Authored so a new category is a row, not a code change. */
+USTRUCT(BlueprintType)
+struct FMythicRuneCategoryColour {
+    GENERATED_BODY()
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Runes", meta = (Categories = "Rune.Category"))
+    FGameplayTag Category;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Runes")
+    FLinearColor Colour = FLinearColor::White;
+};
+
 UCLASS()
 class MYTHIC_API UMythicCharacterPageWidget : public UMythicActivatableWidget {
     GENERATED_BODY()
 
 public:
     void OpenSocketPicker(int32 SlotIndex);
+
+    /** Redraws the socket strip after the picker commits a change. */
+    void NotifyRunesChanged();
 
     /** Advances the bag's active category. Bound to LB/RB CommonUI actions by the page Blueprint. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Inventory")
@@ -139,6 +154,14 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes", meta = (ClampMin = "1", ClampMax = "8"))
     int32 SocketCount = 4;
 
+    /** Tints a worn rune's mark by what it is for, so a build reads as a shape before it is read as words. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes")
+    TArray<FMythicRuneCategoryColour> RuneCategoryColours;
+
+    /** The rune library, opened against whichever socket was clicked. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes")
+    TSubclassOf<class UMythicRunePickerWidget> RunePickerClass;
+
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UPanelWidget> DetailsHost;
 
@@ -175,8 +198,14 @@ private:
 
     void RefreshSockets();
 
+    FLinearColor RuneCategoryColour(const class UMythicRuneDefinition *Rune) const;
+
 
     TArray<FMythicRuneSocket> Sockets;
+
+    /** One picker for the page's lifetime. Creating a widget per click is a frame spike. */
+    UPROPERTY()
+    TObjectPtr<class UMythicRunePickerWidget> RunePicker;
 
 
     UMythicHUDLayout *FindHUDLayout() const;
