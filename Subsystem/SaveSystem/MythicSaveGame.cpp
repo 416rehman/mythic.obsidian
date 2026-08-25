@@ -10,6 +10,11 @@ void UMythicSaveGame::FixupData() {
                 CharacterData.AppliedUnlockRules);
         }
 
+        if (CharacterData.DataVersion <= static_cast<int32>(EMythicCharacterSaveVersion::PreSkills)) {
+            CharacterData.UnlockedSkillSlots = FMythicCharacterSaveMigration::SkillSlotsFromAppliedRules(
+                CharacterData.AppliedUnlockRules);
+        }
+
         CharacterData.DataVersion = static_cast<int32>(CurrentCharacterSaveVersion);
     }
 }

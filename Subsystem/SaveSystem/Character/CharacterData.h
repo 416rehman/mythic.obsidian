@@ -33,6 +33,7 @@ enum class EMythicCharacterSaveVersion : uint8 {
     PreQuestJournal,
     PreWholeNumberRolls,
     PreRunes,
+    PreSkills,
     LatestVersion,
     VersionPlusOne
 };
@@ -189,6 +190,17 @@ struct FSerializedCharacterData {
     UPROPERTY(BlueprintReadWrite)
     int32 UnlockedRuneSlots = 0;
 
+    // Per-player SKILL SLOTS — the skill bound to each slot (definition soft path; a null entry is an empty slot, so
+    // the array index is the slot index) plus how many slots are open. Persists UMythicSkillComponent, whose SaveGame
+    // flags are inert here for the same reason the rune ones are. Restored via RestoreSkills, which re-grants each
+    // skill's ability under that slot's input tag — restoring the array alone would leave filled slots whose keys do
+    // nothing. Zero open slots means the count is absent, which FixupData repairs before load.
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FSoftObjectPath> EquippedSkills;
+
+    UPROPERTY(BlueprintReadWrite)
+    int32 UnlockedSkillSlots = 0;
+
 
     // Last world transform of the player's pawn, so a reload restores position/rotation instead of respawning at
     // the default PlayerStart. Gated by bHasSavedTransform so saves written before this field existed (which would
@@ -213,6 +225,23 @@ struct MYTHIC_API FMythicCharacterSaveMigration {
      */
     static int32 RuneSlotsFromAppliedRules(TConstArrayView<FGameplayTag> AppliedRules) {
         static const FName RuleParent(TEXT("Unlock.Rule.RuneSlot"));
+        int32 Slots = 1;
+        for (const FGameplayTag &Rule : AppliedRules) {
+            if (Rule.IsValid() && Rule.GetTagName().ToString().StartsWith(RuleParent.ToString(), ESearchCase::CaseSensitive)) {
+                ++Slots;
+            }
+        }
+        return Slots;
+    }
+
+    /**
+     * How many skill slots a pre-Skills save had earned. Same trap as the rune sockets: GrantSkillSlot was a no-op,
+     * yet DA_Unlock_SkillSlot2 still latched Unlock.Rule.SkillSlot2 into AppliedUnlockRules and RestoreUnlockState
+     * re-latches it, so the rule can never fire again and the count has to be rebuilt from the rules. One slot is
+     * free; each applied Unlock.Rule.SkillSlot* adds another.
+     */
+    static int32 SkillSlotsFromAppliedRules(TConstArrayView<FGameplayTag> AppliedRules) {
+        static const FName RuleParent(TEXT("Unlock.Rule.SkillSlot"));
         int32 Slots = 1;
         for (const FGameplayTag &Rule : AppliedRules) {
             if (Rule.IsValid() && Rule.GetTagName().ToString().StartsWith(RuleParent.ToString(), ESearchCase::CaseSensitive)) {

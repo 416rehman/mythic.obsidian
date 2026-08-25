@@ -15,6 +15,7 @@
 #include "Progression/MythicAchievementComponent.h"
 #include "Progression/MythicUnlockComponent.h"
 #include "Progression/Runes/MythicRuneComponent.h"
+#include "Progression/Skills/MythicSkillComponent.h"
 #include "Knowledge/MythicCodexComponent.h"
 #include "GAS/Progression/MythicRenownComponent.h"
 #include "GAS/Mounts/MythicMountRosterComponent.h"
@@ -59,6 +60,8 @@ AMythicPlayerState::AMythicPlayerState() {
     Unlocks = CreateDefaultSubobject<UMythicUnlockComponent>(TEXT("Unlocks"));
 
     Runes = CreateDefaultSubobject<UMythicRuneComponent>(TEXT("Runes"));
+
+    Skills = CreateDefaultSubobject<UMythicSkillComponent>(TEXT("Skills"));
 
     Codex = CreateDefaultSubobject<UMythicCodexComponent>(TEXT("Codex"));
 

@@ -12,6 +12,7 @@
 #include "Progression/MythicAchievementComponent.h"
 #include "Progression/MythicUnlockComponent.h"
 #include "Progression/Runes/MythicRuneComponent.h"
+#include "Progression/Skills/MythicSkillComponent.h"
 #include "Knowledge/MythicCodexComponent.h"
 #include "Mythic/GAS/Progression/MythicRenownComponent.h"
 #include "Mythic/GAS/Mounts/MythicMountRosterComponent.h"
@@ -131,6 +132,15 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
             OutData.UnlockedRuneSlots = RuneComp->GetUnlockedSlots();
             UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d rune sockets (%d open)"),
                    OutData.EquippedRunes.Num(), OutData.UnlockedRuneSlots);
+        }
+
+        if (const UMythicSkillComponent *SkillComp = MythPS->GetSkillComponent()) {
+            for (const TSoftObjectPtr<UMythicSkillDefinition> &Skill : SkillComp->GetEquippedSkills()) {
+                OutData.EquippedSkills.Add(Skill.ToSoftObjectPath());
+            }
+            OutData.UnlockedSkillSlots = SkillComp->GetUnlockedSlots();
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d skill slots (%d open)"),
+                   OutData.EquippedSkills.Num(), OutData.UnlockedSkillSlots);
         }
 
         if (const UMythicCodexComponent *CodexComp = MythPS->GetCodexComponent()) {
@@ -359,6 +369,20 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
             RuneComp->RestoreRunes(SavedRunes, InData.UnlockedRuneSlots);
             UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d rune sockets (%d open)"),
                    InData.EquippedRunes.Num(), InData.UnlockedRuneSlots);
+        }
+
+        // Beside the runes, and for the same reason: IsSkillUnlocked reads the achievement, unlock and story ledgers
+        // restored above, so a skill gated on an earned deed would otherwise be dropped as unearned.
+        UMythicSkillComponent *SkillComp = MythPS->GetSkillComponent();
+        if (SkillComp && InData.UnlockedSkillSlots > 0) {
+            TArray<TSoftObjectPtr<UMythicSkillDefinition>> SavedSkills;
+            SavedSkills.Reserve(InData.EquippedSkills.Num());
+            for (const FSoftObjectPath &SkillPath : InData.EquippedSkills) {
+                SavedSkills.Emplace(SkillPath);
+            }
+            SkillComp->RestoreSkills(SavedSkills, InData.UnlockedSkillSlots);
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d skill slots (%d open)"),
+                   InData.EquippedSkills.Num(), InData.UnlockedSkillSlots);
         }
     }
 

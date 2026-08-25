@@ -22,6 +22,7 @@ class UMythicStatLedgerComponent;
 class UMythicAchievementComponent;
 class UMythicUnlockComponent;
 class UMythicRuneComponent;
+class UMythicSkillComponent;
 class UMythicCodexComponent;
 class UMythicRenownComponent;
 class UMythicMountRosterComponent;
@@ -116,6 +117,12 @@ protected:
     // GrantPerkSlot effect opens sockets two through four.
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Progression")
     TObjectPtr<UMythicRuneComponent> Runes;
+
+    // Per-player SKILL SLOTS (replicated COND_OwnerOnly component; server-authoritative equipped skills + unlocked
+    // slot count, and the ability grant/clear that binds each slot to its input tag). Created in the ctor beside
+    // Runes, whose sibling GrantSkillSlot effect on the unlock engine opens slot two.
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Progression")
+    TObjectPtr<UMythicSkillComponent> Skills;
 
     // Per-player CODEX (replicated COND_OwnerOnly component; server-authoritative bestiary kill/encounter records +
     // discovered glossary terms). Mirrors the StatLedger/Narrative components — created in the ctor, persisted via
@@ -216,6 +223,11 @@ public:
     // the unlock engine's GrantPerkSlot effect calls GrantSlot() on it.
     UFUNCTION(BlueprintPure, Category = "Progression")
     UMythicRuneComponent *GetRuneComponent() const { return Runes; }
+
+    // Per-player skill slots (server-authoritative; replicated to owner). Equipped skills + the unlocked slot count;
+    // the unlock engine's GrantSkillSlot effect calls GrantSlot() on it.
+    UFUNCTION(BlueprintPure, Category = "Progression")
+    UMythicSkillComponent *GetSkillComponent() const { return Skills; }
 
     // Per-player codex (server-authoritative; replicated to owner). Bestiary kill/encounter records + discovered
     // glossary terms; persists via the character save (CodexBestiary / CodexTerms).

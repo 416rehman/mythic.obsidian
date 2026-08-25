@@ -13,6 +13,7 @@
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Mythic/Mythic.h"
 #include "UI/MythicUIStyle.h"
 #include "UI/Settings/MythicSettingAccess.h"
 #include "UI/Settings/MythicSettingRowBase.h"
