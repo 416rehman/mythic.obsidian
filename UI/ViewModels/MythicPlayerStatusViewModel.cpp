@@ -100,10 +100,9 @@ float UMythicPlayerStatusViewModel::ComputeBuildupFraction(const UAbilitySystemC
     if (!InASC || !Definition || !Definition->BuildupAttribute.IsValid()) {
         return 0.0f;
     }
-    const float Resistance = InASC->HasAttributeSetForAttribute(Definition->ResistanceAttribute)
-                                 ? InASC->GetNumericAttribute(Definition->ResistanceAttribute)
-                                 : 0.0f;
-    const float Threshold = UMythicAttributeSet_Defense::ComputeBuildupThreshold(Resistance);
+    // No attacker in a self-readout, so nothing reduces the threshold. Resistance does not belong here: it gates
+    // whether a proc lands at all, one layer down, and never moved this number.
+    const float Threshold = UMythicAttributeSet_Defense::ComputeBuildupThreshold(0.0f);
     if (Threshold <= 0.0f) {
         return 0.0f;
     }

@@ -92,6 +92,15 @@ bool FMythicStatusEffectTest::RunTest(const FString &Parameters) {
         // 1 - Resist, so bending the threshold with it as well paid one stat twice.
         TestTrue(TEXT("a reduced threshold is crossed by buildup the base would not have been"),
                  Def::BuildupCrossesThreshold(Base * 0.8f, 0.25f));
+
+        // The parameter changed meaning from resistance to attacker reduction, and both are floats, so a caller
+        // left passing a resistance compiles and silently shrinks the threshold. That shipped: the status bar
+        // read Buildup/Threshold with resistance in this slot, so a resistant target's bar showed full at 40%.
+        // Resistance is a [0,1] fraction, so if any caller still passes one, this is what it does.
+        TestTrue(TEXT("a resistance-shaped value in the reduction slot visibly shrinks the threshold"),
+                 Def::ComputeBuildupThreshold(0.8f) < Base * 0.5f);
+        TestEqual(TEXT("so a defender readout with no attacker must ask for zero reduction"),
+                  Def::ComputeBuildupThreshold(0.0f), Base);
     }
 
     return true;

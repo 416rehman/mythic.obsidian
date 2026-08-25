@@ -737,11 +737,8 @@ void UMythicCheatManager::MythBuildup(const FString &StatusName, float Amount) {
     Cheat_AddBuildup(ASC, Definition->BuildupAttribute, Amount);
 
     const float Now = ASC->GetNumericAttribute(Definition->BuildupAttribute);
-    const float Resist = ASC->HasAttributeSetForAttribute(Definition->ResistanceAttribute)
-                             ? ASC->GetNumericAttribute(Definition->ResistanceAttribute)
-                             : 0.0f;
     UE_LOG(Myth, Warning, TEXT(">>> %s buildup +%.1f -> %.1f of %.1f"), *Cheat_StatusShortName(Definition), Amount, Now,
-           UMythicAttributeSet_Defense::ComputeBuildupThreshold(Resist));
+           UMythicAttributeSet_Defense::ComputeBuildupThreshold(0.0f));
 }
 
 void UMythicCheatManager::MythProcChance(const FString &StatusName, float Chance) {
@@ -785,7 +782,7 @@ void UMythicCheatManager::MythStatusList() {
                                  : 0.0f;
         const bool bActive = Definition->GrantedStateTag.IsValid() && ASC->HasMatchingGameplayTag(Definition->GrantedStateTag);
         UE_LOG(Myth, Warning, TEXT("    %-10s %-24s %8.1f %10.1f %7.2f %s"), *Cheat_StatusShortName(Definition),
-               *Definition->GrantedStateTag.ToString(), Buildup, UMythicAttributeSet_Defense::ComputeBuildupThreshold(Resist),
+               *Definition->GrantedStateTag.ToString(), Buildup, UMythicAttributeSet_Defense::ComputeBuildupThreshold(0.0f),
                Resist, bActive ? TEXT("yes") : TEXT("no"));
     }
 }
