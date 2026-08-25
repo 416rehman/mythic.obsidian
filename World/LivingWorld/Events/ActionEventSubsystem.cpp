@@ -2,6 +2,9 @@
 #include "World/LivingWorld/Events/ActionEventSubsystem.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
+#include "GameFramework/PlayerController.h"
+#include "Player/MythicPlayerState.h"
+#include "Progression/MythicStatLedgerComponent.h"
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "Engine/World.h"
@@ -52,6 +55,8 @@ void UMythicActionEventSubsystem::SubmitAction(const FMythicActionEvent &Action)
         UE_LOG(LogMythActionEvent, Warning, TEXT("SubmitAction called with no perpetrator and no override cell — event discarded"));
         return;
     }
+
+    RecordDeed(PerpActor, Action.ActionTag);
 
     const FMythicFactionId PerpFaction = Action.PerpFactionOverride.IsValid()
         ? Action.PerpFactionOverride
@@ -135,4 +140,49 @@ UMythicLivingWorldSubsystem *UMythicActionEventSubsystem::ResolveLivingWorld() c
         }
     }
     return LivingWorldSubsystem;
+}
+
+void UMythicActionEventSubsystem::RecordDeed(const AActor *Perpetrator, const FGameplayTag &ActionTag) const {
+    if (!Perpetrator || !ActionTag.IsValid()) {
+        return;
+    }
+
+    // Deeds are the player's own record, so an NPC killing an NPC is not the player's violence.
+    const APawn *Pawn = Cast<APawn>(Perpetrator);
+    const AController *Controller = Pawn ? Pawn->GetController() : Cast<AController>(Perpetrator);
+    const APlayerController *PC = Cast<APlayerController>(Controller);
+    AMythicPlayerState *PS = PC ? PC->GetPlayerState<AMythicPlayerState>() : nullptr;
+    UMythicStatLedgerComponent *Ledger = PS ? PS->GetStatLedgerComponent() : nullptr;
+    if (!Ledger) {
+        return;
+    }
+
+    const UMythicLivingWorldSubsystem *LW = ResolveLivingWorld();
+    const UMythicLivingWorldSettings *Settings = LW ? LW->GetSettings() : nullptr;
+    if (!Settings) {
+        return;
+    }
+
+    // Matched by hierarchy so a row on a family covers everything under it. The most specific row wins, or a
+    // leaf row could never narrow what its family already claimed.
+    FGameplayTag BestCounter;
+    int32 BestDepth = -1;
+    for (const TPair<FGameplayTag, FGameplayTag> &Row : Settings->ActionDeedCounters) {
+        if (!Row.Key.IsValid() || !Row.Value.IsValid() || !ActionTag.MatchesTag(Row.Key)) {
+            continue;
+        }
+        FString RowName = Row.Key.ToString();
+        int32 Depth = 0;
+        for (const TCHAR C : RowName) {
+            Depth += (C == TEXT('.')) ? 1 : 0;
+        }
+        if (Depth > BestDepth) {
+            BestDepth = Depth;
+            BestCounter = Row.Value;
+        }
+    }
+
+    if (BestCounter.IsValid()) {
+        Ledger->RecordStat(BestCounter, 1);
+    }
 }

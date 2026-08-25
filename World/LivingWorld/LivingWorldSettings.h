@@ -81,6 +81,16 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Factions", meta = (ClampMin = "-100.0", ClampMax = "100.0"))
     float RecruitStandingThreshold = 70.0f;
 
+    /**
+     * Which actions a player takes count as which deed. Keyed on LivingWorld.Action.* and matched by hierarchy, so
+     * a row on a family covers everything under it and a row on a leaf narrows to that leaf.
+     *
+     * Whether hitting someone is as violent as killing them is a design question, so it is a row rather than a
+     * branch in code.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Deeds", meta = (ForceInlineRow))
+    TMap<FGameplayTag, FGameplayTag> ActionDeedCounters;
+
     /** Territory grid settings (dimensions, cell size, bleed rate) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory")
     TSoftObjectPtr<UMythicTerritoryGridSettings> TerritorySettings;

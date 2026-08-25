@@ -55,5 +55,8 @@ private:
     FMythicCellCoord ResolveActorCell(const AActor *Actor) const;
 
     FMythicFactionId ResolveActorFaction(const AActor *Actor) const;
+
+    /** Credits the perpetrator's deed counter for this action, when the perpetrator is a player and a row maps it. */
+    void RecordDeed(const AActor *Perpetrator, const FGameplayTag &ActionTag) const;
 };
 

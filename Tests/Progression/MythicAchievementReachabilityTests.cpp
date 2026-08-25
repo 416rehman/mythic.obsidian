@@ -9,6 +9,7 @@
 #include "Misc/Paths.h"
 
 #include "Progression/MythicAchievementDefinition.h"
+#include "World/LivingWorld/LivingWorldSettings.h"
 
 namespace MythicTest {
 // Every .cpp in the module, concatenated. A counter with no RecordStat call site fails silently at runtime —
@@ -151,10 +152,31 @@ bool FMythicStatCounterReachabilityTest::RunTest(const FString &Parameters) {
     }
     TestTrue(TEXT("the scan finds a known recorder"), Source.Contains(TEXT("RecordStat(STAT_KILL_GENERIC")));
 
-    // Counters with no producer yet. A merciful or violent act is undefined until the deed system exists, so these
-    // are dead by design, not by omission. Listed explicitly so a NEW counter added without a recorder fails this
-    // test instead of joining a silent graveyard. Drop an entry the moment it earns a RecordStat site.
-    const TSet<FString> KnownUnproduced = {TEXT("Stat.Deed.Mercy"), TEXT("Stat.Deed.Violence")};
+    // Counters with no producer yet. Listed explicitly so a NEW counter added without a recorder fails this test
+    // instead of joining a silent graveyard. Drop an entry the moment it earns a producer.
+    const TSet<FString> KnownUnproduced;
+
+    // A counter can be produced from AUTHORED DATA rather than a RecordStat call site, and a scan over source
+    // cannot see that - the deed counters are written by a row on the living world settings, matched by tag, so
+    // no symbol for them appears anywhere. Gathering them here keeps the source scan from reporting a live
+    // counter as dead.
+    TSet<FString> DataDrivenCounters;
+    {
+        FAssetRegistryModule &AssetModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+        AssetModule.Get().SearchAllAssets(true);
+        TArray<FAssetData> SettingsAssets;
+        AssetModule.Get().GetAssetsByClass(UMythicLivingWorldSettings::StaticClass()->GetClassPathName(), SettingsAssets, true);
+        for (const FAssetData &Asset : SettingsAssets) {
+            if (const UMythicLivingWorldSettings *LivingWorld = Cast<UMythicLivingWorldSettings>(Asset.GetAsset())) {
+                for (const TPair<FGameplayTag, FGameplayTag> &Row : LivingWorld->ActionDeedCounters) {
+                    if (Row.Value.IsValid()) {
+                        DataDrivenCounters.Add(Row.Value.ToString());
+                    }
+                }
+            }
+        }
+    }
+    AddInfo(FString::Printf(TEXT("%d counters produced from authored rows"), DataDrivenCounters.Num()));
 
     const UGameplayTagsManager &Tags = UGameplayTagsManager::Get();
     FGameplayTagContainer AllTags;
@@ -176,7 +198,7 @@ bool FMythicStatCounterReachabilityTest::RunTest(const FString &Parameters) {
             continue;
         }
 
-        const bool bRecorded = MythicTest::HasRecorderFor(Source, Tag);
+        const bool bRecorded = MythicTest::HasRecorderFor(Source, Tag) || DataDrivenCounters.Contains(Name);
         if (KnownUnproduced.Contains(Name)) {
             // Keep the exclusion honest: if one of these quietly gains a recorder, this fails so the list is trimmed.
             TestFalse(*FString::Printf(TEXT("known-unproduced %s is still unrecorded (remove it from the list once it has a producer)"), *Name),
