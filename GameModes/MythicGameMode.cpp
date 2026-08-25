@@ -26,15 +26,16 @@
 namespace {
     const FString WorldSaveSlot = UMythicSaveGameSubsystem::DebugWorldSlot;
 
+    /**
+     * Deliberately never the OS login name. The character page treats a name starting with the OS user or the
+     * machine name as a leaked identity and prints "Unnamed" instead - so seeding the manifest with it produced
+     * a name the game refuses to show, and the header read "Unnamed" exactly as it did before the manifest was
+     * ever read. It is also someone's real login name on a character sheet.
+     *
+     * A placeholder until a character-create screen supplies a chosen one; the manifest carries whatever it is
+     * given, so that screen only has to call CreateNewCharacter with the typed name.
+     */
     FString DefaultCharacterName(const AController *Player) {
-        const APlayerController *PC = Cast<APlayerController>(Player);
-        if (PC && PC->IsLocalController()) {
-            const FString OSUser = FPlatformProcess::UserName();
-            const FString MachineName = FPlatformProcess::ComputerName();
-            if (!OSUser.IsEmpty() && !(!MachineName.IsEmpty() && OSUser.StartsWith(MachineName))) {
-                return OSUser;
-            }
-        }
         return TEXT("Adventurer");
     }
 }

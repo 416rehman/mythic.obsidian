@@ -723,12 +723,13 @@ public:
 
     // ─────────────────────────────────── Item Corruption (Vaal-style gamble) ───────────────────────────────────
     /**
-     * ITEM CORRUPTION master switch (mirrors bSecretsEnabled). When TRUE (default), the Corrupt craft op ("Vaal") rolls a
-     * weighted OUTCOME from ItemCorruptionOutcomes and applies it (reroll / add-socket / upgrade-affix-tier / …) BEFORE
-     * permanently sealing the item — a high-risk/high-reward gamble. The system is ALREADY inert-by-default: an EMPTY
-     * ItemCorruptionOutcomes table makes the roll return Seal, so corruption reduces to the legacy "just seal" behavior —
-     * byte-identical. This switch is NOT required to keep the world quiet; it exists so a designer can globally disable
-     * the outcome roll (an A/B, a timed event) WITHOUT clearing the table. When FALSE, Corrupt does ONLY the legacy seal.
+     * Whether an item can be corrupted at all. When false, ServerCorruptItem refuses and no item is ever sealed,
+     * so every craft op stays available forever.
+     *
+     * Corrupting seals the item permanently: CanApplyCraftOp then refuses every craft verb on it. There is no
+     * outcome roll - a weighted table of reroll / add-socket / upgrade-tier outcomes was described here for a
+     * long time and never written, which is the same defect #145 was raised to remove. Add the table when the
+     * outcomes exist, not before.
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Item Corruption")
     bool bItemCorruptionEnabled = true;

@@ -62,23 +62,29 @@ struct FMythicBestiaryRules {
         static const FGameplayTag NPCTypeRoot = FGameplayTag::RequestGameplayTag(FName("NPC.Type"), false);
         if (NPCTypeRoot.IsValid()) {
             const FString NPCTypePrefix = NPCTypeRoot.ToString() + TEXT(".");
+            // The branch a type resolves under follows what the thing IS, not a fixed prefix. A creature carrying
+            // an NPC.Type tag used to be forced down the humanoid branch and could never reach a creature page.
+            const bool bCreature = OwnedTags.HasTag(AI_KIND_CREATURE);
+            const FString BranchPrefix = bCreature ? TEXT("Codex.Bestiary.Creature.") : TEXT("Codex.Bestiary.Humanoid.");
+            const FGameplayTag BranchGeneric = bCreature ? CODEX_BESTIARY_CREATURE_GENERIC.GetTag()
+                                                        : CODEX_BESTIARY_HUMANOID_GENERIC.GetTag();
+
             for (const FGameplayTag &Tag : OwnedTags) {
                 if (Tag == NPCTypeRoot || !Tag.MatchesTag(NPCTypeRoot)) {
                     continue;
                 }
                 // Walk up from the most specific type until one has a codex page. A bestiary has a page for
                 // Bandit, not for every variant of bandit, so NPC.Type.Bandit.Ambusher has to credit its parent
-                // rather than fall all the way through to the generic humanoid entry.
+                // rather than fall all the way through to the generic entry.
                 for (FGameplayTag Current = Tag; Current.IsValid() && Current != NPCTypeRoot;
                      Current = Current.RequestDirectParent()) {
                     const FString Suffix = Current.ToString().RightChop(NPCTypePrefix.Len());
-                    const FGameplayTag Mapped = FGameplayTag::RequestGameplayTag(
-                        FName(*(FString(TEXT("Codex.Bestiary.Humanoid.")) + Suffix)), false);
+                    const FGameplayTag Mapped = FGameplayTag::RequestGameplayTag(FName(*(BranchPrefix + Suffix)), false);
                     if (Mapped.IsValid()) {
                         return Mapped;
                     }
                 }
-                return CODEX_BESTIARY_HUMANOID_GENERIC.GetTag();
+                return BranchGeneric;
             }
         }
 

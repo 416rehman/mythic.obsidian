@@ -62,6 +62,15 @@ bool FMythicBestiaryKeyTest::RunTest(const FString &Parameters) {
               Rules::MakeBestiaryKeyFromOwnedTags(Owned({TEXT("Codex.Bestiary.Humanoid.Bandit"), TEXT("NPC.Type.Merchant")})),
               Bandit);
 
+    // The branch follows what the thing is. A creature carrying a type tag was forced down the humanoid branch
+    // and could never reach a creature page, however it was authored.
+    const FGameplayTag CreatureGeneric = FGameplayTag::RequestGameplayTag(FName(TEXT("Codex.Bestiary.Creature.Generic")), false);
+    if (TestTrue(TEXT("the creature page is registered"), CreatureGeneric.IsValid())) {
+        TestEqual(TEXT("a creature with a type tag lands on a creature page, not a humanoid one"),
+                  Rules::MakeBestiaryKeyFromOwnedTags(Owned({TEXT("AI.Kind.Creature"), TEXT("NPC.Type.Merchant")})),
+                  CreatureGeneric);
+    }
+
     return true;
 }
 
