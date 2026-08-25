@@ -313,18 +313,6 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Itemization", meta = (Categories = "Itemization.Type"))
     FGameplayTagContainer GatheredItemTypes;
 
-    /**
-     * CROSS-PLAYER REACTION DETONATION (co-op combo-assist) master switch. When TRUE (default), a reaction whose authored
-     * row sets bCrossActorDetonation pays a co-op bonus IF the pre-existing status it consumes was applied by a DIFFERENT
-     * player than the one landing the detonating hit ("you oil, I ignite"): a bonus AoE status pulse, a combat-XP assist to
-     * the original applier, and an inert combo cue. This is ALREADY inert unless a designer authors such a row (the empty
-     * default reaction table fires nothing, and rows default the flag to false), so this switch is not needed to keep the
-     * world quiet — it exists to let a designer globally disable ALL cross-player detonations WITHOUT editing every row.
-     * When FALSE, the detection block is skipped entirely (byte-identical to a normal same-element reaction). Mirrors
-     * bSecretsEnabled / bProcAffixesEnabled — defaults ON because the feature is opt-in per authored row.
-     */
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combat")
-    bool bCrossActorDetonationEnabled = true;
 
     // ─────────────────────────────────── Survival Needs ───────────────────────────────────
     /**
@@ -714,18 +702,6 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Ownership")
     bool bOwnershipCrimeEnabled = true;
 
-    // ─────────────────────────────────── Proc Affixes (Conditional Trigger-Affixes) ───────────────────────────────────
-    /**
-     * CONDITIONAL TRIGGER-AFFIX (proc-mod) master gate. When TRUE (default), a UTriggerAffixFragment with authored proc
-     * specs grants its per-spec UGA_TriggeredAffix abilities on equip ("On Kill: 25% chance Chill nearby"; "on-hit vs
-     * Chilled: Stun"). When FALSE, the fragment grants NOTHING regardless of authored specs — the whole proc system goes
-     * dormant WITHOUT editing items. The system is ALREADY inert-by-default (no authored proc spec => no grants => the
-     * game is byte-identical to today), so this is not required to keep the world quiet — it exists so a designer can
-     * globally disable ALL proc affixes (a timed event, an A/B). Mirrors bSecretsEnabled; defaults ON (a proc spec is
-     * already opt-in, authored per item).
-     */
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Proc Affixes")
-    bool bProcAffixesEnabled = true;
 
     // ─────────────────────────────────── Item Corruption (Vaal-style gamble) ───────────────────────────────────
     /**
@@ -739,18 +715,6 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Item Corruption")
     bool bItemCorruptionEnabled = true;
 
-    // ─────────────────────────────────── Cave / Dungeon (v1) ───────────────────────────────────
-    /**
-     * DUNGEONS master gate. When TRUE (default), a placed AMythicDungeonEntrance registers its FMythicDungeonDef with
-     * UMythicDungeonSubsystem so a boss kill can latch the ONE-TIME first-clear reward, and its sealed-door interact is
-     * live. The system is ALREADY inert-by-default (an empty registry binds no kill subscription and does nothing), so
-     * this is not required to keep the world quiet — it exists so a designer can globally disable ALL open-world caves
-     * (e.g. during an event, or to A/B a build) WITHOUT deleting the placed entrances. When FALSE, entrances skip
-     * registration (their inherited landmark DISCOVERY still works) and the sealed-door interact no-ops. Defaults ON
-     * because a placed entrance is already opt-in. Mirrors bSecretsEnabled.
-     */
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Dungeons")
-    bool bDungeonsEnabled = true;
 
     // ─────────────────────────────────── Mounts ───────────────────────────────────
     /**

@@ -12,7 +12,7 @@ class MYTHIC_API UMythicCorpseHazardConfig : public UDeveloperSettings {
     GENERATED_BODY()
 
 public:
-    virtual FName GetCategoryName() const override { return FName("Mythic"); }
+    virtual FName GetCategoryName() const override { return FName("Game"); }
 
 
     // Decomp stage (Fresh=0..Skeletal=3) at/after which a corpse spreads the disease/weakness aura. Default Decayed(2).
