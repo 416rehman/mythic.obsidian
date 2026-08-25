@@ -1183,4 +1183,64 @@ bool FMythicAffixFragmentValidationTest::RunTest(const FString &Parameters) {
 }
 #endif
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicAffixCoreBaselineMergeTest,
+    "Mythic.Itemization.Affixes.CoreBaselineMerge",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicAffixCoreBaselineMergeTest::RunTest(const FString &Parameters) {
+    /**
+     * An item's own core map is its signature and the type rule is the baseline every item of that type is
+     * guaranteed, so the two ADD. A sword keeps its family damage bonus AND gains the damage-per-hit and
+     * attack-speed the DPS block reads. Where both name an attribute the authored band must survive, because the
+     * item's map rolls first.
+     */
+    const FGameplayAttribute Signature = UMythicAttributeSet_Offense::GetBonusSwordDamageAttribute();
+    const FGameplayAttribute Damage = UMythicAttributeSet_Offense::GetDamagePerHitAttribute();
+    const FGameplayAttribute Speed = UMythicAttributeSet_Offense::GetAttackSpeedAttribute();
+    const FGameplayTagContainer Probe = MakeProbe(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SWORD.GetTag());
+    const int32 ItemLevel = 10;
+
+    {
+        UAffixesFragment *Fragment = NewObject<UAffixesFragment>();
+        FRollDefinition Authored = MakeRoll();
+        Fragment->AffixesRuntimeReplicatedData.RolledCoreAffixes.Add(
+            FRolledAffix(Signature, ItemLevel, Authored, true));
+
+        TArray<FMythicTieredAffixDef> Baseline;
+        Baseline.Add(MakeDef(Damage, EMythicAffixGroup::Prefix));
+        Baseline.Add(MakeDef(Speed, EMythicAffixGroup::Suffix));
+        Fragment->RollCoreAffixesTiered(ItemLevel, Probe, Baseline);
+
+        const TArray<FRolledAffix> &Core = Fragment->AffixesRuntimeReplicatedData.RolledCoreAffixes;
+        TestEqual(TEXT("the item keeps its authored signature"), CountRolled(Core, Signature), 1);
+        TestEqual(TEXT("and gains the type baseline damage"), CountRolled(Core, Damage), 1);
+        TestEqual(TEXT("and the type baseline attack speed"), CountRolled(Core, Speed), 1);
+        TestEqual(TEXT("so a weapon carries signature plus baseline"), Core.Num(), 3);
+    }
+
+    {
+        UAffixesFragment *Fragment = NewObject<UAffixesFragment>();
+        FRollDefinition Authored = MakeRoll();
+        Authored.Min = 999.0f;
+        Authored.Max = 999.0f;
+        Fragment->AffixesRuntimeReplicatedData.RolledCoreAffixes.Add(
+            FRolledAffix(Damage, ItemLevel, Authored, true));
+
+        TArray<FMythicTieredAffixDef> Baseline;
+        Baseline.Add(MakeDef(Damage, EMythicAffixGroup::Prefix));
+        Fragment->RollCoreAffixesTiered(ItemLevel, Probe, Baseline);
+
+        const TArray<FRolledAffix> &Core = Fragment->AffixesRuntimeReplicatedData.RolledCoreAffixes;
+        TestEqual(TEXT("an attribute both halves name lands once"), CountRolled(Core, Damage), 1);
+        if (Core.Num() > 0) {
+            TestTrue(TEXT("and it is the item's authored band that survives, not the baseline"),
+                     Core[0].Value >= 999.0f);
+        }
+    }
+
+    return true;
+}
+
 #endif

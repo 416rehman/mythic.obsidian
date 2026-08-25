@@ -307,27 +307,28 @@ void UAffixesFragment::OnInstanced(UMythicItemInstance *Instance) {
     const bool bHasOwnRandom = bHasOwnTieredPool || bHasOwnFlatPool;
     const bool bHasOwnCore = this->AffixesBuildData.CoreAffixes.Num() > 0;
 
-    // An item that authors both halves itself never pays to load the shared catalogue.
-    const UMythicAffixCatalogue *Catalogue = (LootSettings && (!bHasOwnRandom || !bHasOwnCore))
-                                                 ? LootSettings->GetAffixCatalogue()
-                                                 : nullptr;
+    // An item that authors its own pool never pays to load the shared catalogue for that half; the core half always
+    // consults it, because the type baseline applies on top of whatever signature the item authors.
+    const UMythicAffixCatalogue *Catalogue = LootSettings ? LootSettings->GetAffixCatalogue() : nullptr;
     const FGameplayTag ItemType = Instance->GetItemDefinition()->ItemType;
 
     // Core rolls FIRST so the random half can de-dupe against it: an attribute must never land on one item twice.
+    //
+    // The two core sources ADD rather than compete. An item's own map is its signature - the family damage bonus on
+    // a sword, the slot-appropriate Armor band on a helm - while the type rule is the baseline every item of that
+    // type is guaranteed, like damage per hit and attack speed on anything that swings. The item's map rolls first,
+    // so where both name an attribute the authored band is the one that survives.
     if (bHasOwnCore) {
         RollCoreAffixes(ItemLevel);
     }
-    else {
-        TArray<FMythicTieredAffixDef> CoreDefs;
-        if (Catalogue) {
-            Catalogue->BuildCoreDefs(ItemType, TypeProbe, CoreDefs);
-        }
-        if (CoreDefs.Num() > 0) {
-            RollCoreAffixesTiered(ItemLevel, TypeProbe, CoreDefs);
-        }
-        else {
-            UE_LOG(Myth, Warning, TEXT("AffixesInstFragment::OnInstanced: No core stats to roll."));
-        }
+    TArray<FMythicTieredAffixDef> CoreDefs;
+    if (Catalogue) {
+        Catalogue->BuildCoreDefs(ItemType, TypeProbe, CoreDefs);
+    }
+    RollCoreAffixesTiered(ItemLevel, TypeProbe, CoreDefs);
+    if (this->AffixesRuntimeReplicatedData.RolledCoreAffixes.Num() == 0) {
+        UE_LOG(Myth, Warning, TEXT("AffixesInstFragment::OnInstanced: No core stats to roll for item type %s."),
+               *ItemType.ToString());
     }
 
     // Hand-authored content beats the catalogue on this half too, or assigning a catalogue would silently kill
