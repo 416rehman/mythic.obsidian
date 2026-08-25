@@ -3,9 +3,11 @@
 #include "AttributeSet.h"
 #include "Itemization/Inventory/Fragments/FragmentTypes.h"
 #include "Itemization/Inventory/Fragments/ItemFragment.h"
-#include "Itemization/Affixes/MythicAffixPoolDataAsset.h"
+#include "Itemization/Affixes/MythicAffixTierTypes.h"
 #include "Net/UnrealNetwork.h"
 #include "AffixesFragment.generated.h"
+
+class UMythicAffixCatalogue;
 
 
 USTRUCT(BlueprintType, Blueprintable)
@@ -121,12 +123,11 @@ struct FAffixesBuildData {
     UPROPERTY(EditDefaultsOnly)
     TMap<FGameplayAttribute, FRollDefinition> AffixPoolMap = TMap<FGameplayAttribute, FRollDefinition>();
 
-    // C1 — OPTIONAL tiered/weighted affix pool. When set (and non-empty), RollAffixes rolls from this pool instead of
-    // the flat AffixPoolMap above: item-level-gated tiers, per-tier weights, prefix/suffix budget derived from the
-    // rarity affix count, applicability filtered by the item's TypeProbe. When NULL (the default), the legacy flat
-    // AffixPoolMap roll is used, so unconfigured content behaves EXACTLY as before.
+    // The catalogue THIS item rolls from, replacing the shared one in Mythic Loot Settings. Set it when an item
+    // needs a bespoke set; leave it null and the item takes the shared catalogue matched on its item type.
+    // It answers BOTH halves, so a bespoke item can never end up half-overridden.
     UPROPERTY(EditDefaultsOnly)
-    TObjectPtr<class UMythicAffixPoolDataAsset> TieredAffixPool = nullptr;
+    TObjectPtr<UMythicAffixCatalogue> AffixCatalogueOverride = nullptr;
 };
 
 
@@ -163,9 +164,6 @@ public:
     FAffixesRuntimeServerOnlyData AffixesRuntimeServerOnlyData = FAffixesRuntimeServerOnlyData();
 
     void RollAffixes(int ItemLevel, int Qty);
-
-    void RollAffixesTiered(int ItemLevel, int TotalCount, const FGameplayTagContainer &TypeProbe,
-                           const class UMythicAffixPoolDataAsset *Pool);
 
     void RollAffixesTiered(int ItemLevel, int TotalCount, const FGameplayTagContainer &TypeProbe,
                            TConstArrayView<FMythicTieredAffixDef> Defs);
@@ -223,14 +221,6 @@ public:
 
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
 };
-
-inline void UAffixesFragment::RollAffixesTiered(int ItemLevel, int TotalCount, const FGameplayTagContainer &TypeProbe,
-                                                const UMythicAffixPoolDataAsset *Pool) {
-    if (!Pool) {
-        return;
-    }
-    RollAffixesTiered(ItemLevel, TotalCount, TypeProbe, Pool->Defs);
-}
 
 inline void UAffixesFragment::RollAffixesTiered(int ItemLevel, int TotalCount, const FGameplayTagContainer &TypeProbe,
                                                 TConstArrayView<FMythicTieredAffixDef> Defs) {

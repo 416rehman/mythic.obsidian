@@ -3,6 +3,7 @@
 #include "MythicAttributeSet_Utility.h"
 
 #include "GameplayEffectExtension.h"
+#include "Settings/MythicCombatSettings.h"
 #include "Net/UnrealNetwork.h"
 
 UMythicAttributeSet_Utility::UMythicAttributeSet_Utility() {
@@ -36,9 +37,10 @@ void UMythicAttributeSet_Utility::PreAttributeChange(const FGameplayAttribute &A
     else if (Attribute == GetStaminaCostReductionAttribute()) {
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     }
-    // Stacked slows must bottom out at a standstill rather than invert movement.
+    // A full stop is the crowd-control path's job (Stunned and Frozen disable movement outright), so stacked slows
+    // bottom out at the authored floor instead: never negative, and never an accidental standstill.
     else if (Attribute == GetMovementSpeedMultiplierAttribute()) {
-        NewValue = FMath::Max(0.0f, NewValue);
+        NewValue = FMath::Max(MythicCombat::GetMinSpeedScale(), NewValue);
     }
 }
 
@@ -117,10 +119,6 @@ void UMythicAttributeSet_Utility::OnRep_ProficiencyXPBonus(const FGameplayAttrib
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, ProficiencyXPBonus, OldValue);
 }
 
-void UMythicAttributeSet_Utility::OnRep_BonusSprintSpeed(const FGameplayAttributeData &OldValue) {
-    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, BonusSprintSpeed, OldValue);
-}
-
 void UMythicAttributeSet_Utility::OnRep_MovementSpeedMultiplier(const FGameplayAttributeData &OldValue) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, MovementSpeedMultiplier, OldValue);
 }
@@ -144,8 +142,7 @@ void UMythicAttributeSet_Utility::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, CooldownReduction, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, MaxCooldownReduction, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ProficiencyXPBonus, COND_OwnerOnly, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, BonusSprintSpeed, COND_OwnerOnly, REPNOTIFY_Always);
-    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, MovementSpeedMultiplier, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, MovementSpeedMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ItemRarityFind, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ItemQuantityFind, COND_OwnerOnly, REPNOTIFY_Always);
 }

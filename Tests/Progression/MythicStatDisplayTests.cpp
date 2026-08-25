@@ -26,9 +26,15 @@ bool FMythicStatDisplayFormatsTest::RunTest(const FString &Parameters) {
     }
 
     {
-        const FMythicStatRule Rule = MythicStatDisplay::GetRule(U::GetBonusSprintSpeedAttribute());
-        TestEqual(TEXT("sprint bonus is a fraction shown as a percentage"),
+        // The owner's rule for the one speed stat: 100% is default speed, 200% is double. The Multiplier format
+        // would print the default 1.0 as "+0%", which reads as the stat being absent.
+        const FMythicStatRule Rule = MythicStatDisplay::GetRule(U::GetMovementSpeedMultiplierAttribute());
+        TestEqual(TEXT("speed is shown as a percentage of default"),
                   static_cast<uint8>(Rule.Format), static_cast<uint8>(EMythicStatFormat::Percent));
+        TestEqual(TEXT("default speed reads as 100%"),
+                  MythicStatDisplay::FormatValue(1.0f, Rule.Format).ToString(), FString(TEXT("100%")));
+        TestEqual(TEXT("double speed reads as 200%"),
+                  MythicStatDisplay::FormatValue(2.0f, Rule.Format).ToString(), FString(TEXT("200%")));
     }
 
     {

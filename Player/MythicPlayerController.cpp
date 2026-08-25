@@ -340,7 +340,7 @@ FPlayerStatsSummary AMythicPlayerController::GetPlayerStats() const {
         Stats.StaminaRegenRate = UtilSet->GetStaminaRegenRate();
         Stats.CooldownReduction = UtilSet->GetCooldownReduction();
         Stats.ProficiencyXPBonus = UtilSet->GetProficiencyXPBonus();
-        Stats.BonusSprintSpeed = UtilSet->GetBonusSprintSpeed();
+        Stats.MovementSpeedMultiplier = UtilSet->GetMovementSpeedMultiplier();
     }
 
     Stats.PlayerLevel = GetPlayerLevel();

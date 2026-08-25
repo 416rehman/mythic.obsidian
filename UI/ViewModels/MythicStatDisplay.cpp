@@ -128,7 +128,9 @@ namespace MythicStatDisplay {
         Add(M, TEXT("CooldownReduction"), TEXT("Cooldown Reduction"), EMythicStatCategory::Utility, EMythicStatFormat::Percent, 20);
         Add(M, TEXT("MaxCooldownReduction"), TEXT("Cooldown Reduction Cap"), EMythicStatCategory::Utility, EMythicStatFormat::Percent, 30);
         Add(M, TEXT("StaminaCostReduction"), TEXT("Stamina Cost Reduction"), EMythicStatCategory::Utility, EMythicStatFormat::Percent, 40);
-        Add(M, TEXT("BonusSprintSpeed"), TEXT("Sprint Speed"), EMythicStatCategory::Utility, EMythicStatFormat::Percent, 50);
+        // Percent, not Multiplier: the one speed stat reads as 100% at default and 200% at double. Multiplier
+        // would print the default 1.0 as "+0%", which reads as the stat being absent.
+        Add(M, TEXT("MovementSpeedMultiplier"), TEXT("Movement Speed"), EMythicStatCategory::Utility, EMythicStatFormat::Percent, 50);
         Add(M, TEXT("ProficiencyXPBonus"), TEXT("Proficiency XP"), EMythicStatCategory::Utility, EMythicStatFormat::Percent, 60);
         Add(M, TEXT("ItemRarityFind"), TEXT("Item Rarity Find"), EMythicStatCategory::Utility, EMythicStatFormat::Percent, 70);
         Add(M, TEXT("ItemQuantityFind"), TEXT("Extra Item Drops"), EMythicStatCategory::Utility, EMythicStatFormat::Percent, 80);

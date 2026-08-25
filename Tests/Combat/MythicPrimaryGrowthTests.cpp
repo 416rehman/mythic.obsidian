@@ -8,7 +8,7 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Proficiencies.h"
 #include "GameModes/GameState/MythicGameState.h"
-#include "Itemization/Affixes/MythicAffixPoolDataAsset.h"
+#include "Itemization/Affixes/MythicAffixTierTypes.h"
 #include "Itemization/Inventory/Fragments/FragmentTypes.h"
 #include "Itemization/Inventory/Fragments/Passive/AffixesFragment.h"
 #include "Settings/MythicCombatSettings.h"
@@ -189,10 +189,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicWholeNumberTieredRollTest,
                                  EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
 bool FMythicWholeNumberTieredRollTest::RunTest(const FString &Parameters) {
-    // The tiered pool is how every shipped item rolls. Its roll OVERWRITES the ctor value, so the
-    // whole-number snap has to hold on that path specifically, and the flag must land on the stored
-    // Definition so rerolls stay whole too.
-    UMythicAffixPoolDataAsset *Pool = NewObject<UMythicAffixPoolDataAsset>();
+    // The tiered roll is how every shipped item rolls. It OVERWRITES the ctor value, so the whole-number snap
+    // has to hold on that path specifically, and the flag must land on the stored Definition so rerolls stay
+    // whole too.
     FMythicTieredAffixDef Def;
     Def.Attribute = UMythicAttributeSet_Offense::GetPowerAttribute();
     Def.Group = EMythicAffixGroup::Prefix;
@@ -204,11 +203,11 @@ bool FMythicWholeNumberTieredRollTest::RunTest(const FString &Parameters) {
     Tier.Max = 9.75f;
     Tier.LevelScaling = 0.37f;
     Def.Tiers.Add(Tier);
-    Pool->Defs.Add(Def);
+    const TArray<FMythicTieredAffixDef> Defs = {Def};
 
     for (int32 i = 0; i < 32; ++i) {
         UAffixesFragment *Fragment = NewObject<UAffixesFragment>();
-        Fragment->RollAffixesTiered(7, 1, FGameplayTagContainer(), Pool);
+        Fragment->RollAffixesTiered(7, 1, FGameplayTagContainer(), Defs);
         if (!TestEqual(TEXT("Tiered roll produced one affix"), Fragment->AffixesRuntimeReplicatedData.RolledAffixes.Num(), 1)) {
             return false;
         }

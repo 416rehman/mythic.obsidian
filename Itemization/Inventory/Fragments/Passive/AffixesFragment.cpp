@@ -214,12 +214,11 @@ void UAffixesFragment::RollCoreAffixesTiered(int ItemLevel, const FGameplayTagCo
 bool UAffixesFragment::IsValidFragment(FText &OutErrorMessage) const {
     const TMap<FGameplayAttribute, FRollDefinition> &AffixPoolMap = this->AffixesBuildData.AffixPoolMap;
     const TMap<FGameplayAttribute, FRollDefinition> &CoreAffixes = this->AffixesBuildData.CoreAffixes;
-    const UMythicAffixPoolDataAsset *TieredPool = this->AffixesBuildData.TieredAffixPool;
 
     // Authoring nothing is a valid shape ONLY because the shared catalogue fills both halves at OnInstanced.
     // With no catalogue configured nothing fills them and the item ships with zero core stats and zero affixes.
     const bool bAuthorsNothing = AffixPoolMap.Num() == 0 && CoreAffixes.Num() == 0
-        && (!TieredPool || TieredPool->Defs.Num() == 0);
+        && this->AffixesBuildData.AffixCatalogueOverride == nullptr;
     if (bAuthorsNothing) {
         const UMythicLootSettings *LootSettings = GetDefault<UMythicLootSettings>();
         if (!LootSettings || LootSettings->AffixCatalogue.IsNull()) {
@@ -252,38 +251,8 @@ bool UAffixesFragment::IsValidFragment(FText &OutErrorMessage) const {
         }
     }
 
-    if (TieredPool) {
-        for (const FMythicTieredAffixDef &Def : TieredPool->Defs) {
-            if (!Def.Attribute.IsValid()) {
-                OutErrorMessage = FText::FromString("Invalid affix attribute in tiered affix pool.");
-                return false;
-            }
-            if (Def.Tiers.Num() == 0) {
-                OutErrorMessage = FText::FromString(FString::Printf(
-                    TEXT("Tiered affix '%s' has an empty tier ladder, so it can never roll."), *Def.Attribute.GetName()));
-                return false;
-            }
-            for (int32 TierIdx = 0; TierIdx < Def.Tiers.Num(); ++TierIdx) {
-                const FMythicAffixTier &Tier = Def.Tiers[TierIdx];
-                // This pool feeds the RANDOM roller, which takes the band verbatim - there is no central base to
-                // fall back on. A level-scaled tier still rolls ItemLevel * LevelScaling from a 0/0 band, so only
-                // all three at zero rolls nothing and lets a Multiplicitive op wipe the attribute.
-                if (Tier.Min == 0.0f && Tier.Max == 0.0f && Tier.LevelScaling == 0.0f) {
-                    OutErrorMessage = FText::FromString(FString::Printf(
-                        TEXT("Tiered affix '%s' tier %d has no roll band and no level scaling, so it always rolls 0."),
-                        *Def.Attribute.GetName(), TierIdx));
-                    return false;
-                }
-                if (Tier.Max < Tier.Min) {
-                    OutErrorMessage = FText::FromString(FString::Printf(
-                        TEXT("Tiered affix '%s' tier %d has Max %g below Min %g."),
-                        *Def.Attribute.GetName(), TierIdx, Tier.Max, Tier.Min));
-                    return false;
-                }
-            }
-        }
-    }
-
+    // A catalogue's entries and rules are checked by UMythicAffixCatalogue::IsDataValid on the catalogue asset,
+    // so the fragment validates only what it authors itself.
     return Super::IsValidFragment(OutErrorMessage);
 }
 #endif
@@ -301,15 +270,16 @@ void UAffixesFragment::OnInstanced(UMythicItemInstance *Instance) {
     FGameplayTagContainer TypeProbe;
     Instance->GetTypeProbe(TypeProbe);
 
-    const UMythicAffixPoolDataAsset *TieredPool = this->AffixesBuildData.TieredAffixPool;
-    const bool bHasOwnTieredPool = TieredPool && TieredPool->Defs.Num() > 0;
+    const UMythicAffixCatalogue *Override = this->AffixesBuildData.AffixCatalogueOverride;
     const bool bHasOwnFlatPool = this->AffixesBuildData.AffixPoolMap.Num() > 0;
-    const bool bHasOwnRandom = bHasOwnTieredPool || bHasOwnFlatPool;
     const bool bHasOwnCore = this->AffixesBuildData.CoreAffixes.Num() > 0;
 
-    // An item that authors its own pool never pays to load the shared catalogue for that half; the core half always
-    // consults it, because the type baseline applies on top of whatever signature the item authors.
-    const UMythicAffixCatalogue *Catalogue = LootSettings ? LootSettings->GetAffixCatalogue() : nullptr;
+    // ONE authoring surface, resolved once. The item's own catalogue when it carries one, the shared catalogue
+    // otherwise, and the SAME asset answers both halves - an override covering only the random half would leave a
+    // bespoke item still taking the shared type baseline it was written to replace.
+    const UMythicAffixCatalogue *Catalogue = Override
+                                                 ? Override
+                                                 : (LootSettings ? LootSettings->GetAffixCatalogue() : nullptr);
     const FGameplayTag ItemType = Instance->GetItemDefinition()->ItemType;
 
     // Core rolls FIRST so the random half can de-dupe against it: an attribute must never land on one item twice.
@@ -331,12 +301,9 @@ void UAffixesFragment::OnInstanced(UMythicItemInstance *Instance) {
                *ItemType.ToString());
     }
 
-    // Hand-authored content beats the catalogue on this half too, or assigning a catalogue would silently kill
-    // every flat pool a designer wrote by hand.
-    if (bHasOwnTieredPool) {
-        RollAffixesTiered(ItemLevel, AffixesToRoll, TypeProbe, TieredPool);
-    }
-    else if (bHasOwnFlatPool) {
+    // The legacy flat map beats the SHARED catalogue, or configuring one would silently kill every flat pool a
+    // designer wrote by hand. An override is the more specific statement, so it beats the flat map in turn.
+    if (bHasOwnFlatPool && !Override) {
         RollAffixes(ItemLevel, AffixesToRoll);
     }
     else {

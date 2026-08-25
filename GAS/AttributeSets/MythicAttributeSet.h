@@ -30,4 +30,6 @@ public:
     void GetAttributes(TArray<FGameplayAttribute> &OutAttributes) const;
 
     virtual void PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) override;
+
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 };

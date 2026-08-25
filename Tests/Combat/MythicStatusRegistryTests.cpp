@@ -10,28 +10,28 @@
 #include "Settings/MythicDeveloperSettings.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
-#include "Itemization/Affixes/MythicAffixPoolDataAsset.h"
+#include "Itemization/Affixes/MythicAffixCatalogue.h"
 
 namespace MythicTest {
-// Every attribute any shipped affix pool can actually roll. Read from the asset registry rather than a
-// hardcoded pool list, so a new pool counts automatically.
+// Every attribute any shipped affix catalogue can actually roll. Read from the asset registry rather than a
+// hardcoded list, so a new catalogue counts automatically.
 static TSet<FString> GatherRollableAttributes() {
     FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
     IAssetRegistry &Registry = Module.Get();
     Registry.SearchAllAssets(true);
 
-    TArray<FAssetData> PoolAssets;
-    Registry.GetAssetsByClass(UMythicAffixPoolDataAsset::StaticClass()->GetClassPathName(), PoolAssets);
+    TArray<FAssetData> CatalogueAssets;
+    Registry.GetAssetsByClass(UMythicAffixCatalogue::StaticClass()->GetClassPathName(), CatalogueAssets);
 
     TSet<FString> Out;
-    for (const FAssetData &PoolAsset : PoolAssets) {
-        const UMythicAffixPoolDataAsset *Pool = Cast<UMythicAffixPoolDataAsset>(PoolAsset.GetAsset());
-        if (!Pool) {
+    for (const FAssetData &CatalogueAsset : CatalogueAssets) {
+        const UMythicAffixCatalogue *Catalogue = Cast<UMythicAffixCatalogue>(CatalogueAsset.GetAsset());
+        if (!Catalogue) {
             continue;
         }
-        for (const FMythicTieredAffixDef &Def : Pool->Defs) {
-            if (Def.Attribute.IsValid() && Def.Tiers.Num() > 0) {
-                Out.Add(Def.Attribute.GetName());
+        for (const FMythicAffixCatalogueEntry &Entry : Catalogue->Entries) {
+            if (Entry.Def.Attribute.IsValid() && Entry.Def.Tiers.Num() > 0) {
+                Out.Add(Entry.Def.Attribute.GetName());
             }
         }
     }
@@ -142,12 +142,12 @@ bool FMythicStatusRollableTest::RunTest(const FString &Parameters) {
     }
 
     const TSet<FString> RollableAttributes = MythicTest::GatherRollableAttributes();
-    if (!TestTrue(TEXT("the project ships affix pools that grant something"), RollableAttributes.Num() > 0)) {
+    if (!TestTrue(TEXT("the project ships an affix catalogue that grants something"), RollableAttributes.Num() > 0)) {
         return false;
     }
 
     // A status a player cannot roll for is a status no build can be made of. This is the check that would have
-    // caught Poison and Freeze being absent from every pool while still looking wired up in code.
+    // caught Poison and Freeze being absent from the catalogue while still looking wired up in code.
     for (const UMythicStatusEffectDefinition *Definition : Library->Statuses) {
         if (!Definition || !Definition->StatusType.IsValid()) {
             continue;
@@ -157,7 +157,7 @@ bool FMythicStatusRollableTest::RunTest(const FString &Parameters) {
         const FString Leaf = TagPath.FindLastChar(TCHAR('.'), Dot) ? TagPath.RightChop(Dot + 1) : TagPath;
         const FString ChanceAttribute = FString::Printf(TEXT("Apply%sOnHitChance"), *Leaf);
 
-        TestTrue(*FString::Printf(TEXT("%s can be rolled by loot (%s appears in an affix pool)"), *Leaf, *ChanceAttribute),
+        TestTrue(*FString::Printf(TEXT("%s can be rolled by loot (%s appears in an affix catalogue)"), *Leaf, *ChanceAttribute),
                  RollableAttributes.Contains(ChanceAttribute));
     }
 
@@ -172,12 +172,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicBuildStatsRollableTest::RunTest(const FString &Parameters) {
     const TSet<FString> RollableAttributes = MythicTest::GatherRollableAttributes();
-    if (!TestTrue(TEXT("the project ships affix pools that grant something"), RollableAttributes.Num() > 0)) {
+    if (!TestTrue(TEXT("the project ships an affix catalogue that grants something"), RollableAttributes.Num() > 0)) {
         return false;
     }
 
     /**
-     * The stats a build is made of. Each is read by the damage pipeline, so any of them that no pool rolls is a
+     * The stats a build is made of. Each is read by the damage pipeline, so any of them the catalogue does not roll is a
      * lever the player can see working in code and never obtain. IncreasedDamageToEnemiesUnderStatusEffects and
      * BonusDamageToSuperiorEnemies were both in exactly that state: live in the execution, granted by nothing.
      * This list is the specification — add to it when a new build stat ships.

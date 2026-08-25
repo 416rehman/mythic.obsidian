@@ -153,6 +153,23 @@ public:
 
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Primary Stats", meta = (ClampMin = "1.0"))
     float PlayerPrimaryTailGrowth = 1.01f;
+
+    /**
+     * What sprinting is worth, multiplied onto the character's speed attribute while GAS.State.Sprinting is held.
+     * Sprint used to be a gear-rolled fraction, which meant a character with no boots sprinted at walking pace;
+     * it is a property of the act now, so every character gets the same differential and gear moves the whole
+     * speed instead.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "1.0"))
+    float SprintSpeedMultiplier = 1.5f;
+
+    /**
+     * The floor under the speed attribute and under the composed walk-speed scale. Stopping a character dead is
+     * the crowd-control path's job - Stunned and Frozen disable movement outright - so no stack of slows,
+     * encumbrance and debuffs is allowed to reach a standstill by accident, and none may invert movement.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.01", ClampMax = "1.0"))
+    float MinSpeedScale = 0.1f;
 };
 
 namespace MythicCombat {
@@ -177,4 +194,14 @@ MYTHIC_API int32 ResolveCombatLevelAt(const UWorld *World, const FVector &Locati
 
 MYTHIC_API bool ResolveCoreAffixBand(const FGameplayAttribute &Attribute, float AuthoredMin, float AuthoredMax,
                                      float ItemLevel, float &OutMin, float &OutMax);
+
+/** The authored floor under any speed value. */
+MYTHIC_API float GetMinSpeedScale();
+
+/**
+ * The walk-speed scale a character should be moving at: its one speed attribute, the authored sprint multiplier
+ * while sprinting, and the situational scales already composed into SituationalScale (slows, haste, encumbrance).
+ * Never below the authored floor and never negative.
+ */
+MYTHIC_API float ComposeSpeedScale(float SpeedMultiplier, float SituationalScale, bool bSprinting);
 }

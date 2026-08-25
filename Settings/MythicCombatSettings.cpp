@@ -128,7 +128,9 @@ UMythicCombatSettings::UMythicCombatSettings() {
             {Def::GetLifePerHitAttribute(), MakeCoreBand(0.2f, 1.0f)},
             {Util::GetItemRarityFindAttribute(), MakeCoreBand(0.05f, 0.12f)},
             {Util::GetCooldownReductionAttribute(), MakeCoreBand(0.04f, 0.10f)},
-            {Util::GetBonusSprintSpeedAttribute(), MakeCoreBand(0.04f, 0.10f)},
+            // Speed rolls used to only pay while sprinting; the same roll is now worth its full value at all
+            // times, so the band steps down to keep a pair of boots from outweighing a weapon.
+            {Util::GetMovementSpeedMultiplierAttribute(), MakeCoreBand(0.03f, 0.08f)},
         };
     }
 
@@ -192,6 +194,17 @@ bool ResolveCoreAffixBand(const FGameplayAttribute &Attribute, const float Autho
     OutMin = BaseMin * LevelScale;
     OutMax = BaseMax * LevelScale;
     return true;
+}
+
+float GetMinSpeedScale() {
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    return Settings ? FMath::Clamp(Settings->MinSpeedScale, 0.01f, 1.0f) : 0.1f;
+}
+
+float ComposeSpeedScale(const float SpeedMultiplier, const float SituationalScale, const bool bSprinting) {
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    const float Sprint = bSprinting ? FMath::Max(1.0f, Settings ? Settings->SprintSpeedMultiplier : 1.5f) : 1.0f;
+    return FMath::Max(GetMinSpeedScale(), SpeedMultiplier * SituationalScale * Sprint);
 }
 
 float SampleOpenEnded(const FCurveTableRowHandle &Handle, const float Level, const float TailGrowth) {

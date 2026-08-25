@@ -140,14 +140,9 @@ void UMythicLifeComponent::InitializeWithAbilitySystem(UAbilitySystemComponent *
         }
     }
 
-    const FGameplayAttribute MovementAttributes[] = {
-        UMythicAttributeSet_Utility::GetMovementSpeedMultiplierAttribute(),
-        UMythicAttributeSet_Utility::GetBonusSprintSpeedAttribute(),
-    };
-    for (const FGameplayAttribute &MoveAttribute : MovementAttributes) {
-        AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(MoveAttribute).AddUObject(
-            this, &ThisClass::HandleMovementAttributeChanged);
-    }
+    AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(
+        UMythicAttributeSet_Utility::GetMovementSpeedMultiplierAttribute()).AddUObject(
+        this, &ThisClass::HandleMovementAttributeChanged);
 
     BindEncumbranceInventoryDelegates();
 
@@ -1136,20 +1131,18 @@ void UMythicLifeComponent::ReevaluateCrowdControl() {
         SpeedScale *= HasteMultiplier;
     }
 
-    const FGameplayTag SprintTag = GAS_STATE_SPRINTING;
-    if (SprintTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(SprintTag)
-        && !AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_EXHAUSTED)) {
-        if (const UMythicAttributeSet_Utility *Util = AbilitySystemComponent->GetSet<UMythicAttributeSet_Utility>()) {
-            SpeedScale *= (1.0f + Util->GetBonusSprintSpeed());
-        }
-    }
-
-    if (const UMythicAttributeSet_Utility *SpeedUtil = AbilitySystemComponent->GetSet<UMythicAttributeSet_Utility>()) {
-        SpeedScale *= FMath::Max(0.0f, SpeedUtil->GetMovementSpeedMultiplier());
-    }
-
     SpeedScale *= ComputeEncumbranceSpeedScale();
-    Move->MaxWalkSpeed = BaseWalkSpeed * SpeedScale;
+
+    const FGameplayTag SprintTag = GAS_STATE_SPRINTING;
+    const bool bSprinting = SprintTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(SprintTag)
+        && !AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_EXHAUSTED);
+
+    float SpeedMultiplier = 1.0f;
+    if (const UMythicAttributeSet_Utility *SpeedUtil = AbilitySystemComponent->GetSet<UMythicAttributeSet_Utility>()) {
+        SpeedMultiplier = SpeedUtil->GetMovementSpeedMultiplier();
+    }
+
+    Move->MaxWalkSpeed = BaseWalkSpeed * MythicCombat::ComposeSpeedScale(SpeedMultiplier, SpeedScale, bSprinting);
 }
 
 TArray<UMythicInventoryComponent *> UMythicLifeComponent::GetOwnerInventoryComponents() const {

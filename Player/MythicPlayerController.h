@@ -91,9 +91,9 @@ struct FPlayerStatsSummary {
     UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
     float ProficiencyXPBonus = 0.0f;
 
-    // bonus speed multiplier while sprinting
+    // how fast the player moves, where 1.0 is 100% of base speed
     UPROPERTY(BlueprintReadOnly, Category = "Player Stats")
-    float BonusSprintSpeed = 0.0f;
+    float MovementSpeedMultiplier = 1.0f;
 
     // canonical player level derived from proficiencies
     UPROPERTY(BlueprintReadOnly, Category = "Player Stats")

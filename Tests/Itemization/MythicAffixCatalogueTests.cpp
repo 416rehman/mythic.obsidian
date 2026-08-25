@@ -8,9 +8,12 @@
 // ItemDefinition.h, reached through the fragment header, names USkeletalMesh without declaring it.
 #include "Engine/SkeletalMesh.h"
 
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "Itemization/Affixes/MythicAffixCatalogue.h"
+#include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Inventory/Fragments/Passive/AffixesFragment.h"
 #include "Itemization/MythicLootSettings.h"
 #include "Itemization/MythicTags_Inventory.h"
@@ -1109,47 +1112,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicAffixFragmentValidationTest::RunTest(const FString &Parameters) {
     const FGameplayAttribute Power = UMythicAttributeSet_Offense::GetPowerAttribute();
 
-    auto MakePoolFragment = [&](const TArray<FMythicAffixTier> &Tiers) -> UAffixesFragment * {
-        FMythicTieredAffixDef Def = MakeDef(Power, EMythicAffixGroup::Prefix);
-        Def.Tiers = Tiers;
-        UMythicAffixPoolDataAsset *Pool = NewObject<UMythicAffixPoolDataAsset>();
-        Pool->Defs.Add(Def);
-        UAffixesFragment *Fragment = NewObject<UAffixesFragment>();
-        Fragment->AffixesBuildData.TieredAffixPool = Pool;
-        return Fragment;
-    };
-
-    FMythicAffixTier Authored;
-    Authored.MinItemLevel = 1;
-    Authored.Weight = 1.0f;
-    Authored.Min = 1.0f;
-    Authored.Max = 5.0f;
-
-    // The denominator: an authored pool passes, so the two failures below are the band and nothing else.
-    {
-        FText Error;
-        TestTrue(TEXT("a tiered pool with an authored band validates"),
-                 MakePoolFragment({Authored})->IsValidFragment(Error));
-    }
-
-    {
-        FText Error;
-        TestFalse(TEXT("a tiered pool tier with Min and Max both zero fails the fragment"),
-                  MakePoolFragment({Authored, FMythicAffixTier()})->IsValidFragment(Error));
-        TestTrue(TEXT("naming the rung it sits on"), Error.ToString().Contains(TEXT("tier 1")));
-    }
-
-    {
-        FMythicAffixTier Inverted = Authored;
-        Inverted.Min = 5.0f;
-        Inverted.Max = 1.0f;
-
-        FText Error;
-        TestFalse(TEXT("so does one whose Max sits below its Min"),
-                  MakePoolFragment({Inverted})->IsValidFragment(Error));
-        TestTrue(TEXT("and it names that rung too"), Error.ToString().Contains(TEXT("tier 0")));
-    }
-
     // Authoring nothing is legal ONLY because the shared catalogue fills both halves. The precondition lives on
     // the loot settings CDO, so the test sets it both ways and puts the project's own value back.
     {
@@ -1159,7 +1121,7 @@ bool FMythicAffixFragmentValidationTest::RunTest(const FString &Parameters) {
 
         UAffixesFragment *Empty = NewObject<UAffixesFragment>();
         FText Error;
-        TestFalse(TEXT("a fragment authoring no pool and no core stats fails when no catalogue can fill it"),
+        TestFalse(TEXT("a fragment authoring nothing fails when no catalogue can fill it"),
                   Empty->IsValidFragment(Error));
         TestFalse(TEXT("and says so"), Error.IsEmpty());
 
@@ -1168,6 +1130,16 @@ bool FMythicAffixFragmentValidationTest::RunTest(const FString &Parameters) {
         FText SelfAuthoredError;
         TestTrue(TEXT("while a fragment that authors its own pool needs no catalogue"),
                  SelfAuthored->IsValidFragment(SelfAuthoredError));
+
+        // The per-item override is the ONE way an item narrows its affixes now that the pool type is gone, so
+        // carrying one has to count as authoring something.
+        UMythicAffixCatalogue *Override = NewObject<UMythicAffixCatalogue>();
+        Override->Entries.Add(MakeEntry(TEXT("Affix_Power"), Power));
+        UAffixesFragment *Overridden = NewObject<UAffixesFragment>();
+        Overridden->AffixesBuildData.AffixCatalogueOverride = Override;
+        FText OverriddenError;
+        TestTrue(TEXT("and a fragment pointing at its own catalogue needs no shared one either"),
+                 Overridden->IsValidFragment(OverriddenError));
 
         // Only IsNull() is read: a configured path that would fail to LOAD is a different defect, and validation
         // must not force a synchronous package load to find out.
@@ -1240,6 +1212,75 @@ bool FMythicAffixCoreBaselineMergeTest::RunTest(const FString &Parameters) {
         }
     }
 
+    return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicAffixOverrideWiringTest,
+    "Mythic.Itemization.Affixes.OverrideWiring",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicAffixOverrideWiringTest::RunTest(const FString &Parameters) {
+    /**
+     * An override answers BOTH halves, so one whose rules the item's type does not match hands back an empty
+     * core list and the item silently ships with no baseline stats. Scanned by CLASS, so a new item counts
+     * without anyone remembering this test.
+     */
+    FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry &Registry = Module.Get();
+    Registry.SearchAllAssets(true);
+
+    TArray<FAssetData> ItemAssets;
+    Registry.GetAssetsByClass(UItemDefinition::StaticClass()->GetClassPathName(), ItemAssets, true);
+    if (!TestTrue(TEXT("the project ships item definitions"), ItemAssets.Num() > 0)) {
+        return false;
+    }
+
+    int32 Fragments = 0;
+    int32 Overridden = 0;
+    for (const FAssetData &ItemAsset : ItemAssets) {
+        const UItemDefinition *Item = Cast<UItemDefinition>(ItemAsset.GetAsset());
+        if (!Item) {
+            continue;
+        }
+        for (const TObjectPtr<UItemFragment> &Fragment : Item->Fragments) {
+            const UAffixesFragment *Affixes = Cast<UAffixesFragment>(Fragment);
+            if (!Affixes) {
+                continue;
+            }
+            ++Fragments;
+            const UMythicAffixCatalogue *Override = Affixes->AffixesBuildData.AffixCatalogueOverride;
+            if (!Override) {
+                continue;
+            }
+            ++Overridden;
+
+            const FString Label = Item->GetName();
+            TArray<int32> Chain;
+            FMythicAffixCatalogueMath::ResolveRuleChain(Override->RulesByItemType, Item->ItemType, Chain);
+            TestTrue(*FString::Printf(TEXT("%s: its override %s carries a rule matching item type %s"),
+                                      *Label, *Override->GetName(), *Item->ItemType.ToString()),
+                     Chain.Num() > 0);
+
+            FGameplayTagContainer Probe;
+            Probe.AddTag(Item->ItemType);
+            TArray<FMythicTieredAffixDef> CoreDefs;
+            Override->BuildCoreDefs(Item->ItemType, Probe, CoreDefs);
+            TestTrue(*FString::Printf(TEXT("%s: its override guarantees at least one core stat"), *Label),
+                     CoreDefs.Num() > 0);
+
+            TArray<FMythicTieredAffixDef> RandomDefs;
+            Override->BuildRandomDefs(Item->ItemType, Probe, RandomDefs);
+            TestTrue(*FString::Printf(TEXT("%s: its override offers something to roll"), *Label),
+                     RandomDefs.Num() > 0);
+        }
+    }
+
+    // The denominator: without it a scan that matched no item would report the same clean bill of health as
+    // one that checked every item.
+    AddInfo(FString::Printf(TEXT("%d item definitions, %d affixes fragments, %d pointing at their own catalogue"),
+                            ItemAssets.Num(), Fragments, Overridden));
     return true;
 }
 
