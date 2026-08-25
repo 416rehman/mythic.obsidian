@@ -11,6 +11,7 @@
 #include "Progression/Runes/MythicRuneComponent.h"
 #include "Progression/Runes/MythicRuneDefinition.h"
 #include "UI/Menu/MythicRunePickerWidget.h"
+#include "UI/Inventory/MythicSocketRowWidget.h"
 #include "UI/Widgets/MythicSectionHeader.h"
 #include "UI/MythicUIStyle.h"
 #include "Components/Border.h"
@@ -358,6 +359,19 @@ void UMythicCharacterPageWidget::BuildDetailsCard() {
 
     DetailsHost->AddChild(DetailsCard);
     DetailsCard->SetVisibility(ESlateVisibility::Collapsed);
+
+    // The socket row takes an item instance, which no view model hands it. Found by class rather than by
+    // name so renaming the widget on the card cannot quietly stop the row updating.
+    if (DetailsCard->WidgetTree) {
+        TArray<UWidget *> Children;
+        DetailsCard->WidgetTree->GetAllWidgets(Children);
+        for (UWidget *Child : Children) {
+            if (UMythicSocketRowWidget *Row = Cast<UMythicSocketRowWidget>(Child)) {
+                SocketRow = Row;
+                break;
+            }
+        }
+    }
 }
 
 void UMythicCharacterPageWidget::ShowDetailsFor(UObject *SlotVM) {
@@ -370,6 +384,11 @@ void UMythicCharacterPageWidget::ShowDetailsFor(UObject *SlotVM) {
             }
         }
         DetailsCard->SetVisibility(bHasItem ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+    }
+
+    if (SocketRow) {
+        const UItemSlotVM *SelectedSlot = bHasItem ? Cast<UItemSlotVM>(SlotVM) : nullptr;
+        SocketRow->SetItem(SelectedSlot ? SelectedSlot->TryGetItemInstance() : nullptr);
     }
 
     if (DetailsPlaceholder) {

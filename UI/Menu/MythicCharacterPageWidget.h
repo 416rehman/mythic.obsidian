@@ -207,6 +207,10 @@ private:
     UPROPERTY()
     TObjectPtr<class UMythicRunePickerWidget> RunePicker;
 
+    /** The socket row inside the details card, cached when the card is built. */
+    UPROPERTY()
+    TObjectPtr<class UMythicSocketRowWidget> SocketRow;
+
 
     UMythicHUDLayout *FindHUDLayout() const;
 
