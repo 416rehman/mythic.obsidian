@@ -64,6 +64,30 @@ static bool HasRecorderFor(const FString &Source, const FGameplayTag &Counter) {
     return Source.Contains(Flat) || Source.Contains(Snake.ToUpper()) || Source.Contains(Mixed)
         || Source.Contains(FString::Printf(TEXT("\"%s\""), *Name));
 }
+
+// A counter can be produced from AUTHORED DATA rather than a RecordStat call site, and a source scan cannot see
+// that - the deed counters are written by a row on the living world settings, matched by tag, so no symbol for
+// them appears anywhere. Both audits in this file have to consult it, or one accepts a live counter the other
+// rejects.
+static void GatherDataDrivenCounters(TSet<FString> &Out) {
+    FAssetRegistryModule &AssetModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    AssetModule.Get().SearchAllAssets(true);
+    TArray<FAssetData> SettingsAssets;
+    AssetModule.Get().GetAssetsByClass(UMythicLivingWorldSettings::StaticClass()->GetClassPathName(), SettingsAssets, true);
+    for (const FAssetData &Asset : SettingsAssets) {
+        if (const UMythicLivingWorldSettings *LivingWorld = Cast<UMythicLivingWorldSettings>(Asset.GetAsset())) {
+            for (const TPair<FGameplayTag, FGameplayTag> &Row : LivingWorld->ActionDeedCounters) {
+                if (Row.Value.IsValid()) {
+                    Out.Add(Row.Value.ToString());
+                }
+            }
+        }
+    }
+}
+
+static bool IsCounterProduced(const FString &Source, const FGameplayTag &Counter, const TSet<FString> &DataDriven) {
+    return HasRecorderFor(Source, Counter) || DataDriven.Contains(Counter.ToString());
+}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -94,6 +118,9 @@ bool FMythicAchievementReachabilityTest::RunTest(const FString &Parameters) {
                       MythicTest::HasRecorderFor(Source, Unrecorded));
         }
     }
+
+    TSet<FString> DataDrivenCounters;
+    MythicTest::GatherDataDrivenCounters(DataDrivenCounters);
 
     FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
     IAssetRegistry &Registry = Module.Get();
@@ -128,7 +155,7 @@ bool FMythicAchievementReachabilityTest::RunTest(const FString &Parameters) {
             // The failure this guards: an achievement whose counter nothing ever writes can never be earned, and
             // says nothing at runtime because an unrecorded counter simply reads zero.
             TestTrue(*FString::Printf(TEXT("%s requires %s, which something must record"), *Name, *Counter),
-                     MythicTest::HasRecorderFor(Source, Req.StatTag));
+                     MythicTest::IsCounterProduced(Source, Req.StatTag, DataDrivenCounters));
         }
     }
 
@@ -161,21 +188,8 @@ bool FMythicStatCounterReachabilityTest::RunTest(const FString &Parameters) {
     // no symbol for them appears anywhere. Gathering them here keeps the source scan from reporting a live
     // counter as dead.
     TSet<FString> DataDrivenCounters;
-    {
-        FAssetRegistryModule &AssetModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-        AssetModule.Get().SearchAllAssets(true);
-        TArray<FAssetData> SettingsAssets;
-        AssetModule.Get().GetAssetsByClass(UMythicLivingWorldSettings::StaticClass()->GetClassPathName(), SettingsAssets, true);
-        for (const FAssetData &Asset : SettingsAssets) {
-            if (const UMythicLivingWorldSettings *LivingWorld = Cast<UMythicLivingWorldSettings>(Asset.GetAsset())) {
-                for (const TPair<FGameplayTag, FGameplayTag> &Row : LivingWorld->ActionDeedCounters) {
-                    if (Row.Value.IsValid()) {
-                        DataDrivenCounters.Add(Row.Value.ToString());
-                    }
-                }
-            }
-        }
-    }
+    MythicTest::GatherDataDrivenCounters(DataDrivenCounters);
+
     AddInfo(FString::Printf(TEXT("%d counters produced from authored rows"), DataDrivenCounters.Num()));
 
     const UGameplayTagsManager &Tags = UGameplayTagsManager::Get();
@@ -198,7 +212,7 @@ bool FMythicStatCounterReachabilityTest::RunTest(const FString &Parameters) {
             continue;
         }
 
-        const bool bRecorded = MythicTest::HasRecorderFor(Source, Tag) || DataDrivenCounters.Contains(Name);
+        const bool bRecorded = MythicTest::IsCounterProduced(Source, Tag, DataDrivenCounters);
         if (KnownUnproduced.Contains(Name)) {
             // Keep the exclusion honest: if one of these quietly gains a recorder, this fails so the list is trimmed.
             TestFalse(*FString::Printf(TEXT("known-unproduced %s is still unrecorded (remove it from the list once it has a producer)"), *Name),

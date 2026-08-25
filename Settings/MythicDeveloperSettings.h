@@ -726,10 +726,11 @@ public:
      * Whether an item can be corrupted at all. When false, ServerCorruptItem refuses and no item is ever sealed,
      * so every craft op stays available forever.
      *
-     * Corrupting seals the item permanently: CanApplyCraftOp then refuses every craft verb on it. There is no
-     * outcome roll - a weighted table of reroll / add-socket / upgrade-tier outcomes was described here for a
-     * long time and never written, which is the same defect #145 was raised to remove. Add the table when the
-     * outcomes exist, not before.
+     * Corrupting seals the item permanently: CanApplyCraftOp then refuses every craft verb on it.
+     *
+     * There is no outcome roll, though DefaultGame.ini ships four authored ItemCorruptionOutcomes rows for one -
+     * Seal, Reroll, AddSocket, UpgradeAffixTier. No such property exists, so that config is read by nothing. See
+     * the issue before assuming this flag ever gated an outcome.
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Item Corruption")
     bool bItemCorruptionEnabled = true;
