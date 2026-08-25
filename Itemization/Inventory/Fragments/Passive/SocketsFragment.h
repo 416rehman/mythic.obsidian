@@ -58,5 +58,4 @@ protected:
     void ApplyToActiveASC();
     void RemoveFromActiveASC();
 
-    void GatherFilledGemTypes(TArray<FGameplayTag> &Out) const;
 };

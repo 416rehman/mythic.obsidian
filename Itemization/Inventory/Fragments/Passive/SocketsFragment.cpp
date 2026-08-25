@@ -42,15 +42,6 @@ int32 USocketsFragment::GetFilledSocketCount() const {
     return N;
 }
 
-void USocketsFragment::GatherFilledGemTypes(TArray<FGameplayTag> &Out) const {
-    Out.Reset();
-    for (const FMythicSocketSlot &S : Sockets) {
-        if (S.bFilled && S.SocketedGemType.IsValid()) {
-            Out.Add(S.SocketedGemType);
-        }
-    }
-}
-
 void USocketsFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
     Super::OnItemActivated(ItemInstance);
 
