@@ -146,6 +146,17 @@ void AMythicGameMode::OnPostLogin(AController *NewPlayer) {
         if (!UGameplayStatics::DoesSaveGameExist(Slot, 0)) {
             SaveSys->CreateNewCharacter(DefaultCharacterName(NewPlayer), TEXT(""), false, Slot);
         }
+
+        // The manifest holds the name; without this it was written on creation and never read back, so the
+        // player state kept the engine default - the machine name - and the header read "Unnamed" forever.
+        // Applied before the load so a real saved name still wins, and an empty one no longer blanks it.
+        for (const FMythicCharacterMetadata &Metadata : SaveSys->GetCharacterList()) {
+            if (Metadata.CharacterID == Slot && !Metadata.DisplayName.IsEmpty()) {
+                NewPlayer->PlayerState->SetPlayerName(Metadata.DisplayName);
+                break;
+            }
+        }
+
         SaveSys->LoadCharacter(NewPlayer->PlayerState, Slot);
     }
 }

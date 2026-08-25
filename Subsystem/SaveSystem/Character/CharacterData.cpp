@@ -237,7 +237,9 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
     AActor *ProfHost = PC ? static_cast<AActor *>(PC) : TargetActor;
     AActor *InvHost = PC ? static_cast<AActor *>(PC) : TargetActor;
 
-    if (PS) {
+    // A save with no name must not blank one the manifest already set. Saves written before a character had a
+    // name carry an empty string, and applying it would undo the name every load.
+    if (PS && !InData.CharacterName.IsEmpty()) {
         PS->SetPlayerName(InData.CharacterName);
     }
 
