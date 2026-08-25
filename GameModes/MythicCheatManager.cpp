@@ -23,6 +23,9 @@
 #include "Mythic/GAS/MythicTags_GAS.h"
 #include "Mythic/GAS/Effects/MythicStatusRegistry.h"
 #include "Mythic/GAS/Effects/MythicStatusEffectDefinition.h"
+#include "Mythic/Itemization/Inventory/Fragments/FragmentTypes.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 #include "Mythic/GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "Mythic/GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GameplayEffect.h"
@@ -1729,4 +1732,62 @@ void UMythicCheatManager::MythDumpActions() {
                *GetNameSafe(Action), Keys,
                CommonUI::ActionValidForInputType(LP, Input.GetCurrentInputType(), Action) ? 1 : 0);
     }
+}
+
+namespace {
+TArray<UTalentDefinition *> Cheat_AllTalents() {
+    FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry &Registry = Module.Get();
+    Registry.SearchAllAssets(true);
+
+    TArray<FAssetData> Assets;
+    Registry.GetAssetsByClass(UTalentDefinition::StaticClass()->GetClassPathName(), Assets);
+
+    TArray<UTalentDefinition *> Out;
+    for (const FAssetData &Asset : Assets) {
+        if (UTalentDefinition *Talent = Cast<UTalentDefinition>(Asset.GetAsset())) {
+            Out.Add(Talent);
+        }
+    }
+    Out.Sort([](const UTalentDefinition &A, const UTalentDefinition &B) { return A.GetName() < B.GetName(); });
+    return Out;
+}
+}
+
+void UMythicCheatManager::MythListTalents() {
+    const TArray<UTalentDefinition *> Talents = Cheat_AllTalents();
+    UE_LOG(Myth, Log, TEXT(">>> %d talents"), Talents.Num());
+    for (const UTalentDefinition *Talent : Talents) {
+        UE_LOG(Myth, Log, TEXT("  %-28s %-16s %s"), *Talent->GetName(), *Talent->Name.ToString(),
+               *Talent->AbilityDef.RichText.ToString());
+    }
+}
+
+void UMythicCheatManager::MythGiveTalent(const FString &TalentName) {
+    UMythicAbilitySystemComponent *ASC = Cheat_PlayerASC(GetOuterAPlayerController());
+    if (!ASC) {
+        UE_LOG(Myth, Error, TEXT(">>> No ASC"));
+        return;
+    }
+
+    const TArray<UTalentDefinition *> Talents = Cheat_AllTalents();
+    UTalentDefinition *Match = nullptr;
+    for (UTalentDefinition *Talent : Talents) {
+        if (Talent->GetName().Contains(TalentName) || Talent->Name.ToString().Contains(TalentName)) {
+            Match = Talent;
+            break;
+        }
+    }
+    if (!Match) {
+        UE_LOG(Myth, Error, TEXT(">>> No talent matching '%s'. MythListTalents for the list."), *TalentName);
+        return;
+    }
+    if (!Match->AbilityDef.Ability) {
+        UE_LOG(Myth, Error, TEXT(">>> '%s' has no ability to grant"), *Match->GetName());
+        return;
+    }
+
+    FGameplayAbilitySpec Spec(Match->AbilityDef.Ability, 1, INDEX_NONE, Match);
+    ASC->GiveAbility(Spec);
+    UE_LOG(Myth, Log, TEXT(">>> Granted %s: %s"), *Match->GetName(), *Match->AbilityDef.RichText.ToString());
 }

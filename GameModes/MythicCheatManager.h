@@ -85,6 +85,14 @@ public:
     void MythGiveItem(const FString &ItemName, int32 Count = 1, int32 ItemLevel = 1);
 
     UFUNCTION(Exec)
+    void MythListTalents();
+
+    // Grants a talent's ability directly, so its verb can be exercised without farming a Rare-or-better drop
+    // that happens to roll it.
+    UFUNCTION(Exec)
+    void MythGiveTalent(const FString &TalentName);
+
+    UFUNCTION(Exec)
     void MythClearInventory();
 
     UFUNCTION(Exec)
