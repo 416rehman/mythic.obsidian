@@ -209,6 +209,9 @@ void UMythicAttributeSet_Offense::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, StunDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, WeakenDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, TerrifyDurationMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, SkillRadiusBonus, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, SkillTargetCountBonus, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, SkillDurationBonus, COND_OwnerOnly, REPNOTIFY_Always);
 }
 
 void UMythicAttributeSet_Offense::OnRep_BurnBonusDamage(const FGameplayAttributeData &OldBurnBonusDamage) {
@@ -253,5 +256,17 @@ void UMythicAttributeSet_Offense::OnRep_WeakenDurationMultiplier(const FGameplay
 
 void UMythicAttributeSet_Offense::OnRep_TerrifyDurationMultiplier(const FGameplayAttributeData &OldTerrifyDurationMultiplier) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, TerrifyDurationMultiplier, OldTerrifyDurationMultiplier);
+}
+
+void UMythicAttributeSet_Offense::OnRep_SkillRadiusBonus(const FGameplayAttributeData &OldSkillRadiusBonus) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, SkillRadiusBonus, OldSkillRadiusBonus);
+}
+
+void UMythicAttributeSet_Offense::OnRep_SkillTargetCountBonus(const FGameplayAttributeData &OldSkillTargetCountBonus) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, SkillTargetCountBonus, OldSkillTargetCountBonus);
+}
+
+void UMythicAttributeSet_Offense::OnRep_SkillDurationBonus(const FGameplayAttributeData &OldSkillDurationBonus) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, SkillDurationBonus, OldSkillDurationBonus);
 }
 

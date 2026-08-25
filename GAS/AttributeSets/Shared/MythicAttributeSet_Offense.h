@@ -157,6 +157,30 @@ protected:
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_TerrifyDurationMultiplier)
     FGameplayAttributeData TerrifyDurationMultiplier;
 
+    /**
+     * What a skill does, moved by gear instead of by re-authoring the skill. Each adds to the number the skill
+     * authored: radius 400 with SkillRadiusBonus 50 queries 450.
+     *
+     * Generic rather than per-skill on purpose. Per-skill quantifiers are the eventual design, but sixteen
+     * skills times four quantifiers is sixty-four attributes for a set with no content in it yet. A skill that
+     * earns its own stat gets one added beside these.
+     *
+     * There is deliberately no skill damage stat here. BonusSkillDamage above already scales every hit tagged
+     * GAS.Ability.Type.Skill inside the damage execution, so a second one would double-dip.
+     */
+
+    // Centimetres added to a skill's authored shape radius.
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_SkillRadiusBonus)
+    FGameplayAttributeData SkillRadiusBonus;
+
+    // Extra targets a skill's shape query may take beyond its authored MaxTargets.
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_SkillTargetCountBonus)
+    FGameplayAttributeData SkillTargetCountBonus;
+
+    // Seconds added to a skill's authored duration.
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_SkillDurationBonus)
+    FGameplayAttributeData SkillDurationBonus;
+
 
 public:
     UMythicAttributeSet_Offense();
@@ -198,6 +222,10 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, StunDurationMultiplier);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, WeakenDurationMultiplier);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, TerrifyDurationMultiplier);
+
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, SkillRadiusBonus);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, SkillTargetCountBonus);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, SkillDurationBonus);
 
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
@@ -292,6 +320,15 @@ public:
 
     UFUNCTION()
     virtual void OnRep_TerrifyDurationMultiplier(const FGameplayAttributeData &OldTerrifyDurationMultiplier);
+
+    UFUNCTION()
+    virtual void OnRep_SkillRadiusBonus(const FGameplayAttributeData &OldSkillRadiusBonus);
+
+    UFUNCTION()
+    virtual void OnRep_SkillTargetCountBonus(const FGameplayAttributeData &OldSkillTargetCountBonus);
+
+    UFUNCTION()
+    virtual void OnRep_SkillDurationBonus(const FGameplayAttributeData &OldSkillDurationBonus);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 };
