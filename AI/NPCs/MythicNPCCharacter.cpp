@@ -284,6 +284,13 @@ void AMythicNPCCharacter::PublishIdentityTags() {
         AbilitySystemComponent->AddLooseGameplayTag(EnemyTier);
     }
 
+    // CodexBestiaryKey is the explicit override and the mapper reads it first. Without the type published too,
+    // there was nothing to derive from when no override was authored - which was every NPC, since the key is
+    // assigned nowhere - so every humanoid kill credited the generic page.
+    if (NPCData.NPCType.IsValid()) {
+        AbilitySystemComponent->AddLooseGameplayTag(NPCData.NPCType);
+    }
+
     if (CodexBestiaryKey.IsValid()) {
         AbilitySystemComponent->AddLooseGameplayTag(CodexBestiaryKey);
     }

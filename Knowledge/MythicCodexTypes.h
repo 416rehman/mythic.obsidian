@@ -63,12 +63,22 @@ struct FMythicBestiaryRules {
         if (NPCTypeRoot.IsValid()) {
             const FString NPCTypePrefix = NPCTypeRoot.ToString() + TEXT(".");
             for (const FGameplayTag &Tag : OwnedTags) {
-                if (Tag != NPCTypeRoot && Tag.MatchesTag(NPCTypeRoot)) {
-                    const FString Suffix = Tag.ToString().RightChop(NPCTypePrefix.Len());
+                if (Tag == NPCTypeRoot || !Tag.MatchesTag(NPCTypeRoot)) {
+                    continue;
+                }
+                // Walk up from the most specific type until one has a codex page. A bestiary has a page for
+                // Bandit, not for every variant of bandit, so NPC.Type.Bandit.Ambusher has to credit its parent
+                // rather than fall all the way through to the generic humanoid entry.
+                for (FGameplayTag Current = Tag; Current.IsValid() && Current != NPCTypeRoot;
+                     Current = Current.RequestDirectParent()) {
+                    const FString Suffix = Current.ToString().RightChop(NPCTypePrefix.Len());
                     const FGameplayTag Mapped = FGameplayTag::RequestGameplayTag(
                         FName(*(FString(TEXT("Codex.Bestiary.Humanoid.")) + Suffix)), false);
-                    return Mapped.IsValid() ? Mapped : CODEX_BESTIARY_HUMANOID_GENERIC.GetTag();
+                    if (Mapped.IsValid()) {
+                        return Mapped;
+                    }
                 }
+                return CODEX_BESTIARY_HUMANOID_GENERIC.GetTag();
             }
         }
 
