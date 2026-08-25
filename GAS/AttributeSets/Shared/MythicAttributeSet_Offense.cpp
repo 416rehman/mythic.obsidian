@@ -127,6 +127,10 @@ void UMythicAttributeSet_Offense::OnRep_BonusSkillDamage(const FGameplayAttribut
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BonusSkillDamage, OldBonusSkillDamage);
 }
 
+void UMythicAttributeSet_Offense::OnRep_StatusThresholdReduction(const FGameplayAttributeData &OldStatusThresholdReduction) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, StatusThresholdReduction, OldStatusThresholdReduction);
+}
+
 void UMythicAttributeSet_Offense::OnRep_BonusSwordDamage(const FGameplayAttributeData &OldBonusSwordDamage) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Offense, BonusSwordDamage, OldBonusSwordDamage);
 }
@@ -187,6 +191,7 @@ void UMythicAttributeSet_Offense::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ApplyTerrifyOnHitChance, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, ControlPotency, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusSkillDamage, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, StatusThresholdReduction, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusSwordDamage, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusAxeDamage, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Offense, BonusDaggerDamage, COND_OwnerOnly, REPNOTIFY_Always);

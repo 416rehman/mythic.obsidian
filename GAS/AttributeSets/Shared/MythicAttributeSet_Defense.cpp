@@ -10,6 +10,7 @@
 #include "GAS/Effects/MythicStatusEffectDefinition.h"
 #include "GAS/Effects/MythicStatusRegistry.h"
 #include "Settings/MythicCombatSettings.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/Effects/MythicCrowdControl.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/Feedback/MythicTags_FeedbackCues.h"
@@ -119,10 +120,16 @@ void UMythicAttributeSet_Defense::PostGameplayEffectExecute(const FGameplayEffec
     }
 
     const float CurrentBuildup = TargetASC->GetNumericAttribute(Data.EvaluatedData.Attribute);
-    const float Resistance = TargetASC->HasAttributeSetForAttribute(Definition->ResistanceAttribute)
-                                 ? TargetASC->GetNumericAttribute(Definition->ResistanceAttribute)
-                                 : 0.0f;
-    const float Threshold = ComputeBuildupThreshold(Resistance);
+
+    // The threshold answers to the attacker, not the defender. A defender's resistance already gates every proc
+    // through 1 - Resist, so at full resistance nothing accrues to cross a threshold at all.
+    float ThresholdReduction = 0.0f;
+    if (const UAbilitySystemComponent *SourceASC = Data.EffectSpec.GetContext().GetInstigatorAbilitySystemComponent()) {
+        if (const UMythicAttributeSet_Offense *Offense = SourceASC->GetSet<UMythicAttributeSet_Offense>()) {
+            ThresholdReduction = Offense->GetStatusThresholdReduction();
+        }
+    }
+    const float Threshold = ComputeBuildupThreshold(ThresholdReduction);
     const bool bHardCC = Definition->bHardCrowdControl;
 
     if (bHardCC && TargetASC->HasMatchingGameplayTag(GAS_IMMUNE_HARDCC)) {
@@ -350,12 +357,15 @@ void UMythicAttributeSet_Defense::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, IncomingDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
 }
 
-float UMythicAttributeSet_Defense::ComputeBuildupThreshold(float Resistance) {
-    return 100.0f + FMath::Clamp(Resistance, 0.0f, 1.0f) * 2.0f;
+float UMythicAttributeSet_Defense::ComputeBuildupThreshold(float ThresholdReduction) {
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    const float Base = Settings ? Settings->StatusBuildupThreshold : 100.0f;
+    const float MaxCut = Settings ? Settings->MaxStatusThresholdReduction : 0.6f;
+    return FMath::Max(1.0f, Base * (1.0f - FMath::Clamp(ThresholdReduction, 0.0f, MaxCut)));
 }
 
-bool UMythicAttributeSet_Defense::BuildupCrossesThreshold(float NewBuildup, float Resistance) {
-    return NewBuildup >= ComputeBuildupThreshold(Resistance);
+bool UMythicAttributeSet_Defense::BuildupCrossesThreshold(float NewBuildup, float ThresholdReduction) {
+    return NewBuildup >= ComputeBuildupThreshold(ThresholdReduction);
 }
 
 float UMythicAttributeSet_Defense::ComputeBuildupAfterDecay(float Cur, float DecayPerSecond, float DeltaSeconds) {

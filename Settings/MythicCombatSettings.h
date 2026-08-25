@@ -95,6 +95,21 @@ public:
     float StatusDurationScale = 1.0f;
 
     /**
+     * Buildup a target must accumulate before a status lands. Resistance deliberately does not move this: it
+     * already gates every proc through 1 - Resist, so at full resistance no buildup accrues at all, and bending
+     * the threshold as well would pay the same stat twice.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "1.0"))
+    float StatusBuildupThreshold = 100.0f;
+
+    /**
+     * Most of the threshold an attacker's StatusThresholdReduction may remove. Without a ceiling a stacked build
+     * reaches zero and every status lands on the first proc.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0", ClampMax = "0.95"))
+    float MaxStatusThresholdReduction = 0.6f;
+
+    /**
      * How hard each enemy tier resists repeat hard crowd control. One row per AI tier (1..5); a tier with no row
      * falls back to the gentlest defaults. This is the retune knob for CC feel, kept beside the stun-duration curve
      * in StatDiminishing so both halves of the mechanic live in one place.

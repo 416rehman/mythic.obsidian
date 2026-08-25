@@ -71,6 +71,13 @@ protected:
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BonusSkillDamage)
     FGameplayAttributeData BonusSkillDamage;
 
+    /**
+     * Fraction of a target's buildup threshold this attacker removes, so statuses land sooner. The matching axis
+     * to a defender's resistance, which had no attacking counterpart.
+     */
+    UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_StatusThresholdReduction)
+    FGameplayAttributeData StatusThresholdReduction;
+
     // Increase damage from swords - If a sword was used to deal damage, this attribute increases the damage dealt
     UPROPERTY(Category = "Offense", EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_BonusSwordDamage)
     FGameplayAttributeData BonusSwordDamage;
@@ -200,6 +207,7 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, ApplyTerrifyOnHitChance);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, ControlPotency);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusSkillDamage);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, StatusThresholdReduction);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusSwordDamage);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusAxeDamage);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Offense, BonusDaggerDamage);
@@ -266,6 +274,9 @@ public:
     virtual void OnRep_ControlPotency(const FGameplayAttributeData &OldControlPotency);
     UFUNCTION()
     virtual void OnRep_BonusSkillDamage(const FGameplayAttributeData &OldBonusSkillDamage);
+
+    UFUNCTION()
+    virtual void OnRep_StatusThresholdReduction(const FGameplayAttributeData &OldStatusThresholdReduction);
     UFUNCTION()
     virtual void OnRep_BonusSwordDamage(const FGameplayAttributeData &OldBonusSwordDamage);
     UFUNCTION()

@@ -7,6 +7,7 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/Effects/MythicStatusEffectDefinition.h"
 #include "GAS/Effects/MythicStatusRegistry.h"
+#include "Settings/MythicCombatSettings.h"
 #include "Settings/MythicDeveloperSettings.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -61,17 +62,37 @@ bool FMythicStatusEffectTest::RunTest(const FString &Parameters) {
         }
     }
 
-    TestEqual(TEXT("threshold @0 resistance = 100"), Def::ComputeBuildupThreshold(0.0f), 100.0f);
-    TestEqual(TEXT("threshold @full resistance = 102"), Def::ComputeBuildupThreshold(1.0f), 102.0f);
-    TestEqual(TEXT("threshold @0.5 resistance = 101"), Def::ComputeBuildupThreshold(0.5f), 101.0f);
-    TestEqual(TEXT("threshold clamps resistance > 1 to 102"), Def::ComputeBuildupThreshold(5.0f), 102.0f);
-    TestEqual(TEXT("threshold clamps negative resistance to 100"), Def::ComputeBuildupThreshold(-3.0f), 100.0f);
+    // The threshold is authored, so this asserts the relationship to the settings rather than the old literals.
+    const UMythicCombatSettings *CombatSettings = GetDefault<UMythicCombatSettings>();
+    if (TestNotNull(TEXT("combat settings resolve"), CombatSettings)) {
+        const float Base = CombatSettings->StatusBuildupThreshold;
+        const float MaxCut = CombatSettings->MaxStatusThresholdReduction;
 
-    TestFalse(TEXT("below base threshold does not cross"), Def::BuildupCrossesThreshold(99.0f, 0.0f));
-    TestTrue(TEXT("exactly at base threshold crosses"), Def::BuildupCrossesThreshold(100.0f, 0.0f));
-    TestTrue(TEXT("above base threshold crosses"), Def::BuildupCrossesThreshold(150.0f, 0.0f));
-    TestFalse(TEXT("101 does not cross the 102 threshold at full resistance"), Def::BuildupCrossesThreshold(101.0f, 1.0f));
-    TestTrue(TEXT("102 crosses the 102 threshold at full resistance"), Def::BuildupCrossesThreshold(102.0f, 1.0f));
+        TestEqual(TEXT("no attacker reduction leaves the authored base"), Def::ComputeBuildupThreshold(0.0f), Base);
+        TestTrue(TEXT("the base is a designer-reachable number, not a literal"), Base >= 1.0f);
+
+        // The whole point of the stat: an attacker who specialises makes statuses land sooner.
+        TestTrue(TEXT("reduction lowers the threshold"), Def::ComputeBuildupThreshold(0.25f) < Base);
+        TestEqual(TEXT("reduction is the authored fraction of the base"),
+                  Def::ComputeBuildupThreshold(0.25f), Base * 0.75f);
+
+        // Without the ceiling a stacked build reaches zero and every status lands on the first proc.
+        TestEqual(TEXT("reduction past the ceiling clamps to the ceiling"),
+                  Def::ComputeBuildupThreshold(1.0f), Def::ComputeBuildupThreshold(MaxCut));
+        TestTrue(TEXT("even a fully stacked attacker leaves a threshold to cross"),
+                 Def::ComputeBuildupThreshold(1.0f) >= 1.0f);
+        TestEqual(TEXT("a negative reduction cannot raise the threshold"),
+                  Def::ComputeBuildupThreshold(-3.0f), Base);
+
+        TestFalse(TEXT("below the threshold does not cross"), Def::BuildupCrossesThreshold(Base - 1.0f, 0.0f));
+        TestTrue(TEXT("exactly at the threshold crosses"), Def::BuildupCrossesThreshold(Base, 0.0f));
+        TestTrue(TEXT("above the threshold crosses"), Def::BuildupCrossesThreshold(Base * 1.5f, 0.0f));
+
+        // Resistance is deliberately not a threshold input any more: it already gates every proc through
+        // 1 - Resist, so bending the threshold with it as well paid one stat twice.
+        TestTrue(TEXT("a reduced threshold is crossed by buildup the base would not have been"),
+                 Def::BuildupCrossesThreshold(Base * 0.8f, 0.25f));
+    }
 
     return true;
 }

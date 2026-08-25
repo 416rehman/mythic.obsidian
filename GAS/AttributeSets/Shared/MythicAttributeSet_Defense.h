@@ -154,9 +154,14 @@ public:
 
     static void DecayAllBuildups(UAbilitySystemComponent *ASC, float DecayPerSecond, float DeltaSeconds);
 
-    static float ComputeBuildupThreshold(float Resistance);
+    /**
+     * Buildup needed before a status lands, from the authored base less whatever the ATTACKER has specialised
+     * into removing. The defender's resistance is deliberately absent: it already gates every proc through
+     * 1 - Resist, so bending the threshold with it as well would pay one stat twice.
+     */
+    static float ComputeBuildupThreshold(float ThresholdReduction);
 
-    static bool BuildupCrossesThreshold(float NewBuildup, float Resistance);
+    static bool BuildupCrossesThreshold(float NewBuildup, float ThresholdReduction);
 
     void ResetCcAndBuildupState();
 
