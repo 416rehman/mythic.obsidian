@@ -32,6 +32,7 @@ enum class EMythicCharacterSaveVersion : uint8 {
     PreTradeContracts,
     PreQuestJournal,
     PreWholeNumberRolls,
+    PreRunes,
     LatestVersion,
     VersionPlusOne
 };
@@ -174,6 +175,20 @@ struct FSerializedCharacterData {
     UPROPERTY(BlueprintReadWrite)
     TArray<FSoftObjectPath> CompletedStorylines;
 
+    // Per-player RUNE SOCKETS — the rune worn in each socket (definition soft path; a null entry is an empty socket, so
+    // the array index is the slot index) plus how many sockets are open. Persists UMythicRuneComponent, whose SaveGame
+    // flags are inert here (no component archive targets the PlayerState). Without this a reload strips every rune AND
+    // leaves the sockets shut for good, because the GrantPerkSlot rules that opened them are latched in
+    // AppliedUnlockRules and never re-fire. Restored via RestoreRunes, which re-grants each rune's passive ability.
+    // Zero open sockets means the count is absent, which FixupData repairs before load rather than treating as one
+    // socket: GrantPerkSlot was a no-op before this existed, yet its rules still latched, so a save that earned
+    // sockets carries the rules and no count.
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FSoftObjectPath> EquippedRunes;
+
+    UPROPERTY(BlueprintReadWrite)
+    int32 UnlockedRuneSlots = 0;
+
 
     // Last world transform of the player's pawn, so a reload restores position/rotation instead of respawning at
     // the default PlayerStart. Gated by bHasSavedTransform so saves written before this field existed (which would
@@ -187,4 +202,23 @@ struct FSerializedCharacterData {
     static bool Serialize(AActor *SourceActor, FSerializedCharacterData &OutData);
 
     static bool Deserialize(AActor *TargetActor, const FSerializedCharacterData &InData);
+};
+
+/** Repairs for saves written before a field existed, kept pure so each is testable without a save file. */
+struct MYTHIC_API FMythicCharacterSaveMigration {
+    /**
+     * How many rune sockets a pre-Runes save had earned. GrantPerkSlot did nothing back then, but its rules still
+     * latched into AppliedUnlockRules and RestoreUnlockState re-latches them, so the count has to be rebuilt from
+     * the rules or those sockets never reopen. One socket is free; each applied Unlock.Rule.RuneSlot* adds another.
+     */
+    static int32 RuneSlotsFromAppliedRules(TConstArrayView<FGameplayTag> AppliedRules) {
+        static const FName RuleParent(TEXT("Unlock.Rule.RuneSlot"));
+        int32 Slots = 1;
+        for (const FGameplayTag &Rule : AppliedRules) {
+            if (Rule.IsValid() && Rule.GetTagName().ToString().StartsWith(RuleParent.ToString(), ESearchCase::CaseSensitive)) {
+                ++Slots;
+            }
+        }
+        return Slots;
+    }
 };

@@ -5,6 +5,7 @@
 #include "MythicUnlockRule.h"
 #include "MythicUnlockEngine.h"
 #include "MythicAchievementComponent.h"
+#include "Runes/MythicRuneComponent.h"
 
 #include "Mythic/Narrative/MythicNarrativeStateComponent.h"
 #include "Mythic/Player/MythicPlayerState.h"
@@ -201,7 +202,13 @@ void UMythicUnlockComponent::ApplyRule(const UMythicUnlockRule &Rule) {
         case EMythicUnlockEffect::UnlockSkill:
         case EMythicUnlockEffect::UnlockPerk:
         case EMythicUnlockEffect::GrantSkillSlot:
+            break;
         case EMythicUnlockEffect::GrantPerkSlot:
+            if (const AMythicPlayerState *PS = Cast<AMythicPlayerState>(GetOwner())) {
+                if (UMythicRuneComponent *Runes = PS->GetRuneComponent()) {
+                    Runes->GrantSlot();
+                }
+            }
             break;
         case EMythicUnlockEffect::GrantTitle:
         case EMythicUnlockEffect::GrantCosmetic:

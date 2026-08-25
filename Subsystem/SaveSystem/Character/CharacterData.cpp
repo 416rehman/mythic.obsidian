@@ -11,6 +11,7 @@
 #include "Progression/MythicStatLedgerComponent.h"
 #include "Progression/MythicAchievementComponent.h"
 #include "Progression/MythicUnlockComponent.h"
+#include "Progression/Runes/MythicRuneComponent.h"
 #include "Knowledge/MythicCodexComponent.h"
 #include "Mythic/GAS/Progression/MythicRenownComponent.h"
 #include "Mythic/GAS/Mounts/MythicMountRosterComponent.h"
@@ -121,6 +122,15 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
             OutData.ActiveTitle = Unlocks->GetActiveTitleTag();
             UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d unlock tags (%d applied rules)"),
                    OutData.GrantedUnlockTags.Num(), OutData.AppliedUnlockRules.Num());
+        }
+
+        if (const UMythicRuneComponent *RuneComp = MythPS->GetRuneComponent()) {
+            for (const TSoftObjectPtr<UMythicRuneDefinition> &Rune : RuneComp->GetEquippedRunes()) {
+                OutData.EquippedRunes.Add(Rune.ToSoftObjectPath());
+            }
+            OutData.UnlockedRuneSlots = RuneComp->GetUnlockedSlots();
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d rune sockets (%d open)"),
+                   OutData.EquippedRunes.Num(), OutData.UnlockedRuneSlots);
         }
 
         if (const UMythicCodexComponent *CodexComp = MythPS->GetCodexComponent()) {
@@ -335,6 +345,20 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
             UnlocksToRestore->SetRestoring(false);
             UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d unlock tags (%d applied rules)"),
                    InData.GrantedUnlockTags.Num(), InData.AppliedUnlockRules.Num());
+        }
+
+        // Last, after the story/achievement/unlock ledgers above: IsRuneUnlocked reads all three, so a rune gated on a
+        // deed the player has actually earned would otherwise be dropped as unearned.
+        UMythicRuneComponent *RuneComp = MythPS->GetRuneComponent();
+        if (RuneComp && InData.UnlockedRuneSlots > 0) {
+            TArray<TSoftObjectPtr<UMythicRuneDefinition>> SavedRunes;
+            SavedRunes.Reserve(InData.EquippedRunes.Num());
+            for (const FSoftObjectPath &RunePath : InData.EquippedRunes) {
+                SavedRunes.Emplace(RunePath);
+            }
+            RuneComp->RestoreRunes(SavedRunes, InData.UnlockedRuneSlots);
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d rune sockets (%d open)"),
+                   InData.EquippedRunes.Num(), InData.UnlockedRuneSlots);
         }
     }
 

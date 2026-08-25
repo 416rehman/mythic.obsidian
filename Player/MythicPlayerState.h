@@ -21,6 +21,7 @@ class UMythicQuestJournalComponent;
 class UMythicStatLedgerComponent;
 class UMythicAchievementComponent;
 class UMythicUnlockComponent;
+class UMythicRuneComponent;
 class UMythicCodexComponent;
 class UMythicRenownComponent;
 class UMythicMountRosterComponent;
@@ -109,6 +110,12 @@ protected:
     // (GrantedUnlockTags / AppliedUnlockRules / ActiveTitle). Turns earned tags/achievements into concrete unlocks.
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Progression")
     TObjectPtr<UMythicUnlockComponent> Unlocks;
+
+    // Per-player RUNE SOCKETS (replicated COND_OwnerOnly component; server-authoritative equipped runes + unlocked
+    // slot count, and the ability grant/clear that rides each socket). Created in the ctor beside Unlocks, whose
+    // GrantPerkSlot effect opens sockets two through four.
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Progression")
+    TObjectPtr<UMythicRuneComponent> Runes;
 
     // Per-player CODEX (replicated COND_OwnerOnly component; server-authoritative bestiary kill/encounter records +
     // discovered glossary terms). Mirrors the StatLedger/Narrative components — created in the ctor, persisted via
@@ -204,6 +211,11 @@ public:
     // Persists via the character save (GrantedUnlockTags / AppliedUnlockRules / ActiveTitle).
     UFUNCTION(BlueprintPure, Category = "Progression")
     UMythicUnlockComponent *GetUnlockComponent() const { return Unlocks; }
+
+    // Per-player rune sockets (server-authoritative; replicated to owner). Equipped runes + the unlocked slot count;
+    // the unlock engine's GrantPerkSlot effect calls GrantSlot() on it.
+    UFUNCTION(BlueprintPure, Category = "Progression")
+    UMythicRuneComponent *GetRuneComponent() const { return Runes; }
 
     // Per-player codex (server-authoritative; replicated to owner). Bestiary kill/encounter records + discovered
     // glossary terms; persists via the character save (CodexBestiary / CodexTerms).

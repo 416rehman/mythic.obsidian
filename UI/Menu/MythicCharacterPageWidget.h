@@ -116,7 +116,7 @@ protected:
      * show the four choices that shape it most. Empty sockets are drawn as sockets rather than written as the words
      * "not yet earned", so an unfilled one reads as something to fill.
      *
-     * The sockets only display and route: every write still goes through UMythicPerkComponent's server RPCs, which
+     * The sockets only display and route: every write still goes through UMythicRuneComponent's server RPCs, which
      * re-run the slotting rules. Clicking one opens the picker with that slot already chosen.
      */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
@@ -135,7 +135,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Inventory")
     FName BagWidgetName = TEXT("WBP_InventorySlots");
 
-    /** How many sockets to build. Matches the perk component's MaxPerkSlots. */
+    /** How many sockets to build. Matches the rune component's MaxSlots. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes", meta = (ClampMin = "1", ClampMax = "8"))
     int32 SocketCount = 4;
 
