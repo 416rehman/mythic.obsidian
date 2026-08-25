@@ -5,6 +5,7 @@
 #include "AbilitySystemGlobals.h"
 #include "GameModes/GameState/MythicGameState.h"
 #include "Itemization/Affixes/MythicAffixCatalogue.h"
+#include "Settings/MythicDeveloperSettings.h"
 #include "Itemization/MythicLootSettings.h"
 #include "Mythic/Mythic.h"
 #include "GameFramework/Pawn.h"
@@ -427,9 +428,37 @@ bool UAffixesFragment::CanBeStackedWith(const UItemFragment *Other) const {
     return true;
 }
 
+bool UAffixesFragment::CanApplyCraftOp(FText &OutReason) const {
+    if (this->AffixesRuntimeReplicatedData.bCorrupted) {
+        OutReason = NSLOCTEXT("Mythic", "CraftRefusedCorrupted", "This item is corrupted and can no longer be crafted.");
+        return false;
+    }
+    OutReason = FText::GetEmpty();
+    return true;
+}
+
+void UAffixesFragment::ServerCorruptItem() {
+    const AActor *Owner = GetOwningActor();
+    if (!Owner || !Owner->HasAuthority()) {
+        return;
+    }
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    if (Settings && !Settings->bItemCorruptionEnabled) {
+        UE_LOG(Myth, Warning, TEXT("Affixes: corruption refused - item corruption is switched off in settings."));
+        return;
+    }
+    // Deliberately one-way. Corruption is the price of the gamble, so nothing here un-sets it.
+    this->AffixesRuntimeReplicatedData.bCorrupted = true;
+}
+
 void UAffixesFragment::RerollUnlockedAffixes(int32 ItemLevel) {
     const AActor *Owner = GetOwningActor();
     if (!Owner || !Owner->HasAuthority()) {
+        return;
+    }
+    FText Refusal;
+    if (!CanApplyCraftOp(Refusal)) {
+        UE_LOG(Myth, Warning, TEXT("Affixes: reroll refused - %s"), *Refusal.ToString());
         return;
     }
 
@@ -464,6 +493,11 @@ void UAffixesFragment::RerollUnlockedAffixes(int32 ItemLevel) {
 void UAffixesFragment::SetAffixLocked(int32 AffixIndex, bool bLocked) {
     const AActor *Owner = GetOwningActor();
     if (!Owner || !Owner->HasAuthority()) {
+        return;
+    }
+    FText Refusal;
+    if (!CanApplyCraftOp(Refusal)) {
+        UE_LOG(Myth, Warning, TEXT("Affixes: lock refused - %s"), *Refusal.ToString());
         return;
     }
     if (this->AffixesRuntimeReplicatedData.RolledAffixes.IsValidIndex(AffixIndex)) {

@@ -79,19 +79,10 @@ struct FAffixesRuntimeReplicatedData {
     UPROPERTY(NotReplicated, BlueprintReadOnly)
     UAbilitySystemComponent *ASC = nullptr;
 
-    // C4 (crafting) — PERMANENT corruption flag ("Vaal"). Once set, EVERY future craft op is refused (CanApplyCraftOp
-    // denies with Corrupted). A top-level SaveGame bool on this struct persists via the DEFAULT tagged-property path
-    // (this struct has no custom serializer — only its FRolledAffix elements do), exactly like bEquipEventEmitted, and
-    // replicates with the struct so the owning client's tooltip can show "Corrupted".
+    // Permanent. Once set, CanApplyCraftOp refuses every craft op on this item. Replicates with the struct so the
+    // owning client's tooltip can say so, and persists by the default tagged-property path like bEquipEventEmitted.
     UPROPERTY(BlueprintReadOnly, SaveGame)
     bool bCorrupted = false;
-
-    // C4 (crafting) — additive item-level bonus from "Elevation" (RaiseItemLevel). The item instance's own ItemLevel is
-    // immutable (no public setter), so crafting tracks its raised level here; the EFFECTIVE crafting level = base
-    // ItemLevel + this bonus (clamped to the cap). A higher effective level unlocks higher affix tiers on subsequent
-    // Add / UpgradeTier ops. Persists (SaveGame) + replicates as a top-level field of this struct.
-    UPROPERTY(BlueprintReadOnly, SaveGame)
-    int32 ItemLevelBonus = 0;
 };
 
 USTRUCT(BlueprintType)
@@ -197,6 +188,17 @@ public:
     // C4 (crafting) — is this item permanently corrupted (blocks all crafting ops)? Read on server + owning client.
     UFUNCTION(BlueprintPure, Category = "Affixes")
     bool IsCorrupted() const { return AffixesRuntimeReplicatedData.bCorrupted; }
+
+    /** Whether a craft op may run, and why not when it may not. Every craft verb asks this before touching state. */
+    UFUNCTION(BlueprintPure, Category = "Affixes")
+    bool CanApplyCraftOp(FText &OutReason) const;
+
+    /**
+     * SERVER: seals this item against every future craft op, permanently. The risk half of crafting - what makes
+     * a good roll worth stopping on. Refused when item corruption is switched off in settings.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Affixes")
+    void ServerCorruptItem();
 
 
     static bool IsAffixRolled(const FGameplayAttribute &Affix, TArray<FRolledAffix> &InRolledAffixes);
