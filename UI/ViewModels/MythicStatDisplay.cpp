@@ -188,6 +188,15 @@ namespace MythicStatDisplay {
         GRules.Reset();
     }
 
+    // Without this door the registry is a boot-time snapshot: a display-table edit silently does nothing
+    // until the next editor launch, which reads exactly like the edit failing.
+    static FAutoConsoleCommand GRefreshStatDisplayCmd(
+        TEXT("Mythic.RefreshStatDisplay"),
+        TEXT("Drops the cached stat display registry so the next read rebuilds it from DT_StatDisplay."),
+        FConsoleCommandDelegate::CreateLambda([]() {
+            InvalidateCache();
+        }));
+
     FString MakeFriendlyLabel(const FString &PropertyName) {
         FString Out;
         Out.Reserve(PropertyName.Len() + 8);

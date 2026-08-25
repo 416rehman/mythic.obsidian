@@ -21,19 +21,31 @@ struct FMythicNPCData {
     UPROPERTY(BlueprintReadOnly, Category = "NPC Data", meta = (Categories = "NPC.Type"))
     FGameplayTag NPCType;
 
+    // Actor class to spawn for this NPC (copied from UNPCDefinition::NPCClass). Carried on the runtime
+    // struct so cached respawns rebuild the same body.
+    UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
+    TSubclassOf<AMythicNPCCharacter> NPCClass;
+
+    // Cognitive faction (copied from UNPCDefinition::Faction). Resolved to an FMythicFactionId and fed to
+    // the brain on spawn.
+    UPROPERTY(BlueprintReadOnly, Category = "NPC Data", meta = (Categories = "Faction"))
+    FGameplayTag Faction;
+
+    // Behavior traits, applied as loose tags on the NPC's ASC at spawn (stripped again on pool return).
+    UPROPERTY(BlueprintReadOnly, Category = "NPC Data", meta = (Categories = "NPC.Trait"))
+    FGameplayTagContainer Traits;
+
     // Tags required to recruit
     UPROPERTY(EditAnywhere, Category = "NPC Data", meta = (Categories = "NPC.Recruitment"))
     FGameplayTagContainer TagsRequiredToRecruit;
 
-    // Overrides for the NPC's Affiliations. Map of Faction: Value
-    // These have a higher priority than the global AffiliationOverrides in the NPCTypesTable
-    UPROPERTY(EditAnywhere, Category = "NPC Data", meta = (Categories = "NPC.Type"))
+    // Per-faction stance delta on the -100..+100 standing scale, composed with the live diplomacy
+    // relation in AMythicAIController::GetTeamAttitudeTowards.
+    UPROPERTY(EditAnywhere, Category = "NPC Data", meta = (Categories = "Faction"))
     TMap<FGameplayTag, float> AffiliationOverrides;
 
-    // Overrides for the Fight or Flight values. Map of Faction: Value
-    // These have a higher priority than the global FoF mappings in the NPCTypesTable
-    // When this NPC encounters a Hostile NPC, this will be used to determine if this NPC will fight or flee
-    UPROPERTY(EditAnywhere, Category = "NPC Data", meta = (Categories = "NPC.Type"))
+    // Per-faction fight probability [0,1]; collapsed into the brain's Fight/Flee vent weights at spawn.
+    UPROPERTY(EditAnywhere, Category = "NPC Data", meta = (Categories = "Faction"))
     TMap<FGameplayTag, float> FlightOrFightOverrides;
 
     // The NPC's Family
@@ -67,6 +79,9 @@ struct FMythicNPCData {
         NPCId.Invalidate();
         NPCName.Empty();
         NPCType = FGameplayTag();
+        NPCClass = nullptr;
+        Faction = FGameplayTag();
+        Traits = FGameplayTagContainer();
         TagsRequiredToRecruit = FGameplayTagContainer();
         AffiliationOverrides.Empty();
         FlightOrFightOverrides.Empty();
@@ -85,6 +100,9 @@ struct FMythicNPCData {
         this->NPCId = NPCDef->NPCId;
         this->NPCName = NPCDef->Name;
         this->NPCType = NPCDef->NPCType;
+        this->NPCClass = NPCDef->NPCClass;
+        this->Faction = NPCDef->Faction;
+        this->Traits = NPCDef->Traits;
         this->TagsRequiredToRecruit = NPCDef->TagsRequiredToRecruit;
         this->AffiliationOverrides = NPCDef->AffiliationOverrides;
         this->FlightOrFightOverrides = NPCDef->FlightOrFightOverrides;

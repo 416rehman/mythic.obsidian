@@ -9,6 +9,7 @@
 #include "MythicAttributeSet_Utility.h"
 #include "Player/MythicPlayerController.h"
 #include "Player/Proficiency/ProficiencyComponent.h"
+#include "Player/Proficiency/ProficiencyDefinition.h"
 #include "GameFramework/PlayerState.h"
 #include "World/Camping/MythicRestedXp.h"
 
@@ -340,7 +341,56 @@ int32 UMythicAttributeSet_Proficiencies::LevelFromXp(const float CurrentXp, cons
     if (MaxXp <= 0.0f) {
         return 1;
     }
-    return FMath::FloorToInt32(FMath::Clamp((CurrentXp / MaxXp) * MaxLevel, 1.0f, MaxLevel));
+    const float Fraction = FMath::Clamp(CurrentXp / MaxXp, 0.0f, 1.0f);
+
+    // Proficiency XP curves are geometric, so the overall pair (a weighted average of them) is too. A
+    // flat ratio against the lifetime total parks a new character at level 1 for hours; inverting the
+    // same authored curve shape (the combat track's growth rate, rescaled to the overall span) paces
+    // overall levels like proficiency levels. Falls back to the flat ratio only when no track is
+    // authored.
+    const UProficiencyDefinition *CombatDef =
+        UProficiencyDefinition::FindByProgressAttribute(GetCombatProficiencyAttribute());
+    if (CombatDef && CombatDef->GrowthRate > 1.0f + KINDA_SMALL_NUMBER && CombatDef->MaxLevel > 1) {
+        const float Growth = CombatDef->GrowthRate;
+        const float TrackSpan = static_cast<float>(CombatDef->MaxLevel);
+        const float GeometricSpan = FMath::Pow(Growth, TrackSpan - 1.0f) - 1.0f;
+        const float TrackLevel = 1.0f + FMath::LogX(Growth, 1.0f + Fraction * GeometricSpan);
+        const float Level = 1.0f + (TrackLevel - 1.0f) * (MaxLevel - 1.0f) / (TrackSpan - 1.0f);
+        return FMath::FloorToInt32(FMath::Clamp(Level, 1.0f, MaxLevel));
+    }
+    return FMath::FloorToInt32(FMath::Clamp(1.0f + Fraction * (MaxLevel - 1.0f), 1.0f, MaxLevel));
+}
+
+void UMythicAttributeSet_Proficiencies::GetLevelXpWindow(const float CurrentXp, const float MaxXp,
+                                                         int32 &OutLevel, float &OutIntoLevel, float &OutLevelSpan) {
+    OutLevel = LevelFromXp(CurrentXp, MaxXp);
+    OutIntoLevel = 0.0f;
+    OutLevelSpan = 0.0f;
+    auto Settings = GetDefault<UMythicDeveloperSettings>();
+    if (!Settings || MaxXp <= 0.0f) {
+        return;
+    }
+    const float MaxLevel = static_cast<float>(Settings->MaxLevel);
+
+    // The same curve LevelFromXp inverts, run forward: the overall XP at which a given overall level
+    // starts. The two must share one shape or the bar would disagree with the number beside it.
+    const UProficiencyDefinition *CombatDef =
+        UProficiencyDefinition::FindByProgressAttribute(GetCombatProficiencyAttribute());
+    auto XpAtLevel = [&](const float Level) -> float {
+        const float Clamped = FMath::Clamp(Level, 1.0f, MaxLevel);
+        if (CombatDef && CombatDef->GrowthRate > 1.0f + KINDA_SMALL_NUMBER && CombatDef->MaxLevel > 1) {
+            const float Growth = CombatDef->GrowthRate;
+            const float TrackSpan = static_cast<float>(CombatDef->MaxLevel);
+            const float TrackLevel = 1.0f + (Clamped - 1.0f) * (TrackSpan - 1.0f) / (MaxLevel - 1.0f);
+            return MaxXp * (FMath::Pow(Growth, TrackLevel - 1.0f) - 1.0f) / (FMath::Pow(Growth, TrackSpan - 1.0f) - 1.0f);
+        }
+        return MaxXp * (Clamped - 1.0f) / (MaxLevel - 1.0f);
+    };
+
+    const float LevelStart = XpAtLevel(static_cast<float>(OutLevel));
+    const float LevelEnd = OutLevel >= Settings->MaxLevel ? MaxXp : XpAtLevel(static_cast<float>(OutLevel + 1));
+    OutIntoLevel = FMath::Max(0.0f, CurrentXp - LevelStart);
+    OutLevelSpan = FMath::Max(0.0f, LevelEnd - LevelStart);
 }
 
 float UMythicAttributeSet_Proficiencies::CalculateOverallXpMax() {

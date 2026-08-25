@@ -279,9 +279,14 @@ inline void UAffixesFragment::RollAffixesTiered(int ItemLevel, int TotalCount, c
         RollDef.Max = Tier.Max;
         RollDef.Modifier = Def.ModOp;
         RollDef.LevelScaling = Tier.LevelScaling;
+        RollDef.bWholeNumber = Def.bWholeNumber;
 
         FRolledAffix NewAffix(Def.Attribute, ItemLevel, RollDef, false);
+        // The tier roll overwrites the ctor's value, so the whole-number snap must re-apply here.
         NewAffix.Value = FMythicAffixTierMath::RollValueInTier(Tier, ItemLevel, FMath::FRand());
+        if (RollDef.bWholeNumber) {
+            NewAffix.Value = FMath::RoundToFloat(NewAffix.Value);
+        }
         if ((RollDef.Modifier == EGameplayModOp::Multiplicitive || RollDef.Modifier == EGameplayModOp::Division)
             && FMath::IsNearlyZero(NewAffix.Value)) {
             NewAffix.Value = KINDA_SMALL_NUMBER;

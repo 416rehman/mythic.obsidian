@@ -8,6 +8,7 @@
 #include "NPCDefinition.generated.h"
 
 class UFamilyDefinition;
+class AMythicNPCCharacter;
 UCLASS(Blueprintable, BlueprintType)
 class MYTHIC_API UNPCDefinition : public UDataAsset {
     GENERATED_BODY()
@@ -24,6 +25,17 @@ public:
     // NPC Type
     UPROPERTY(EditAnywhere, Category = "Basic", meta=(Categories = "NPC.Type"))
     FGameplayTag NPCType;
+
+    // The actor class the manager spawns for this definition. The Blueprint class carries the mesh,
+    // attack ability and default effects; the raw C++ base has none of them, so an unset class means an
+    // invisible, unarmed pawn.
+    UPROPERTY(EditAnywhere, Category = "Basic")
+    TSubclassOf<AMythicNPCCharacter> NPCClass;
+
+    // The faction whose brain, relations and standing this NPC carries. Unset = no cognitive faction:
+    // the NPC is Neutral to the world and invisible to the diplomacy, witness and standing systems.
+    UPROPERTY(EditAnywhere, Category = "Relations", meta = (Categories = "Faction"))
+    FGameplayTag Faction;
 
     // Proficiencies - What the NPC is good/bad at. Goes on the NPC's ASC
     UPROPERTY(EditAnywhere, Category = "Stats")
@@ -44,8 +56,9 @@ public:
     UPROPERTY(EditAnywhere, Category = "Perception", meta = (ClampMin = "0.0", ClampMax = "180.0"))
     float PeripheralVisionAngleDegrees = 90.0f;
 
-    // Affiliation Overrides - Instead of using the global "per NPCType" affiliations from the NPCTypesTable
-    UPROPERTY(EditAnywhere, Category = "Relations")
+    // Per-faction stance delta on the -100..+100 standing scale, added on top of the live diplomacy
+    // relation before banding. Authored data biases the living world; it never replaces it.
+    UPROPERTY(EditAnywhere, Category = "Relations", meta = (Categories = "Faction"))
     TMap<FGameplayTag, float> AffiliationOverrides;
 
     // Family Definition - Should not be set manually.
@@ -53,8 +66,9 @@ public:
     UPROPERTY(VisibleAnywhere, Category = "Relations")
     TSoftObjectPtr<const UFamilyDefinition> FamilyDef;
 
-    // Fight or Flight Overrides - Instead of using the global "per NPCType" FoF mappings from the NPCTypesTable
-    UPROPERTY(EditAnywhere, Category = "Relations")
+    // Per-faction probability [0,1] of standing to fight when threatened by that faction. Collapsed into
+    // the brain's Fight/Flee vent weights at spawn until a per-faction threat consumer exists.
+    UPROPERTY(EditAnywhere, Category = "Relations", meta = (Categories = "Faction", ClampMin = "0.0", ClampMax = "1.0"))
     TMap<FGameplayTag, float> FlightOrFightOverrides;
 
     // Tags the player must have if they want to recruit this NPC.

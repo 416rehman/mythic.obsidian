@@ -2,6 +2,27 @@
 #include "Mythic.h"
 #include "ProficiencyComponent.h"
 #include "Rewards/AttributeReward.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+
+const UProficiencyDefinition *UProficiencyDefinition::FindByProgressAttribute(const FGameplayAttribute &Attribute) {
+    static TMap<FGameplayAttribute, TWeakObjectPtr<const UProficiencyDefinition>> Cache;
+    if (const TWeakObjectPtr<const UProficiencyDefinition> *Found = Cache.Find(Attribute)) {
+        if (Found->IsValid()) {
+            return Found->Get();
+        }
+    }
+    const FAssetRegistryModule &Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+    TArray<FAssetData> Assets;
+    Registry.Get().GetAssetsByClass(UProficiencyDefinition::StaticClass()->GetClassPathName(), Assets, true);
+    for (const FAssetData &Asset : Assets) {
+        const UProficiencyDefinition *Def = Cast<UProficiencyDefinition>(Asset.GetAsset());
+        if (Def && Def->ProgressAttribute == Attribute) {
+            Cache.Add(Attribute, Def);
+            return Def;
+        }
+    }
+    return nullptr;
+}
 
 FAttributeGoal::FAttributeGoal() {}
 

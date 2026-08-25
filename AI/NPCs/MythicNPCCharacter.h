@@ -175,6 +175,22 @@ protected:
     // OnSpawnedFromPool, Mass embodiment) removes this first so multipliers can never stack.
     FActiveGameplayEffectHandle CombatScalingHandle;
 
+    // Handles for the applied DefaultGameplayEffects. A baseline GE that grants no tags survives the
+    // owned-tags sweep on pool return, so these are removed explicitly — without this every pool cycle
+    // stacked another baseline (the same leak ClearAbility fixed for ability specs).
+    TArray<FActiveGameplayEffectHandle> DefaultEffectHandles;
+
+    // Pool transitions for CharacterMovement. SetActorTickEnabled does not touch component ticks: a parked
+    // character keeps simulating falling (and can be KillZ-destroyed out of the pool) unless the CMC itself
+    // is stopped.
+    void ParkMovementForPool();
+    void RestoreMovementFromPool();
+
+    // Manager-spawn brain wiring: resolves NPCData.Faction to a faction id and initializes the cognitive
+    // brain (no Mass entity), so definition-spawned NPCs join perception, diplomacy, standing and witness
+    // systems instead of living as forced-engagement Neutrals.
+    void InitializeBrainFromNPCData();
+
 public:
     /**
      * The attack this NPC was authored with, and the effects that give it its stats. Public because
@@ -183,6 +199,9 @@ public:
      */
     UFUNCTION(BlueprintPure, Category = "Mythic NPC | Combat")
     TSubclassOf<UMythicGameplayAbility> GetAttackAbility() const { return AttackAbility; }
+
+    // No-copy access for hot paths (perception attitude queries read the affiliation map every sense event).
+    const FMythicNPCData &GetNPCDataRef() const { return NPCData; }
 
     UFUNCTION(BlueprintPure, Category = "Mythic NPC | Combat")
     const TArray<TSubclassOf<UGameplayEffect>> &GetDefaultGameplayEffects() const { return DefaultGameplayEffects; }

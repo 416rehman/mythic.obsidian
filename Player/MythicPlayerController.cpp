@@ -284,6 +284,13 @@ float AMythicPlayerController::GetPlayerLevelProgress() const {
     if (MaxVal <= 0.0f) {
         return 0.0f;
     }
+    int32 Level = 1;
+    float IntoLevel = 0.0f;
+    float LevelSpan = 0.0f;
+    UMythicAttributeSet_Proficiencies::GetLevelXpWindow(Current, MaxVal, Level, IntoLevel, LevelSpan);
+    if (LevelSpan > 0.0f) {
+        return FMath::Clamp(IntoLevel / LevelSpan, 0.0f, 1.0f);
+    }
 
     return FMath::Clamp(Current / MaxVal, 0.0f, 1.0f);
 }

@@ -35,6 +35,12 @@ struct MYTHIC_API FRollDefinition {
     UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category="Presentation")
     bool bIsPercentage = true;
 
+    // Whole-number rolls: the rolled VALUE snaps to an integer at roll and reroll time, server-side.
+    // For flat stats a player reads as counts (Power, Strength, Resolve, Armor) a +3.4 roll is noise
+    // the UI would have to hide; authored here so itemization owns the rule, not the display layer.
+    UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category="Itemization")
+    bool bWholeNumber = false;
+
     bool Serialize(FArchive &Ar) {
         if (!Ar.IsSaveGame()) {
             return false;
@@ -45,6 +51,7 @@ struct MYTHIC_API FRollDefinition {
         Ar << LevelScaling;
         Ar << bLowerIsBetter;
         Ar << bIsPercentage;
+        Ar << bWholeNumber;
         return true;
     }
 
@@ -53,7 +60,8 @@ struct MYTHIC_API FRollDefinition {
             && Max == Other.Max
             && Modifier == Other.Modifier
             && bLowerIsBetter == Other.bLowerIsBetter
-            && bIsPercentage == Other.bIsPercentage;
+            && bIsPercentage == Other.bIsPercentage
+            && bWholeNumber == Other.bWholeNumber;
     }
 
     static float ScaleValue(float Value, float Level, float LevelScaling) {
@@ -124,6 +132,9 @@ struct MYTHIC_API FRolledAttributeSpec {
         auto Max = RollDef.GetScaledMax(ItemLvl);
 
         Value = FMath::RandRange(Min, Max);
+        if (RollDef.bWholeNumber) {
+            Value = FMath::RoundToFloat(Value);
+        }
 
         Definition = RollDef;
     }

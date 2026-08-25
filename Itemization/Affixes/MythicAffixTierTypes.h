@@ -54,6 +54,11 @@ struct FMythicTieredAffixDef {
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Affixes")
     EMythicAffixGroup Group = EMythicAffixGroup::Prefix;
 
+    // Whole-number affix: every rolled VALUE snaps to an integer, at roll and reroll, server-side.
+    // Authored here because itemization owns the rule - display never decides it.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Affixes")
+    bool bWholeNumber = false;
+
     // Matched over the item's GetTypeProbe tags. An EMPTY query applies to ALL items (see FMythicAffixTierMath::DefApplies).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Affixes")
     FGameplayTagQuery Applicability;

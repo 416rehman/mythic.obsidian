@@ -180,10 +180,15 @@ void UMythicCharacterPageWidget::RefreshHeader() {
 
     if (Txt_XpValue) {
         if (bProgressionLive) {
+            // Progress through THIS level, not lifetime totals - "45 / 127929" tells a player nothing.
+            int32 WindowLevel = 1;
+            float IntoLevel = 0.0f;
+            float LevelSpan = 0.0f;
+            UMythicAttributeSet_Proficiencies::GetLevelXpWindow(Current, Max, WindowLevel, IntoLevel, LevelSpan);
             Txt_XpValue->SetVisibility(ESlateVisibility::HitTestInvisible);
             Txt_XpValue->SetText(FText::Format(NSLOCTEXT("Mythic", "CharXp", "{0} / {1}"),
-                                               FText::AsNumber(FMath::FloorToInt(Current)),
-                                               FText::AsNumber(FMath::FloorToInt(Max))));
+                                               FText::AsNumber(FMath::FloorToInt(LevelSpan > 0.0f ? IntoLevel : Current)),
+                                               FText::AsNumber(FMath::CeilToInt(LevelSpan > 0.0f ? LevelSpan : Max))));
         }
         else {
             Txt_XpValue->SetVisibility(ESlateVisibility::Collapsed);

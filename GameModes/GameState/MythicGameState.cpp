@@ -1,5 +1,6 @@
 #include "MythicGameState.h"
 #include "Mythic.h"
+#include "AI/NPCs/MythicNPCManager.h"
 #include "GameModes/Attributes/WorldAttributes.h"
 #include "Net/UnrealNetwork.h"
 #include "Resources/MythicResourceManagerComponent.h"
@@ -78,6 +79,28 @@ void AMythicGameState::AdvanceWorldTier() {
     SetWorldTier(NewTier);
 
     UE_LOG(Myth, Log, TEXT("AdvanceWorldTier: WorldTier now %d (highest reached %d)"), WorldTier, HighestWorldTier);
+}
+
+void AMythicGameState::AddPlayerState(APlayerState *PlayerState) {
+    Super::AddPlayerState(PlayerState);
+    if (HasAuthority()) {
+        if (UGameInstance *GI = GetGameInstance()) {
+            if (UMythicNPCManager *Mgr = GI->GetSubsystem<UMythicNPCManager>()) {
+                Mgr->RefreshCombatScalingOnActive();
+            }
+        }
+    }
+}
+
+void AMythicGameState::RemovePlayerState(APlayerState *PlayerState) {
+    Super::RemovePlayerState(PlayerState);
+    if (HasAuthority()) {
+        if (UGameInstance *GI = GetGameInstance()) {
+            if (UMythicNPCManager *Mgr = GI->GetSubsystem<UMythicNPCManager>()) {
+                Mgr->RefreshCombatScalingOnActive();
+            }
+        }
+    }
 }
 
 void AMythicGameState::BeginPlay() {

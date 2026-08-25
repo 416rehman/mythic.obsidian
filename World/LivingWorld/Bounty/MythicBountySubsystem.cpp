@@ -5,6 +5,7 @@
 #include "World/LivingWorld/CausalFabric/CausalFabric.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "World/LivingWorld/MythicTags_LivingWorld.h"
+#include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "World/LivingWorld/Spawn/MythicPlacement.h"
 #include "World/GameDirector/MythicPacingDirectorSubsystem.h"
 #include "Objectives/ObjectiveDefinition.h"
@@ -131,11 +132,22 @@ void UMythicBountySubsystem::EvaluatePlayer(AMythicPlayerController *PC, double 
         return;
     }
 
+    const UMythicFactionDatabase *FactionDB = LivingWorld ? LivingWorld->GetFactionDatabase() : nullptr;
+
     float Notoriety = 0.0f;
     FMythicFactionId WorstFaction;
     for (const FMythicFactionStandingEntry &Entry : Standing->GetStandings()) {
         if (!Entry.Faction.IsValid()) {
             continue;
+        }
+        // Factions that cannot negotiate sit outside society (bandits, undead) — being hated by them is
+        // not a crime, so their standing never buys a bounty. Without this, lawful bandit-slaying parks
+        // the slayer at permanent max notoriety.
+        if (FactionDB) {
+            FMythicFactionData Data;
+            if (FactionDB->GetFaction(Entry.Faction, Data) && !Data.bCanNegotiate) {
+                continue;
+            }
         }
         const float Heat = -Entry.Value;
         if (Heat > Notoriety) {

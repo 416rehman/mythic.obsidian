@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "GenericTeamAgentInterface.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include <atomic>
 
@@ -367,6 +368,20 @@ public:
     /** Initial faction definitions. Loaded at startup. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     TArray<FMythicFactionData> InitialFactions;
+
+    /**
+     * What each diplomatic relation is worth on the -100..+100 standing scale. Per-NPC affiliation
+     * deltas add on top of this baseline before banding, so authored personality biases the living
+     * diplomacy without ever replacing it.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Relations")
+    TMap<EMythicFactionRelation, float> RelationStandingBaselines = {
+        {EMythicFactionRelation::Allied, 75.0f},
+        {EMythicFactionRelation::Friendly, 60.0f},
+        {EMythicFactionRelation::Neutral, 0.0f},
+        {EMythicFactionRelation::Unfriendly, -60.0f},
+        {EMythicFactionRelation::Hostile, -75.0f},
+    };
 };
 
 
@@ -413,6 +428,15 @@ public:
 
     EMythicFactionRelation GetRelationship(FMythicFactionId A, FMythicFactionId B) const;
 
+    /** The authored standing value a diplomatic relation contributes (see RelationStandingBaselines). */
+    float GetRelationStandingBaseline(EMythicFactionRelation Relation) const;
+
+    /**
+     * Bands a -100..+100 stance into an attitude with the same thresholds the player-standing branch
+     * uses. Static and pure so tests can pin the banding without a world.
+     */
+    static ETeamAttitude::Type BandStanding(float Stance, float HostileThreshold, float FriendlyThreshold);
+
     int32 GetActiveFactionCount() const;
 
     int32 GetMaxFactions() const { return MaxFactions; }
@@ -440,6 +464,9 @@ private:
     TArray<EMythicFactionRelation> ReadRelationships;
 
     std::atomic<int32> RegisteredCount = 0;
+
+    UPROPERTY(Transient)
+    TMap<EMythicFactionRelation, float> RelationStandingBaselines;
 
     mutable FCriticalSection SnapshotLock;
 

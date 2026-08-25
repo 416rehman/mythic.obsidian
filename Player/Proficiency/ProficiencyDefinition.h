@@ -108,6 +108,13 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track | Balancing")
     float BaseXPPerAction = 10.0f;
 
+    /**
+     * The authored definition whose track fills the given attribute, found once through the asset
+     * registry and cached. This is how systems outside the proficiency component (the growth MMC, the
+     * overall-level formula) reach a track's authored curve without a hardcoded asset path.
+     */
+    static const UProficiencyDefinition *FindByProgressAttribute(const FGameplayAttribute &Attribute);
+
     //----------------------------------------------------------------------------
     // 1. Returns the XP cost to level up from the specified level (i.e. from level L to L+1)
     //----------------------------------------------------------------------------

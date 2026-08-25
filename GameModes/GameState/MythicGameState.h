@@ -180,6 +180,11 @@ public:
     virtual void PostInitializeComponents() override;
     virtual void BeginPlay() override;
 
+    // Party size feeds NPC combat scaling; joins and leaves re-stamp every active NPC so a 4-player fight
+    // never lingers on a lone survivor.
+    virtual void AddPlayerState(APlayerState *PlayerState) override;
+    virtual void RemovePlayerState(APlayerState *PlayerState) override;
+
     virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override;
 
     // Gets the ability system component used for game wide things

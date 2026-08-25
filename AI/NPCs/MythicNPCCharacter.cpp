@@ -37,6 +37,7 @@
 #include "TimerManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -62,6 +63,19 @@ void AMythicNPCCharacter::OnSpawnedFromPool(const struct FMythicNPCData &InNPCDa
     // Waking from the pool: visible and solid again before anything else runs.
     SetActorHiddenInGame(false);
     SetActorEnableCollision(true);
+    SetActorTickEnabled(PrimaryActorTick.bCanEverTick);
+    RestoreMovementFromPool();
+
+    // A recycled actor was unpossessed on pool return; a fresh SpawnActor already auto-possessed.
+    if (!GetController()) {
+        if (AController *Retained = PooledController.Get()) {
+            Retained->Possess(this);
+        }
+        else {
+            SpawnDefaultController();
+        }
+    }
+    PooledController = nullptr;
 
     this->InitializeASC();
 
@@ -73,6 +87,12 @@ void AMythicNPCCharacter::OnSpawnedFromPool(const struct FMythicNPCData &InNPCDa
 
     GrantAttackAbility();
 
+    if (AbilitySystemComponent && !NPCData.Traits.IsEmpty()) {
+        AbilitySystemComponent->AddLooseGameplayTags(NPCData.Traits);
+    }
+
+    InitializeBrainFromNPCData();
+
     if (LifeAttributes) {
         LifeAttributes->ResetForRespawn();
     }
@@ -80,6 +100,61 @@ void AMythicNPCCharacter::OnSpawnedFromPool(const struct FMythicNPCData &InNPCDa
     if (LifeComponent) {
         LifeComponent->RestoreAfterDeath();
     }
+}
+
+void AMythicNPCCharacter::ParkMovementForPool() {
+    if (UCharacterMovementComponent *CMC = GetCharacterMovement()) {
+        CMC->StopMovementImmediately();
+        CMC->DisableMovement();
+        CMC->SetComponentTickEnabled(false);
+    }
+}
+
+void AMythicNPCCharacter::RestoreMovementFromPool() {
+    if (UCharacterMovementComponent *CMC = GetCharacterMovement()) {
+        CMC->SetComponentTickEnabled(true);
+        CMC->StopMovementImmediately();
+        CMC->SetMovementMode(MOVE_Walking);
+    }
+}
+
+void AMythicNPCCharacter::InitializeBrainFromNPCData() {
+    if (!CognitiveBrain || !NPCData.Faction.IsValid()) {
+        return;
+    }
+    const UGameInstance *GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    const UMythicLivingWorldSubsystem *LWS = GI ? GI->GetSubsystem<UMythicLivingWorldSubsystem>() : nullptr;
+    const UMythicFactionDatabase *FactionDB = LWS ? LWS->GetFactionDatabase() : nullptr;
+    if (!FactionDB) {
+        return;
+    }
+    const FMythicFactionId FactionId = FactionDB->FindFactionId(NPCData.Faction);
+    if (!FactionId.IsValid()) {
+        UE_LOG(Myth, Warning, TEXT("InitializeBrainFromNPCData: %s carries faction %s which the faction database does not know."),
+               *GetNameSafe(this), *NPCData.Faction.ToString());
+        return;
+    }
+
+    // The per-faction fight map collapses to scalar vent weights until a per-faction threat consumer
+    // exists; the full map stays authored on NPCData for that day.
+    FMythicPersonalityFragment Personality;
+    if (NPCData.FlightOrFightOverrides.Num() > 0) {
+        float Sum = 0.0f;
+        for (const TPair<FGameplayTag, float> &Pair : NPCData.FlightOrFightOverrides) {
+            Sum += Pair.Value;
+        }
+        const float Fight = FMath::Clamp(Sum / NPCData.FlightOrFightOverrides.Num(), 0.0f, 1.0f);
+        Personality.VentWeights[static_cast<int32>(EMythicVentChannel::Fight)] = Fight;
+        Personality.VentWeights[static_cast<int32>(EMythicVentChannel::Flee)] = 1.0f - Fight;
+    }
+
+    FMythicCellCoord HomeCell;
+    if (const UMythicTerritoryGrid *Grid = LWS->GetTerritoryGrid()) {
+        HomeCell = Grid->WorldToCell(GetActorLocation());
+    }
+
+    CognitiveBrain->InitializeBrain(FactionId, HomeCell, Personality, FMassEntityHandle());
+    CognitiveBrain->StartThinking();
 }
 
 void AMythicNPCCharacter::GrantAttackAbility() {
@@ -111,7 +186,10 @@ void AMythicNPCCharacter::CombatInit() {
         Ctx.AddSourceObject(this);
         const FGameplayEffectSpecHandle Spec = AbilitySystemComponent->MakeOutgoingSpec(Effect, 1.0f, Ctx);
         if (Spec.IsValid()) {
-            AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
+            const FActiveGameplayEffectHandle Applied = AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
+            if (Applied.IsValid()) {
+                DefaultEffectHandles.Add(Applied);
+            }
         }
     }
 
@@ -331,6 +409,15 @@ void AMythicNPCCharacter::OnReturnedToPool() {
 
         AbilitySystemComponent->RemoveActiveEffectsWithGrantedTags(FGameplayTagContainer(GAS_STATE_COMBATSCALING));
 
+        // Tag-less baseline GEs are invisible to the owned-tags sweep above; without the explicit removal
+        // the next CombatInit stacks a second baseline on top.
+        for (const FActiveGameplayEffectHandle &Handle : DefaultEffectHandles) {
+            if (Handle.IsValid()) {
+                AbilitySystemComponent->RemoveActiveGameplayEffect(Handle);
+            }
+        }
+        DefaultEffectHandles.Reset();
+
         FMonsterAffixGranter::RemoveMonsterAffixes(AbilitySystemComponent, MonsterAffixHandles);
     }
 
@@ -350,13 +437,23 @@ void AMythicNPCCharacter::OnReturnedToPool() {
         World->GetTimerManager().ClearAllTimersForObject(this);
         if (AController *AIController = GetController()) {
             World->GetTimerManager().ClearAllTimersForObject(AIController);
+            // Retain the controller for the next wake; without this the recycled NPC comes back
+            // controller-less and the old controller leaks in the world.
+            PooledController = AIController;
             AIController->UnPossess();
         }
+    }
+
+    if (CognitiveBrain) {
+        CognitiveBrain->StopThinking();
+        CognitiveBrain->ResetForReuse();
     }
 
     // Pooled actors must not linger in the world: invisible, intangible, and parked until reuse.
     SetActorHiddenInGame(true);
     SetActorEnableCollision(false);
+    SetActorTickEnabled(false);
+    ParkMovementForPool();
 
     bCombatInitialized = false;
     if (AbilitySystemComponent && AttackAbilityHandle.IsValid()) {
@@ -372,27 +469,15 @@ void AMythicNPCCharacter::SleepToPool() {
         return;
     }
 
-    if (CognitiveBrain) {
-        CognitiveBrain->StopThinking();
-    }
-
-    PooledController = GetController();
-
     OnReturnedToPool();
-
-    if (CognitiveBrain) {
-        CognitiveBrain->ResetForReuse();
-    }
-
-    SetActorEnableCollision(false);
-    SetActorHiddenInGame(true);
-    SetActorTickEnabled(false);
 }
 
 void AMythicNPCCharacter::WakeFromPool() {
     if (!HasAuthority()) {
         return;
     }
+
+    RestoreMovementFromPool();
 
     InitializeASC();
 
@@ -666,34 +751,35 @@ void AMythicNPCCharacter::InitializeASC() {
 }
 
 void AMythicNPCCharacter::HandleNPCDeath(AActor *DeadActor) {
-    if (!HasAuthority() || !CognitiveBrain) {
-        return;
-    }
-    const FMassEntityHandle Entity = CognitiveBrain->GetSourceEntity();
-    UMassEntitySubsystem *EntitySubsystem = UWorld::GetSubsystem<UMassEntitySubsystem>(GetWorld());
-    if (!EntitySubsystem || !Entity.IsSet() || !EntitySubsystem->GetEntityManager().IsEntityValid(Entity)) {
-        return;
-    }
-    const FMythicIdentityFragment *Id =
-        EntitySubsystem->GetEntityManager().GetFragmentDataPtr<FMythicIdentityFragment>(Entity);
-    if (!Id) {
+    if (!HasAuthority()) {
         return;
     }
 
-    CognitiveBrain->StopThinking();
+    if (CognitiveBrain) {
+        CognitiveBrain->StopThinking();
+    }
 
     if (UMythicPartySubsystem *Party = GetWorld()->GetSubsystem<UMythicPartySubsystem>()) {
         Party->RemoveCompanionFromAnyParty(this, false);
     }
 
-    if (UGameInstance *GI = GetWorld()->GetGameInstance()) {
-        if (UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
-            if (LWS->IsSystemActive()) {
-                if (UMythicPersistentNPCRegistry *Reg = LWS->GetPersistentNPCRegistry()) {
-                    Reg->RegisterDeath(Id->NameHash, Id->Faction, Id->RoleTag, Id->Cell,
-                                       GetWorld()->GetTimeSeconds(), LWS);
+    // Only Mass-embodied NPCs report into the persistent registry; the corpse timer below runs for every
+    // authority death, or manager-owned NPCs would stand as ticking corpses forever.
+    const FMassEntityHandle Entity = CognitiveBrain ? CognitiveBrain->GetSourceEntity() : FMassEntityHandle();
+    UMassEntitySubsystem *EntitySubsystem = UWorld::GetSubsystem<UMassEntitySubsystem>(GetWorld());
+    if (EntitySubsystem && Entity.IsSet() && EntitySubsystem->GetEntityManager().IsEntityValid(Entity)) {
+        if (const FMythicIdentityFragment *Id =
+            EntitySubsystem->GetEntityManager().GetFragmentDataPtr<FMythicIdentityFragment>(Entity)) {
+            if (UGameInstance *GI = GetWorld()->GetGameInstance()) {
+                if (UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+                    if (LWS->IsSystemActive()) {
+                        if (UMythicPersistentNPCRegistry *Reg = LWS->GetPersistentNPCRegistry()) {
+                            Reg->RegisterDeath(Id->NameHash, Id->Faction, Id->RoleTag, Id->Cell,
+                                               GetWorld()->GetTimeSeconds(), LWS);
+                        }
+                        LWS->ReportNpcDeath(Id->Faction, Id->RoleTag);
+                    }
                 }
-                LWS->ReportNpcDeath(Id->Faction, Id->RoleTag);
             }
         }
     }

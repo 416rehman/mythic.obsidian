@@ -6,6 +6,7 @@ void UMythicFactionDatabase::Initialize(const UMythicFactionDatabaseSettings *Se
 
 
     MaxFactions = Settings->MaxFactions;
+    RelationStandingBaselines = Settings->RelationStandingBaselines;
     WriteFactions.SetNum(MaxFactions);
     ReadFactions.SetNum(MaxFactions);
 
@@ -232,6 +233,23 @@ FMythicFactionId UMythicFactionDatabase::FindFactionId(const FGameplayTag &Tag) 
         }
     }
     return FMythicFactionId();
+}
+
+float UMythicFactionDatabase::GetRelationStandingBaseline(const EMythicFactionRelation Relation) const {
+    if (const float *Baseline = RelationStandingBaselines.Find(Relation)) {
+        return *Baseline;
+    }
+    return 0.0f;
+}
+
+ETeamAttitude::Type UMythicFactionDatabase::BandStanding(const float Stance, const float HostileThreshold, const float FriendlyThreshold) {
+    if (Stance <= HostileThreshold) {
+        return ETeamAttitude::Hostile;
+    }
+    if (Stance >= FriendlyThreshold) {
+        return ETeamAttitude::Friendly;
+    }
+    return ETeamAttitude::Neutral;
 }
 
 EMythicFactionRelation UMythicFactionDatabase::GetRelationship(FMythicFactionId A, FMythicFactionId B) const {

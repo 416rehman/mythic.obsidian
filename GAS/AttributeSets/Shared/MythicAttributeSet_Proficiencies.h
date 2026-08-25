@@ -234,6 +234,13 @@ public:
     /** The one XP-to-level formula, shared by GetLevel and every magnitude calculation that captures XP. */
     static int32 LevelFromXp(float CurrentXp, float MaxXp);
 
+    /**
+     * The current level plus the XP window around it: how far into the level the character is and how
+     * wide the level is, in the same units as CurrentXp. This is what a level readout shows - lifetime
+     * totals mean nothing to a player mid-bar.
+     */
+    static void GetLevelXpWindow(float CurrentXp, float MaxXp, int32 &OutLevel, float &OutIntoLevel, float &OutLevelSpan);
+
 private:
     float CalculateOverallXpMax();
     float CalculateOverallXp();

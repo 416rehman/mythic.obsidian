@@ -26,22 +26,46 @@ void UMythicNPCManager::Initialize(FSubsystemCollectionBase &Collection) {
     Super::Initialize(Collection);
 }
 
-AMythicNPCCharacter *UMythicNPCManager::GetFromPool(FGameplayTag NPCType) {
-    if (!NPCType.IsValid()) {
-        UE_LOG(Myth, Warning, TEXT("UMythicNPCManager::GetFromPool: NPCType is invalid."));
+AMythicNPCCharacter *UMythicNPCManager::GetFromPool(UClass *NPCClass) {
+    if (!NPCClass) {
         return nullptr;
     }
 
-
-    if (NPCCharacterPool.Num() > 0) {
-        if (AMythicNPCCharacter *PooledNPC = NPCCharacterPool.Pop()) {
+    FMythicNPCPoolBucket *Bucket = NPCCharacterPool.Find(NPCClass);
+    if (!Bucket) {
+        return nullptr;
+    }
+    while (Bucket->NPCs.Num() > 0) {
+        if (AMythicNPCCharacter *PooledNPC = Bucket->NPCs.Pop()) {
             return PooledNPC;
         }
-
-        NPCCharacterPool.Remove(nullptr);
-        UE_LOG(Myth, Warning, TEXT("Found and removed nullptr from NPC pool for type %s."), *NPCType.ToString());
+        UE_LOG(Myth, Warning, TEXT("Dropped a null entry from the NPC pool for class %s."), *NPCClass->GetName());
     }
     return nullptr;
+}
+
+bool UMythicNPCManager::IsAuthoritativeWorld() const {
+    const UWorld *World = GetWorld();
+    return World && World->GetNetMode() != NM_Client;
+}
+
+AMythicNPCCharacter *UMythicNPCManager::AcquireNPC(UClass *NPCClass, const FVector &SpawnLocation, const FRotator &SpawnRotation) {
+    if (AMythicNPCCharacter *Pooled = GetFromPool(NPCClass)) {
+        Pooled->SetActorLocationAndRotation(SpawnLocation, SpawnRotation);
+        return Pooled;
+    }
+
+    FActorSpawnParameters SpawnInfo;
+    SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+    return GetWorld()->SpawnActor<AMythicNPCCharacter>(NPCClass, SpawnLocation, SpawnRotation, SpawnInfo);
+}
+
+void UMythicNPCManager::RefreshCombatScalingOnActive() {
+    for (const TPair<FGuid, AMythicNPCCharacter *> &Pair : ActiveNPCs) {
+        if (AMythicNPCCharacter *NPC = Pair.Value) {
+            NPC->StampCombatLevel(NPC->GetNPCDataRef().CombatLevel);
+        }
+    }
 }
 
 void UMythicNPCManager::ReturnToPool(AMythicNPCCharacter *NPC, bool bShouldCache) {
@@ -59,7 +83,7 @@ void UMythicNPCManager::ReturnToPool(AMythicNPCCharacter *NPC, bool bShouldCache
 
     NPC->OnReturnedToPool();
     ActiveNPCs.Remove(NPCId);
-    NPCCharacterPool.Add(NPC);
+    NPCCharacterPool.FindOrAdd(NPC->GetClass()).NPCs.Add(NPC);
 
     UE_LOG(Myth, Verbose, TEXT("NPC returned to pool (ID: %s)"), *NPCId.ToString());
 }
@@ -99,7 +123,7 @@ int32 UMythicNPCManager::CountDefinitionsForType(const FGameplayTag NPCType) {
 }
 
 bool UMythicNPCManager::ReclaimNPC(AMythicNPCCharacter *NPC) {
-    if (!NPC || !ActiveNPCs.Contains(NPC->GetNPCId())) {
+    if (!IsAuthoritativeWorld() || !NPC || !ActiveNPCs.Contains(NPC->GetNPCId())) {
         return false;
     }
     // Emergent NPCs die and are done: no cache, straight back to the pool for the next ambush.
@@ -108,7 +132,7 @@ bool UMythicNPCManager::ReclaimNPC(AMythicNPCCharacter *NPC) {
 }
 
 AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDef, FVector SpawnLocation, FRotator SpawnRotation) {
-    if (!GetWorld()) {
+    if (!GetWorld() || !IsAuthoritativeWorld()) {
         return nullptr;
     }
     if (!NPCDef) {
@@ -129,25 +153,16 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDe
         return SpawnCachedNPC(NPCDef->NPCId, SpawnLocation, SpawnRotation);
     }
 
-    AMythicNPCCharacter *SpawnedNPC = GetFromPool(NPCDef->NPCType);
-
-    FActorSpawnParameters SpawnInfo;
-    SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-    if (SpawnedNPC) {
-        SpawnedNPC->SetActorLocationAndRotation(SpawnLocation, SpawnRotation);
+    if (!NPCDef->NPCClass) {
+        UE_LOG(Myth, Warning, TEXT("SpawnPredefinedNPC: %s has no NPCClass; the raw base class has no mesh, attack or stats."),
+               *NPCDef->GetName());
     }
-    else {
-        UClass *NPCClassToSpawn = AMythicNPCCharacter::StaticClass();
-
-        SpawnedNPC = GetWorld()->SpawnActor<AMythicNPCCharacter>(NPCClassToSpawn, SpawnLocation, SpawnRotation, SpawnInfo);
-        if (!SpawnedNPC) {
-            UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnPredefinedNPC: Failed to spawn new actor for NPC ID %s, Type %s."), *NPCDef->NPCId.ToString(),
-                   *NPCDef->NPCType.ToString());
-            return nullptr;
-        }
-        UE_LOG(Myth, Log, TEXT("Spawned new NPC %s for Predefined ID %s, Type %s."), *SpawnedNPC->GetName(), *NPCDef->NPCId.ToString(),
+    UClass *ClassToSpawn = NPCDef->NPCClass ? NPCDef->NPCClass.Get() : AMythicNPCCharacter::StaticClass();
+    AMythicNPCCharacter *SpawnedNPC = AcquireNPC(ClassToSpawn, SpawnLocation, SpawnRotation);
+    if (!SpawnedNPC) {
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnPredefinedNPC: Failed to spawn new actor for NPC ID %s, Type %s."), *NPCDef->NPCId.ToString(),
                *NPCDef->NPCType.ToString());
+        return nullptr;
     }
 
     FMythicNPCData Data(NPCDef);
@@ -159,7 +174,7 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDe
 }
 
 AMythicNPCCharacter *UMythicNPCManager::SpawnRandomNPC(FGameplayTag NPCType, FVector SpawnLocation, FRotator SpawnRotation) {
-    if (!GetWorld()) {
+    if (!GetWorld() || !IsAuthoritativeWorld()) {
         return nullptr;
     }
     if (!NPCType.IsValid()) {
@@ -186,24 +201,15 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnRandomNPC(FGameplayTag NPCType, FVe
     }
     UNPCDefinition *Chosen = Candidates[FMath::RandRange(0, Candidates.Num() - 1)];
 
-    AMythicNPCCharacter *SpawnedNPC = GetFromPool(NPCType);
-
-    FActorSpawnParameters SpawnInfo;
-    SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-    if (SpawnedNPC) {
-        SpawnedNPC->SetActorLocationAndRotation(SpawnLocation, SpawnRotation);
+    if (!Chosen->NPCClass) {
+        UE_LOG(Myth, Warning, TEXT("SpawnRandomNPC: %s has no NPCClass; the raw base class has no mesh, attack or stats."),
+               *Chosen->GetName());
     }
-    else {
-        UClass *NPCClassToSpawn = AMythicNPCCharacter::StaticClass();
-
-        SpawnedNPC = GetWorld()->SpawnActor<AMythicNPCCharacter>(NPCClassToSpawn, SpawnLocation, SpawnRotation, SpawnInfo);
-        if (!SpawnedNPC) {
-            UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnRandomNPC: Failed to spawn new actor for NPCType %s."), *NPCType.ToString());
-            return nullptr;
-        }
-
-        UE_LOG(Myth, Log, TEXT("Spawned new NPC %s for Random Type %s."), *SpawnedNPC->GetName(), *NPCType.ToString());
+    UClass *ClassToSpawn = Chosen->NPCClass ? Chosen->NPCClass.Get() : AMythicNPCCharacter::StaticClass();
+    AMythicNPCCharacter *SpawnedNPC = AcquireNPC(ClassToSpawn, SpawnLocation, SpawnRotation);
+    if (!SpawnedNPC) {
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnRandomNPC: Failed to spawn new actor for NPCType %s."), *NPCType.ToString());
+        return nullptr;
     }
 
     // The definition is the template, not the individual: a fresh id per spawn so two bandits from one
@@ -218,7 +224,7 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnRandomNPC(FGameplayTag NPCType, FVe
 }
 
 AMythicNPCCharacter *UMythicNPCManager::SpawnCachedNPC(FGuid NPCId, FVector SpawnLocation, FRotator SpawnRotation) {
-    if (!GetWorld()) {
+    if (!GetWorld() || !IsAuthoritativeWorld()) {
         return nullptr;
     }
 
@@ -240,24 +246,12 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnCachedNPC(FGuid NPCId, FVector Spaw
         return nullptr;
     }
 
-    AMythicNPCCharacter *SpawnedNPC = GetFromPool(NPCType);
-
-    FActorSpawnParameters SpawnInfo;
-    SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-    if (SpawnedNPC) {
-        SpawnedNPC->SetActorLocationAndRotation(SpawnLocation, SpawnRotation);
-    }
-    else {
-        UClass *NPCClassToSpawn = AMythicNPCCharacter::StaticClass();
-
-        SpawnedNPC = GetWorld()->SpawnActor<AMythicNPCCharacter>(NPCClassToSpawn, SpawnLocation, SpawnRotation, SpawnInfo);
-        if (!SpawnedNPC) {
-            UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnCachedNPC: Failed to spawn new actor for NPC ID %s, Type %s."), *NPCId.ToString(),
-                   *NPCType.ToString());
-            return nullptr;
-        }
-        UE_LOG(Myth, Log, TEXT("Spawned new NPC %s for Cached ID %s, Type %s."), *SpawnedNPC->GetName(), *NPCId.ToString(), *NPCType.ToString());
+    UClass *ClassToSpawn = CachedData->NPCData.NPCClass ? CachedData->NPCData.NPCClass.Get() : AMythicNPCCharacter::StaticClass();
+    AMythicNPCCharacter *SpawnedNPC = AcquireNPC(ClassToSpawn, SpawnLocation, SpawnRotation);
+    if (!SpawnedNPC) {
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnCachedNPC: Failed to spawn new actor for NPC ID %s, Type %s."), *NPCId.ToString(),
+               *NPCType.ToString());
+        return nullptr;
     }
 
     // Level reflects where the NPC stands NOW, not where it was cached.

@@ -297,6 +297,9 @@ void UAffixesFragment::RerollUnlockedAffixes(int32 ItemLevel) {
             continue;
         }
         Affix.Value = FMath::RandRange(Affix.Definition.GetScaledMin(ItemLevel), Affix.Definition.GetScaledMax(ItemLevel));
+        if (Affix.Definition.bWholeNumber) {
+            Affix.Value = FMath::RoundToFloat(Affix.Value);
+        }
         if ((Affix.Definition.Modifier == EGameplayModOp::Multiplicitive || Affix.Definition.Modifier == EGameplayModOp::Division)
             && FMath::IsNearlyZero(Affix.Value)) {
             Affix.Value = KINDA_SMALL_NUMBER;

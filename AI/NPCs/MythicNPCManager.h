@@ -35,12 +35,25 @@ struct FMythicNPCDefinitionBucket {
     TArray<TObjectPtr<UNPCDefinition>> Defs;
 };
 
+USTRUCT()
+struct FMythicNPCPoolBucket {
+    GENERATED_BODY()
+
+    UPROPERTY()
+    TArray<TObjectPtr<AMythicNPCCharacter>> NPCs;
+};
+
 UCLASS()
 class MYTHIC_API UMythicNPCManager : public UGameInstanceSubsystem {
     GENERATED_BODY()
 
     virtual void Initialize(FSubsystemCollectionBase &Collection) override;
-    AMythicNPCCharacter *GetFromPool(FGameplayTag NPCType);
+    AMythicNPCCharacter *GetFromPool(UClass *NPCClass);
+
+    // The spawn API is BlueprintCallable and the subsystem exists on clients too; a client-side SpawnActor
+    // would make a locally-authoritative phantom NPC only that machine can see. Checked per call because
+    // Initialize runs against the pre-travel dummy world in packaged builds.
+    bool IsAuthoritativeWorld() const;
 
     UPROPERTY()
     TMap<FGuid, FMythicCachedNPCData> CachedNPCs;
@@ -59,10 +72,14 @@ class MYTHIC_API UMythicNPCManager : public UGameInstanceSubsystem {
     TMap<FGuid, FFamilySpec> ActiveFamilySpecs;
 
 protected:
+    // Pooled by actor class: a recycled body must match the class the definition asks for, or a bandit
+    // definition could come back wearing the merchant's Blueprint.
     UPROPERTY()
-    TArray<TObjectPtr<AMythicNPCCharacter>> NPCCharacterPool;
+    TMap<TObjectPtr<UClass>, FMythicNPCPoolBucket> NPCCharacterPool;
 
     void ReturnToPool(AMythicNPCCharacter *NPC, bool bShouldCache = true);
+
+    AMythicNPCCharacter *AcquireNPC(UClass *NPCClass, const FVector &SpawnLocation, const FRotator &SpawnRotation);
 
     /**
      * Definitions bucketed by NPCType, built lazily from the asset registry on the first random spawn.
@@ -103,6 +120,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "NPC Manager|Spawning")
     int32 CountDefinitionsForType(FGameplayTag NPCType);
 
+    /**
+     * Re-runs combat scaling on every active NPC. Called when the session's player count changes, so
+     * long-lived NPCs stamped for a full party do not keep party-sized health against a lone survivor.
+     */
+    void RefreshCombatScalingOnActive();
+
     UFUNCTION(BlueprintCallable, Category= "NPC Manager")
     bool GetCachedNPCData(FGuid NPCType, FMythicNPCData &NPCData);
 
@@ -117,5 +140,11 @@ public:
     int32 GetCachedNPCCount() const { return CachedNPCs.Num(); }
     int32 GetCachedFamilyCount() const { return CachedFamilies.Num(); }
     int32 GetActiveFamilyCount() const { return ActiveFamilySpecs.Num(); }
-    int32 GetPooledNPCCount() const { return NPCCharacterPool.Num(); }
+    int32 GetPooledNPCCount() const {
+        int32 Count = 0;
+        for (const TPair<TObjectPtr<UClass>, FMythicNPCPoolBucket> &Bucket : NPCCharacterPool) {
+            Count += Bucket.Value.NPCs.Num();
+        }
+        return Count;
+    }
 };

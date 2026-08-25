@@ -779,17 +779,25 @@ ETeamAttitude::Type AMythicAIController::GetTeamAttitudeTowards(const AActor &Ot
         if (OtherFaction == MyFaction) {
             return ETeamAttitude::Friendly;
         }
-        switch (FactionDB->GetRelationship(MyFaction, OtherFaction)) {
-        case EMythicFactionRelation::Allied:
-        case EMythicFactionRelation::Friendly:
-            return ETeamAttitude::Friendly;
-        case EMythicFactionRelation::Unfriendly:
-        case EMythicFactionRelation::Hostile:
-            return ETeamAttitude::Hostile;
-        case EMythicFactionRelation::Neutral:
-        default:
-            return ETeamAttitude::Neutral;
+        // The live diplomacy relation sets the baseline stance; the NPC's authored per-faction delta
+        // biases it (a raider hates the law harder than his faction does), then the shared standing
+        // thresholds band the sum. Data never replaces the sim, it leans on it.
+        float Stance = FactionDB->GetRelationStandingBaseline(FactionDB->GetRelationship(MyFaction, OtherFaction));
+        if (const AMythicNPCCharacter *MyNPC = Cast<AMythicNPCCharacter>(MyPawn)) {
+            const TMap<FGameplayTag, float> &Personal = MyNPC->GetNPCDataRef().AffiliationOverrides;
+            if (Personal.Num() > 0) {
+                FMythicFactionData OtherData;
+                if (FactionDB->GetFaction(OtherFaction, OtherData)) {
+                    if (const float *Delta = Personal.Find(OtherData.FactionTag)) {
+                        Stance = FMath::Clamp(Stance + *Delta, -100.0f, 100.0f);
+                    }
+                }
+            }
         }
+        const UMythicFactionStandingComponent *StandingDefaults = GetDefault<UMythicFactionStandingComponent>();
+        return UMythicFactionDatabase::BandStanding(Stance,
+                                                    StandingDefaults->GetHostileThreshold(),
+                                                    StandingDefaults->GetFriendlyThreshold());
     }
 
     if (const APawn *OtherPawn = Cast<APawn>(OtherActor)) {

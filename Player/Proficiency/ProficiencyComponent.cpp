@@ -156,6 +156,22 @@ void UProficiencyComponent::ConfigureProgressionAttribute(FProficiency &Proficie
 
     Proficiency.MaxXP = ceil(UProficiencyDefinition::CalcCumulativeXPForLevel(Def->MaxLevel, Def));
 
+    // Seed the paired *Max attribute. OverallXpMax is a weighted aggregate of these, and an unseeded 0
+    // leaves the whole account at level 1 forever: the header lies and the primary-growth GE grants
+    // nothing, because both divide by it.
+    const FString MaxAttrName = Proficiency.ProgressAttribute.AttributeName + TEXT("Max");
+    if (const UClass *SetClass = Proficiency.ProgressAttribute.GetAttributeSetClass()) {
+        for (TFieldIterator<FProperty> It(SetClass); It; ++It) {
+            if (It->GetName() == MaxAttrName) {
+                const FGameplayAttribute MaxAttr(*It);
+                if (ASC->HasAttributeSetForAttribute(MaxAttr)) {
+                    ASC->SetNumericAttributeBase(MaxAttr, Proficiency.MaxXP);
+                }
+                break;
+            }
+        }
+    }
+
     UE_LOG(Myth, Log, TEXT("Proficiency: Bound to %s (MaxXP: %.1f)"), *Proficiency.ProgressAttribute.AttributeName, Proficiency.MaxXP);
 }
 

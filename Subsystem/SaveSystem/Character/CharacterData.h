@@ -31,6 +31,7 @@ enum class EMythicCharacterSaveVersion : uint8 {
     PreAcquaintance,
     PreTradeContracts,
     PreQuestJournal,
+    PreWholeNumberRolls,
     LatestVersion,
     VersionPlusOne
 };
