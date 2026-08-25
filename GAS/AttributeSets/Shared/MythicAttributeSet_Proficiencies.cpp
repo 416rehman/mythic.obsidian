@@ -326,20 +326,21 @@ int32 UMythicAttributeSet_Proficiencies::GetLevel(const UAbilitySystemComponent 
         return 0;
     }
 
+    return LevelFromXp(CurrentXp, MaxXp);
+}
+
+int32 UMythicAttributeSet_Proficiencies::LevelFromXp(const float CurrentXp, const float MaxXp) {
     auto Settings = GetDefault<UMythicDeveloperSettings>();
     if (!Settings) {
         UE_LOG(Myth, Error, TEXT("Unable to find MythicDeveloperSettings"));
         return 0;
     }
 
-    auto MaxLevel = Settings->MaxLevel;
-
+    const float MaxLevel = Settings->MaxLevel;
     if (MaxXp <= 0.0f) {
         return 1;
     }
-
-    auto Level = FMath::FloorToInt32(FMath::Clamp((CurrentXp / MaxXp) * MaxLevel, 1.0f, MaxLevel));
-    return Level;
+    return FMath::FloorToInt32(FMath::Clamp((CurrentXp / MaxXp) * MaxLevel, 1.0f, MaxLevel));
 }
 
 float UMythicAttributeSet_Proficiencies::CalculateOverallXpMax() {

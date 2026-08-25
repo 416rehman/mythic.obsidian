@@ -139,6 +139,20 @@ public:
 
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Core Affix Scaling", meta = (ClampMin = "1.0"))
     float CoreAffixTailGrowth = 1.05f;
+
+    /**
+     * The authored growth of each primary with character level - the whole "primaries rise with level"
+     * model in two curves a designer can read. Consumed by MythicGE_PrimaryGrowth through non-snapshot
+     * magnitudes, so a level-up moves the primary and its derived values the same frame.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Primary Stats")
+    FCurveTableRowHandle PlayerPowerCurve;
+
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Primary Stats")
+    FCurveTableRowHandle PlayerStrengthCurve;
+
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Primary Stats", meta = (ClampMin = "1.0"))
+    float PlayerPrimaryTailGrowth = 1.01f;
 };
 
 namespace MythicCombat {

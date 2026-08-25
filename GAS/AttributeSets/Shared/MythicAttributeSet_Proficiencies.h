@@ -231,6 +231,9 @@ public:
 
     static int32 GetLevel(const UAbilitySystemComponent* ASC, bool& found);
 
+    /** The one XP-to-level formula, shared by GetLevel and every magnitude calculation that captures XP. */
+    static int32 LevelFromXp(float CurrentXp, float MaxXp);
+
 private:
     float CalculateOverallXpMax();
     float CalculateOverallXp();
