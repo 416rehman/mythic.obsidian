@@ -5,6 +5,42 @@
 #include "Mythic.h"
 #include "MythicNPCCharacter.h"
 #include "Engine/World.h"
+#include "GameModes/Attributes/WorldAttributes.h"
+#include "GameModes/GameState/MythicGameState.h"
+#include "Settings/MythicCombatSettings.h"
+#include "World/LivingWorld/LivingWorldSubsystem.h"
+#include "World/LivingWorld/Territory/TerritoryGrid.h"
+
+int32 UMythicNPCManager::ResolveCombatLevelAt(const FVector &SpawnLocation) const {
+    EMythicDangerTier Tier = EMythicDangerTier::Safe;
+    if (const UWorld *World = GetWorld()) {
+        if (const UGameInstance *GI = World->GetGameInstance()) {
+            if (const UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
+                if (const UMythicTerritoryGrid *Grid = LWS->GetTerritoryGrid()) {
+                    Tier = Grid->GetCellDangerTier(Grid->WorldToCell(SpawnLocation));
+                }
+            }
+        }
+    }
+
+    int32 Level = 1;
+    if (const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>()) {
+        if (const int32 *Base = Settings->EnemyLevelByDangerTier.Find(Tier)) {
+            Level = FMath::Max(1, *Base);
+        }
+    }
+
+    if (const UWorld *World = GetWorld()) {
+        if (const AMythicGameState *GS = World->GetGameState<AMythicGameState>()) {
+            if (const UWorldTierAttributes *WTA = GS->WorldTierAttributes) {
+                // ItemLevelBase is the world tier's floor for dropped gear; enemies stand on the same floor so a
+                // higher world raises the fight and the reward together.
+                Level += FMath::Max(0, FMath::RoundToInt(WTA->GetItemLevelBase()) - 1);
+            }
+        }
+    }
+    return Level;
+}
 
 void UMythicNPCManager::Initialize(FSubsystemCollectionBase &Collection) {
     if (GetWorld()->GetNetMode() >= NM_Client) {
@@ -96,7 +132,9 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDe
                *NPCDef->NPCType.ToString());
     }
 
-    SpawnedNPC->OnSpawnedFromPool(FMythicNPCData(NPCDef));
+    FMythicNPCData Data(NPCDef);
+    Data.CombatLevel = ResolveCombatLevelAt(SpawnLocation);
+    SpawnedNPC->OnSpawnedFromPool(Data);
 
     ActiveNPCs.Add(NPCDef->NPCId, SpawnedNPC);
     return SpawnedNPC;
@@ -179,7 +217,10 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnCachedNPC(FGuid NPCId, FVector Spaw
         UE_LOG(Myth, Log, TEXT("Spawned new NPC %s for Cached ID %s, Type %s."), *SpawnedNPC->GetName(), *NPCId.ToString(), *NPCType.ToString());
     }
 
-    SpawnedNPC->OnSpawnedFromPool(CachedData->NPCData);
+    // Level reflects where the NPC stands NOW, not where it was cached.
+    FMythicNPCData Data = CachedData->NPCData;
+    Data.CombatLevel = ResolveCombatLevelAt(SpawnLocation);
+    SpawnedNPC->OnSpawnedFromPool(Data);
 
     ActiveNPCs.Add(NPCId, SpawnedNPC);
     CachedNPCs.Remove(NPCId);

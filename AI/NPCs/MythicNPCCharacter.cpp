@@ -10,6 +10,7 @@
 #include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
 #include "GAS/Abilities/MythicGameplayAbility.h"
 #include "GAS/Effects/MythicEnemyScaling.h"
+#include "Settings/MythicCombatSettings.h"
 #include "AI/MythicTags_AI.h"
 #include "GAS/MythicTags_GAS.h"
 #include "AI/MonsterAffixes/MonsterAffixPool.h"
@@ -221,8 +222,25 @@ void AMythicNPCCharacter::ApplyCombatScaling() {
         PartySize, PerExtraMemberHealth, PerExtraMemberDamage, WorldHealthMult, WorldDamageMult);
     const FMythicTierScaling Tier = FMythicEnemyScaling::GetTierScaling(EnemyTier);
 
-    const float HealthMult = static_cast<float>(PartyWorldMult.X) * Tier.HealthMult;
-    const float DamageMult = static_cast<float>(PartyWorldMult.Y) * Tier.DamageMult;
+    // The level half: the GameState's min/max curves sampled at this NPC's combat level, rolled once per spawn so
+    // two same-level wolves are not clones. Unauthored curves read 1.0 and the level term vanishes.
+    float LevelHealthMult = 1.0f;
+    float LevelDamageMult = 1.0f;
+    if (const UWorld *World = GetWorld()) {
+        if (const AMythicGameState *GS = World->GetGameState<AMythicGameState>()) {
+            const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+            const float Level = static_cast<float>(FMath::Max(1, NPCData.CombatLevel));
+            const float HealthLow = MythicCombat::SampleOpenEnded(GS->HealthMinCurveRowHandle, Level, Settings->EnemyHealthTailGrowth);
+            const float HealthHigh = MythicCombat::SampleOpenEnded(GS->HealthMaxCurveRowHandle, Level, Settings->EnemyHealthTailGrowth);
+            const float DamageLow = MythicCombat::SampleOpenEnded(GS->DamageMinCurveRowHandle, Level, Settings->EnemyDamageTailGrowth);
+            const float DamageHigh = MythicCombat::SampleOpenEnded(GS->DamageMaxCurveRowHandle, Level, Settings->EnemyDamageTailGrowth);
+            LevelHealthMult = FMath::FRandRange(FMath::Min(HealthLow, HealthHigh), FMath::Max(HealthLow, HealthHigh));
+            LevelDamageMult = FMath::FRandRange(FMath::Min(DamageLow, DamageHigh), FMath::Max(DamageLow, DamageHigh));
+        }
+    }
+
+    const float HealthMult = static_cast<float>(PartyWorldMult.X) * Tier.HealthMult * LevelHealthMult;
+    const float DamageMult = static_cast<float>(PartyWorldMult.Y) * Tier.DamageMult * LevelDamageMult;
 
     FGameplayEffectContextHandle Ctx = AbilitySystemComponent->MakeEffectContext();
     Ctx.AddSourceObject(this);

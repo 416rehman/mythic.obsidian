@@ -66,6 +66,13 @@ public:
     UFUNCTION(BlueprintCallable, Category = "NPC Manager|Spawning")
     AMythicNPCCharacter *SpawnCachedNPC(FGuid NPCId, FVector SpawnLocation, FRotator SpawnRotation);
 
+    /**
+     * The combat level an enemy spawning here should carry: the authored level for the territory danger tier at
+     * this position, lifted by the world tier's ItemLevelBase. The one place spawn danger becomes a number.
+     */
+    UFUNCTION(BlueprintCallable, Category = "NPC Manager|Spawning")
+    int32 ResolveCombatLevelAt(const FVector &SpawnLocation) const;
+
     UFUNCTION(BlueprintCallable, Category= "NPC Manager")
     bool GetCachedNPCData(FGuid NPCType, FMythicNPCData &NPCData);
 

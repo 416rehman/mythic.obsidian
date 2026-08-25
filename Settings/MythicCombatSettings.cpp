@@ -92,4 +92,36 @@ UMythicCombatSettings::UMythicCombatSettings() {
         MakeCcTier(4, 0.75f, 3, 10.0f, 6.0f),
         MakeCcTier(5, 1.0f, 2, 12.0f, 8.0f),
     };
+
+    // Safe stays a tutorial-grade threat; each danger band opens a clear gap over the last so walking toward the
+    // frontier reads as walking into a harder world.
+    EnemyLevelByDangerTier = {
+        {EMythicDangerTier::Safe, 1},
+        {EMythicDangerTier::Low, 5},
+        {EMythicDangerTier::Moderate, 12},
+        {EMythicDangerTier::High, 20},
+        {EMythicDangerTier::Extreme, 30},
+    };
+}
+
+namespace MythicCombat {
+float SampleOpenEnded(const FCurveTableRowHandle &Handle, const float Level, const float TailGrowth) {
+    if (Handle.IsNull()) {
+        return 1.0f;
+    }
+    const FRealCurve *Curve = Handle.GetCurve(TEXT("MythicCombat::SampleOpenEnded"));
+    if (!Curve || Curve->GetNumKeys() == 0) {
+        return 1.0f;
+    }
+
+    float MinTime = 0.0f;
+    float MaxTime = 0.0f;
+    Curve->GetTimeRange(MinTime, MaxTime);
+    const float Clamped = FMath::Clamp(Level, MinTime, MaxTime);
+    const float Base = Curve->Eval(Clamped);
+    if (Level <= MaxTime) {
+        return Base;
+    }
+    return Base * FMath::Pow(FMath::Max(TailGrowth, 1.0f), Level - MaxTime);
+}
 }

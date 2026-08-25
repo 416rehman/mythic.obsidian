@@ -40,6 +40,11 @@ struct FMythicNPCData {
     UPROPERTY(BlueprintReadOnly)
     FGuid NPCFamilyId = FGuid();
 
+    // Combat level, stamped at spawn from the territory danger at the spawn site plus the world tier.
+    // Drives the level half of ApplyCombatScaling and, downstream, the item level of anything it drops.
+    UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
+    int32 CombatLevel = 1;
+
     // Rolled base-attribute specs seeded onto this NPC's ASC on spawn (copied from the source
     // UNPCDefinition::Proficiencies). Applied authority-side in AMythicNPCCharacter::SeedAttributesFromData.
     // Carried on the runtime struct (not via a UNPCDefinition* backpointer) so pooled reuse retains them.

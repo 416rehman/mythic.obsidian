@@ -2,7 +2,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/CurveTable.h"
 #include "Engine/DeveloperSettings.h"
+#include "World/LivingWorld/Territory/MythicDanger.h"
 #include "GAS/Executions/MythicDamageCompose.h"
 #include "GAS/MythicStatContribution.h"
 #include "GAS/MythicHealthBands.h"
@@ -86,4 +88,32 @@ public:
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Crowd Control")
     TArray<FMythicCcTierEscalation> CcEscalationByTier;
+
+    /**
+     * Base combat level an enemy spawns at per territory danger tier at its spawn site. The world already computes
+     * danger from distance to civilisation and military strength; this is the one table that turns that danger into
+     * a number the scaling curves can eat. A tier with no row spawns at level 1.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Enemy Level")
+    TMap<EMythicDangerTier, int32> EnemyLevelByDangerTier;
+
+    /**
+     * Per-level growth applied beyond the last authored key of the enemy scaling curves. Keyed curves terminate
+     * and levels do not; past the final key the sampled value keeps compounding at this rate, so the curves stay
+     * a readable table while the progression stays open-ended.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Enemy Level", meta = (ClampMin = "1.0"))
+    float EnemyHealthTailGrowth = 1.05f;
+
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Enemy Level", meta = (ClampMin = "1.0"))
+    float EnemyDamageTailGrowth = 1.04f;
 };
+
+namespace MythicCombat {
+/**
+ * Sample a level-keyed curve with an open-ended geometric tail: inside the authored range the curve answers
+ * directly; beyond its last key the final value compounds by TailGrowth per level. An unset handle reads 1.0,
+ * so an unauthored curve scales nothing rather than zeroing what it multiplies.
+ */
+MYTHIC_API float SampleOpenEnded(const FCurveTableRowHandle &Handle, float Level, float TailGrowth);
+}
