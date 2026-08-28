@@ -11,81 +11,94 @@ class MYTHIC_API UMythicAttributeSet_Proficiencies : public UMythicAttributeSet 
     GENERATED_BODY()
 
 protected:
-    // Killing, Combat, Fighting etc
+    /** Lifetime Combat XP earned from fighting and defeating enemies. */
     UPROPERTY(BlueprintReadOnly, Category = "Combat Proficiency", ReplicatedUsing = OnRep_CombatProficiency)
     FGameplayAttributeData CombatProficiency;
+    /** Maximum cumulative Combat XP, paired with CombatProficiency by its Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Combat Proficiency", ReplicatedUsing = OnRep_CombatProficiencyMax)
     FGameplayAttributeData CombatProficiencyMax;
 
-    // Cutting wood, trees.
+    /** Lifetime Woodcutting XP earned from felling and processing trees. */
     UPROPERTY(BlueprintReadOnly, Category = "Woodcutting Proficiency", ReplicatedUsing = OnRep_WoodcuttingProficiency)
     FGameplayAttributeData WoodcuttingProficiency;
+    /** Maximum cumulative Woodcutting XP, paired by its Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Woodcutting Proficiency", ReplicatedUsing = OnRep_WoodcuttingProficiencyMax)
     FGameplayAttributeData WoodcuttingProficiencyMax;
 
-    // Mining, digging, mining ores.
+    /** Lifetime Mining XP earned from digging and extracting ore. */
     UPROPERTY(BlueprintReadOnly, Category = "Mining Proficiency", ReplicatedUsing = OnRep_MiningProficiency)
     FGameplayAttributeData MiningProficiency;
+    /** Maximum cumulative Mining XP, paired by its Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Mining Proficiency", ReplicatedUsing = OnRep_MiningProficiencyMax)
     FGameplayAttributeData MiningProficiencyMax;
 
-    // Construction, building, repairing.
+    /** Lifetime Construction XP earned from building and repairing structures. */
     UPROPERTY(BlueprintReadOnly, Category = "Construction Proficiency", ReplicatedUsing = OnRep_ConstructionProficiency)
     FGameplayAttributeData ConstructionProficiency;
+    /** Maximum cumulative Construction XP, paired by its Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Construction Proficiency", ReplicatedUsing = OnRep_ConstructionProficiencyMax)
     FGameplayAttributeData ConstructionProficiencyMax;
 
-    // Trading, buying and selling items.
+    /** Lifetime Trading XP earned from commerce and market activity. */
     UPROPERTY(BlueprintReadOnly, Category = "Trading Proficiency", ReplicatedUsing = OnRep_TradingProficiency)
     FGameplayAttributeData TradingProficiency;
+    /** Maximum cumulative Trading XP, paired by its Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Trading Proficiency", ReplicatedUsing = OnRep_TradingProficiencyMax)
     FGameplayAttributeData TradingProficiencyMax;
 
-    // Hunting, killing animals.
+    /** Lifetime Hunting XP earned from tracking and defeating wildlife. */
     UPROPERTY(BlueprintReadOnly, Category = "Hunting Proficiency", ReplicatedUsing = OnRep_HuntingProficiency)
     FGameplayAttributeData HuntingProficiency;
+    /** Maximum cumulative Hunting XP, paired by its Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Hunting Proficiency", ReplicatedUsing = OnRep_HuntingProficiencyMax)
     FGameplayAttributeData HuntingProficiencyMax;
 
-    // Fishing, catching fish.
+    /** Lifetime Fishing XP earned from catching fish. */
     UPROPERTY(BlueprintReadOnly, Category = "Fishing Proficiency", ReplicatedUsing = OnRep_FishingProficiency)
     FGameplayAttributeData FishingProficiency;
+    /** Maximum cumulative Fishing XP, paired by its Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Fishing Proficiency", ReplicatedUsing = OnRep_FishingProficiencyMax)
     FGameplayAttributeData FishingProficiencyMax;
 
-    // Farming, planting, watering plants.
+    /** Lifetime Farming XP earned from planting and tending crops. */
     UPROPERTY(BlueprintReadOnly, Category = "Farming Proficiency", ReplicatedUsing = OnRep_FarmingProficiency)
     FGameplayAttributeData FarmingProficiency;
+    /** Maximum cumulative Farming XP, paired by its Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Farming Proficiency", ReplicatedUsing = OnRep_FarmingProficiencyMax)
     FGameplayAttributeData FarmingProficiencyMax;
 
-    // Harvesting, gathering crops, shrubs, plants, etc.
+    /** Lifetime Harvesting XP earned from gathering crops and wild plants. */
     UPROPERTY(BlueprintReadOnly, Category = "Harvesting Proficiency", ReplicatedUsing = OnRep_HarvestingProficiency)
     FGameplayAttributeData HarvestingProficiency;
+    /** Maximum cumulative Harvesting XP, paired by its Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Harvesting Proficiency", ReplicatedUsing = OnRep_HarvestingProficiencyMax)
     FGameplayAttributeData HarvestingProficiencyMax;
 
-    // Crafting, making items.
+    /** Lifetime Crafting XP earned from creating items. */
     UPROPERTY(BlueprintReadOnly, Category = "Crafting Proficiency", ReplicatedUsing = OnRep_CraftingProficiency)
     FGameplayAttributeData CraftingProficiency;
+    /** Maximum cumulative Crafting XP, paired by its Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Crafting Proficiency", ReplicatedUsing = OnRep_CraftingProficiencyMax)
     FGameplayAttributeData CraftingProficiencyMax;
 
-    // Alchemy, making potions, poisons, etc.
+    /** Lifetime Alchemy XP earned from creating potions, poisons, and reagents. */
     UPROPERTY(BlueprintReadOnly, Category = "Alchemy Proficiency", ReplicatedUsing = OnRep_AlchemyProficiency)
     FGameplayAttributeData AlchemyProficiency;
+    /** Maximum cumulative Alchemy XP, paired by its Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Alchemy Proficiency", ReplicatedUsing = OnRep_AlchemyProficiencyMax)
     FGameplayAttributeData AlchemyProficiencyMax;
 
-    // Cooking, cooking food.
+    /** Lifetime Cooking XP earned from preparing food. */
     UPROPERTY(BlueprintReadOnly, Category = "Cooking Proficiency", ReplicatedUsing = OnRep_CookingProficiency)
     FGameplayAttributeData CookingProficiency;
+    /** Maximum cumulative Cooking XP, paired by its Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Cooking Proficiency", ReplicatedUsing = OnRep_CookingProficiencyMax)
     FGameplayAttributeData CookingProficiencyMax;
 
-    // AUTO-CALCULATED: Overall Xp based on all proficiencies
+    /** Weighted overall XP derived from every configured proficiency track. */
     UPROPERTY(BlueprintReadOnly, Category = "Overall Xp", ReplicatedUsing = OnRep_OverallXp)
     FGameplayAttributeData OverallXp;
+    /** Weighted account-wide XP capacity derived from every proficiency capacity Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Overall Xp", ReplicatedUsing = OnRep_OverallXpMax)
     FGameplayAttributeData OverallXpMax;
 
@@ -211,7 +224,7 @@ public:
     virtual void OnRep_OverallXpMax(const FGameplayAttributeData &OldValue);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
-    float GetMaxValueForAttribute(const FGameplayAttribute &Attribute);
+    float GetMaxValueForAttribute(const FGameplayAttribute &Attribute) const;
 
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 

@@ -5,61 +5,73 @@
 #include "GameplayEffectTypes.h"
 #include "Engine/DataAsset.h"
 #include "Rewards/RewardBase.h"
+#include "Stats/MythicStatTypes.h"
 #include "ProficiencyDefinition.generated.h"
 class URewardBase;
 
 const float STARTING_XP = 100.0f;
 
+/** Typed permanent-stat target and end-of-track tuning goal for generated proficiency rewards. */
 USTRUCT(BlueprintType, Blueprintable)
 struct FAttributeGoal {
     GENERATED_BODY()
 
     FAttributeGoal();
 
-    FAttributeGoal(FGameplayAttribute InAttribute, float InGoal, EGameplayModOp::Type InModifier);
+    FAttributeGoal(FMythicStatDefinitionHandle InStatDefinition,
+                   float InGoal,
+                   EGameplayModOp::Type InModifier);
 
-    // The attribute to improve
+    /** Canonical Stat Definition improved by the generated permanent milestone rewards. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Attribute Goal")
-    FGameplayAttribute Attribute = FGameplayAttribute();
+    FMythicStatDefinitionHandle TargetStat;
 
-    // The value to reach for this attribute by the end of the proficiency track
+    /** Total authored operand distributed across generated rewards by the end of this proficiency track. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Attribute Goal")
     float Goal = 0.0f;
 
-    // The operation to perform on the attribute
+    /** Permanent-stat operation applied by each generated reward. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Attribute Goal")
     TEnumAsByte<EGameplayModOp::Type> Modifier = EGameplayModOp::Additive;
 };
 
+/** Authored milestone presentation and reward templates placed onto the compiled proficiency track. */
 USTRUCT(BlueprintType, Blueprintable)
 struct FMilestone {
     GENERATED_BODY()
 
-    // Icon for the milestone
+    /** Player-facing milestone icon shown in track previews and reward callouts. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Milestone")
     TSoftObjectPtr<UTexture2D> Icon;
 
-    // The name of the milestone
+    /** Localized player-facing milestone name. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Milestone")
     FText Name;
 
-    // Reward(s) for reaching this milestone
+    /**
+     * Reward templates cloned into transient runtime instances when this milestone is compiled. Attribute reward
+     * identity derives from this authored milestone index and reward slot, so balance-driven level placement can move.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Milestone")
     TArray<URewardBase *> Rewards;
 };
 
+/** Primary Data Asset that owns the complete semantic, progression, presentation, and reward design for one track. */
 UCLASS(BlueprintType, Blueprintable)
-class MYTHIC_API UProficiencyDefinition : public UDataAsset {
+class MYTHIC_API UProficiencyDefinition : public UPrimaryDataAsset {
     GENERATED_BODY()
 
 public:
     UProficiencyDefinition();
 
-    // The name of the proficiency track
+    /** Returns the registered typed identity used by persistence and data-driven proficiency discovery. */
+    virtual FPrimaryAssetId GetPrimaryAssetId() const override;
+
+    /** Localized player-facing name of this proficiency track. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track")
     FText Name;
 
-    // The description of the proficiency track
+    /** Localized explanation of what advances this track and what mastery provides. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track")
     FText Description;
 
@@ -81,30 +93,30 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track")
     FGameplayTag TrackTag;
 
-    // The attribute to use to track the progress of this proficiency track
+    /**
+     * Canonical current-value Stat Definition for this track's XP. Its paired capacity Stat Definition stores
+     * Max XP, so progression, GAS, save data, and the data-driven stat registry share one typed source.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track | Rewards")
-    FGameplayAttribute ProgressAttribute = FGameplayAttribute();
+    FMythicStatDefinitionHandle ProgressStat;
 
-    // The list of milestones for this proficiency track
+    /** Hand-authored milestone rewards distributed across the generated progression track. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track | Rewards")
     TArray<FMilestone> KeyMilestones;
 
-    // The list of attributes to improve. By the end of the proficiency track, the attributes will reach the goal values.
-    // These will be spread across the milestones.
+    /** Permanent stat gains distributed across milestones so each target reaches its authored goal at maximum level. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track | Rewards")
     TArray<FAttributeGoal> AttributeGoals;
 
-    // Maximum level of the proficiency track
+    /** Highest attainable track level and the endpoint used to distribute generated milestone rewards. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track | Balancing")
     int32 MaxLevel = 30;
 
-    // Growth rate of the proficiency track. After each level, the required experience to level up will be multiplied by this value.
-    // For example, if the growth rate is 1.2, the required experience for the next level will be:
-    //   XP_for_next = current_level_cost * 1.2
+    /** Multiplier applied to each successive level-up cost; 1.2 makes every next level cost 20% more XP. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track | Balancing")
     float GrowthRate = 1.2f;
 
-    // Base XP per action. For instance, a combat proficiency track might reward XP per enemy kill.
+    /** Baseline XP for one representative action before reward percentage, level, and player bonuses are applied. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Track | Balancing")
     float BaseXPPerAction = 10.0f;
 
@@ -115,43 +127,42 @@ public:
      */
     static const UProficiencyDefinition *FindByProgressAttribute(const FGameplayAttribute &Attribute);
 
-    //----------------------------------------------------------------------------
-    // 1. Returns the XP cost to level up from the specified level (i.e. from level L to L+1)
-    //----------------------------------------------------------------------------
+    /** Returns the loaded canonical current-XP Stat Definition, or null while semantic data is unavailable. */
+    const UMythicStatDefinition *GetProgressStatDefinition() const;
+
+    /** Returns the GAS attribute owned by Progress Stat, or an invalid attribute when unavailable. */
+    FGameplayAttribute GetProgressAttribute() const;
+
+    /** Returns the GAS attribute owned by Progress Stat's paired capacity definition. */
+    FGameplayAttribute GetProgressCapacityAttribute() const;
+
+    /** Returns the XP cost to advance from Level to Level + 1 using the definition's progression curve. */
     UFUNCTION(BlueprintCallable, Category = "Proficiency Track")
     static float CalcXPCostForLevelUp(int32 Level, const UProficiencyDefinition *ProficiencyDefinition);
 
-    //----------------------------------------------------------------------------
-    // 2. Returns the cumulative XP required to reach the specified level.
-    //    Level 1 is reached at 0 XP; for level > 1, this is the sum of all previous level-up costs.
-    //    For a geometric progression:
-    //       Cumulative XP = STARTING_XP * ((GrowthRate^(Level - 1) - 1) / (GrowthRate - 1))
-    //----------------------------------------------------------------------------
+    /** Returns total lifetime XP required to reach Level; level one always starts at zero XP. */
     UFUNCTION(BlueprintCallable, Category = "Proficiency Track")
     static float CalcCumulativeXPForLevel(int32 Level, const UProficiencyDefinition *ProficiencyDefinition);
 
-    //----------------------------------------------------------------------------
-    // 3. Given cumulative XP, returns the current level.
-    //    This inverts the cumulative XP formula.
-    //----------------------------------------------------------------------------
+    /** Converts lifetime XP into the clamped level reached on the supplied proficiency definition. */
     UFUNCTION(BlueprintCallable, Category = "Proficiency Track")
     static int32 CalcLevelAtXP(float XP, const UProficiencyDefinition *ProficiencyDefinition);
 
-    //----------------------------------------------------------------------------
-    // 4. Given current cumulative XP and a target level, returns the XP remaining to reach that target level.
-    //    If the current XP already meets or exceeds the cumulative XP for TargetLevel, this returns 0.
-    //----------------------------------------------------------------------------
+    /** Returns non-negative XP still required to reach TargetLevel from the supplied lifetime XP. */
     UFUNCTION(BlueprintCallable, Category = "Proficiency Track")
     static float CalcXPRemainingForLevel(float CurrentXP, int32 TargetLevel, const UProficiencyDefinition *ProficiencyDefinition);
 
 #if WITH_EDITOR
 
 public:
-    // A debug helper that prints out the progression table.
-    // Note: In gameplay, a player starts at level 1 with 0 XP and must earn XP for level 2, 3, etc.
+    /** Validates progression tuning and every typed permanent-stat reward target. */
+    virtual EDataValidationResult IsDataValid(FDataValidationContext &Context) const override;
+
+    /** Builds a designer-facing level and cumulative-XP table for auditing this asset's progression curve. */
     UFUNCTION(BlueprintCallable, Category = "Proficiency Track | Debug")
     FString GetProgressionBreakdown() const;
 
+    /** Estimates real time to maximum level at a constant positive action rate for balance review. */
     UFUNCTION(BlueprintCallable, Category = "Proficiency Track | Debug")
     FString GetTimeToMaxLevelEstimate(float ActionsPerMinute = 1.0f) const;
 

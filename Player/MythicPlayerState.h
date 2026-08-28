@@ -30,13 +30,24 @@ class UMythicDialogueComponent;
 class UMythicAcquaintanceComponent;
 class UMythicDossierComponent;
 class UMythicTradeContractComponent;
+class UMythicAffixApplicationComponent;
+class UMythicHarvestReceiptLedgerComponent;
+class UMythicHarvestRewardEscrowComponent;
 UCLASS()
 class MYTHIC_API AMythicPlayerState : public APlayerState, public IAbilitySystemInterface, public IInventoryProviderInterface {
     GENERATED_BODY()
 
 protected:
+    /** Authoritative player Ability System Component that owns attributes, abilities, effects, and gameplay tags. */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Ability System")
     TObjectPtr<UMythicAbilitySystemComponent> MythicAbilitySystemComponent;
+
+    /**
+     * Authoritative permanent equipment-affix composer and cross-item stacking owner. Clients receive GAS values
+     * plus the owner-only base/equipment split required by the data-driven stat sheet.
+     */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ability System|Affixes")
+    TObjectPtr<UMythicAffixApplicationComponent> AffixApplicationComponent;
 
     // Default Ability Set
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
@@ -173,10 +184,18 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Trading")
     TObjectPtr<UMythicTradeContractComponent> TradeContracts;
 
-    // The canonical PERSISTENT player identity = the save-slot CharacterID this player's character was loaded from
-    // (a stable GUID-string across sessions). Empty until a character is loaded onto this player. Server sets it from
-    // the save-load path; replicated so clients can display/attribute by a stable key. This is the cross-session key
-    // the party/companion system and the player registry resolve against (vs the session-transient GetPlayerId()).
+    /** Native authority-only receipt ledger persisted with this exact character; it is never replicated or BP-owned. */
+    UPROPERTY()
+    TObjectPtr<UMythicHarvestReceiptLedgerComponent> HarvestReceiptLedger;
+
+    /** Native authority-only deterministic item mailbox persisted atomically with this character and inventory. */
+    UPROPERTY()
+    TObjectPtr<UMythicHarvestRewardEscrowComponent> HarvestRewardEscrow;
+
+    /**
+     * Canonical save-slot CharacterID loaded for this player. Authority owns it, Blueprint may read the replicated
+     * stable cross-session key, and empty means persistent character loading/registry agreement is not ready.
+     */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Identity")
     FString PersistentCharacterId;
 
@@ -185,6 +204,10 @@ protected:
 public:
     virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override;
     UMythicAbilitySystemComponent *GetMythicAbilitySystemComponent() const;
+
+    /** Returns the authoritative component that owns persistent item-affix effects and stacking winners. */
+    UFUNCTION(BlueprintPure, Category = "Ability System|Affixes")
+    UMythicAffixApplicationComponent *GetAffixApplicationComponent() const { return AffixApplicationComponent; }
 
     // Per-player faction standing store (server-authoritative; replicated to owner).
     UFUNCTION(BlueprintPure, Category = "Faction")
@@ -264,6 +287,14 @@ public:
     UFUNCTION(BlueprintPure, Category = "Trading")
     UMythicTradeContractComponent *GetTradeContractComponent() const { return TradeContracts; }
 
+    UMythicHarvestReceiptLedgerComponent *GetHarvestReceiptLedger() const {
+        return HarvestReceiptLedger;
+    }
+
+    UMythicHarvestRewardEscrowComponent *GetHarvestRewardEscrow() const {
+        return HarvestRewardEscrow;
+    }
+
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
     virtual void BeginPlay() override;
@@ -271,11 +302,14 @@ public:
 
     void SetPersistentCharacterId(const FString &InCharacterId);
 
+    /** Returns the stable character identifier used by persistence; empty until character data has been assigned. */
     UFUNCTION(BlueprintPure, Category = "Identity")
     const FString &GetPersistentCharacterId() const { return PersistentCharacterId; }
 
-    // The canonical key this player is addressed by across the party/companion + registry systems: the persistent
-    // CharacterID when one has been loaded, else a session-stable fallback. Built from this player's live state.
+    /**
+     * Returns the live registry key: the persistent character id after load, otherwise a session-only fallback.
+     * Persistent gameplay transactions must separately require GetPersistentCharacterId to be non-empty.
+     */
     UFUNCTION(BlueprintPure, Category = "Identity")
     FString GetCanonicalPlayerKey() const;
 

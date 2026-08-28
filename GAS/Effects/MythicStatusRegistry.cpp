@@ -6,6 +6,9 @@
 #include "Mythic.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
+#include "Engine/World.h"
+#include "GameFramework/GameStateBase.h"
+#include "GameplayEffect.h"
 #include "GAS/Effects/MythicStatusEffectDefinition.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/Abilities/MythicAbilityRollSource.h"
@@ -22,7 +25,38 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_STATUS_DAMAGE, "SetByCaller.Statu
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_STATUS_DURATION, "SetByCaller.Status.Duration",
                                "Seconds handed to an authored status effect");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_STATUS_CONTROL_MAGNITUDE, "SetByCaller.Status.ControlMagnitude",
-                               "Rolled control strength (slow/weaken/terrify fraction) handed to a control status effect");
+                               "Snapshotted aggregate control strength handed to a control status effect");
+
+namespace {
+const FActiveGameplayEffect *FindActiveStatusStack(const UAbilitySystemComponent *TargetASC,
+                                                  const UMythicStatusEffectDefinition *Definition,
+                                                  const UAbilitySystemComponent *SourceASC) {
+    const UGameplayEffect *EffectCDO = Definition && Definition->EffectToApply
+                                           ? Definition->EffectToApply.GetDefaultObject()
+                                           : nullptr;
+    const EGameplayEffectStackingType StackingType = EffectCDO
+                                                         ? EffectCDO->GetStackingType()
+                                                         : EGameplayEffectStackingType::None;
+    if (!TargetASC || !EffectCDO || StackingType == EGameplayEffectStackingType::None
+        || (StackingType == EGameplayEffectStackingType::AggregateBySource && !SourceASC)) {
+        return nullptr;
+    }
+
+    for (const FActiveGameplayEffectHandle &Handle : TargetASC->GetActiveEffects(FGameplayEffectQuery())) {
+        const FActiveGameplayEffect *ActiveEffect = TargetASC->GetActiveGameplayEffect(Handle);
+        if (!ActiveEffect) {
+            continue;
+        }
+        const bool bMatchingSource = StackingType != EGameplayEffectStackingType::AggregateBySource
+            || ActiveEffect->Spec.GetEffectContext().GetOriginalInstigatorAbilitySystemComponent() == SourceASC;
+        if (ActiveEffect->Spec.Def == EffectCDO && bMatchingSource
+            && ActiveEffect->Spec.GetEffectContext().GetSourceObject() == Definition) {
+            return ActiveEffect;
+        }
+    }
+    return nullptr;
+}
+}
 
 void UMythicStatusRegistry::BuildIndex() {
     const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
@@ -206,9 +240,9 @@ float UMythicStatusRegistry::ResolveApplierPowerMultiplier(const AActor *Instiga
 }
 
 namespace {
-// Walks the active control statuses of one kind on a target and folds their per-application ControlMagnitudes into a
-// single ready-to-multiply factor. Applications that authored no band are ignored here; the caller substitutes the
-// pre-band constant only when none carried a magnitude, so today's flat behaviour holds until content is tuned.
+// Walks the active control-status handles of one kind and folds their already-snapshotted aggregates into a single
+// ready-to-multiply factor. Handles with no authored band are ignored; the caller substitutes the pre-band constant
+// only when none carries an aggregate, so untuned content preserves its flat behaviour.
 float CombineControlMagnitudes(const UAbilitySystemComponent *ASC, const FGameplayTag &StateTag, float FallbackMagnitude, bool bBonus) {
     if (!ASC || !StateTag.IsValid()) {
         return 1.0f;
@@ -261,25 +295,140 @@ float UMythicStatusRegistry::RollMagnitudeOrBase(const FRollDefinition &Range, f
     return RollScaledMagnitude(Range, 0, Scale, Roll01);
 }
 
+float UMythicStatusRegistry::ResolveStackedDamageMagnitude(const float ExistingAggregate, const float NewStackRoll,
+                                                            const int32 ExistingStackCount, const int32 StackLimit) {
+    const float SafeExisting = FMath::IsFinite(ExistingAggregate) ? FMath::Max(0.0f, ExistingAggregate) : 0.0f;
+    const float SafeRoll = FMath::IsFinite(NewStackRoll) ? FMath::Max(0.0f, NewStackRoll) : 0.0f;
+    const bool bAtStackLimit = StackLimit > 0 && ExistingStackCount >= StackLimit;
+    if (bAtStackLimit) {
+        return SafeExisting;
+    }
+
+    const double Combined = static_cast<double>(SafeExisting) + static_cast<double>(SafeRoll);
+    return FMath::IsFinite(Combined) && Combined <= static_cast<double>(TNumericLimits<float>::Max())
+               ? static_cast<float>(Combined)
+               : SafeExisting;
+}
+
+float UMythicStatusRegistry::ResolveStackedControlMagnitude(
+    const float ExistingAggregate, const float NewStackRoll, const int32 ExistingStackCount,
+    const int32 StackLimit, const EMythicStatusControlOperation Operation) {
+    const bool bHasExisting = FMath::IsFinite(ExistingAggregate) && ExistingAggregate >= 0.0f;
+    const float SafeExisting = bHasExisting ? ExistingAggregate : 0.0f;
+    const float SafeRoll = FMath::IsFinite(NewStackRoll) ? FMath::Max(0.0f, NewStackRoll) : 0.0f;
+    if (StackLimit > 0 && ExistingStackCount >= StackLimit) {
+        return SafeExisting;
+    }
+
+    if (Operation == EMythicStatusControlOperation::Bonus) {
+        const double ExistingFactor = bHasExisting ? 1.0 + static_cast<double>(SafeExisting) : 1.0;
+        const double Combined = ExistingFactor * (1.0 + static_cast<double>(SafeRoll)) - 1.0;
+        return FMath::IsFinite(Combined) && Combined <= static_cast<double>(TNumericLimits<float>::Max())
+                   ? static_cast<float>(Combined)
+                   : SafeExisting;
+    }
+
+    const double ExistingFactor = bHasExisting
+                                      ? 1.0 - static_cast<double>(FMath::Clamp(SafeExisting, 0.0f, 1.0f))
+                                      : 1.0;
+    const double NewFactor = 1.0 - static_cast<double>(FMath::Min(SafeRoll, 0.95f));
+    return static_cast<float>(FMath::Clamp(1.0 - ExistingFactor * NewFactor, 0.0, 1.0));
+}
+
+UAbilitySystemComponent *UMythicStatusRegistry::ResolveStatusEffectSourceASC(AActor *Instigator,
+                                                                             UAbilitySystemComponent *TargetASC) {
+    if (UAbilitySystemComponent *InstigatorASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Instigator)) {
+        return InstigatorASC;
+    }
+
+    if (Instigator) {
+        // AggregateBySource keys stacks by ASC, not EffectCauser or SourceObject. Giving each ASC-less authored hazard
+        // a transient identity component is therefore the only way to keep two fires/traps from sharing rolls, caps,
+        // and tick attribution without inventing string IDs or duplicating GameplayEffect classes. It is server-only:
+        // the physical actor and exact status definition remain the replicated/presentation identities.
+        if (!Instigator->HasAuthority()) {
+            return nullptr;
+        }
+
+        static const FName StatusSourceASCName(TEXT("MythicStatusSourceASC"));
+        UAbilitySystemComponent *StatusSourceASC = NewObject<UAbilitySystemComponent>(
+            Instigator, StatusSourceASCName, RF_Transient);
+        if (!StatusSourceASC) {
+            return nullptr;
+        }
+        StatusSourceASC->SetIsReplicated(false);
+        Instigator->AddInstanceComponent(StatusSourceASC);
+        StatusSourceASC->RegisterComponent();
+        StatusSourceASC->InitAbilityActorInfo(Instigator, Instigator);
+        return StatusSourceASC;
+    }
+
+    const UWorld *World = TargetASC ? TargetASC->GetWorld() : nullptr;
+    AGameStateBase *GameState = World ? World->GetGameState() : nullptr;
+    return UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(GameState);
+}
+
 bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC, const UMythicStatusEffectDefinition *Definition, AActor *Instigator,
-                                              AActor *Causer) {
+                                               AActor *Causer) {
     if (!TargetASC || !Definition || !Definition->EffectToApply) {
         return false;
     }
 
-    FGameplayEffectContextHandle Context = TargetASC->MakeEffectContext();
-    Context.AddInstigator(Instigator, Causer ? Causer : Instigator);
+    AActor *StatusSourceActor = Instigator ? Instigator : Causer;
+    UAbilitySystemComponent *SourceASC = ResolveStatusEffectSourceASC(StatusSourceActor, TargetASC);
+    if (!SourceASC) {
+        return false;
+    }
 
-    const FGameplayEffectSpecHandle Spec = TargetASC->MakeOutgoingSpec(Definition->EffectToApply, 1.0f, Context);
+    const bool bUsesActorlessWorldSource = !StatusSourceActor;
+    AActor *ContextInstigator = StatusSourceActor;
+    if (bUsesActorlessWorldSource) {
+        ContextInstigator = SourceASC->GetOwnerActor();
+        if (!ContextInstigator) {
+            const UWorld *World = TargetASC->GetWorld();
+            ContextInstigator = World ? World->GetGameState() : nullptr;
+        }
+    }
+    AActor *ContextCauser = Causer ? Causer : Instigator;
+
+    FGameplayEffectContextHandle Context = SourceASC->MakeEffectContext();
+    Context.AddInstigator(ContextInstigator, ContextCauser);
+    if (Context.GetOriginalInstigatorAbilitySystemComponent() != SourceASC) {
+        if (FMythicGameplayEffectContext *MythicContext =
+                FMythicGameplayEffectContext::ExtractEffectContext(Context)) {
+            MythicContext->SetInstigatorAbilitySystemComponentForStacking(SourceASC);
+        }
+    }
+    if (Context.GetOriginalInstigatorAbilitySystemComponent() != SourceASC) {
+        UE_LOG(Myth, Error, TEXT("StatusRegistry: failed to retain source ASC for %s"), *Definition->GetName());
+        return false;
+    }
+    Context.AddSourceObject(Definition);
+
+    // Burn/Bleed/etc booleans describe proc intent on the hit that built the status. A fresh periodic context must
+    // not inherit those flags as damage identity; the exact definition above is the canonical status provenance.
+
+    const FGameplayEffectSpecHandle Spec = SourceASC->MakeOutgoingSpec(Definition->EffectToApply, 1.0f, Context);
     if (!Spec.IsValid()) {
         return false;
     }
 
-    // Two applications differ by the roll AND by what the applier has stacked, so a poison build hits harder
-    // than a passer-by inflicting the same poison.
     const UMythicCombatSettings *CombatSettings = GetDefault<UMythicCombatSettings>();
     const float BaseDamage = CombatSettings ? CombatSettings->StatusBaseDamagePerTick : 3.0f;
     const float BaseDuration = CombatSettings ? CombatSettings->StatusBaseDurationSeconds : 5.0f;
+
+    const UGameplayEffect *EffectCDO = Definition->EffectToApply.GetDefaultObject();
+    if (EffectCDO && EffectCDO->GetStackingType() == EGameplayEffectStackingType::AggregateBySource
+        && EffectCDO->bFactorInStackCount) {
+        UE_LOG(Myth, Error,
+               TEXT("StatusRegistry: %s aggregates rolled damage itself, but %s also factors StackCount. "
+                    "Disable bFactorInStackCount to prevent double multiplication."),
+               *Definition->GetName(), *EffectCDO->GetName());
+        return false;
+    }
+    const FActiveGameplayEffect *ExistingStack = FindActiveStatusStack(TargetASC, Definition, SourceASC);
+    const int32 ExistingStackCount = ExistingStack ? ExistingStack->Spec.GetStackCount() : 0;
+    const int32 StackLimit = EffectCDO ? EffectCDO->StackLimitCount : 0;
 
     // Two applications differ by the roll AND by what the applier has stacked, so a poison build hits harder than
     // a passer-by inflicting the same poison. The global scale is the one knob that moves every status at once, Power
@@ -287,7 +436,16 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
     const float DamageScale = (CombatSettings ? CombatSettings->StatusDamageScale : 1.0f)
         * ResolveApplierPowerMultiplier(Instigator)
         * ResolveApplierBonus(Instigator, Definition->BonusDamageAttribute);
-    const float Damage = RollMagnitudeOrBase(Definition->DamagePerTick, BaseDamage, DamageScale, FMath::FRand());
+    const bool bAtStackLimit = StackLimit > 0 && ExistingStackCount >= StackLimit;
+    const float NewDamageRoll = bAtStackLimit
+                                    ? 0.0f
+                                    : RollMagnitudeOrBase(Definition->DamagePerTick, BaseDamage, DamageScale, FMath::FRand());
+    const float ExistingDamage = ExistingStack
+                                     ? ExistingStack->Spec.GetSetByCallerMagnitude(
+                                           GAS_SETBYCALLER_STATUS_DAMAGE, false, 0.0f)
+                                     : 0.0f;
+    const float Damage = ResolveStackedDamageMagnitude(
+        ExistingDamage, NewDamageRoll, ExistingStackCount, StackLimit);
     if (Damage > 0.0f) {
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_DAMAGE, Damage);
     }
@@ -304,11 +462,25 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
     const bool bControlAuthored = Definition->ControlMagnitude.Min > 0.0f || Definition->ControlMagnitude.Max > 0.0f;
     if (bControlAuthored) {
         const float ControlScale = ResolveApplierBonus(Instigator, Definition->ControlMagnitudeAttribute);
-        const float ControlMag = RollMagnitudeOrBase(Definition->ControlMagnitude, 0.0f, ControlScale, FMath::FRand());
+        const float NewControlRoll = bAtStackLimit
+                                         ? 0.0f
+                                         : RollMagnitudeOrBase(
+                                             Definition->ControlMagnitude, 0.0f, ControlScale, FMath::FRand());
+        const float ExistingControl = ExistingStack
+                                          ? ExistingStack->Spec.GetSetByCallerMagnitude(
+                                              GAS_SETBYCALLER_STATUS_CONTROL_MAGNITUDE, false, -1.0f)
+                                          : -1.0f;
+        const float ControlMag = ResolveStackedControlMagnitude(
+            ExistingControl, NewControlRoll, ExistingStackCount, StackLimit, Definition->ControlOperation);
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_CONTROL_MAGNITUDE, ControlMag);
     }
 
-    TargetASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
+    const FActiveGameplayEffectHandle AppliedHandle = SourceASC == TargetASC
+                                                          ? TargetASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get())
+                                                          : SourceASC->ApplyGameplayEffectSpecToTarget(*Spec.Data.Get(), TargetASC);
+    if (!AppliedHandle.IsValid()) {
+        return false;
+    }
     PlayStatusCue(TargetASC, Definition->OnsetCueTag);
     TeachStatusIfNew(TargetASC, Definition);
     return true;

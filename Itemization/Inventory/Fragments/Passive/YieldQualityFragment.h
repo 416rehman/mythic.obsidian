@@ -13,7 +13,10 @@ class MYTHIC_API UYieldQualityFragment : public UItemFragment {
 public:
     DECLARE_FRAGMENT(YieldQuality)
 
-    /** This definition's quality tier (P1 shared enum). The def IS the tier — this never changes at runtime. */
+    /**
+     * Immutable quality snapshot for this physical item. The definition supplies the default; authoritative factory
+     * construction may replace it with an already-resolved outcome before publication, after which it never changes.
+     */
     UPROPERTY(Replicated, EditAnywhere, BlueprintReadOnly, SaveGame, Category = "Yield Quality")
     EMythicYieldQuality QualityTier = EMythicYieldQuality::Common;
 

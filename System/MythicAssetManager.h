@@ -33,6 +33,17 @@ public:
 
     static const FPrimaryAssetType ConversionRecipeType;
 
+    static const FPrimaryAssetType StatCategoryDefinitionType;
+    static const FPrimaryAssetType StatDefinitionType;
+    static const FPrimaryAssetType AffixDefinitionType;
+    static const FPrimaryAssetType AffixPoolType;
+    static const FPrimaryAssetType AffixRollPolicyType;
+    static const FPrimaryAssetType AffixProfileType;
+    static const FPrimaryAssetType ItemizationRulesetType;
+    static const FPrimaryAssetType HarvestToolTypeDefinitionType;
+    static const FPrimaryAssetType HarvestableDefinitionType;
+    static const FPrimaryAssetType ProficiencyDefinitionType;
+
 private:
     TMap<FSoftObjectPath, TSharedPtr<FStreamableHandle>> ActiveHandles;
 

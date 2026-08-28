@@ -6,6 +6,8 @@
 #include "GAS/AttributeSets/MythicAttributeSet.h"
 #include "MythicAttributeSet_Life.generated.h"
 
+class UMythicStatusEffectDefinition;
+
 UENUM(BlueprintType)
 enum class EMythicLethalOutcome : uint8 {
     Survive,
@@ -18,17 +20,19 @@ class MYTHIC_API UMythicAttributeSet_Life : public UMythicAttributeSet {
     GENERATED_BODY()
 
 protected:
+    /** Maximum health replicated to clients and available to Blueprint UI bindings. */
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_MaxHealth)
     FGameplayAttributeData MaxHealth;
+
+    /** Current health replicated to clients and available to Blueprint UI bindings. */
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_Health)
     FGameplayAttributeData Health;
 
-    // Meta Attribute - NOT replicated, used for damage/healing calculations
-    // Damage is applied to this, then converted to -Health in PostGameplayEffectExecute
+    /** Non-replicated damage meta attribute converted into a negative Health delta after combat resolution. */
     UPROPERTY(BlueprintReadOnly, Category = "Attributes")
     FGameplayAttributeData Damage;
-    // Meta Attribute - NOT replicated, used for damage/healing calculations
-    // Healing is applied to this, then converted to +Health in PostGameplayEffectExecute
+
+    /** Non-replicated healing meta attribute converted into a positive Health delta after resolution. */
     UPROPERTY(BlueprintReadOnly, Category = "Attributes")
     FGameplayAttributeData Healing;
 
@@ -74,9 +78,31 @@ public:
 
     static bool ComputeOutOfHealthLatch(float NewHealth);
 
+    /** Returns the finite, positive health amount actually removed after clamping. */
+    static float ResolveAppliedHealthDamage(float OldHealth, float NewHealth);
+
+    /** Returns the finite, positive shield amount actually absorbed without rounding it for transport. */
+    static float ResolveAppliedShieldDamage(float RawShieldAbsorbed);
+
+    /** True only when an authoritative resolution represents a finite, positive renderable magnitude. */
+    static bool ShouldEmitResolvedCombatText(float ResolvedMagnitude, bool bAuthoritative);
+
+    /** Routes an outgoing copy only when the source has a distinct owning viewer. */
+    static bool ShouldRouteResolvedCombatTextToSource(bool bHasSourceViewer, bool bSourceIsTargetViewer);
+
+    /** Routes an incoming copy whenever the damaged target has an owning viewer. */
+    static bool ShouldRouteResolvedCombatTextToTarget(bool bHasTargetViewer);
+
+    /**
+     * Resolves the exact canonical status Data Asset carried by a periodic effect context. Returns null for direct
+     * damage, arbitrary periodic effects, and contexts that do not carry a typed status definition.
+     */
+    static const UMythicStatusEffectDefinition *ResolvePeriodicStatusDefinition(
+        float Period, const FGameplayEffectContextHandle &Context);
+
     static EMythicLethalOutcome ResolveLethalOutcome(bool bWouldBeLethal, bool bCoopDownStateEnabled, bool bAlreadyDowned, bool bRevivablePawn);
 
-    // True once Health has hit zero (the server-authoritative death latch).
+    /** Returns true once Health has reached zero and the server-authoritative death latch is set. */
     UFUNCTION(BlueprintPure, Category = "Attributes")
     bool IsDead() const { return bOutOfHealth; }
 

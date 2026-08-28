@@ -10,29 +10,36 @@
 #include "Settings/MythicDeveloperSettings.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
-#include "Itemization/Affixes/MythicAffixCatalogue.h"
+#include "Itemization/Affixes/MythicAffixDefinition.h"
+#include "Stats/MythicStatDefinition.h"
 
 namespace MythicTest {
-// Every attribute any shipped affix catalogue can actually roll. Read from the asset registry rather than a
-// hardcoded list, so a new catalogue counts automatically.
+// Every stat reached by a shipped Affix Definition that owns at least one embedded tier progression. Read from the
+// registry so a newly authored build stat counts automatically.
 static TSet<FString> GatherRollableAttributes() {
     FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
     IAssetRegistry &Registry = Module.Get();
     Registry.SearchAllAssets(true);
 
-    TArray<FAssetData> CatalogueAssets;
-    Registry.GetAssetsByClass(UMythicAffixCatalogue::StaticClass()->GetClassPathName(), CatalogueAssets);
-
-    TSet<FString> Out;
-    for (const FAssetData &CatalogueAsset : CatalogueAssets) {
-        const UMythicAffixCatalogue *Catalogue = Cast<UMythicAffixCatalogue>(CatalogueAsset.GetAsset());
-        if (!Catalogue) {
+    TSet<FPrimaryAssetId> ReferencedStatIds;
+    TArray<FAssetData> DefinitionAssets;
+    Registry.GetAssetsByClass(UMythicAffixDefinition::StaticClass()->GetClassPathName(), DefinitionAssets);
+    for (const FAssetData &DefinitionAsset : DefinitionAssets) {
+        const UMythicAffixDefinition *Definition = Cast<UMythicAffixDefinition>(DefinitionAsset.GetAsset());
+        if (!Definition || Definition->TierProgressions.IsEmpty()
+            || !Definition->TargetStat.IsValid()) {
             continue;
         }
-        for (const FMythicAffixCatalogueEntry &Entry : Catalogue->Entries) {
-            if (Entry.Def.Attribute.IsValid() && Entry.Def.Tiers.Num() > 0) {
-                Out.Add(Entry.Def.Attribute.GetName());
-            }
+        ReferencedStatIds.Add(Definition->TargetStat.GetPrimaryAssetId());
+    }
+
+    TSet<FString> Out;
+    TArray<FAssetData> StatAssets;
+    Registry.GetAssetsByClass(UMythicStatDefinition::StaticClass()->GetClassPathName(), StatAssets);
+    for (const FAssetData &StatAsset : StatAssets) {
+        const UMythicStatDefinition *Stat = Cast<UMythicStatDefinition>(StatAsset.GetAsset());
+        if (Stat && ReferencedStatIds.Contains(Stat->GetPrimaryAssetId()) && Stat->Attribute.IsValid()) {
+            Out.Add(Stat->Attribute.GetName());
         }
     }
     return Out;
@@ -142,12 +149,12 @@ bool FMythicStatusRollableTest::RunTest(const FString &Parameters) {
     }
 
     const TSet<FString> RollableAttributes = MythicTest::GatherRollableAttributes();
-    if (!TestTrue(TEXT("the project ships an affix catalogue that grants something"), RollableAttributes.Num() > 0)) {
+    if (!TestTrue(TEXT("the project ships an Affix Definition with embedded tiers"), RollableAttributes.Num() > 0)) {
         return false;
     }
 
     // A status a player cannot roll for is a status no build can be made of. This is the check that would have
-    // caught Poison and Freeze being absent from the catalogue while still looking wired up in code.
+    // caught Poison and Freeze being absent from Affix Definitions while still looking wired up in code.
     for (const UMythicStatusEffectDefinition *Definition : Library->Statuses) {
         if (!Definition || !Definition->StatusType.IsValid()) {
             continue;
@@ -157,7 +164,7 @@ bool FMythicStatusRollableTest::RunTest(const FString &Parameters) {
         const FString Leaf = TagPath.FindLastChar(TCHAR('.'), Dot) ? TagPath.RightChop(Dot + 1) : TagPath;
         const FString ChanceAttribute = FString::Printf(TEXT("Apply%sOnHitChance"), *Leaf);
 
-        TestTrue(*FString::Printf(TEXT("%s can be rolled by loot (%s appears in an affix catalogue)"), *Leaf, *ChanceAttribute),
+        TestTrue(*FString::Printf(TEXT("%s can be rolled by loot (%s has an embedded affix tier set)"), *Leaf, *ChanceAttribute),
                  RollableAttributes.Contains(ChanceAttribute));
     }
 
@@ -172,12 +179,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMythicBuildStatsRollableTest::RunTest(const FString &Parameters) {
     const TSet<FString> RollableAttributes = MythicTest::GatherRollableAttributes();
-    if (!TestTrue(TEXT("the project ships an affix catalogue that grants something"), RollableAttributes.Num() > 0)) {
+    if (!TestTrue(TEXT("the project ships an Affix Definition with embedded tiers"), RollableAttributes.Num() > 0)) {
         return false;
     }
 
     /**
-     * The stats a build is made of. Each is read by the damage pipeline, so any of them the catalogue does not roll is a
+     * The stats a build is made of. Each is read by the damage pipeline, so any of them affix data does not roll is a
      * lever the player can see working in code and never obtain. IncreasedDamageToEnemiesUnderStatusEffects and
      * BonusDamageToSuperiorEnemies were both in exactly that state: live in the execution, granted by nothing.
      * This list is the specification — add to it when a new build stat ships.

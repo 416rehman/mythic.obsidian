@@ -632,7 +632,7 @@ int32 AMythicFarmPlot::ResolveProficiencyLevel(AActor *Interactor, const UProfic
             if (!ASC) {
                 return 0;
             }
-            const float CurrentXP = ASC->GetNumericAttribute(Proficiency->ProgressAttribute);
+            const float CurrentXP = ASC->GetNumericAttribute(Proficiency->GetProgressAttribute());
             return UProficiencyDefinition::CalcLevelAtXP(CurrentXP, Proficiency);
         }
     }

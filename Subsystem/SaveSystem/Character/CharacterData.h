@@ -15,6 +15,8 @@
 #include "World/Trading/MythicTradeContractTypes.h"
 #include "World/LivingWorld/Acquaintance/MythicAcquaintanceTypes.h"
 #include "World/LivingWorld/Chronicle/MythicDossierComponent.h"
+#include "World/Harvesting/MythicHarvestReceiptTypes.h"
+#include "World/Harvesting/MythicHarvestRewardEscrowTypes.h"
 #include "CharacterData.generated.h"
 
 UENUM(BlueprintType)
@@ -36,6 +38,8 @@ enum class EMythicCharacterSaveVersion : uint8 {
     PreRunes,
     PreSkills,
     PreSkillModifiers,
+    PreHarvestReceiptLedger,
+    PreHarvestRewardEscrow,
     LatestVersion,
     VersionPlusOne
 };
@@ -57,6 +61,14 @@ struct FSerializedCharacterData {
 
     UPROPERTY(BlueprintReadWrite)
     TArray<FSerializedInventoryData> Inventories;
+
+    /** Native authority-owned cumulative harvest receipts captured atomically with inventory, progression, and quests. */
+    UPROPERTY()
+    FMythicHarvestReceiptLedgerSaveV1 HarvestReceiptLedger;
+
+    /** Deterministic item entitlements accepted from the world and waiting on inventory space. */
+    UPROPERTY()
+    FMythicHarvestItemEscrowSaveV1 HarvestItemEscrow;
 
     UPROPERTY(BlueprintReadWrite)
     TArray<FSerializedProficiencyData> Proficiencies;

@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "Engine/NetDriver.h"
 #include "GameFramework/Actor.h"
 #include "Net/UnrealNetwork.h"
 #include "Mythic/Mythic.h"
@@ -29,6 +30,7 @@ public:
         return OwningActor;
     }
 
+    /** Assigns the authoritative replication owner and registers this object as a replicated subobject. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly)
     void SetOwner(AActor *NewOwner) {
         if (!ensureMsgf(NewOwner, TEXT("SetOwner: NewOwner cannot be null"))) {

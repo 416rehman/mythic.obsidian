@@ -22,6 +22,19 @@ public:
     // otherwise immunity through IncomingDamageMultiplier cannot be expressed.
     static float ApplyChipFloor(float Damage, float MinChipDamage);
 
+    /** Suppresses Gameplay Cues owned by an application effect when damage is rejected before landing. */
+    static void MarkDamageExecutionAborted(
+        FGameplayEffectCustomExecutionOutput &OutExecutionOutput);
+
+    /**
+     * Applies the native Damage.Hit cue policy to a fully composed pre-mitigation damage value. Zero, negative, or
+     * non-finite damage suppresses the application GE's automatic hit cue; positive damage leaves it enabled.
+     * Returns true when the resolved hit carries no damage. Status buildup may still be processed by the caller.
+     */
+    static bool HandleResolvedDamageCuePolicy(
+        float ResolvedDamage,
+        FGameplayEffectCustomExecutionOutput &OutExecutionOutput);
+
 protected:
     virtual void Execute_Implementation(const FGameplayEffectCustomExecutionParameters& ExecutionParams, FGameplayEffectCustomExecutionOutput& OutExecutionOutput) const override;
 

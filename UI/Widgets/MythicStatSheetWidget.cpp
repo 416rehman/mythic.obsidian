@@ -85,8 +85,10 @@ void UMythicStatSheetWidget::NativeConstruct() {
 
     if (!bCollapseInitialized) {
         bCollapseInitialized = true;
-        for (const EMythicStatCategory Category : DefaultCollapsedSections) {
-            CollapsedSections.Add(Category);
+        for (const FGameplayTag CategoryTag : DefaultCollapsedCategoryTags) {
+            if (CategoryTag.IsValid()) {
+                CollapsedSections.Add(CategoryTag);
+            }
         }
     }
 
@@ -171,12 +173,6 @@ void UMythicStatSheetWidget::Unbind() {
         ViewModel->Shutdown();
     }
     bBound = false;
-}
-
-void UMythicStatSheetWidget::ToggleShowUnmodified() {
-    if (ViewModel) {
-        ViewModel->SetShowUnmodified(!ViewModel->GetShowUnmodified());
-    }
 }
 
 void UMythicStatSheetWidget::HandleFieldChanged(UObject *Object, UE::FieldNotification::FFieldId FieldId) {
@@ -274,9 +270,9 @@ void UMythicStatSheetWidget::HandleSectionToggled(UMythicSectionHeader *Header) 
     if (!HeaderCategories.IsValidIndex(Index)) {
         return;
     }
-    const EMythicStatCategory Category = HeaderCategories[Index];
-    if (!CollapsedSections.Remove(Category)) {
-        CollapsedSections.Add(Category);
+    const FGameplayTag CategoryTag = HeaderCategories[Index];
+    if (!CollapsedSections.Remove(CategoryTag)) {
+        CollapsedSections.Add(CategoryTag);
     }
     Rebuild();
 }
@@ -315,19 +311,19 @@ void UMythicStatSheetWidget::SetRowGap(FMythicStatRowWidgets &Row, float TopGap)
 }
 
 void UMythicStatSheetWidget::ApplyLine(FMythicStatRowWidgets &Row, const FMythicStatLine &Line) {
-    const bool bPrimary = Line.Category == EMythicStatCategory::Primary;
-    const FSlateFontInfo &LineFont = bPrimary && PrimaryRowFont.HasValidFont() ? PrimaryRowFont : RowFont;
+    const bool bEmphasized = Line.bEmphasizeRow;
+    const bool bHasDrilldown = Line.bEnableContributionDrilldown;
+    const FSlateFontInfo &LineFont = bEmphasized && PrimaryRowFont.HasValidFont() ? PrimaryRowFont : RowFont;
     const bool bGauge = Line.BarPercent >= 0.0f;
     // Base 0 means the value and the bonus are the same number; printing both reads as a bug.
     const bool bAllBonus = Line.bHasBonus && FMath::IsNearlyZero(Line.BaseValue);
 
     if (Row.Backing) {
-        // Exactly one hit-taking node per row: the primary's backing takes the hover for its tooltip,
-        // every other row stays transparent to the mouse.
-        Row.Backing->SetVisibility(bPrimary ? ESlateVisibility::Visible : ESlateVisibility::HitTestInvisible);
+        // Only data-authored drill-down rows take hover input; every other row stays transparent to the mouse.
+        Row.Backing->SetVisibility(bHasDrilldown ? ESlateVisibility::Visible : ESlateVisibility::HitTestInvisible);
         Row.Backing->SetBrush(Sheet_NoDrawBrush());
-        Row.Backing->SetPadding(bPrimary ? FMargin(0.0f, 4.0f) : FMargin(0.0f));
-        if (!bPrimary) {
+        Row.Backing->SetPadding(bEmphasized ? FMargin(0.0f, 4.0f) : FMargin(0.0f));
+        if (!bHasDrilldown) {
             Row.Backing->SetToolTip(nullptr);
         }
     }
@@ -336,8 +332,8 @@ void UMythicStatSheetWidget::ApplyLine(FMythicStatRowWidgets &Row, const FMythic
 
     Row.Label->SetText(Line.Label);
     Row.Label->SetColorAndOpacity(FSlateColor(LabelColor));
-    if (RowFont.HasValidFont()) {
-        Row.Label->SetFont(RowFont);
+    if (LineFont.HasValidFont()) {
+        Row.Label->SetFont(LineFont);
     }
 
     if (Row.ValueBox) {
@@ -351,7 +347,7 @@ void UMythicStatSheetWidget::ApplyLine(FMythicStatRowWidgets &Row, const FMythic
     Row.Value->SetVisibility(ESlateVisibility::HitTestInvisible);
     Row.Value->SetText(Line.Value);
     Row.Value->SetColorAndOpacity(FSlateColor(
-        bPrimary ? Sheet_PrimaryText
+        bEmphasized ? Sheet_PrimaryText
                  : bAllBonus ? (Line.BonusValue < 0.0f ? PenaltyColor : BonusColor) : ValueColor));
     if (LineFont.HasValidFont()) {
         Row.Value->SetFont(LineFont);
@@ -384,16 +380,16 @@ void UMythicStatSheetWidget::ApplyLine(FMythicStatRowWidgets &Row, const FMythic
         Row.Bonus->SetFont(RowFont);
     }
 
-    if (bPrimary) {
-        ApplyPrimaryTooltip(Row, Line);
+    if (bHasDrilldown) {
+        ApplyContributionTooltip(Row, Line);
     }
 }
 
-void UMythicStatSheetWidget::ApplyPrimaryTooltip(FMythicStatRowWidgets &Row, const FMythicStatLine &Line) {
-    if (!Row.Backing || !ViewModel || !TooltipPool.IsValidIndex(UsedPrimaryTooltips)) {
+void UMythicStatSheetWidget::ApplyContributionTooltip(FMythicStatRowWidgets &Row, const FMythicStatLine &Line) {
+    if (!Row.Backing || !ViewModel || !TooltipPool.IsValidIndex(UsedContributionTooltips)) {
         return;
     }
-    FMythicStatTooltipWidgets &Tip = TooltipPool[UsedPrimaryTooltips++];
+    FMythicStatTooltipWidgets &Tip = TooltipPool[UsedContributionTooltips++];
 
     if (Tip.Title) {
         Tip.Title->SetText(FText::Format(NSLOCTEXT("Mythic", "PrimaryContributes", "{0} contributes"), Line.Label));
@@ -564,7 +560,7 @@ void UMythicStatSheetWidget::Rebuild() {
     }
 
     // Tooltips are re-texted from index zero each pass; a stale cursor would strand hovers on old figures.
-    UsedPrimaryTooltips = 0;
+    UsedContributionTooltips = 0;
     ApplySummaries();
 
     // Rows first, so the ordering pass has every widget it needs to parent. A collapsed section's rows are
@@ -576,7 +572,7 @@ void UMythicStatSheetWidget::Rebuild() {
             continue;
         }
         NewShape.Add(Section.Lines.Num());
-        const bool bSectionCollapsed = CollapsedSections.Contains(Section.Category);
+        const bool bSectionCollapsed = CollapsedSections.Contains(Section.CategoryTag);
         for (const FMythicStatLine &Line : Section.Lines) {
             FMythicStatRowWidgets &Row = GetOrCreateRow(RowIndex++);
             ApplyLine(Row, Line);
@@ -593,7 +589,7 @@ void UMythicStatSheetWidget::Rebuild() {
             continue;
         }
         if (UMythicSectionHeader *Header = GetOrCreateHeader(SectionIndex)) {
-            const bool bSectionCollapsed = CollapsedSections.Contains(Section.Category);
+            const bool bSectionCollapsed = CollapsedSections.Contains(Section.CategoryTag);
             // Open sections carry no trailing count - it reads as a stat in its own right. A closed drawer
             // says what it holds, in words, so "4" can never read as a value.
             Header->SetHeader(Section.Heading,
@@ -606,7 +602,7 @@ void UMythicStatSheetWidget::Rebuild() {
             Header->SetCollapsed(bSectionCollapsed);
             Header->SetVisibility(ESlateVisibility::Visible);
         }
-        HeaderCategories.Add(Section.Category);
+        HeaderCategories.Add(Section.CategoryTag);
         ++SectionIndex;
     }
 

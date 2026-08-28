@@ -16,11 +16,15 @@
 class UMythicInventorySlot;
 
 #define DECLARE_FRAGMENT(Name) \
-UFUNCTION(BlueprintCallable, BlueprintPure) \
+/** Returns the typed fragment from a live item instance, or null when the item does not own one. */ \
+UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Item Fragment", \
+          meta = (ToolTip = "Returns this typed fragment from a live item instance, or null when the item does not own one.")) \
 const U##Name##Fragment* Get##Name##FragmentFromInstance(UMythicItemInstance* ItemInstance) { \
     return ItemInstance->GetFragment<U##Name##Fragment>(); \
 } \
-UFUNCTION(BlueprintCallable, BlueprintPure) \
+/** Returns the typed fragment from an immutable item definition, or null when the definition does not own one. */ \
+UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Item Fragment", \
+          meta = (ToolTip = "Returns this typed fragment from an immutable item definition, or null when the definition does not own one.")) \
 static const U##Name##Fragment* Get##Name##FragmentFromDefinition(UItemDefinition* ItemDefinition) { \
     return UItemDefinition::GetFragment<U##Name##Fragment>(ItemDefinition); \
 }
@@ -30,11 +34,13 @@ DOREPLIFETIME_CONDITION(ThisClass, Name##RuntimeReplicatedData, COND_InitialOrOw
 DOREPLIFETIME_CONDITION(ThisClass, Name##Config, COND_InitialOrOwner);
 
 
+/** Abstract instanced base for immutable item configuration plus replicated per-instance fragment state. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced, Abstract)
 class MYTHIC_API UItemFragment : public UMythicReplicatedObject {
     GENERATED_BODY()
 
 protected:
+    /** Live owning item instance assigned when the fragment is instanced; null on immutable definition templates. */
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item Fragment")
     UMythicItemInstance *ParentItemInstance;
 
@@ -63,15 +69,15 @@ public:
         DOREPLIFETIME_CONDITION(UItemFragment, ParentItemInstance, COND_InitialOrOwner);
     }
 
-    // Get the owning item instance
+    /** Returns the live item instance that owns this runtime fragment, or null on a definition template. */
     UFUNCTION(BlueprintPure, Category = "Item Fragment")
     UMythicItemInstance *GetOwningItemInstance() const { return ParentItemInstance; }
 
-    // Get the owning inventory component's owners ability system component
+    /** Returns the inventory component that owns the live item, or null while the fragment is not in an inventory. */
     UFUNCTION(BlueprintPure, Category = "Item Fragment")
     UMythicInventoryComponent *GetOwningInventoryComponent() const;
 
-    // Get the owning inventory component's owners ability system component
+    /** Returns the Mythic ASC associated with the fragment's owning actor, or null when no owner has one. */
     UFUNCTION(BlueprintPure, Category = "Item Fragment")
     UMythicAbilitySystemComponent *GetOwningAbilitySystemComponent() const;
 

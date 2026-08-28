@@ -12,6 +12,7 @@
 
 class UMythicAbilitySystemComponent;
 class AMythicPlayerController;
+class UAttackFragment;
 
 UENUM(BlueprintType)
 enum class EMythicAbilityActivationPolicy : uint8 {
@@ -53,33 +54,60 @@ public:
     virtual void OnAvatarSet(const FGameplayAbilityActorInfo *ActorInfo, const FGameplayAbilitySpec &Spec) override;
 
 
-    /** Creates gameplay effect container spec to be applied later via ApplyDamageContainerSpec */
-    UFUNCTION(BlueprintCallable, Category = "MythicAbility", meta=(AutoCreateRefTerm = "EventData"))
+    /** Builds an unapplied damage spec with this active ability's exact source-object and effect-causer provenance. */
+    UFUNCTION(BlueprintCallable, Category = "MythicAbility",
+              meta = (ToolTip = "Build an unapplied damage spec using this active ability's exact source object, ability source, effect causer, and level."))
     virtual FMythicDamageContainerSpec MakeDamageContainerSpec(const FMythicDamageContainer &Container, int32 OverrideGameplayLevel = -1);
 
-    /** Applies a gameplay effect container spec that was previously created */
-    UFUNCTION(BlueprintCallable, Category = "MythicAbility")
+    /** Applies a previously built damage spec to its canonical living and destructible target sets. */
+    UFUNCTION(BlueprintCallable, Category = "MythicAbility",
+              meta = (ToolTip = "Apply a previously built damage spec to its canonical living and destructible target sets."))
     virtual TArray<FActiveGameplayEffectHandle> ApplyDamageContainerSpec(const FMythicDamageContainerSpec &ContainerSpec);
 
-    /** Applies a gameplay effect container, by creating and applying the spec */
-    UFUNCTION(BlueprintCallable, Category = "MythicAbility", meta = (AutoCreateRefTerm = "EventData"))
+    /** Builds and applies a damage spec to the supplied hit results and actor targets. */
+    UFUNCTION(BlueprintCallable, Category = "MythicAbility",
+              meta = (AutoCreateRefTerm = "HitResults,TargetActors",
+                      ToolTip = "Build and apply a damage spec to the supplied hit results and actor targets using this active ability's provenance."))
     virtual TArray<FActiveGameplayEffectHandle> ApplyDamageContainer(const FMythicDamageContainer &Container, const TArray<FHitResult> &HitResults,
                                                                      const TArray<AActor *> &TargetActors, int32 OverrideGameplayLevel = -1);
-    /** Add targets to a damage container spec */
-    UFUNCTION(BlueprintCallable, Category = "MythicAbility")
+    /** Adds hit results and actor targets to an existing damage spec without applying it. */
+    UFUNCTION(BlueprintCallable, Category = "MythicAbility",
+              meta = (AutoCreateRefTerm = "HitResults,TargetActors",
+                      ToolTip = "Add hit results and actor targets to an existing damage spec without applying it."))
     virtual void AddTargetsToDamageContainerSpec(UPARAM(ref) FMythicDamageContainerSpec &ContainerSpec, const TArray<FHitResult> &HitResults,
                                                  const TArray<AActor *> &TargetActors);
+
+protected:
+    /**
+     * Native combat dispatch seam used when a higher-level transaction owns source-item wear for the attack cycle.
+     * Blueprint never receives the bypass flag; ordinary damage calls retain their canonical one-wear behavior.
+     */
+    TArray<FActiveGameplayEffectHandle> ApplyDamageContainerNative(
+        const FMythicDamageContainer &Container,
+        const TArray<FHitResult> &HitResults,
+        const TArray<AActor *> &TargetActors,
+        int32 OverrideGameplayLevel,
+        bool bApplySourceWear);
+
+    /** Applies authoritative wear to the exact live item fragment that granted this ability. */
+    bool TryApplySourceDurabilityWear(int32 Amount);
+
+public:
 
 
     EMythicAbilityActivationPolicy GetActivationPolicy() const { return ActivationPolicy; }
     EMythicAbilityActivationGroup GetActivationGroup() const { return ActivationGroup; }
 
-    // Returns true if the requested activation group is a valid transition.
-    UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "Mythic|Ability", Meta = (ExpandBoolAsExecs = "ReturnValue"))
+    /** Returns whether this active ability may transition to the requested local activation group. */
+    UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "Mythic|Ability",
+              meta = (ExpandBoolAsExecs = "ReturnValue",
+                      ToolTip = "Return whether this active ability may transition to the requested local activation group."))
     bool CanChangeActivationGroup(EMythicAbilityActivationGroup NewGroup) const;
 
-    // Tries to change the activation group.  Returns true if it successfully changed.
-    UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "Mythic|Ability", Meta = (ExpandBoolAsExecs = "ReturnValue"))
+    /** Transitions this active ability to a different local activation group when the group contract allows it. */
+    UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "Mythic|Ability",
+              meta = (ExpandBoolAsExecs = "ReturnValue",
+                      ToolTip = "Transition this active ability to another local activation group when the group contract allows it."))
     bool ChangeActivationGroup(EMythicAbilityActivationGroup NewGroup);
 
     virtual bool CanActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo *ActorInfo,
@@ -120,20 +148,31 @@ public:
     UFUNCTION(BlueprintImplementableEvent, Category = Ability, DisplayName = "OnPawnAvatarSet")
     void K2_OnAvatarSet();
 
+    /** Returns the Mythic ASC from the current ability actor info, or null when this ability has no valid owner. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Ability")
     UMythicAbilitySystemComponent *GetMythicAbilitySystemComponentFromActorInfo() const;
 
-    // retrieve the active attack speed scaling factor clamped to a safe range
+    /** Returns the live AttackSpeed montage play rate after applying the GameState's combat-safe clamps. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Ability")
     float GetClampedAttackSpeedPlayRate() const;
+
+    /**
+     * Selects one standalone attack-variant section from the fragment's live montage. Local prediction and server
+     * execution derive the same transient section index from the shared activation prediction key; no section name
+     * or numeric-string identifier is stored in item data.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "Mythic|Ability|Attack")
+    FName SelectAttackMontageSection(const UAttackFragment *AttackFragment) const;
 
     // AttackSpeed is a bonus fraction over the normal rate. Never returns zero: a stalled montage never
     // completes, so PlayMontageAndWait would hang the ability forever.
     static float ComputeAttackSpeedPlayRate(float AttackSpeedBonus, float MinRate, float MaxRate);
 
+    /** Returns the Mythic player controller from the current ability actor info, or null for a non-player owner. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Ability")
     AMythicPlayerController *GetMythicPlayerControllerFromActorInfo() const;
 
+    /** Returns the controller from the current ability actor info, or null when the ability has no controller. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Ability")
     AController *GetControllerFromActorInfo() const;
 

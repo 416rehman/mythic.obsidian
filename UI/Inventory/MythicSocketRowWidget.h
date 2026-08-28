@@ -38,12 +38,15 @@ USTRUCT(BlueprintType)
 struct FMythicGemMark {
     GENERATED_BODY()
 
+    /** Gem gameplay tag whose authored mark and colour this row presents. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Sockets", meta = (Categories = "Itemization.Gem"))
     FGameplayTag GemType;
 
+    /** Soft icon used for occupied and colour-restricted socket wells of this gem type. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Sockets")
     TSoftObjectPtr<UTexture2D> Mark;
 
+    /** Player-facing tint applied to this gem type's socket mark. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Sockets")
     FLinearColor Colour = FLinearColor::White;
 };
@@ -102,6 +105,7 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UMythicSectionHeader> Header;
 
+    /** Fallback section title used when no house-style Header widget is bound. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> Txt_Label;
 
@@ -113,6 +117,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Sockets")
     FName WellComponentId = TEXT("SlotTex.Round");
 
+    /** Pixel size of each socket well before row-layout scaling. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Sockets")
     FVector2D WellSize = FVector2D(56.0, 56.0);
 
@@ -128,6 +133,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Sockets", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float RestrictedMarkOpacity = 0.35f;
 
+    /** Data-driven colour-to-mark presentation map used by filled and restricted socket wells. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Sockets")
     TArray<FMythicGemMark> GemMarks;
 

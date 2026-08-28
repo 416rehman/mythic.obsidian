@@ -222,7 +222,7 @@ void UVendorMenuVM::RebuildSellLines(AMythicVendor *Vendor, AMythicPlayerControl
         const TArray<FMythicInventorySlotEntry> &Slots = Inv->GetAllSlots();
         for (int32 i = 0; i < Slots.Num(); ++i) {
             const FMythicInventorySlotEntry &Slot = Slots[i];
-            if (Slot.bEquipmentSlot || !Slot.bCanPlayerTake) {
+            if (Slot.IsGearSlot() || !Slot.bCanPlayerTake) {
                 continue;
             }
             UMythicItemInstance *Item = Slot.SlottedItemInstance;

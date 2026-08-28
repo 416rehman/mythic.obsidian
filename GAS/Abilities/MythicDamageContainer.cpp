@@ -1,35 +1,48 @@
 #include "MythicDamageContainer.h"
 
+#include "Components/PrimitiveComponent.h"
 #include "Destructible.h"
+#include "GameFramework/Actor.h"
 
-bool FMythicDamageContainerSpec::IsDestructible(AActor *Actor) {
-    bool bIsDestructible = Actor->GetClass()->ImplementsInterface(UDestructible::StaticClass());
-    if (!bIsDestructible) {
-        for (UActorComponent *Component : Actor->GetComponents()) {
-            if (Component->GetClass()->ImplementsInterface(UDestructible::StaticClass())) {
-                bIsDestructible = true;
-                break;
-            }
-        }
+FMythicDestructibleTargetIdentity
+FMythicDestructibleTargetIdentity::ResolveActor(const AActor *Actor) {
+    if (!::IsValid(Actor)
+        || !Actor->GetClass()->ImplementsInterface(
+            UDestructible::StaticClass())) {
+        return {};
     }
-
-    return bIsDestructible;
+    return {Actor, INDEX_NONE, false};
 }
 
-void FMythicDamageContainerSpec::AddTargets(const TArray<FHitResult> &HitResults, const TArray<AActor *> &TargetActors) {
-    for (size_t i = 0; i < HitResults.Num(); i++) {
-        FHitResult HitResult = HitResults[i];
+FMythicDestructibleTargetIdentity
+FMythicDestructibleTargetIdentity::Resolve(const FHitResult &Hit) {
+    const AActor *HitActor = Hit.GetActor();
+    if (!::IsValid(HitActor)) {
+        return {};
+    }
 
+    const UPrimitiveComponent *HitComponent = Hit.GetComponent();
+    if (::IsValid(HitComponent)
+        && HitComponent->GetClass()->ImplementsInterface(
+            UDestructible::StaticClass())) {
+        return {HitComponent, Hit.Item, true};
+    }
+    return ResolveActor(HitActor);
+}
 
-        auto Actor = HitResult.GetActor();
-        if (!Actor) {
+void FMythicDamageContainerSpec::AddTargets(
+    const TArray<FHitResult> &HitResults,
+    const TArray<AActor *> &TargetActors) {
+    for (const FHitResult &HitResult : HitResults) {
+        if (!IsValid(HitResult.GetActor())) {
             continue;
         }
 
-        FGameplayAbilityTargetData_SingleTargetHit *TargetHit = new FGameplayAbilityTargetData_SingleTargetHit();
+        FGameplayAbilityTargetData_SingleTargetHit *TargetHit =
+            new FGameplayAbilityTargetData_SingleTargetHit();
         TargetHit->HitResult = HitResult;
 
-        if (IsDestructible(Actor)) {
+        if (FMythicDestructibleTargetIdentity::Resolve(HitResult).IsValid()) {
             DestructibleTargetsHandle.Add(TargetHit);
         }
         else {
@@ -38,15 +51,17 @@ void FMythicDamageContainerSpec::AddTargets(const TArray<FHitResult> &HitResults
     }
 
     if (TargetActors.Num() > 0) {
-        FGameplayAbilityTargetData_ActorArray *DestructibleActors = new FGameplayAbilityTargetData_ActorArray();
-        FGameplayAbilityTargetData_ActorArray *Actors = new FGameplayAbilityTargetData_ActorArray();
+        FGameplayAbilityTargetData_ActorArray *DestructibleActors =
+            new FGameplayAbilityTargetData_ActorArray();
+        FGameplayAbilityTargetData_ActorArray *Actors =
+            new FGameplayAbilityTargetData_ActorArray();
 
         for (AActor *Actor : TargetActors) {
-            if (!Actor) {
+            if (!IsValid(Actor)) {
                 continue;
             }
 
-            if (IsDestructible(Actor)) {
+            if (FMythicDestructibleTargetIdentity::ResolveActor(Actor).IsValid()) {
                 DestructibleActors->TargetActorArray.Add(Actor);
             }
             else {

@@ -859,9 +859,10 @@ void UMythicCheatManager::MythListProficiencies() {
         FString Name = Prof.Definition ? Prof.Definition->GetName() : TEXT("Unknown");
 
         float CurrentProgress = 0.0f;
-        if (ASC && Prof.ProgressAttribute.IsValid()) {
+        const FGameplayAttribute ProgressAttribute = Prof.GetProgressAttribute();
+        if (ASC && ProgressAttribute.IsValid()) {
             bool bFound = false;
-            CurrentProgress = ASC->GetGameplayAttributeValue(Prof.ProgressAttribute, bFound);
+            CurrentProgress = ASC->GetGameplayAttributeValue(ProgressAttribute, bFound);
         }
 
         UE_LOG(Myth, Warning, TEXT("    - %s: %.0f progress"), *Name, CurrentProgress);
@@ -898,16 +899,17 @@ void UMythicCheatManager::MythGiveProficiency(const FString &ProficiencyName, fl
     for (FProficiency &Prof : ProfComp->Proficiencies) {
         FString Name = Prof.Definition ? Prof.Definition->GetName() : TEXT("");
         if (Name.Contains(ProficiencyName, ESearchCase::IgnoreCase)) {
-            if (!Prof.ProgressAttribute.IsValid()) {
-                UE_LOG(Myth, Error, TEXT(">>> Proficiency '%s' has no ProgressAttribute"), *Name);
+            const FGameplayAttribute ProgressAttribute = Prof.GetProgressAttribute();
+            if (!ProgressAttribute.IsValid()) {
+                UE_LOG(Myth, Error, TEXT(">>> Proficiency '%s' has no canonical Progress Stat"), *Name);
                 return;
             }
 
             bool bFound = false;
-            float Current = ASC->GetGameplayAttributeValue(Prof.ProgressAttribute, bFound);
+            float Current = ASC->GetGameplayAttributeValue(ProgressAttribute, bFound);
             if (bFound) {
                 float NewVal = Current + Amount;
-                ASC->SetNumericAttributeBase(Prof.ProgressAttribute, NewVal);
+                ASC->SetNumericAttributeBase(ProgressAttribute, NewVal);
                 UE_LOG(Myth, Warning, TEXT(">>> %s: %.0f -> %.0f (+%.0f)"), *Name, Current, NewVal, Amount);
                 return;
             }

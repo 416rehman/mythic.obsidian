@@ -5,6 +5,22 @@
 #include "GameplayEffectExtension.h"
 #include "Settings/MythicCombatSettings.h"
 #include "Net/UnrealNetwork.h"
+#include "World/Harvesting/MythicHarvestSettings.h"
+
+namespace {
+
+void ClampHarvestWorkAttribute(float &InOutValue) {
+    double ClampedValue = 0.0;
+    const UMythicHarvestSettings *Settings =
+        GetDefault<UMythicHarvestSettings>();
+    InOutValue = Settings
+        && Settings->TryClampHarvestWorkMultiplier(
+            static_cast<double>(InOutValue), ClampedValue)
+        ? static_cast<float>(ClampedValue)
+        : 1.0f;
+}
+
+} // namespace
 
 UMythicAttributeSet_Utility::UMythicAttributeSet_Utility() {
     InitMaxStamina(100.0f);
@@ -13,6 +29,9 @@ UMythicAttributeSet_Utility::UMythicAttributeSet_Utility() {
 
     InitMaxCooldownReduction(0.60f);
     InitMovementSpeedMultiplier(1.0f);
+    InitItemRarityFind(1.0f);
+    InitItemQuantityFind(1.0f);
+    InitHarvestWorkMultiplier(1.0f);
 }
 
 bool UMythicAttributeSet_Utility::IsReductionFractionAttribute(const FGameplayAttribute &Attribute) {
@@ -42,6 +61,9 @@ void UMythicAttributeSet_Utility::PreAttributeChange(const FGameplayAttribute &A
     else if (Attribute == GetMovementSpeedMultiplierAttribute()) {
         NewValue = FMath::Max(MythicCombat::GetMinSpeedScale(), NewValue);
     }
+    else if (Attribute == GetHarvestWorkMultiplierAttribute()) {
+        ClampHarvestWorkAttribute(NewValue);
+    }
 }
 
 void UMythicAttributeSet_Utility::PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const {
@@ -52,6 +74,9 @@ void UMythicAttributeSet_Utility::PreAttributeBaseChange(const FGameplayAttribut
     }
     else if (Attribute == GetMaxCooldownReductionAttribute()) {
         NewValue = FMath::Max(0.0f, NewValue);
+    }
+    else if (Attribute == GetHarvestWorkMultiplierAttribute()) {
+        ClampHarvestWorkAttribute(NewValue);
     }
 }
 
@@ -131,6 +156,10 @@ void UMythicAttributeSet_Utility::OnRep_ItemQuantityFind(const FGameplayAttribut
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, ItemQuantityFind, OldValue);
 }
 
+void UMythicAttributeSet_Utility::OnRep_HarvestWorkMultiplier(const FGameplayAttributeData &OldValue) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Utility, HarvestWorkMultiplier, OldValue);
+}
+
 void UMythicAttributeSet_Utility::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
@@ -145,4 +174,5 @@ void UMythicAttributeSet_Utility::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, MovementSpeedMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ItemRarityFind, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, ItemQuantityFind, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Utility, HarvestWorkMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
 }

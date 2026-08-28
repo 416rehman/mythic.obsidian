@@ -11,11 +11,11 @@ class MYTHIC_API UAbilityReward : public URewardBase {
     GENERATED_BODY()
 
 public:
-    // The ability to give
+    /** Gameplay Ability class permanently granted to the receiving player's Ability System Component. */
     UPROPERTY(EditAnywhere, Blueprintable)
     TSubclassOf<UGameplayAbility> Ability;
 
-    // Whether to activate it too
+    /** When enabled, immediately attempts to activate the newly granted ability after a successful grant. */
     UPROPERTY(EditAnywhere, Blueprintable)
     bool Activate = true;
 
@@ -25,7 +25,7 @@ public:
 
     virtual bool CanReapplyOnLoad() const override { return true; }
 
-    // Helper function to get the context for the reward
+    /** Builds a reward context for PlayerController and grants the configured ability on authority. */
     UFUNCTION(BlueprintCallable)
     static bool GiveAbilityReward(UAbilityReward *Reward, APlayerController *PlayerController) {
         auto Context = FRewardContext(PlayerController);

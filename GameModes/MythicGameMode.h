@@ -42,5 +42,8 @@ protected:
 
     FTimerHandle AutosaveTimerHandle;
 
+    /** Authority persistence route resolved once from deployment command line; empty disables automatic world I/O. */
+    FString AuthorityWorldSaveSlot;
+
     static constexpr float AutosaveIntervalSeconds = 300.0f;
 };

@@ -1,6 +1,5 @@
 #include "MythicCharacter.h"
 #include "Mythic/Mythic.h"
-#include "MythicPlayerController.h"
 #include "MythicPlayerState.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicLifeComponent.h"

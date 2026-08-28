@@ -3,12 +3,20 @@
 #include "MythicStatTextLibrary.h"
 
 #include "Itemization/Inventory/Fragments/FragmentTypes.h"
+#include "Stats/MythicStatDefinition.h"
 #include "UI/ViewModels/MythicEffectDescriber.h"
 #include "UI/ViewModels/MythicStatDisplay.h"
 
 namespace {
-EMythicStatFormat FormatForRoll(FGameplayAttribute Attribute, bool bIsPercentage) {
-    return MythicStatDisplay::ResolveRollFormat(Attribute, EGameplayModOp::Additive, bIsPercentage);
+bool PresentationForRoll(FGameplayAttribute Attribute, bool /*bIsPercentage*/,
+                         FMythicStatNumberPresentation& OutPresentation) {
+    const UMythicStatDefinition* Definition = MythicStatDisplay::FindResidentDefinition(Attribute);
+    if (!Definition) {
+        return false;
+    }
+    OutPresentation = MythicStatDisplay::ResolveModifierPresentation(
+        *Definition, EGameplayModOp::Additive);
+    return true;
 }
 }
 
@@ -16,11 +24,17 @@ FText UMythicStatTextLibrary::GetAttributeLabel(FGameplayAttribute Attribute) {
     if (!Attribute.IsValid()) {
         return FText::GetEmpty();
     }
-    return FText::FromString(MythicStatDisplay::GetRule(Attribute).Label);
+    if (const UMythicStatDefinition* Definition = MythicStatDisplay::FindResidentDefinition(Attribute)) {
+        return Definition->DisplayName;
+    }
+    return MythicStatDisplay::GetUnknownStatDiagnostic();
 }
 
 FText UMythicStatTextLibrary::FormatAffixValue(FGameplayAttribute Attribute, float Value, bool bIsPercentage) {
-    return MythicStatDisplay::FormatBonus(Value, FormatForRoll(Attribute, bIsPercentage));
+    FMythicStatNumberPresentation Presentation;
+    return PresentationForRoll(Attribute, bIsPercentage, Presentation)
+        ? MythicStatDisplay::FormatBonus(Value, Presentation)
+        : FText::GetEmpty();
 }
 
 FText UMythicStatTextLibrary::FormatAffixRange(FGameplayAttribute Attribute, float Min, float Max,
@@ -33,10 +47,13 @@ FText UMythicStatTextLibrary::FormatAffixRange(FGameplayAttribute Attribute, flo
         return FText::GetEmpty();
     }
 
-    const EMythicStatFormat Format = FormatForRoll(Attribute, bIsPercentage);
+    FMythicStatNumberPresentation Presentation;
+    if (!PresentationForRoll(Attribute, bIsPercentage, Presentation)) {
+        return FText::GetEmpty();
+    }
     return FText::Format(NSLOCTEXT("Mythic", "AffixRange", "[{0}-{1}]"),
-                         MythicStatDisplay::FormatValue(ScaledMin, Format),
-                         MythicStatDisplay::FormatValue(ScaledMax, Format));
+                         MythicStatDisplay::FormatValue(ScaledMin, Presentation),
+                         MythicStatDisplay::FormatValue(ScaledMax, Presentation));
 }
 
 FText UMythicStatTextLibrary::DescribeAffixRichText(FGameplayAttribute Attribute, float Value, float Min,

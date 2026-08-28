@@ -8,11 +8,8 @@
 
 #if WITH_EDITOR
 bool UActionableItemFragment::IsValidFragment(FText &OutErrorMessage) const {
-    if (!this->InputTag.IsValid()) {
-        OutErrorMessage = FText::FromString("ActionableItemFragment: InputTag is not set");
-        return false;
-    }
-
+    // Some actionable fragments are invoked directly by inventory/hotbar UI and intentionally grant no input
+    // ability. Concrete input-bound fragments (for example UAttackFragment) own the stricter tag contract.
     return Super::IsValidFragment(OutErrorMessage);
 }
 #endif
@@ -34,13 +31,17 @@ bool UActionableItemFragment::CanBeStackedWith(const UItemFragment *Other) const
     return true;
 }
 
-FGameplayAbilitySpecHandle UActionableItemFragment::GrantItemAbility(UMythicAbilitySystemComponent *ASC, UMythicItemInstance *ItemInstance,
-                                                                     TSubclassOf<UMythicGameplayAbility> AbilityClass) {
-    UE_LOG(Myth, Log, TEXT("UActionableItemFragment::GrantItemAbility: Fragment=%s, Item=%s, AbilityClass=%s, InputTag=%s"),
+FGameplayAbilitySpecHandle UActionableItemFragment::GrantItemAbility(
+    UMythicAbilitySystemComponent *ASC,
+    UMythicItemInstance *ItemInstance,
+    TSubclassOf<UMythicGameplayAbility> AbilityClass,
+    const bool bBindInputTag) {
+    UE_LOG(Myth, Log, TEXT("UActionableItemFragment::GrantItemAbility: Fragment=%s, Item=%s, AbilityClass=%s, InputTag=%s, BindInput=%s"),
            *GetName(),
            *GetNameSafe(ItemInstance),
            *GetNameSafe(AbilityClass.Get()),
-           *InputTag.ToString());
+           *InputTag.ToString(),
+           bBindInputTag ? TEXT("true") : TEXT("false"));
 
     if (!ASC || !ItemInstance) {
         UE_LOG(Myth, Error, TEXT("  -> FAILED: Invalid ASC=%s or ItemInstance=%s"),
@@ -52,7 +53,7 @@ FGameplayAbilitySpecHandle UActionableItemFragment::GrantItemAbility(UMythicAbil
     UClass *TargetAbilityClass = AbilityClass.Get();
     UE_LOG(Myth, Log, TEXT("  -> Initial TargetAbilityClass: %s"), *GetNameSafe(TargetAbilityClass));
 
-    if (!TargetAbilityClass && InputTag.IsValid()) {
+    if (!TargetAbilityClass && bBindInputTag && InputTag.IsValid()) {
         UE_LOG(Myth, Log, TEXT("  -> No ability class, but have InputTag. Trying to use Generic Consumable."));
         if (const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>()) {
             TargetAbilityClass = Settings->DefaultItemInputAbility.LoadSynchronous();
@@ -77,12 +78,15 @@ FGameplayAbilitySpecHandle UActionableItemFragment::GrantItemAbility(UMythicAbil
     FGameplayAbilitySpec Spec(TargetAbilityClass, 1, INDEX_NONE, this);
     UE_LOG(Myth, Log, TEXT("  -> Created AbilitySpec with SourceObject=%s"), *GetName());
 
-    if (InputTag.IsValid()) {
+    if (bBindInputTag && InputTag.IsValid()) {
         Spec.GetDynamicSpecSourceTags().AddTag(InputTag);
         UE_LOG(Myth, Log, TEXT("  -> Added InputTag %s to DynamicSpecSourceTags"), *InputTag.ToString());
     }
-    else {
+    else if (bBindInputTag) {
         UE_LOG(Myth, Warning, TEXT("  -> InputTag is NOT VALID! Ability will not respond to input."));
+    }
+    else {
+        UE_LOG(Myth, Log, TEXT("  -> Generic input binding intentionally omitted; exact-source activation owns this spec."));
     }
 
     FGameplayAbilitySpecHandle Handle = ASC->GiveAbility(Spec);

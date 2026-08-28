@@ -3,178 +3,194 @@
 
 #include "CoreMinimal.h"
 #include "AttributeSet.h"
-#include "Engine/DataTable.h"
 #include "Engine/DeveloperSettings.h"
 #include "GameplayEffectTypes.h"
 #include "GameplayTagContainer.h"
+#include "Stats/MythicStatTypes.h"
 #include "MythicStatDisplay.generated.h"
 
+class UMythicStatDefinition;
 class UMythicStatSummaryLibrary;
 class UTexture2D;
 
-UENUM(BlueprintType)
-enum class EMythicStatFormat : uint8 {
-    Flat,
-    Integer,
-    Percent,
-    Multiplier,
-    PerSecond,
-    Bipolar
-};
-
-UENUM(BlueprintType)
-enum class EMythicStatCategory : uint8 {
-    Vitality,
-    Offense,
-    Defense,
-    Utility,
-    Proficiency,
-    Survival,
-    Hidden,
-
-    /**
-     * A stat the player invests in that derives others, rather than one derived from something else.
-     *
-     * Appended rather than inserted at the top: the values are serialised in config and assets, so
-     * renumbering would silently repoint existing rows. The panel orders tiers explicitly instead.
-     */
-    Primary
-};
-
-/**
- * One row of the stat display registry, authored as data. The row NAME is the attribute name; everything
- * the sheet needs to place and format that attribute lives in the row. This table is the single source -
- * moving a stat between sections or renaming its label is a cell edit, never a code change.
- */
-USTRUCT(BlueprintType)
-struct MYTHIC_API FMythicStatDisplayRow : public FTableRowBase {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stat Display")
-    FString Label;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stat Display")
-    EMythicStatCategory Category = EMythicStatCategory::Hidden;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stat Display")
-    EMythicStatFormat Format = EMythicStatFormat::Flat;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stat Display")
-    int32 SortOrder = 0;
-
-    // The paired capacity attribute for "current / max" rows, empty for plain values.
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stat Display")
-    FString MaxAttribute;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stat Display")
-    bool bHidden = false;
-};
-
+/** Display-ready state for one canonical StatDefinition and the ASC values it addresses. */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicStatLine {
     GENERATED_BODY()
 
+    /** Canonical gameplay tag identity of the stat represented by this row. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FGameplayTag StatTag;
+
+    /** Canonical category tag used to group and style this row. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FGameplayTag CategoryTag;
+
+    /** Localized player-facing stat name. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     FText Label;
 
-    // Fully formatted, unit-correct. "5%", "+25%", "3.0/s", "42".
+    /** Localized explanation of the stat's gameplay effect. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FText Description;
+
+    /** Display-ready current value, including pair-aware composition where applicable. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     FText Value;
 
-    // "+12" / "-3" — what gear, talents and buffs are adding on top of the base right now. Empty when there is no
-    // difference, so an unmodified stat stays visually quiet.
+    /** Display-ready total difference between current and base values for the rendered row. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     FText BonusText;
 
+    /** Bonus text for the row's primary/current attribute before pair-aware composition. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FText PrimaryBonusText;
+
+    /** Canonical identity and presentation for a capacity folded into this current-stat row. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FGameplayTag PairedStatTag;
+
+    /** Gameplay Ability System attribute addressed by PairedStatTag. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FGameplayAttribute PairedAttribute;
+
+    /** Canonical formatting rules for the paired capacity value. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FMythicStatNumberPresentation PairedNumberPresentation;
+
+    /** Display-ready current-minus-base delta for the paired capacity stat. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FText PairedBonusText;
+
+    /** Unmodified base value of the row's primary Gameplay Ability System attribute. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     float BaseValue = 0.0f;
 
+    /** GAS base after permanent equipment affixes are composed and before temporary Gameplay Effects. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    float EquipmentBaseValue = 0.0f;
+
+    /** Live final value of the row's primary Gameplay Ability System attribute. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     float CurrentValue = 0.0f;
 
-    // CurrentValue - BaseValue. Positive is an improvement for every attribute except IncomingDamageMultiplier.
+    /** CurrentValue minus BaseValue for the row's primary stat. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     float BonusValue = 0.0f;
 
+    /** EquipmentBaseValue minus BaseValue for the row's primary stat. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    float EquipmentBonusValue = 0.0f;
+
+    /** CurrentValue minus EquipmentBaseValue for temporary effects on the row's primary stat. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    float TemporaryBonusValue = 0.0f;
+
+    /** Unmodified base value of the paired capacity stat, or zero when no pair is rendered. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    float PairedBaseValue = 0.0f;
+
+    /** Equipment-composed GAS base of the paired capacity stat, or zero when no pair is rendered. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    float PairedEquipmentBaseValue = 0.0f;
+
+    /** Live final value of the paired capacity stat, or zero when no pair is rendered. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    float PairedCurrentValue = 0.0f;
+
+    /** PairedCurrentValue minus PairedBaseValue. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    float PairedBonusValue = 0.0f;
+
+    /** Equipment-only delta for the paired capacity stat. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    float PairedEquipmentBonusValue = 0.0f;
+
+    /** Temporary-effect delta for the paired capacity stat. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    float PairedTemporaryBonusValue = 0.0f;
+
+    /** True when permanent equipment changes either attribute represented by this row. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    bool bHasEquipmentBonus = false;
+
+    /** True when temporary Gameplay Effects change either attribute represented by this row. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    bool bHasTemporaryBonus = false;
+
+    /** True when either the primary stat or its rendered pair differs meaningfully from its base value. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     bool bHasBonus = false;
 
-    // 0..1 for current/max pairs so the view can draw a bar. -1 when this stat is not a pair.
+    /** True when the row's primary stat differs meaningfully from its base value. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    bool bPrimaryStatHasBonus = false;
+
+    /** True when the paired capacity stat differs meaningfully from its base value. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    bool bPairedStatHasBonus = false;
+
+    /** Current divided by capacity in the range 0..1, or -1 when this row has no rendered capacity pair. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     float BarPercent = -1.0f;
 
+    /** True when the category style requests the primary/high-emphasis row treatment. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
-    EMythicStatCategory Category = EMythicStatCategory::Utility;
+    bool bEmphasizeRow = false;
 
+    /** True when the category permits a tooltip breakdown of this stat's downstream contributions. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
-    EMythicStatFormat Format = EMythicStatFormat::Flat;
+    bool bEnableContributionDrilldown = false;
 
+    /** Canonical formatting rules copied from the stat definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
-    int32 SortOrder = 1000;
+    FMythicStatNumberPresentation NumberPresentation;
 
-    // Which attribute this line shows, so the view can ask follow-up questions (contribution tooltips) about it.
+    /** Indicates which numeric direction should be presented as beneficial. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    EMythicStatComparisonDirection ComparisonDirection = EMythicStatComparisonDirection::HigherIsBetter;
+
+    /** Ascending authored order of this row within its category. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    int32 SortOrder = 0;
+
+    /** Gameplay Ability System attribute addressed by this row. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     FGameplayAttribute Attribute;
 };
 
-/** One headline card: a summary's display-ready state, computed by its authored calculation. */
+/** One headline card computed by its authored summary calculation. */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicStatSummaryLine {
     GENERATED_BODY()
 
+    /** Stable gameplay tag identity of the authored headline summary calculation. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     FGameplayTag SummaryId;
 
+    /** Localized player-facing summary-card heading. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     FText Label;
 
-    // Preformatted through the same formatter as every other stat on the sheet.
+    /** Display-ready result of the summary calculation. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     FText Value;
 
+    /** Localized explanation of what the summary measures. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     FText Description;
 
+    /** Optional soft icon supplied by the authored summary definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     TSoftObjectPtr<UTexture2D> Icon;
 
+    /** Unformatted numeric result of the summary calculation. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     float RawValue = 0.0f;
 };
 
-USTRUCT()
-struct MYTHIC_API FMythicStatRule {
-    GENERATED_BODY()
-
-    // Matches FGameplayAttribute::GetName(), i.e. the C++ property name.
-    UPROPERTY(EditAnywhere, Config, Category = "Stat")
-    FString Attribute;
-
-    // Left empty to fall back to MakeFriendlyLabel(Attribute).
-    UPROPERTY(EditAnywhere, Config, Category = "Stat")
-    FString Label;
-
-    UPROPERTY(EditAnywhere, Config, Category = "Stat")
-    EMythicStatCategory Category = EMythicStatCategory::Utility;
-
-    UPROPERTY(EditAnywhere, Config, Category = "Stat")
-    EMythicStatFormat Format = EMythicStatFormat::Flat;
-
-    // Ascending within a category. Sparse (10, 20, 30…) so rules can be inserted between without renumbering.
-    UPROPERTY(EditAnywhere, Config, Category = "Stat")
-    int32 SortOrder = 1000;
-
-    // Property name of this attribute's "max" partner, for current/max pairs. The pair renders as one row with a bar
-    // and the max attribute is suppressed as its own row. Naming is inconsistent across the sets (MaxHealth is a
-    // prefix, CombatProficiencyMax is a suffix), which is exactly why this is explicit rather than inferred.
-    UPROPERTY(EditAnywhere, Config, Category = "Stat")
-    FString MaxAttribute;
-
-    UPROPERTY(EditAnywhere, Config, Category = "Stat")
-    bool bHidden = false;
-};
-
-UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic Stat Display"))
+/** Project setting for optional data-driven headline summaries; canonical stat identity stays in Stat Definitions. */
+UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic Stat Sheet"))
 class MYTHIC_API UMythicStatDisplaySettings : public UDeveloperSettings {
     GENERATED_BODY()
 
@@ -183,26 +199,9 @@ public:
         return FName(TEXT("Game"));
     }
 
-    // Per-attribute overrides. Empty by default — the C++ table already covers every shipped attribute.
-    UPROPERTY(EditAnywhere, Config, Category = "Stat Display")
-    TArray<FMythicStatRule> Overrides;
-
-    // Attributes whose live value equals their base and whose base is 0 are dropped from the sheet. Keeps ~30 inert
-    // rows (unrolled magic find, unused weapon-family bonuses) out of the player's face until something grants them.
-    UPROPERTY(EditAnywhere, Config, Category = "Stat Display")
-    bool bHideUnmodifiedZeroStats = true;
-
-    // The headline summaries the sheet shows, in display order. Unset means no cards — the section collapses.
-    UPROPERTY(EditAnywhere, Config, Category = "Stat Display")
+    /** Optional data-driven library that defines the stat sheet's headline summary cards. */
+    UPROPERTY(EditAnywhere, Config, Category = "Stat Sheet")
     TSoftObjectPtr<UMythicStatSummaryLibrary> SummaryLibrary;
-
-    /**
-     * The stat display registry as data (rows of FMythicStatDisplayRow, row name = attribute name). When
-     * authored this is the single source; the compiled-in list is only the fallback for a project without
-     * the table, and its use is logged so it can never be mistaken for the real thing.
-     */
-    UPROPERTY(config, EditAnywhere, Category = "Stats", meta = (RequiredAssetDataTags = "RowStructure=/Script/Mythic.MythicStatDisplayRow"))
-    TSoftObjectPtr<UDataTable> DisplayTable;
 };
 
 /** One line of a primary stat's tooltip: what it feeds, and how much it is feeding it right now. */
@@ -210,43 +209,53 @@ USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicStatContributionLine {
     GENERATED_BODY()
 
-    /** Name of the derived value, taken from the same rule table that names it everywhere else. */
+    /** Localized name of a downstream stat affected by the inspected primary stat. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     FText Label;
 
-    /** Preformatted, e.g. "+38%". */
+    /** Display-ready amount currently contributed to the downstream stat. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     FText Value;
 
+    /** Normalized share of the source stat that contributes to this downstream result. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     float Fraction = 0.0f;
 
-    /** True when the diminishing curve is measurably cutting this contribution, so the UI can say so. */
+    /** True when diminishing returns reduced this contribution below its undiminished amount. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     bool bDiminished = false;
 };
 
 namespace MythicStatDisplay {
-    MYTHIC_API FMythicStatRule GetRule(const FGameplayAttribute &Attribute);
+    /** Formats a final/base stat value using its canonical StatDefinition presentation. */
+    MYTHIC_API FText FormatValue(float Value, const FMythicStatNumberPresentation& Presentation);
 
-    /**
-     * How one rolled or granted modifier should read, given the attribute's registry format and the op that
-     * applies it. Every affix, effect line and comparison row resolves through here so a value and the range
-     * printed beside it can never disagree.
-     *
-     * bForcePercent is the authored FRollDefinition override, honoured only for Flat attributes.
-     */
-    MYTHIC_API EMythicStatFormat ResolveRollFormat(const FGameplayAttribute &Attribute,
-                                                   TEnumAsByte<EGameplayModOp::Type> Op,
-                                                   bool bForcePercent = false);
+    /** Formats a signed current-minus-base delta. */
+    MYTHIC_API FText FormatBonus(float Delta, const FMythicStatNumberPresentation& Presentation);
 
-    MYTHIC_API FString MakeFriendlyLabel(const FString &PropertyName);
-
+    /** Format-only overloads for summary calculations that do not represent a canonical stat. */
     MYTHIC_API FText FormatValue(float Value, EMythicStatFormat Format);
-
     MYTHIC_API FText FormatBonus(float Delta, EMythicStatFormat Format);
 
-    MYTHIC_API FText GetCategoryLabel(EMythicStatCategory Category);
+    /** Derives modifier presentation from a canonical stat, never from an attribute-name heuristic. */
+    MYTHIC_API FMythicStatNumberPresentation ResolveModifierPresentation(
+        const UMythicStatDefinition& Definition,
+        TEnumAsByte<EGameplayModOp::Type> ModifierOp);
 
-    MYTHIC_API void InvalidateCache();
+    /** Identity used when folding item-local modifier contributions; distinct from the final stat's baseline. */
+    MYTHIC_API float GetModifierContributionIdentity(
+        TEnumAsByte<EGameplayModOp::Type> ModifierOp,
+        float FinalStatNeutralValue);
+
+    /** Exact visibility rule for WhenModifiedOrNonNeutral. */
+    MYTHIC_API bool ShouldRender(const UMythicStatDefinition& Definition, float BaseValue, float CurrentValue);
+
+    /**
+     * Finds the one already-resident Stat Definition for an attribute without loading or inventing semantics.
+     * Systems that own a game-instance registry should query that registry directly.
+     */
+    MYTHIC_API const UMythicStatDefinition* FindResidentDefinition(const FGameplayAttribute& Attribute);
+
+    /** Non-shipping diagnostic only. Shipping presentation defers instead of inventing a stat identity. */
+    MYTHIC_API FText GetUnknownStatDiagnostic();
 }

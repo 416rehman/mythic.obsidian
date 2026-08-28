@@ -5,28 +5,23 @@
 #include "SavedProficiency.generated.h"
 
 class UProficiencyComponent;
+class UProficiencyDefinition;
 
+/** Persistent proficiency row storing a typed definition reference and its canonical cumulative XP. */
 USTRUCT(BlueprintType)
 struct FSerializedProficiencyData {
     GENERATED_BODY()
 
-    // Reference to the proficiency definition asset
+    /** Typed proficiency identity; the Progress Stat and its GAS attributes are derived from this definition. */
     UPROPERTY(BlueprintReadWrite)
-    FSoftObjectPath ProficiencyAsset;
+    TSoftObjectPtr<UProficiencyDefinition> ProficiencyDefinition;
 
-    // String-based storage for FGameplayAttribute (pointers don't serialize)
-    UPROPERTY(BlueprintReadWrite)
-    FString ProgressAttributeSetClass;
-
-    UPROPERTY(BlueprintReadWrite)
-    FString ProgressAttributeName;
-
-    // Current XP value - ClaimedLevels is derived from this on load
+    /** Canonical cumulative XP; level and claimed rewards are deterministically derived on load. */
     UPROPERTY(BlueprintReadWrite)
     float CurrentXP = 0.0f;
 };
 
 struct FSerializedProficiencyHelper {
-    static void Serialize(UProficiencyComponent *Component, TArray<FSerializedProficiencyData> &OutData);
-    static void Deserialize(UProficiencyComponent *Component, const TArray<FSerializedProficiencyData> &InData);
+    static bool Serialize(UProficiencyComponent *Component, TArray<FSerializedProficiencyData> &OutData);
+    static bool Deserialize(UProficiencyComponent *Component, const TArray<FSerializedProficiencyData> &InData);
 };

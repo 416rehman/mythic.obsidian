@@ -49,6 +49,24 @@ float UMythicDamageApplication::ApplySkillDamageBonus(float Damage, bool bIsSkil
     return FMath::Max(0.0f, bIsSkillHit ? Damage * (1.0f + BonusSkillDamage) : Damage);
 }
 
+void UMythicDamageApplication::MarkDamageExecutionAborted(
+    FGameplayEffectCustomExecutionOutput &OutExecutionOutput) {
+    // The native application GE owns Damage.Hit. An execution that rejects the hit must opt out of the GE's
+    // automatic cue dispatch, otherwise invulnerability, dodge, invalid data, and friendly fire still look landed.
+    OutExecutionOutput.MarkGameplayCuesHandledManually();
+}
+
+bool UMythicDamageApplication::HandleResolvedDamageCuePolicy(
+    const float ResolvedDamage,
+    FGameplayEffectCustomExecutionOutput &OutExecutionOutput) {
+    if (FMath::IsFinite(ResolvedDamage) && ResolvedDamage > 0.0f) {
+        return false;
+    }
+
+    MarkDamageExecutionAborted(OutExecutionOutput);
+    return true;
+}
+
 struct FDamageApplicationStatics {
     FGameplayEffectAttributeCaptureDefinition Power;
     FGameplayEffectAttributeCaptureDefinition DamagePerHit;
@@ -194,14 +212,27 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     UE_LOG(Myth, Verbose, TEXT("DamageApplication:: Applying damage"));
 
     FGameplayEffectSpec *Spec = ExecutionParams.GetOwningSpecForPreExecuteMod();
-    FMythicGameplayEffectContext *MythicContext = FMythicGameplayEffectContext::ExtractEffectContext(Spec->GetContext());
+    if (!Spec) {
+        MarkDamageExecutionAborted(OutExecutionOutput);
+        UE_LOG(Myth, Error, TEXT("DamageApplication:: missing owning effect spec - aborting damage execution"));
+        return;
+    }
+
+    FMythicGameplayEffectContext *MythicContext =
+        FMythicGameplayEffectContext::ExtractEffectContext(Spec->GetContext());
     if (!MythicContext) {
+        MarkDamageExecutionAborted(OutExecutionOutput);
         UE_LOG(Myth, Error, TEXT("DamageApplication:: non-Mythic/empty effect context - aborting damage execution"));
         return;
     }
 
     auto SourceASC = ExecutionParams.GetSourceAbilitySystemComponent();
     auto TargetASC = ExecutionParams.GetTargetAbilitySystemComponent();
+    if (!SourceASC || !TargetASC) {
+        MarkDamageExecutionAborted(OutExecutionOutput);
+        UE_LOG(Myth, Error, TEXT("DamageApplication:: missing source or target ASC - aborting damage execution"));
+        return;
+    }
 
     {
         const AActor *SourceActor = SourceASC ? SourceASC->GetAvatarActor() : nullptr;
@@ -212,6 +243,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         const bool bTargetIsPlayer = TargetPawn && TargetPawn->IsPlayerControlled();
         const bool bFriendlyFire = GetDefault<UMythicDeveloperSettings>()->bFriendlyFireEnabled;
         if (ShouldNegateFriendlyFire(bSourceIsPlayer, bTargetIsPlayer, SourceActor == TargetActor, bFriendlyFire)) {
+            MarkDamageExecutionAborted(OutExecutionOutput);
             UE_LOG(Myth, Log, TEXT("DamageApplication:: friendly fire OFF — player→player hit negated"));
             return;
         }
@@ -275,7 +307,16 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
      * The fraction comes from the authored mapping, so the coefficient is not a literal here, and it passes the
      * same diminishing curve as every other stacked stat.
      */
-    const float WeaponRoll = FMath::RandRange(DmgPerHit, DmgPerHit * 1.5f);
+    float MinimumWeaponDamage = 0.0f;
+    float MaximumWeaponDamage = 0.0f;
+    float AverageWeaponDamage = 0.0f;
+    if (!MythicCombat::ResolveWeaponDamageRange(
+            DmgPerHit, MinimumWeaponDamage, MaximumWeaponDamage, AverageWeaponDamage)) {
+        MarkDamageExecutionAborted(OutExecutionOutput);
+        UE_LOG(Myth, Error, TEXT("DamageApplication:: invalid DamagePerHit or weapon damage range configuration"));
+        return;
+    }
+    const float WeaponRoll = FMath::FRandRange(MinimumWeaponDamage, MaximumWeaponDamage);
     float FinalDamage = WeaponRoll;
     if (const UMythicCombatSettings *CombatSettings = GetDefault<UMythicCombatSettings>()) {
         FinalDamage = FMythicStatContributionRules::ApplyToBase(
@@ -289,8 +330,10 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
             });
     }
     const float PowerFraction = WeaponRoll > KINDA_SMALL_NUMBER ? (FinalDamage / WeaponRoll) - 1.0f : 0.0f;
-    UE_LOG(Myth, Verbose, TEXT("DamageApplication:: Damage %f = DmgPerHit (%f - %f) * (1 + Power %f -> +%.1f%%)"),
-           FinalDamage, DmgPerHit, DmgPerHit * 1.5f, Power, PowerFraction * 100.0f);
+    UE_LOG(Myth, Verbose,
+           TEXT("DamageApplication:: Damage %f = weapon range (%f - %f, expected %f) * (1 + Power %f -> +%.1f%%)"),
+           FinalDamage, MinimumWeaponDamage, MaximumWeaponDamage, AverageWeaponDamage,
+           Power, PowerFraction * 100.0f);
     // Every damage-affecting fraction below is a stacked 0.0-based bonus, so each rides its authored diminishing
     // curve before it multiplies. A stat with no curve passes through unchanged, so this is a no-op until one is
     // authored - the curves in UMythicCombatSettings::StatDiminishing are the brake, not this call.
@@ -436,9 +479,22 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
 
     UE_LOG(Myth, Verbose, TEXT("DamageApplication:: Pre-mitigation damage: %f"), FinalDamage);
 
+    // Incoming/outgoing immunity and other authored multipliers are allowed to resolve the damage component to
+    // zero while status intent continues through its own resistance/buildup path below. Suppress only the native
+    // application GE's automatic Damage.Hit cue; otherwise an intentional zero-damage proc still looks like a
+    // landed weapon hit. Non-finite combat math fails the entire execution closed.
+    const bool bDamageNullified =
+        HandleResolvedDamageCuePolicy(FinalDamage, OutExecutionOutput);
+    if (!FMath::IsFinite(FinalDamage)) {
+        UE_LOG(Myth, Error,
+               TEXT("DamageApplication:: non-finite composed damage - aborting damage and status execution"));
+        return;
+    }
+
     auto &Statics = MythicDamageApplicationStatics();
 
     if (TargetTags && TargetTags->HasTag(GAS_BUFF_INVINCIBLE)) {
+        MarkDamageExecutionAborted(OutExecutionOutput);
         UE_LOG(Myth, Log, TEXT("DamageApplication:: Target INVINCIBLE - hit negated"));
         return;
     }
@@ -448,6 +504,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     DodgeChance = MythicCombat::ClampProbability(DodgeChance, GS ? GS->MaxDodgeChance : 0.75f);
     if (MythicCombat::RollSucceeds(DodgeChance, FMath::FRand())) {
         MythicContext->SetDodged(true);
+        MarkDamageExecutionAborted(OutExecutionOutput);
         UE_LOG(Myth, Log, TEXT("DamageApplication:: Attack DODGED (chance %.2f)"), DodgeChance);
         if (const APawn *VictimPawn = TargetASC ? Cast<APawn>(TargetASC->GetAvatarActor()) : nullptr) {
             if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(VictimPawn->GetController())) {
@@ -459,7 +516,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
 
     // Plays here, not where the crit is rolled: everything above can still negate the hit, and a crit bang on a
     // dodged or nullified swing reads as a hit that landed.
-    if (MythicContext->IsCriticalHit()) {
+    if (!bDamageNullified && MythicContext->IsCriticalHit()) {
         if (UMythicAbilitySystemComponent *SourceMythicASC = Cast<UMythicAbilitySystemComponent>(SourceASC)) {
             FGameplayCueParameters CueParams;
             if (const FHitResult *Hit = MythicContext->GetHitResult()) {

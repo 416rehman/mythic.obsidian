@@ -1,11 +1,14 @@
 #include "ItemizationSubsystem.h"
 
+#include "Engine/World.h"
 #include "Mythic.h"
 #include "Inventory/ItemDefinition.h"
 #include "Inventory/Fragments/Passive/CraftableFragment.h"
+#include "Inventory/MythicItemFactorySubsystem.h"
 #include "System/MythicAssetManager.h"
 
 void UItemizationSubsystem::Initialize(FSubsystemCollectionBase &Collection) {
+    Collection.InitializeDependency<UMythicItemFactorySubsystem>();
     Super::Initialize(Collection);
 
     UE_LOG(Myth, Log, TEXT("Caching item defs"));
@@ -62,6 +65,8 @@ void UItemizationSubsystem::OnAllItemDefsLoaded() {
         }
     }
 
+    BeginCreationClosurePrewarm();
+
     RequiredItemAssets = RequiredItemAssets.Difference(TSet<FPrimaryAssetId>(AllItemDefIds));
 
     if (RequiredItemAssets.Num() > 0) {
@@ -75,6 +80,83 @@ void UItemizationSubsystem::OnAllItemDefsLoaded() {
     else {
         ProcessCraftingRequirements();
     }
+}
+
+void UItemizationSubsystem::BeginCreationClosurePrewarm() {
+    bCreationClosurePrewarmComplete = false;
+    FailedCreationClosureCount = 0;
+    PendingCreationClosureCount = CachedItemDefs.Num();
+
+    UGameInstance *GameInstance = GetGameInstance();
+    UMythicItemFactorySubsystem *Factory = GameInstance
+        ? GameInstance->GetSubsystem<UMythicItemFactorySubsystem>() : nullptr;
+
+    if (!Factory) {
+        const UWorld *World = GetWorld();
+        const bool bAuthoritativeWorld = World && World->GetNetMode() < NM_Client;
+        FailedCreationClosureCount = bAuthoritativeWorld ? PendingCreationClosureCount : 0;
+        PendingCreationClosureCount = 0;
+        bCreationClosurePrewarmComplete = true;
+        if (bAuthoritativeWorld) {
+            UE_LOG(Myth, Error,
+                   TEXT("Itemization: item factory unavailable; %d creation closure(s) could not be prewarmed."),
+                   FailedCreationClosureCount);
+        }
+        CreationClosuresPrewarmed.Broadcast(FailedCreationClosureCount == 0, FailedCreationClosureCount);
+        return;
+    }
+
+    if (PendingCreationClosureCount == 0) {
+        bCreationClosurePrewarmComplete = true;
+        CreationClosuresPrewarmed.Broadcast(true, 0);
+        return;
+    }
+
+    TWeakObjectPtr<UItemizationSubsystem> WeakThis(this);
+    for (UItemDefinition *ItemDefinition : CachedItemDefs) {
+        const FPrimaryAssetId DefinitionId = ItemDefinition
+            ? ItemDefinition->GetPrimaryAssetId() : FPrimaryAssetId();
+        if (!ItemDefinition) {
+            OnCreationClosurePrewarmComplete(DefinitionId, false);
+            continue;
+        }
+        Factory->RequestItemDefinitionReadyAsync(
+            ItemDefinition,
+            FOnMythicItemDefinitionReady::CreateLambda(
+                [WeakThis, DefinitionId](const bool bSuccess) {
+                    if (WeakThis.IsValid()) {
+                        WeakThis->OnCreationClosurePrewarmComplete(DefinitionId, bSuccess);
+                    }
+                }));
+    }
+}
+
+void UItemizationSubsystem::OnCreationClosurePrewarmComplete(
+    const FPrimaryAssetId ItemDefinitionId, const bool bSuccess) {
+    if (bCreationClosurePrewarmComplete || PendingCreationClosureCount <= 0) {
+        return;
+    }
+    if (!bSuccess) {
+        ++FailedCreationClosureCount;
+        UE_LOG(Myth, Error, TEXT("Itemization: exact creation closure failed to prewarm for %s."),
+               *ItemDefinitionId.ToString());
+    }
+    --PendingCreationClosureCount;
+    if (PendingCreationClosureCount > 0) {
+        return;
+    }
+
+    bCreationClosurePrewarmComplete = true;
+    if (FailedCreationClosureCount == 0) {
+        UE_LOG(Myth, Log, TEXT("Itemization: creation-closure prewarm finished for %d definitions."),
+               CachedItemDefs.Num());
+    }
+    else {
+        UE_LOG(Myth, Error,
+               TEXT("Itemization: creation-closure prewarm finished for %d definitions (%d failed)."),
+               CachedItemDefs.Num(), FailedCreationClosureCount);
+    }
+    CreationClosuresPrewarmed.Broadcast(FailedCreationClosureCount == 0, FailedCreationClosureCount);
 }
 
 void UItemizationSubsystem::OnCraftingRequirementsLoaded() {
@@ -121,10 +203,13 @@ void UItemizationSubsystem::ProcessCraftingRequirements() {
 }
 
 void UItemizationSubsystem::Deinitialize() {
-    Super::Deinitialize();
-
+    CreationClosuresPrewarmed.Clear();
+    PendingCreationClosureCount = 0;
+    FailedCreationClosureCount = 0;
+    bCreationClosurePrewarmComplete = false;
     UMythicAssetManager &AssetManager = UMythicAssetManager::Get();
     AssetManager.UnloadPrimaryAssets(AllItemDefIds);
+    Super::Deinitialize();
 }
 
 bool UItemizationSubsystem::IsCraftingIngredient(UItemDefinition *Item) const {

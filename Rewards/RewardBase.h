@@ -17,7 +17,7 @@ struct FRewardContext {
     FRewardContext() {}
     FRewardContext(APlayerController *PlayerController) : PlayerController(PlayerController) {}
 
-    // The player that is receiving the reward
+    /** Authoritative player controller that owns and receives this reward. */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Reward Context")
     APlayerController *PlayerController = nullptr;
 };
@@ -40,27 +40,27 @@ USTRUCT(BlueprintType, Blueprintable)
 struct FRewardsToGive {
     GENERATED_BODY()
 
-    // XP Reward
+    /** Optional proficiency XP reward granted by this bundle. */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rewards")
     TObjectPtr<UXPReward> XPReward;
 
-    // Item Reward
+    /** Optional exact item reward granted by this bundle. */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rewards")
     TObjectPtr<UItemReward> ItemReward;
 
-    // Loot Reward
+    /** Optional randomized loot-table reward granted by this bundle. */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rewards")
     TObjectPtr<ULootReward> LootReward;
 
-    // Ability Reward
+    /** Optional Gameplay Ability reward granted by this bundle. */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rewards")
     TObjectPtr<UAbilityReward> AbilityReward;
 
-    // Attribute Reward
+    /** Optional source-addressed permanent stat reward granted by this bundle. */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rewards")
     TObjectPtr<UAttributeReward> AttributeReward;
 
-    // Renown Reward (scoped reputation toward a faction/region/global scope — see GAS/Progression/MythicRenownReward.h)
+    /** Optional scoped faction, region, or global renown reward granted by this bundle. */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rewards")
     TObjectPtr<URenownReward> RenownReward;
 

@@ -11,12 +11,14 @@ class MYTHIC_API URenownReward : public URewardBase {
     GENERATED_BODY()
 
 public:
-    // The renown scope this reward feeds (a Faction.* tag, a region tag, or RENOWN_SCOPE_GLOBAL). Every grant also
-    // feeds the global aggregate automatically — do NOT author a second global reward alongside a scoped one.
+    /**
+     * Faction, region, or global scope receiving this reward. Scoped grants also feed the global aggregate, so do
+     * not author a duplicate global reward beside them.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Renown Reward")
     FGameplayTag Scope;
 
-    // Signed renown delta (negative = infamy/loss).
+    /** Signed renown delta; negative values represent infamy or reputation loss. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Renown Reward")
     float Amount = 100.0f;
 

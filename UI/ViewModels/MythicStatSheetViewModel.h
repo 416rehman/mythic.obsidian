@@ -5,40 +5,55 @@
 #include "MVVMViewModelBase.h"
 #include "AttributeSet.h"
 #include "MythicStatDisplay.h"
+#include "Stats/MythicStatRegistry.h"
 #include "MythicStatSheetViewModel.generated.h"
 
 class UAbilitySystemComponent;
+class UMythicItemizationDataRegistrySubsystem;
+class UMythicAffixApplicationComponent;
 class UMythicAttributeSet;
 class UMythicStatSummaryLibrary;
 
+/** Ordered Blueprint-facing stat-sheet section built from one canonical category definition. */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicStatSection {
     GENERATED_BODY()
 
+    /** Localized category heading displayed above this group of stat rows. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     FText Heading;
 
+    /** Canonical category identity used for styling and collapse-state persistence. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
-    EMythicStatCategory Category = EMythicStatCategory::Utility;
+    FGameplayTag CategoryTag;
 
+    /** Data-authored visual and interaction treatment for this section. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
+    FMythicStatCategoryStyle Style;
+
+    /** Ordered, display-ready stat rows that belong to this category. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Stats")
     TArray<FMythicStatLine> Lines;
 };
 
+/** MVVM projection that builds the complete data-driven stat sheet from live GAS and semantic asset data. */
 UCLASS(BlueprintType)
 class MYTHIC_API UMythicStatSheetViewModel : public UMVVMViewModelBase {
     GENERATED_BODY()
 
 public:
-    // Bind to the local player's ASC and build the first snapshot. Idempotent — safe to call on every open.
+    /** Binds to the local player's Ability System Component and builds the first snapshot; safe to call on every open. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Stats")
     void InitializeForASC(UAbilitySystemComponent *InASC);
 
-    // Drop all bindings. Call when the sheet closes so a hidden panel costs nothing.
+    /** Deterministic C++/automation entry point over an already-built semantic registry. */
+    void InitializeForASCWithRegistry(UAbilitySystemComponent* InASC, const FMythicStatRegistry& InRegistry);
+
+    /** Releases all Ability System bindings; call when the sheet closes so a hidden panel has no update cost. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Stats")
     void Shutdown();
 
-    // Force an immediate rebuild. Only needed if something changes a value without going through GAS.
+    /** Forces an immediate snapshot rebuild for changes that did not emit a Gameplay Ability System attribute event. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Stats")
     void Refresh();
 
@@ -51,27 +66,13 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Stats")
     TArray<FMythicStatContributionLine> GetContributionsFor(FGameplayAttribute Stat) const;
 
-    /** True for a stat the player invests in, as opposed to one derived from it. */
+    /** True when the category asset enables contribution drill-down for this row. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Stats")
-    static bool IsPrimaryStat(const FMythicStatLine &Line) {
-        return Line.Category == EMythicStatCategory::Primary;
+    static bool SupportsContributionDrilldown(const FMythicStatLine &Line) {
+        return Line.bEnableContributionDrilldown;
     }
 
-    // Progressive disclosure: off by default, the sheet shows only stats that are non-zero or actively modified.
-    // Turning it on reveals every attribute including the ~30 that are inert for this build.
-    UFUNCTION(BlueprintCallable, Category = "Mythic|Stats")
-    void SetShowUnmodified(bool bShow);
-
-    // b-prefixed -> explicit accessor name, so the getter drops the 'b' (UHT will not infer this).
-    UPROPERTY(BlueprintReadOnly, FieldNotify, Getter = GetShowUnmodified, meta = (AllowPrivateAccess))
-    bool bShowUnmodified = false;
-
-    bool GetShowUnmodified() const {
-        return bShowUnmodified;
-    }
-
-    // The whole sheet, ordered: Vitality, Offense, Defense, Utility, Survival, Proficiencies. Empty sections are
-    // omitted entirely rather than rendered as an empty heading.
+    /** Complete data-authored stat sheet in category order; categories without visible rows are omitted. */
     UPROPERTY(BlueprintReadOnly, FieldNotify, Getter, meta = (AllowPrivateAccess))
     TArray<FMythicStatSection> Sections;
 
@@ -79,8 +80,7 @@ public:
         return Sections;
     }
 
-    // The headline cards — Damage / Toughness / Recovery-style — from the configured summary library, computed
-    // against the live ASC. Empty when no library is configured, so the cards section simply does not exist.
+    /** Headline cards computed from the configured summary library and live Ability System values. */
     UPROPERTY(BlueprintReadOnly, FieldNotify, Getter, meta = (AllowPrivateAccess))
     TArray<FMythicStatSummaryLine> Summaries;
 
@@ -88,8 +88,7 @@ public:
         return Summaries;
     }
 
-    // How many stats your gear, talents and buffs are currently changing. Drives a "12 stats modified" summary line —
-    // a single number that tells a player their build is doing something before they read any of it.
+    /** Number of stats currently changed by gear, talents, or buffs; drives the sheet's modified-stat summary. */
     UPROPERTY(BlueprintReadOnly, FieldNotify, Getter, meta = (AllowPrivateAccess))
     int32 ModifiedStatCount = 0;
 
@@ -105,6 +104,9 @@ private:
 
     void ScheduleRebuild();
     void Rebuild();
+    void BindPermanentStatLayer(UAbilitySystemComponent *InASC);
+    void HandlePermanentStatLayerChanged();
+    void HandleSemanticDataChanged(uint64 SemanticRevision);
 
     void SetSections(TArray<FMythicStatSection> &&In);
     void SetSummaries(TArray<FMythicStatSummaryLine> &&In);
@@ -113,14 +115,19 @@ private:
     const UMythicStatSummaryLibrary *ResolveSummaryLibrary();
 
     TWeakObjectPtr<UAbilitySystemComponent> ASC;
+    TWeakObjectPtr<UMythicAffixApplicationComponent> AffixApplication;
+    FDelegateHandle PermanentStatLayerChangedHandle;
 
     UPROPERTY()
     TObjectPtr<const UMythicStatSummaryLibrary> SummaryLibrary;
 
     bool bSummaryLibraryTried = false;
 
-    static void GatherGearContributions(const UAbilitySystemComponent *InASC,
-                                        TMap<FGameplayAttribute, float> &OutByAttribute);
+    // Owned and pinned by the GameInstance itemization subsystem (or by the caller in focused tests).
+    const FMythicStatRegistry* StatRegistry = nullptr;
+    TWeakObjectPtr<UMythicItemizationDataRegistrySubsystem> RegistrySubsystem;
+    FDelegateHandle RegistryReadinessHandle;
+    FDelegateHandle RegistrySemanticDataChangedHandle;
 
     UPROPERTY()
     TArray<TWeakObjectPtr<UMythicAttributeSet>> BoundSets;

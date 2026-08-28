@@ -17,8 +17,11 @@
 #include "AbilitySystemComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "GameFramework/Controller.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerState.h"
 #include "Fragments/ActionableItemFragment.h"
-#include "Mythic/Itemization/MythicTags_Inventory.h"
+#include "Itemization/Affixes/MythicAffixApplicationComponent.h"
 
 UMythicInventoryComponent::UMythicInventoryComponent(const FObjectInitializer &OI) :
     Super(OI) {
@@ -31,18 +34,18 @@ UMythicInventoryComponent::UMythicInventoryComponent(const FObjectInitializer &O
 
 void FMythicInventorySlotEntry::ClientUpdateActiveState(UMythicInventoryComponent* Owner) {
     bool bChanged = ClientLastKnownItem != SlottedItemInstance;
-    UE_LOG(Myth, Log, TEXT("ClientUpdateActiveState: Slot Item: %s, LastKnown: %s, bEquipmentSlot: %d, Changed: %d"),
+    UE_LOG(Myth, Log, TEXT("ClientUpdateActiveState: Slot Item: %s, LastKnown: %s, SlotDomain: %d, Changed: %d"),
            SlottedItemInstance ? *SlottedItemInstance->GetName() : TEXT("Null"),
            ClientLastKnownItem ? *ClientLastKnownItem->GetName() : TEXT("Null"),
-           bEquipmentSlot,
+           static_cast<int32>(SlotDomain),
            bChanged);
 
     if (bChanged) {
-        if (IsValid(ClientLastKnownItem)) {
+        if (IsGearSlot() && IsValid(ClientLastKnownItem)) {
             UE_LOG(Myth, Log, TEXT("ClientUpdateActiveState: Deactivating Old Item: %s"), *ClientLastKnownItem->GetName());
             ClientLastKnownItem->OnClientInactiveItem();
 
-            if (bEquipmentSlot && Owner && Owner->GetOwner()) {
+            if (Owner && Owner->GetOwner()) {
                 if (AMythicCharacter* CharOwner = Cast<AMythicCharacter>(Owner->GetOwner())) {
                     if (SlotDefinition) {
                         CharOwner->RemoveLocalEquipmentMesh(SlotDefinition->SlotType);
@@ -51,7 +54,7 @@ void FMythicInventorySlotEntry::ClientUpdateActiveState(UMythicInventoryComponen
             }
         }
 
-        if (bEquipmentSlot && IsValid(SlottedItemInstance)) {
+        if (IsGearSlot() && IsValid(SlottedItemInstance)) {
             UE_LOG(Myth, Log, TEXT("ClientUpdateActiveState: Activating New Item: %s"), *SlottedItemInstance->GetName());
             SlottedItemInstance->OnClientActiveItem();
 
@@ -73,7 +76,7 @@ void FMythicInventorySlotEntry::ClientUpdateActiveState(UMythicInventoryComponen
 }
 
 void FMythicInventorySlotEntry::ServerUpdateActiveState() {
-    if (bEquipmentSlot && IsValid(SlottedItemInstance)) {
+    if (IsGearSlot() && IsValid(SlottedItemInstance)) {
         SlottedItemInstance->OnActiveItem();
     }
 }
@@ -228,7 +231,7 @@ void UMythicInventoryComponent::InitializeSlots() {
             for (int32 i = 0; i < Entry.Count; ++i) {
                 FMythicInventorySlotEntry SlotEntry;
                 SlotEntry.SlotDefinition = Entry.SlotDefinition;
-                SlotEntry.bEquipmentSlot = Group.bIsEquipmentGroup;
+                SlotEntry.SlotDomain = Group.SlotDomain;
                 SlotEntry.GroupTag = GroupTag;
                 SlotEntry.EntryIndex = EntryIndex;
                 SlotEntry.bRequireUniqueInEntry = Entry.bRequireUniqueItems;
@@ -281,7 +284,7 @@ bool UMythicInventoryComponent::CanSlotAcceptItem(int32 SlotIndex, UMythicItemIn
         return false;
     }
 
-    if (bFromPlayer && Slot.bEquipmentSlot) {
+    if (bFromPlayer && Slot.IsGearSlot()) {
         if (const UItemDefinition *Def = ItemInstance->GetItemDefinition()) {
             if (Def->RequiredEquipTag.IsValid()) {
                 FGameplayTagContainer OwnerTags;
@@ -342,8 +345,9 @@ UMythicItemInstance *UMythicInventoryComponent::ReleaseFromSlot(int32 SlotIndex)
         return nullptr;
     }
 
-    SetItemInSlot(SlotIndex, nullptr);
-    Inst->SetInventory(nullptr, INDEX_NONE);
+    if (!SetItemInSlot(SlotIndex, nullptr)) {
+        return nullptr;
+    }
     return Inst;
 }
 
@@ -352,25 +356,29 @@ UMythicItemInstance *UMythicInventoryComponent::GetItem(int32 SlotIndex) {
 }
 
 bool UMythicInventoryComponent::TryTransferToSlot(UMythicItemInstance *ItemInstance, int32 TargetSlotIndex) {
-    if (!ItemInstance) {
+    if (!ItemInstance || !Slots.IsValidIndex(TargetSlotIndex)) {
         return false;
     }
-    auto OldInventory = ItemInstance->GetInventoryComponent();
-    auto OldItemSlot = ItemInstance->GetSlot();
-
-    if (OldInventory) {
-        OldInventory->SetItemInSlot(OldItemSlot, nullptr);
-    }
-    if (this->SetItemInSlot(TargetSlotIndex, ItemInstance)) {
+    UMythicInventoryComponent *OldInventory = ItemInstance->GetInventoryComponent();
+    const int32 OldItemSlot = ItemInstance->GetSlot();
+    if (OldInventory == this && OldItemSlot == TargetSlotIndex
+        && Slots.Items[TargetSlotIndex].SlottedItemInstance == ItemInstance) {
         return true;
     }
-
-    if (OldItemSlot != INDEX_NONE && OldInventory) {
-        UE_LOG(Myth, Verbose, TEXT("Failed to add item to slot, reverting to previous"));
-        OldInventory->SetItemInSlot(OldItemSlot, ItemInstance);
+    if (Slots.Items[TargetSlotIndex].SlottedItemInstance) {
+        return false;
     }
 
-    return false;
+    TArray<FStagedSlotMutation> Mutations;
+    if (OldInventory) {
+        if (!OldInventory->Slots.IsValidIndex(OldItemSlot)
+            || OldInventory->Slots.Items[OldItemSlot].SlottedItemInstance != ItemInstance) {
+            return false;
+        }
+        Mutations.Add({OldInventory, OldItemSlot, ItemInstance, nullptr});
+    }
+    Mutations.Add({this, TargetSlotIndex, nullptr, ItemInstance});
+    return CommitSlotMutationsTransactional(Mutations);
 }
 
 bool UMythicInventoryComponent::SetItemInSlot(int32 SlotIndex, UMythicItemInstance *NewItemInstance) {
@@ -384,75 +392,251 @@ bool UMythicInventoryComponent::SetItemInSlotInternal(int32 SlotIndex, UMythicIt
         return false;
     }
 
-    if (!NewItemInstance) {
-        if (Slots.Items[SlotIndex].SlottedItemInstance && Slots.Items[SlotIndex].bEquipmentSlot) {
-            Slots.Items[SlotIndex].SlottedItemInstance->OnInactiveItem();
-        }
-
-        Slots.ModifySlotAtIndex(SlotIndex, [](FMythicInventorySlotEntry &SlotData) {
-            SlotData.Clear();
-        });
-
-        NotifyItemInstanceUpdated(SlotIndex);
+    UMythicItemInstance *CurrentItem = Slots.Items[SlotIndex].SlottedItemInstance;
+    if (CurrentItem == NewItemInstance) {
         return true;
     }
-
-    FMythicInventorySlotEntry &Slot = Slots.Items[SlotIndex];
-
-    if (Slot.SlottedItemInstance) {
+    if (CurrentItem && NewItemInstance) {
         UE_LOG(Myth, Warning, TEXT("There is already an item in this slot"));
         return false;
     }
+    const FStagedSlotMutation Mutation{this, SlotIndex, CurrentItem, NewItemInstance};
+    return CommitSlotMutationsTransactional(MakeArrayView(&Mutation, 1));
+}
 
-    if (Slot.SlotDefinition && (Slot.SlotDefinition->WhitelistedItemTypes.Num() > 0)) {
-        if (!NewItemInstance->GetItemDefinition()) {
-            UE_LOG(Myth, Error, TEXT("SetItemInSlotInternal: ItemDefinition is null for item %s"), *NewItemInstance->GetName());
-            return false;
-        }
-        if (!SlotWhitelistAccepts(SlotIndex, NewItemInstance)) {
-            UE_LOG(Myth, Verbose, TEXT("SetItemInSlotInternal: Item %s of type %s is not whitelisted for slot %d"),
-                   *NewItemInstance->GetName(),
-                   *NewItemInstance->GetItemDefinition()->ItemType.ToString(),
-                   SlotIndex);
-            return false;
-        }
+bool UMythicInventoryComponent::ValidateFinalSlotLayout(
+    const TConstArrayView<FStagedSlotMutation> Mutations) {
+    if (Mutations.IsEmpty()) {
+        return true;
     }
 
-    if (Slot.bRequireUniqueInEntry && NewItemInstance->GetItemDefinition()) {
-        for (int32 i = 0; i < Slots.Num(); ++i) {
-            if (i == SlotIndex) {
-                continue;
-            }
-            const FMythicInventorySlotEntry &OtherSlot = Slots.Items[i];
-            if (OtherSlot.GroupTag == Slot.GroupTag &&
-                OtherSlot.EntryIndex == Slot.EntryIndex &&
-                OtherSlot.SlottedItemInstance &&
-                OtherSlot.SlottedItemInstance->GetItemDefinition() == NewItemInstance->GetItemDefinition()) {
-                UE_LOG(Myth, Warning, TEXT("SetItemInSlotInternal: Item %s already exists in entry (uniqueness required)"),
-                       *NewItemInstance->GetName());
+    TSet<UMythicInventoryComponent *> AffectedInventories;
+    for (int32 Index = 0; Index < Mutations.Num(); ++Index) {
+        const FStagedSlotMutation &Mutation = Mutations[Index];
+        if (!Mutation.Inventory || !Mutation.Inventory->GetOwner()
+            || !Mutation.Inventory->GetOwner()->HasAuthority()
+            || !Mutation.Inventory->Slots.IsValidIndex(Mutation.SlotIndex)
+            || Mutation.Inventory->Slots.Items[Mutation.SlotIndex].SlottedItemInstance != Mutation.ExpectedItem) {
+            return false;
+        }
+        for (int32 OtherIndex = Index + 1; OtherIndex < Mutations.Num(); ++OtherIndex) {
+            if (Mutations[OtherIndex].Inventory == Mutation.Inventory
+                && Mutations[OtherIndex].SlotIndex == Mutation.SlotIndex) {
                 return false;
             }
         }
-    }
-
-    if (Slot.SlottedItemInstance && Slot.bEquipmentSlot) {
-        Slot.SlottedItemInstance->OnInactiveItem();
-    }
-
-    Slots.ModifySlotAtIndex(SlotIndex, [this, NewItemInstance, SlotIndex](FMythicInventorySlotEntry &Slot) {
-        Slot.SlottedItemInstance = NewItemInstance;
-        if (IsValid(Slot.SlottedItemInstance)) {
-            Slot.SlottedItemInstance->SetOwner(this);
-            Slot.SlottedItemInstance->SetInventory(this, SlotIndex);
-
-            Slot.ServerUpdateActiveState();
+        if (Mutation.ProposedItem
+            && !Mutation.Inventory->SlotWhitelistAccepts(Mutation.SlotIndex, Mutation.ProposedItem)) {
+            return false;
         }
-    });
+        AffectedInventories.Add(Mutation.Inventory);
+    }
 
-    NotifyItemInstanceUpdated(SlotIndex);
+    auto FindProposedItem = [&Mutations](UMythicInventoryComponent *Inventory, const int32 SlotIndex,
+                                         UMythicItemInstance *Current) {
+        for (const FStagedSlotMutation &Mutation : Mutations) {
+            if (Mutation.Inventory == Inventory && Mutation.SlotIndex == SlotIndex) {
+                return Mutation.ProposedItem;
+            }
+        }
+        return Current;
+    };
 
-    UE_LOG(Myth, Verbose, TEXT("Item added to slot %d successfully"), SlotIndex);
+    // A currently owned item may only enter a new destination if its source slot is part of this same transaction.
+    for (const FStagedSlotMutation &Mutation : Mutations) {
+        UMythicItemInstance *Proposed = Mutation.ProposedItem;
+        UMythicInventoryComponent *CurrentInventory = Proposed ? Proposed->GetInventoryComponent() : nullptr;
+        if (!CurrentInventory) {
+            continue;
+        }
+        const int32 CurrentSlot = Proposed->GetSlot();
+        bool bCurrentSlotParticipates = false;
+        for (const FStagedSlotMutation &SourceMutation : Mutations) {
+            bCurrentSlotParticipates |= SourceMutation.Inventory == CurrentInventory
+                && SourceMutation.SlotIndex == CurrentSlot && SourceMutation.ExpectedItem == Proposed;
+        }
+        if (!bCurrentSlotParticipates) {
+            return false;
+        }
+    }
+
+    TSet<UMythicItemInstance *> FinalItems;
+    for (UMythicInventoryComponent *Inventory : AffectedInventories) {
+        for (int32 SlotIndex = 0; SlotIndex < Inventory->Slots.Num(); ++SlotIndex) {
+            const FMythicInventorySlotEntry &Slot = Inventory->Slots.Items[SlotIndex];
+            UMythicItemInstance *FinalItem = FindProposedItem(Inventory, SlotIndex, Slot.SlottedItemInstance);
+            if (!FinalItem) {
+                continue;
+            }
+            if (FinalItems.Contains(FinalItem)) {
+                return false;
+            }
+            FinalItems.Add(FinalItem);
+
+            if (!Slot.bRequireUniqueInEntry || !FinalItem->GetItemDefinition()) {
+                continue;
+            }
+            for (int32 OtherSlotIndex = SlotIndex + 1; OtherSlotIndex < Inventory->Slots.Num(); ++OtherSlotIndex) {
+                const FMythicInventorySlotEntry &OtherSlot = Inventory->Slots.Items[OtherSlotIndex];
+                UMythicItemInstance *OtherFinal = FindProposedItem(
+                    Inventory, OtherSlotIndex, OtherSlot.SlottedItemInstance);
+                if (OtherSlot.GroupTag == Slot.GroupTag && OtherSlot.EntryIndex == Slot.EntryIndex
+                    && OtherFinal && OtherFinal->GetItemDefinition() == FinalItem->GetItemDefinition()) {
+                    return false;
+                }
+            }
+        }
+    }
     return true;
+}
+
+UMythicAffixApplicationComponent *UMythicInventoryComponent::ResolveAffixApplicationComponent() const {
+    auto FindApplication = [](AActor *Actor) -> UMythicAffixApplicationComponent * {
+        return Actor ? Actor->FindComponentByClass<UMythicAffixApplicationComponent>() : nullptr;
+    };
+    AActor *OwnerActor = GetOwner();
+    UMythicAffixApplicationComponent *Application = FindApplication(OwnerActor);
+    if (!Application) {
+        if (APawn *Pawn = Cast<APawn>(OwnerActor)) {
+            Application = FindApplication(Pawn->GetPlayerState());
+            if (!Application) Application = FindApplication(Pawn->GetController());
+        }
+        else if (AController *Controller = Cast<AController>(OwnerActor)) {
+            Application = FindApplication(Controller->GetPlayerState<APlayerState>());
+            if (!Application && Controller->GetPawn()) {
+                Application = FindApplication(Controller->GetPawn()->GetPlayerState());
+            }
+        }
+    }
+    return Application ? Application : FindApplication(OwnerActor ? OwnerActor->GetOwner() : nullptr);
+}
+
+bool UMythicInventoryComponent::CommitSlotMutationsTransactional(
+    const TConstArrayView<FStagedSlotMutation> Mutations) {
+    if (!ValidateFinalSlotLayout(Mutations)) {
+        return false;
+    }
+
+    TArray<FMythicAffixEquipmentSlotOverride> EquipmentOverrides;
+    UMythicAffixApplicationComponent *Application = nullptr;
+    for (const FStagedSlotMutation &Mutation : Mutations) {
+        const FMythicInventorySlotEntry &Slot = Mutation.Inventory->Slots.Items[Mutation.SlotIndex];
+        if (Mutation.ExpectedItem == Mutation.ProposedItem
+            || !Slot.IsGearSlot()) {
+            continue;
+        }
+        UMythicAffixApplicationComponent *CandidateApplication =
+            Mutation.Inventory->ResolveAffixApplicationComponent();
+        if (!CandidateApplication || (Application && CandidateApplication != Application)) {
+            return false;
+        }
+        Application = CandidateApplication;
+        EquipmentOverrides.Add({Mutation.Inventory, Mutation.SlotIndex, Mutation.ProposedItem});
+    }
+
+    // This is the only fallible mutation. Until it succeeds, slot pointers, item back-pointers, lifecycle state and
+    // Fast Array dirtiness are all exactly the old transaction state.
+    if (Application
+        && !Application->ReconcileEquipmentMutationTransactional(EquipmentOverrides)) {
+        return false;
+    }
+
+    TSet<UMythicItemInstance *> PreviouslyActiveItems;
+    TSet<UMythicItemInstance *> ProposedActiveItems;
+    for (const FStagedSlotMutation &Mutation : Mutations) {
+        const FMythicInventorySlotEntry &Slot = Mutation.Inventory->Slots.Items[Mutation.SlotIndex];
+        if (Mutation.ExpectedItem && Slot.IsGearSlot()) {
+            PreviouslyActiveItems.Add(Mutation.ExpectedItem);
+        }
+        if (Mutation.ProposedItem && Slot.IsGearSlot()) {
+            ProposedActiveItems.Add(Mutation.ProposedItem);
+        }
+    }
+    for (UMythicItemInstance *PreviouslyActive : PreviouslyActiveItems) {
+        if (PreviouslyActive && !ProposedActiveItems.Contains(PreviouslyActive)) {
+            PreviouslyActive->OnInactiveItem();
+        }
+    }
+
+    TSet<UMythicItemInstance *> DetachedItems;
+    for (const FStagedSlotMutation &Mutation : Mutations) {
+        if (Mutation.ExpectedItem && Mutation.ExpectedItem != Mutation.ProposedItem
+            && !DetachedItems.Contains(Mutation.ExpectedItem)) {
+            Mutation.ExpectedItem->SetInventory(nullptr, INDEX_NONE);
+            DetachedItems.Add(Mutation.ExpectedItem);
+        }
+    }
+
+    // Install every pointer before invoking inventory-change callbacks, so swaps/transfers never expose a partial
+    // final layout to fragments. Replication is marked dirty only after all lifecycle callbacks complete.
+    for (const FStagedSlotMutation &Mutation : Mutations) {
+        Mutation.Inventory->Slots.Items[Mutation.SlotIndex].SlottedItemInstance = Mutation.ProposedItem;
+    }
+    for (const FStagedSlotMutation &Mutation : Mutations) {
+        if (Mutation.ProposedItem) {
+            Mutation.ProposedItem->SetOwner(Mutation.Inventory);
+            Mutation.ProposedItem->SetInventory(Mutation.Inventory, Mutation.SlotIndex);
+        }
+    }
+
+    TArray<TPair<UMythicInventoryComponent *, UMythicItemInstance *>> NewlyEquippedItems;
+    for (const FStagedSlotMutation &Mutation : Mutations) {
+        const FMythicInventorySlotEntry &Slot = Mutation.Inventory->Slots.Items[Mutation.SlotIndex];
+        if (Mutation.ProposedItem
+            && ProposedActiveItems.Contains(Mutation.ProposedItem)
+            && !PreviouslyActiveItems.Contains(Mutation.ProposedItem)
+            && !NewlyEquippedItems.ContainsByPredicate(
+                [&Mutation](const TPair<UMythicInventoryComponent *, UMythicItemInstance *> &Pair) {
+                    return Pair.Value == Mutation.ProposedItem;
+                })) {
+            Mutation.ProposedItem->OnActiveItem();
+            NewlyEquippedItems.Emplace(Mutation.Inventory, Mutation.ProposedItem);
+        }
+    }
+
+    // Equipment telemetry is a slot-transaction concern, not an affix/attack-fragment concern. Emit once only
+    // after every lifecycle callback observes the complete committed layout.
+    for (const TPair<UMythicInventoryComponent *, UMythicItemInstance *> &Equipped : NewlyEquippedItems) {
+        AActor *InventoryOwner = Equipped.Key ? Equipped.Key->GetOwner() : nullptr;
+        AMythicPlayerController *PlayerController = Cast<AMythicPlayerController>(InventoryOwner);
+        if (!PlayerController) {
+            if (const APawn *Pawn = Cast<APawn>(InventoryOwner)) {
+                PlayerController = Cast<AMythicPlayerController>(Pawn->GetController());
+            }
+        }
+        if (PlayerController && Equipped.Value && Equipped.Value->GetItemDefinition()) {
+            PlayerController->NotifyItemEquipped(Equipped.Value->GetItemDefinition());
+        }
+    }
+
+    TMap<UMythicInventoryComponent *, TArray<int32>> ChangedSlotsByInventory;
+    for (const FStagedSlotMutation &Mutation : Mutations) {
+        if (Mutation.ExpectedItem == Mutation.ProposedItem) {
+            continue;
+        }
+        Mutation.Inventory->Slots.MarkItemDirty(Mutation.Inventory->Slots.Items[Mutation.SlotIndex]);
+        ChangedSlotsByInventory.FindOrAdd(Mutation.Inventory).Add(Mutation.SlotIndex);
+    }
+    for (TPair<UMythicInventoryComponent *, TArray<int32>> &Pair : ChangedSlotsByInventory) {
+        Pair.Key->HandleSlotsChanged(Pair.Value, Pair.Key->Slots.Num());
+    }
+    return true;
+}
+
+bool UMythicInventoryComponent::ReconcileEquippedAffixSnapshotMutationTransactional(
+    UMythicItemInstance *ItemInstance,
+    const TConstArrayView<FRolledAffix> ProposedSnapshots) const {
+    if (!ItemInstance || !GetOwner() || !GetOwner()->HasAuthority()
+        || ItemInstance->GetInventoryComponent() != this || !Slots.IsValidIndex(ItemInstance->GetSlot())) {
+        return false;
+    }
+    const FMythicInventorySlotEntry &Slot = Slots.Items[ItemInstance->GetSlot()];
+    if (!Slot.IsGearSlot() || Slot.SlottedItemInstance != ItemInstance) {
+        return false;
+    }
+    UMythicAffixApplicationComponent *Application = ResolveAffixApplicationComponent();
+    return Application
+        && Application->ReconcileItemSnapshotMutationTransactional(ItemInstance, ProposedSnapshots);
 }
 
 AMythicWorldItem *UMythicInventoryComponent::AddItem(UMythicItemInstance *ItemInstance, AController *TargetRecipient) {
@@ -529,13 +713,18 @@ int32 UMythicInventoryComponent::AddToAnySlot(UMythicItemInstance *ItemInstance,
             continue;
         }
 
-        UMythicItemInstance *Split = DuplicateObject<UMythicItemInstance>(ItemInstance, this);
-        Split->SetStackSize(MaxStack);
+        UMythicItemInstance *Split = ItemInstance->CloneForStackSplit(this, MaxStack);
+        if (!Split) {
+            UE_LOG(Myth, Error,
+                   TEXT("AddToAnySlot: current semantic stack clone failed for %s"),
+                   *GetNameSafe(ItemInstance));
+            break;
+        }
         if (TryTransferToSlot(Split, i)) {
             ItemInstance->SetStackSize(remaining - MaxStack);
         }
         else if (IsValid(Split)) {
-            Split->Destroy();
+            Split->MarkAsGarbage();
         }
     }
 
@@ -655,7 +844,15 @@ bool UMythicInventoryComponent::DropItem(int32 SlotIndex, const FVector &locatio
         return false;
     }
 
-    SetItemInSlot(SlotIndex, nullptr);
+    if (!SetItemInSlot(SlotIndex, nullptr)) {
+        // Spawn may have temporarily adopted the instance. The staged unequip failed before changing the slot, so
+        // detach the world representation and restore the item's old inventory ownership as the rollback state.
+        world_item->ItemInstance = nullptr;
+        item_instance->SetOwner(this);
+        item_instance->SetInventory(this, SlotIndex);
+        world_item->Destroy();
+        return false;
+    }
 
     this->OnItemDropped.Broadcast(SlotIndex, world_item);
 
@@ -679,24 +876,19 @@ void UMythicInventoryComponent::PickupItem_Implementation(AMythicWorldItem *worl
         return;
     }
 
-    auto copied_item_instance = DuplicateObject<UMythicItemInstance>(item_instance, this);
-
-    auto OriginalQty = copied_item_instance->GetStacks();
-    auto PickupDef = copied_item_instance->GetItemDefinition();
-    auto AmountAdded = AddToAnySlot(copied_item_instance);
+    const int32 OriginalQty = item_instance->GetStacks();
+    UItemDefinition *PickupDef = item_instance->GetItemDefinition();
+    const int32 AmountAdded = AddToAnySlot(item_instance);
 
     if (AmountAdded >= OriginalQty) {
+        // AddToAnySlot either merged/destroyed the source or transferred this exact physical identity. The dying
+        // world representation must not keep publishing a pointer now owned by an inventory.
+        world_item->ItemInstance = nullptr;
         world_item->Destroy();
     }
     else if (AmountAdded > 0) {
-        auto RemainingQty = OriginalQty - AmountAdded;
-        world_item->ItemInstance->SetStackSize(RemainingQty);
+        // Partial merge/split already reduced the original world-owned stack in place.
         world_item->FlushNetDormancy();
-    }
-    else {
-        if (IsValid(copied_item_instance)) {
-            copied_item_instance->Destroy();
-        }
     }
 
     if (AmountAdded > 0 && PickupDef) {
@@ -749,7 +941,7 @@ void UMythicInventoryComponent::HandleSlotsRemoved(const TArrayView<int32> &Remo
             if (IsValid(Slot.ClientLastKnownItem)) {
                 Slot.ClientLastKnownItem->OnClientInactiveItem();
 
-                if (Slot.bEquipmentSlot && GetOwner()) {
+                if (Slot.IsGearSlot() && GetOwner()) {
                     if (AMythicCharacter* CharOwner = Cast<AMythicCharacter>(GetOwner())) {
                         if (Slot.SlotDefinition) {
                             CharOwner->RemoveLocalEquipmentMesh(Slot.SlotDefinition->SlotType);
@@ -863,14 +1055,12 @@ bool UMythicInventoryComponent::DestroySlot(int32 SlotIndex) {
         return false;
     }
 
-    FMythicInventorySlotEntry &InSlot = Slots.Items[SlotIndex];
-
-    if (InSlot.SlottedItemInstance && InSlot.bEquipmentSlot) {
-        InSlot.SlottedItemInstance->OnInactiveItem();
+    UMythicItemInstance *Item = Slots.Items[SlotIndex].SlottedItemInstance;
+    if (Item && !SetItemInSlotInternal(SlotIndex, nullptr)) {
+        return false;
     }
-
-    if (InSlot.SlottedItemInstance) {
-        InSlot.SlottedItemInstance->Destroy();
+    if (Item) {
+        Item->Destroy();
     }
 
     Slots.RemoveSlotAt(SlotIndex);
@@ -884,7 +1074,11 @@ void UMythicInventoryComponent::DestroyAllSlots() {
     checkf(lOwner->HasAuthority(), TEXT("DestroySlot:: Called without Authority!"));
 
     for (int32 i = Slots.Num() - 1; i >= 0; --i) {
-        DestroySlot(i);
+        if (!DestroySlot(i)) {
+            UE_LOG(Myth, Error,
+                   TEXT("DestroyAllSlots stopped at slot %d because its transactional unequip failed."), i);
+            return;
+        }
     }
 
     Slots.Items.Empty();
@@ -960,11 +1154,22 @@ int32 UMythicInventoryComponent::SpendCurrency(int32 Amount) {
     return SpentSoFar;
 }
 
-void UMythicInventoryComponent::NotifyItemInstanceUpdated(int32 SlotIndex) {
+void UMythicInventoryComponent::NotifyItemInstanceUpdated(const int32 SlotIndex,
+                                                           const bool bReconcileAffixes) {
     if (IsValid(ViewModel)) {
         ViewModel->RefreshSlotFromInventory(this, SlotIndex);
     }
     OnSlotUpdated.Broadcast(SlotIndex);
+
+    // Equipment, restore, socket, crafting and durability mutations all converge here after their authoritative
+    // item state is committed. Reconcile the complete equipped snapshot set so cross-item stacking/conflicts cannot
+    // depend on fragment callback order and reconnect/load never relies on a stale incremental ledger.
+    if (bReconcileAffixes && GetOwner() && GetOwner()->HasAuthority()
+        && Slots.Items.IsValidIndex(SlotIndex)
+        && Slots.Items[SlotIndex].IsGearSlot()) {
+        UMythicAffixApplicationComponent *Application = ResolveAffixApplicationComponent();
+        if (Application) Application->RequestAuthoritativeReconciliation();
+    }
 }
 
 void UMythicInventoryComponent::AddSlot(UInventorySlotDefinition *SlotDefinition, int32 Count) {
@@ -980,7 +1185,7 @@ void UMythicInventoryComponent::AddSlot(UInventorySlotDefinition *SlotDefinition
     for (int32 i = 0; i < Count; ++i) {
         FMythicInventorySlotEntry NewSlot;
         NewSlot.SlotDefinition = SlotDefinition;
-        NewSlot.bEquipmentSlot = false;
+        NewSlot.SlotDomain = EMythicInventorySlotDomain::Carried;
 
         Slots.AddSlot(NewSlot);
     }
@@ -1017,12 +1222,18 @@ bool UMythicInventoryComponent::RemoveSlot(UInventorySlotDefinition *SlotDefinit
         }
 
         if (Slots.Items[i].SlotDefinition == SlotDefinition) {
-            if (Slots.Items[i].SlottedItemInstance) {
+            UMythicItemInstance *Item = Slots.Items[i].SlottedItemInstance;
+            if (Item) {
                 if (bDropItems) {
-                    DropItem(i, GetOwner()->GetActorLocation());
+                    if (!DropItem(i, GetOwner()->GetActorLocation())) {
+                        continue;
+                    }
                 }
                 else {
-                    Slots.Items[i].SlottedItemInstance->Destroy();
+                    if (!SetItemInSlotInternal(i, nullptr)) {
+                        continue;
+                    }
+                    Item->Destroy();
                 }
             }
 
@@ -1051,7 +1262,7 @@ int32 UMythicInventoryComponent::SplitStackToFreeSlot(int32 SourceSlotIndex, int
 
     const FMythicInventorySlotEntry &SourceSlot = Slots.Items[SourceSlotIndex];
 
-    if (SourceSlot.bEquipmentSlot) {
+    if (SourceSlot.IsGearSlot()) {
         UE_LOG(Myth, Warning, TEXT("ServerSplitStack: cannot split from equipment slot %d"), SourceSlotIndex);
         return INDEX_NONE;
     }
@@ -1073,7 +1284,9 @@ int32 UMythicInventoryComponent::SplitStackToFreeSlot(int32 SourceSlotIndex, int
             continue;
         }
         const FMythicInventorySlotEntry &CandidateSlot = Slots.Items[i];
-        if (CandidateSlot.GroupTag == SourceSlot.GroupTag && !CandidateSlot.bEquipmentSlot && !CandidateSlot.SlottedItemInstance) {
+        if (CandidateSlot.GroupTag == SourceSlot.GroupTag
+            && !CandidateSlot.IsGearSlot()
+            && !CandidateSlot.SlottedItemInstance) {
             if (SlotWhitelistAccepts(i, SourceItem)) {
                 TargetSlotIndex = i;
                 break;
@@ -1086,27 +1299,17 @@ int32 UMythicInventoryComponent::SplitStackToFreeSlot(int32 SourceSlotIndex, int
         return INDEX_NONE;
     }
 
-    UMythicLootManagerSubsystem *LootManager = lOwner->GetGameInstance()->GetSubsystem<UMythicLootManagerSubsystem>();
-    if (!LootManager) {
-        UE_LOG(Myth, Error, TEXT("ServerSplitStack: no LootManagerSubsystem"));
-        return INDEX_NONE;
-    }
-
-    UMythicItemInstance *NewItem = LootManager->Create(
-        SourceItem->GetItemDefinition(),
-        SplitAmount,
-        Cast<AController>(lOwner),
-        SourceItem->GetItemLevel()
-    );
+    UMythicItemInstance *NewItem = SourceItem->CloneForStackSplit(this, SplitAmount);
 
     if (!NewItem) {
-        UE_LOG(Myth, Error, TEXT("ServerSplitStack: failed to create split item"));
+        UE_LOG(Myth, Error,
+               TEXT("ServerSplitStack: failed to clone current immutable stack state"));
         return INDEX_NONE;
     }
 
     if (!SetItemInSlot(TargetSlotIndex, NewItem)) {
         UE_LOG(Myth, Error, TEXT("ServerSplitStack: failed to place split item in slot %d"), TargetSlotIndex);
-        NewItem->Destroy();
+        NewItem->MarkAsGarbage();
         return INDEX_NONE;
     }
 
@@ -1115,97 +1318,40 @@ int32 UMythicInventoryComponent::SplitStackToFreeSlot(int32 SourceSlotIndex, int
 }
 
 void UMythicInventoryComponent::ServerSwapSlots_Implementation(int32 SlotA, int32 SlotB) {
+    if (!TrySwapSlotsTransactional(SlotA, SlotB)) {
+        UE_LOG(Myth, Warning,
+               TEXT("ServerSwapSlots: transactional swap rejected for slots %d / %d; old slots and GAS preserved"),
+               SlotA, SlotB);
+    }
+}
+
+bool UMythicInventoryComponent::TrySwapSlotsTransactional(const int32 SlotA, const int32 SlotB) {
     AActor *lOwner = GetOwner();
     if (!lOwner || !lOwner->HasAuthority()) {
-        return;
+        return false;
     }
 
     if (SlotA == SlotB) {
-        return;
+        return Slots.IsValidIndex(SlotA);
     }
 
     if (!Slots.IsValidIndex(SlotA) || !Slots.IsValidIndex(SlotB)) {
         UE_LOG(Myth, Warning, TEXT("ServerSwapSlots: invalid slot indices %d / %d"), SlotA, SlotB);
-        return;
+        return false;
     }
 
     UMythicItemInstance *ItemA = Slots.Items[SlotA].SlottedItemInstance;
     UMythicItemInstance *ItemB = Slots.Items[SlotB].SlottedItemInstance;
 
     if (!ItemA && !ItemB) {
-        return;
+        return true;
     }
 
-    if (!ItemA) {
-        if (!SlotWhitelistAccepts(SlotA, ItemB)) {
-            UE_LOG(Myth, Warning, TEXT("ServerSwapSlots: slot %d does not accept item from slot %d"), SlotA, SlotB);
-            return;
-        }
-
-        if (Slots.Items[SlotB].bEquipmentSlot && IsValid(ItemB)) {
-            ItemB->OnInactiveItem();
-        }
-
-        Slots.ModifySlotAtIndex(SlotB, [](FMythicInventorySlotEntry &SlotData) {
-            SlotData.SlottedItemInstance = nullptr;
-        });
-        ItemB->SetInventory(nullptr, INDEX_NONE);
-        NotifyItemInstanceUpdated(SlotB);
-
-        SetItemInSlot(SlotA, ItemB);
-        return;
-    }
-
-    if (!ItemB) {
-        if (!SlotWhitelistAccepts(SlotB, ItemA)) {
-            UE_LOG(Myth, Warning, TEXT("ServerSwapSlots: slot %d does not accept item from slot %d"), SlotB, SlotA);
-            return;
-        }
-
-        if (Slots.Items[SlotA].bEquipmentSlot && IsValid(ItemA)) {
-            ItemA->OnInactiveItem();
-        }
-
-        Slots.ModifySlotAtIndex(SlotA, [](FMythicInventorySlotEntry &SlotData) {
-            SlotData.SlottedItemInstance = nullptr;
-        });
-        ItemA->SetInventory(nullptr, INDEX_NONE);
-        NotifyItemInstanceUpdated(SlotA);
-
-        SetItemInSlot(SlotB, ItemA);
-        return;
-    }
-
-    if (!SlotWhitelistAccepts(SlotA, ItemB) || !SlotWhitelistAccepts(SlotB, ItemA)) {
-        UE_LOG(Myth, Warning, TEXT("ServerSwapSlots: whitelist rejection for swap between %d and %d"), SlotA, SlotB);
-        return;
-    }
-
-    if (Slots.Items[SlotA].bEquipmentSlot && IsValid(ItemA)) {
-        ItemA->OnInactiveItem();
-    }
-    if (Slots.Items[SlotB].bEquipmentSlot && IsValid(ItemB)) {
-        ItemB->OnInactiveItem();
-    }
-
-    ItemA->SetInventory(nullptr, INDEX_NONE);
-    ItemB->SetInventory(nullptr, INDEX_NONE);
-
-    Slots.ModifySlotAtIndex(SlotA, [this, ItemB, SlotA](FMythicInventorySlotEntry &Slot) {
-        Slot.SlottedItemInstance = ItemB;
-        ItemB->SetOwner(this);
-        ItemB->SetInventory(this, SlotA);
-        Slot.ServerUpdateActiveState();
-    });
-    NotifyItemInstanceUpdated(SlotA);
-
-    Slots.ModifySlotAtIndex(SlotB, [this, ItemA, SlotB](FMythicInventorySlotEntry &Slot) {
-        Slot.SlottedItemInstance = ItemA;
-        ItemA->SetOwner(this);
-        ItemA->SetInventory(this, SlotB);
-        Slot.ServerUpdateActiveState();
-    });
-    NotifyItemInstanceUpdated(SlotB);
+    const FStagedSlotMutation Mutations[] = {
+        {this, SlotA, ItemA, ItemB},
+        {this, SlotB, ItemB, ItemA}
+    };
+    return CommitSlotMutationsTransactional(MakeArrayView(Mutations));
 }
 
 void UMythicInventoryComponent::ServerQuickMoveToInventory_Implementation(int32 SourceSlotIndex, UMythicInventoryComponent *TargetInventory) {
@@ -1231,6 +1377,22 @@ void UMythicInventoryComponent::ServerQuickMoveToInventory_Implementation(int32 
 
     if (!Slots.Items[SourceSlotIndex].bCanPlayerTake) {
         UE_LOG(Myth, Warning, TEXT("ServerQuickMoveToInventory: slot %d does not allow player take"), SourceSlotIndex);
+        return;
+    }
+
+    if (Slots.Items[SourceSlotIndex].IsGearSlot()) {
+        UMythicItemInstance *EquippedItem = Slots.Items[SourceSlotIndex].SlottedItemInstance;
+        if (!EquippedItem) {
+            return;
+        }
+        // Do not release first: an equipment-to-inventory move is one slot/GAS transaction or no move at all.
+        for (int32 TargetSlotIndex = 0; TargetSlotIndex < TargetInventory->Slots.Num(); ++TargetSlotIndex) {
+            if (!TargetInventory->Slots.Items[TargetSlotIndex].SlottedItemInstance
+                && TargetInventory->CanSlotAcceptItem(TargetSlotIndex, EquippedItem, true)
+                && TargetInventory->TryTransferToSlot(EquippedItem, TargetSlotIndex)) {
+                return;
+            }
+        }
         return;
     }
 
@@ -1270,7 +1432,7 @@ void UMythicInventoryComponent::ServerSortGroup_Implementation(FGameplayTag Grou
         if (Slot.GroupTag != GroupTag) {
             continue;
         }
-        if (Slot.bEquipmentSlot) {
+        if (Slot.IsGearSlot()) {
             UE_LOG(Myth, Warning, TEXT("ServerSortGroup: cannot sort equipment group %s"), *GroupTag.ToString());
             return;
         }
@@ -1350,7 +1512,7 @@ void UMythicInventoryComponent::ServerDepositAll_Implementation(UMythicInventory
     for (int32 i = Slots.Num() - 1; i >= 0; --i) {
         const FMythicInventorySlotEntry &Slot = Slots.Items[i];
 
-        if (Slot.bEquipmentSlot) {
+        if (Slot.IsGearSlot()) {
             continue;
         }
 

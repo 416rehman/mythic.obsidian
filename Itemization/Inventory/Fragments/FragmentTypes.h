@@ -7,6 +7,19 @@
 #include "FragmentTypes.generated.h"
 
 struct FRolledTagSpec;
+namespace MythicFragmentSerialization {
+inline constexpr int32 MaxIdentityStringBytes = 4096;
+
+/** Serializes a bounded canonical UTF-8 field as a byte count followed by bytes without a terminator. */
+MYTHIC_API bool SerializeBoundedUtf8(FArchive &Ar, FString &Value, int32 MaxBytes,
+                                     bool bRequired);
+
+/** Resolves an attribute only when its native AttributeSet and property belong to the supported item-stat domain. */
+MYTHIC_API bool ResolveAllowedAttribute(const FString &AttributeSetClassPath,
+                                        const FString &AttributePropertyName,
+                                        FGameplayAttribute &OutAttribute);
+}
+
 USTRUCT(Blueprintable, BlueprintType)
 struct MYTHIC_API FRollDefinition {
     GENERATED_BODY()
@@ -19,6 +32,7 @@ struct MYTHIC_API FRollDefinition {
     UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category="Itemization")
     float Max = 0;
 
+    /** GAS modifier operation used when this legacy non-affix roll definition is applied. */
     UPROPERTY(BlueprintReadOnly, EditAnywhere, Category="Itemization")
     TEnumAsByte<EGameplayModOp::Type> Modifier = EGameplayModOp::Additive;
 
@@ -31,8 +45,9 @@ struct MYTHIC_API FRollDefinition {
     UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category="Presentation")
     bool bLowerIsBetter = false;
 
-    // Forces a percent reading on an attribute the stat registry calls Flat. The registry (DT_StatDisplay) decides
-    // units for every other format, so this stays off unless a roll genuinely needs to override it.
+    // Forces a percent reading on an attribute whose StatDefinition asset declares Flat presentation. The
+    // data-driven stat definitions decide units for every other format, so this stays off unless a roll genuinely
+    // needs to override them.
     UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category="Presentation")
     bool bIsPercentage = false;
 
@@ -48,11 +63,25 @@ struct MYTHIC_API FRollDefinition {
         }
         Ar << Min;
         Ar << Max;
-        Ar << Modifier;
+        uint8 ModifierByte = Ar.IsSaving() ? static_cast<uint8>(Modifier.GetValue()) : 0;
+        Ar << ModifierByte;
+        if (ModifierByte > static_cast<uint8>(EGameplayModOp::Override)
+            && ModifierByte != static_cast<uint8>(EGameplayModOp::MultiplyCompound)) {
+            Ar.SetError();
+            return true;
+        }
+        if (Ar.IsLoading()) {
+            Modifier = static_cast<EGameplayModOp::Type>(ModifierByte);
+        }
         Ar << LevelScaling;
         Ar << bLowerIsBetter;
         Ar << bIsPercentage;
         Ar << bWholeNumber;
+        if (Ar.IsLoading()
+            && (!FMath::IsFinite(Min) || !FMath::IsFinite(Max)
+                || !FMath::IsFinite(LevelScaling) || Min > Max)) {
+            Ar.SetError();
+        }
         return true;
     }
 
@@ -110,9 +139,11 @@ struct MYTHIC_API FRolledAttributeSpec {
 
     FString AttributePropertyName;
 
+    /** Numeric value rolled for this current serialized attribute specification. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     float Value = 0;
 
+    /** True while the owning gameplay system has this rolled attribute applied. */
     UPROPERTY(BlueprintReadOnly)
     bool bIsApplied = false;
 
@@ -347,7 +378,7 @@ public:
     TEnumAsByte<EItemRarity> MinRarity = Common;
 
     /** Which item TYPES this talent may roll on, matched over the item's GetTypeProbe tags — the same mechanism
-     *  UMythicAspectDefinition::AllowedItemTypes and FMythicTieredAffixDef::Applicability already use. An EMPTY query
+     *  UMythicAspectDefinition::AllowedItemTypes uses. An EMPTY query
      *  is UNIVERSAL (rollable on anything), so every existing talent is unaffected. Use it to stop a family-specific
      *  talent landing on the wrong weapon; leave it empty for anything that should stay cross-build, since a wide
      *  talent space is the point. */

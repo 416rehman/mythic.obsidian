@@ -1,9 +1,7 @@
 
 #include "Settings/MythicCombatSettings.h"
 
-#include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
-#include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
 #include "GAS/MythicTags_GAS.h"
 #include "GameModes/Attributes/WorldAttributes.h"
 #include "GameModes/GameState/MythicGameState.h"
@@ -11,13 +9,6 @@
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 
 namespace {
-FMythicCoreAffixScaling MakeCoreBand(const float BaseMin, const float BaseMax) {
-    FMythicCoreAffixScaling Band;
-    Band.BaseMin = BaseMin;
-    Band.BaseMax = BaseMax;
-    return Band;
-}
-
 FMythicStatDiminishing MakeCurve(const FGameplayAttribute &Attribute, float SoftCap, float Ceiling) {
     FMythicStatDiminishing Curve;
     Curve.Attribute = Attribute;
@@ -106,34 +97,6 @@ UMythicCombatSettings::UMythicCombatSettings() {
         MakeCcTier(5, 1.0f, 2, 12.0f, 8.0f),
     };
 
-    // The central level-1 bands every core affix rolls from, seeded to the exact values the 40 shipped item
-    // definitions authored by hand - migration changes no level-1 roll, it only replaces each item's private
-    // linear LevelScaling with the shared open-ended curve. Armor's base is the lightest slot; heavier slots
-    // keep their own authored bands as identity.
-    {
-        using Def = UMythicAttributeSet_Defense;
-        using Off = UMythicAttributeSet_Offense;
-        using Util = UMythicAttributeSet_Utility;
-        CoreAffixScaling = {
-            {Off::GetBonusSwordDamageAttribute(), MakeCoreBand(0.10f, 0.25f)},
-            {Off::GetBonusAxeDamageAttribute(), MakeCoreBand(0.10f, 0.25f)},
-            {Off::GetBonusDaggerDamageAttribute(), MakeCoreBand(0.10f, 0.25f)},
-            {Off::GetBonusHammerDamageAttribute(), MakeCoreBand(0.10f, 0.25f)},
-            {Off::GetBonusSickleDamageAttribute(), MakeCoreBand(0.10f, 0.25f)},
-            {Off::GetBonusSpearDamageAttribute(), MakeCoreBand(0.10f, 0.25f)},
-            {Off::GetCriticalHitChanceAttribute(), MakeCoreBand(0.03f, 0.08f)},
-            {Off::GetApplyBurnOnHitChanceAttribute(), MakeCoreBand(0.04f, 0.10f)},
-            {Off::GetApplyFreezeOnHitChanceAttribute(), MakeCoreBand(0.04f, 0.10f)},
-            {Def::GetArmorAttribute(), MakeCoreBand(8.0f, 18.0f)},
-            {Def::GetLifePerHitAttribute(), MakeCoreBand(0.2f, 1.0f)},
-            {Util::GetItemRarityFindAttribute(), MakeCoreBand(0.05f, 0.12f)},
-            {Util::GetCooldownReductionAttribute(), MakeCoreBand(0.04f, 0.10f)},
-            // Speed rolls used to only pay while sprinting; the same roll is now worth its full value at all
-            // times, so the band steps down to keep a pair of boots from outweighing a weapon.
-            {Util::GetMovementSpeedMultiplierAttribute(), MakeCoreBand(0.03f, 0.08f)},
-        };
-    }
-
     // Safe stays a tutorial-grade threat; each danger band opens a clear gap over the last so walking toward the
     // frontier reads as walking into a harder world.
     CombatantLevelByDangerTier = {
@@ -177,25 +140,6 @@ int32 ResolveCombatLevelAt(const UWorld *World, const FVector &Location) {
     return Level;
 }
 
-bool ResolveCoreAffixBand(const FGameplayAttribute &Attribute, const float AuthoredMin, const float AuthoredMax,
-                          const float ItemLevel, float &OutMin, float &OutMax) {
-    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
-    const FMythicCoreAffixScaling *Row = Settings ? Settings->CoreAffixScaling.Find(Attribute) : nullptr;
-    if (!Row) {
-        return false;
-    }
-
-    // A non-zero authored band is the item's deliberate level-1 identity; zeros mean "the central base decides".
-    const bool bAuthored = AuthoredMin != 0.0f || AuthoredMax != 0.0f;
-    const float BaseMin = bAuthored ? AuthoredMin : Row->BaseMin;
-    const float BaseMax = bAuthored ? AuthoredMax : Row->BaseMax;
-
-    const float LevelScale = SampleOpenEnded(Settings->CoreAffixLevelCurve, ItemLevel, Settings->CoreAffixTailGrowth);
-    OutMin = BaseMin * LevelScale;
-    OutMax = BaseMax * LevelScale;
-    return true;
-}
-
 float GetMinSpeedScale() {
     const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
     return Settings ? FMath::Clamp(Settings->MinSpeedScale, 0.01f, 1.0f) : 0.1f;
@@ -205,6 +149,38 @@ float ComposeSpeedScale(const float SpeedMultiplier, const float SituationalScal
     const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
     const float Sprint = bSprinting ? FMath::Max(1.0f, Settings ? Settings->SprintSpeedMultiplier : 1.5f) : 1.0f;
     return FMath::Max(GetMinSpeedScale(), SpeedMultiplier * SituationalScale * Sprint);
+}
+
+bool ResolveWeaponDamageRange(const float DamagePerHit,
+                              float &OutMinimumDamage,
+                              float &OutMaximumDamage,
+                              float &OutAverageDamage) {
+    OutMinimumDamage = 0.0f;
+    OutMaximumDamage = 0.0f;
+    OutAverageDamage = 0.0f;
+    if (!FMath::IsFinite(DamagePerHit) || DamagePerHit < 0.0f) {
+        return false;
+    }
+
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    const float AuthoredMaximumMultiplier = Settings
+        ? Settings->WeaponDamageMaximumMultiplier
+        : 1.5f;
+    if (!FMath::IsFinite(AuthoredMaximumMultiplier)) {
+        return false;
+    }
+
+    const float MaximumMultiplier = FMath::Max(1.0f, AuthoredMaximumMultiplier);
+    const float MaximumDamage = DamagePerHit * MaximumMultiplier;
+    const float AverageDamage = (DamagePerHit + MaximumDamage) * 0.5f;
+    if (!FMath::IsFinite(MaximumDamage) || !FMath::IsFinite(AverageDamage)) {
+        return false;
+    }
+
+    OutMinimumDamage = DamagePerHit;
+    OutMaximumDamage = MaximumDamage;
+    OutAverageDamage = AverageDamage;
+    return true;
 }
 
 float SampleOpenEnded(const FCurveTableRowHandle &Handle, const float Level, const float TailGrowth) {

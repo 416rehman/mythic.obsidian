@@ -17,6 +17,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     static UMythicUserSettings *Get();
 
+    /** Returns the master audio volume in the normalized 0..1 range. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetMasterVolume() const { return MasterVolume; }
 
@@ -28,9 +29,11 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     bool GetInvertLookY() const { return bInvertLookY; }
 
+    /** Enables or disables inversion of the vertical look axis. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetInvertLookY(bool bInvert);
 
+    /** Returns the legacy shared look-sensitivity multiplier. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetLookSensitivity() const { return LookSensitivity; }
 
@@ -43,6 +46,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     int32 GetAntiAliasingMethod() const { return AntiAliasingMethod; }
 
+    /** Sets and applies the renderer anti-aliasing method. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetAntiAliasingMethod(int32 Method);
 
@@ -50,6 +54,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetSharpness() const { return Sharpness; }
 
+    /** Sets post-tonemap sharpening, clamped to the supported range. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetSharpness(float NewSharpness);
 
@@ -64,6 +69,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     bool GetAlwaysShowHUD() const { return bAlwaysShowHUD; }
 
+    /** Keeps the contextual HUD fully visible when enabled. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetAlwaysShowHUD(bool bAlways);
 
@@ -78,6 +84,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetDisplayGamma() const { return DisplayGamma; }
 
+    /** Sets and immediately applies the display gamma. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetDisplayGamma(float NewGamma);
 
@@ -85,6 +92,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetBackgroundFrameRateLimit() const { return BackgroundFrameRateLimit; }
 
+    /** Sets the frame-rate limit used while the application is unfocused; zero disables it. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetBackgroundFrameRateLimit(float NewLimit);
 
@@ -95,12 +103,15 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     int32 GetMotionBlurQuality() const { return MotionBlurQuality; }
 
+    /** Sets motion-blur quality from off through very high. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetMotionBlurQuality(int32 Quality);
 
+    /** Returns whether bloom is enabled. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     bool GetBloom() const { return bBloom; }
 
+    /** Enables or disables bloom. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetBloom(bool bEnabled);
 
@@ -108,6 +119,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     int32 GetMaxAnisotropy() const { return MaxAnisotropy; }
 
+    /** Sets the anisotropic-filtering sample count. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetMaxAnisotropy(int32 Samples);
 
@@ -119,6 +131,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     int32 GetAmbientOcclusionMode() const { return AmbientOcclusionMode; }
 
+    /** Sets the ambient-occlusion implementation. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetAmbientOcclusionMode(int32 Mode);
 
@@ -132,6 +145,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     int32 GetGlobalIlluminationMethod() const { return GlobalIlluminationMethod; }
 
+    /** Sets the global-illumination tracing method. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetGlobalIlluminationMethod(int32 Method);
 
@@ -139,18 +153,23 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     int32 GetReflectionMethod() const { return ReflectionMethod; }
 
+    /** Sets the reflection method. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetReflectionMethod(int32 Method);
 
+    /** Returns whether virtual shadow maps are enabled. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     bool GetVirtualShadowMaps() const { return bVirtualShadowMaps; }
 
+    /** Enables or disables virtual shadow maps. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetVirtualShadowMaps(bool bEnabled);
 
+    /** Returns whether Nanite rendering is enabled. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     bool GetNanite() const { return bNanite; }
 
+    /** Enables or disables Nanite rendering. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetNanite(bool bEnabled);
 
@@ -166,6 +185,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     int32 GetReflexMode() const { return ReflexMode; }
 
+    /** Sets NVIDIA Reflex to off, on, or on with boost. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetReflexMode(int32 Mode);
 
@@ -173,9 +193,11 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     static bool IsDLSSAvailable();
 
+    /** Returns whether DLSS frame generation is available on this machine. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     static bool IsFrameGenerationAvailable();
 
+    /** Returns whether DLSS ray reconstruction is available on this machine. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     static bool IsRayReconstructionAvailable();
 
@@ -187,6 +209,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     int32 GetDLSSMode() const { return DLSSMode; }
 
+    /** Sets the DLSS quality mode. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetDLSSMode(int32 Mode);
 
@@ -194,32 +217,41 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     int32 GetFrameGenerationMode() const { return FrameGenerationMode; }
 
+    /** Sets the DLSS frame-generation mode. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetFrameGenerationMode(int32 Mode);
 
+    /** Returns whether DLSS ray reconstruction is enabled. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     bool GetRayReconstruction() const { return bRayReconstruction; }
 
+    /** Enables or disables DLSS ray reconstruction. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetRayReconstruction(bool bEnabled);
 
 
+    /** Returns whether audio is muted while the application is unfocused. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     bool GetMuteWhenUnfocused() const { return bMuteWhenUnfocused; }
 
+    /** Enables or disables muting while the application is unfocused. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetMuteWhenUnfocused(bool bMute);
 
 
+    /** Returns the mouse look-sensitivity multiplier. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetMouseLookSensitivity() const { return MouseLookSensitivity; }
 
+    /** Sets the mouse look-sensitivity multiplier. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetMouseLookSensitivity(float V);
 
+    /** Returns the gamepad look-sensitivity multiplier. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetGamepadLookSensitivity() const { return GamepadLookSensitivity; }
 
+    /** Sets the gamepad look-sensitivity multiplier. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetGamepadLookSensitivity(float V);
 
@@ -227,58 +259,74 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetVerticalLookScale() const { return VerticalLookScale; }
 
+    /** Sets the vertical-axis look multiplier. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetVerticalLookScale(float V);
 
+    /** Returns whether the horizontal look axis is inverted. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     bool GetInvertLookX() const { return bInvertLookX; }
 
+    /** Enables or disables inversion of the horizontal look axis. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetInvertLookX(bool bInvert);
 
+    /** Returns the left-stick deadzone in the normalized 0..1 range. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetGamepadDeadzoneLeft() const { return GamepadDeadzoneLeft; }
 
+    /** Sets the left-stick deadzone. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetGamepadDeadzoneLeft(float V);
 
+    /** Returns the right-stick deadzone in the normalized 0..1 range. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetGamepadDeadzoneRight() const { return GamepadDeadzoneRight; }
 
+    /** Sets the right-stick deadzone. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetGamepadDeadzoneRight(float V);
 
+    /** Returns the gamepad-vibration strength in the normalized 0..1 range. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetVibrationScale() const { return VibrationScale; }
 
+    /** Sets and applies the gamepad-vibration strength. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetVibrationScale(float Scale);
 
     void ApplyVibration() const;
 
 
+    /** Returns the user-interface scale multiplier. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetUIScale() const { return UIScale; }
 
+    /** Sets and applies the user-interface scale multiplier. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetUIScale(float Scale);
 
+    /** Returns the global HUD opacity in the normalized 0..1 range. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetHUDOpacity() const { return HUDOpacity; }
 
+    /** Sets and applies the global HUD opacity. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetHUDOpacity(float Opacity);
 
-    /** 0 off, 1 damage you deal, 2 everything. */
+    /** Returns combat-number visibility: 0 off, 1 damage you deal, 2 damage you deal and receive. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     uint8 GetDamageNumberMode() const { return DamageNumberMode; }
 
+    /** Sets combat-number visibility: 0 off, 1 damage you deal, 2 damage you deal and receive. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetDamageNumberMode(uint8 Mode);
 
+    /** Returns the accessibility scale applied to every combat number. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetDamageNumberScale() const { return DamageNumberScale; }
 
+    /** Sets the accessibility scale applied to every combat number, clamped to the supported UI range. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetDamageNumberScale(float Scale);
 
@@ -309,6 +357,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetRenderScale(float Percent);
 
+    /** Returns the configured render scale as a percentage. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetRenderScale() const;
 

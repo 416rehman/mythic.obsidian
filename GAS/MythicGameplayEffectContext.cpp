@@ -13,7 +13,9 @@
 
 #if UE_WITH_IRIS
 namespace UE::Net {
-    UE_NET_IMPLEMENT_FORWARDING_NETSERIALIZER_AND_REGISTRY_DELEGATES(MythicGameplayEffectContext, FGameplayEffectContextNetSerializer);
+    // FGameplayEffectContextNetSerializer only quantizes the engine base fields. Forward this derived context through
+    // its legacy NetSerialize implementation so Iris also carries Mythic hit metadata.
+    UE_NET_IMPLEMENT_NAMED_STRUCT_LASTRESORT_NETSERIALIZER_AND_REGISTRY_DELEGATES(MythicGameplayEffectContext);
 }
 #endif
 
@@ -66,6 +68,10 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         REP_ShieldAbsorbed,
         REP_MAX
     };
+    static_assert(REP_MAX <= 32, "FMythicGameplayEffectContext replication flags must fit in RepBits");
+
+    bool bSuccess = true;
+    bOutSuccess = false;
     uint32 RepBits = 0;
     if (Ar.IsSaving()) {
         if (bReplicateInstigator && Instigator.IsValid()) {
@@ -129,6 +135,29 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
 
     Ar.SerializeBits(&RepBits, REP_MAX);
 
+    if (Ar.IsLoading()) {
+        Instigator.Reset();
+        EffectCauser.Reset();
+        AbilityCDO.Reset();
+        SourceObject.Reset();
+        Actors.Reset();
+        HitResult.Reset();
+        WorldOrigin = FVector::ZeroVector;
+        bHasWorldOrigin = false;
+        bCriticalHit = false;
+        bBleed = false;
+        bBurn = false;
+        bPoison = false;
+        bStun = false;
+        bSlow = false;
+        bWeaken = false;
+        bFreeze = false;
+        bTerrify = false;
+        bDodged = false;
+        ApplierPlayerKey.Reset();
+        ShieldAbsorbed = 0.0f;
+    }
+
     if (RepBits & (1 << REP_Instigator)) {
         Ar << Instigator;
     }
@@ -150,7 +179,9 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
                 HitResult = MakeShared<FHitResult>();
             }
         }
-        HitResult->NetSerialize(Ar, Map, bOutSuccess);
+        bool bHitResultSuccess = true;
+        HitResult->NetSerialize(Ar, Map, bHitResultSuccess);
+        bSuccess &= bHitResultSuccess;
     }
     if (RepBits & (1 << REP_WorldOrigin)) {
         Ar << WorldOrigin;
@@ -200,8 +231,8 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         AddInstigator(Instigator.Get(), EffectCauser.Get());
     }
 
-    bOutSuccess = true;
-    return true;
+    bOutSuccess = bSuccess && !Ar.IsError();
+    return bOutSuccess;
 }
 
 void UMythicGameplayEffectContextLibrary::ResolveInstigator(AActor *Instigator, APawn *&OutPawn, AController *&OutController,

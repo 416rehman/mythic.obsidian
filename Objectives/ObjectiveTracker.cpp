@@ -13,6 +13,7 @@
 #include "Narrative/MythicNarrativeStateComponent.h"
 #include "Narrative/MythicNarrativeGrant.h"
 #include "World/LivingWorld/MythicWorldStateSubsystem.h"
+#include "World/Harvesting/MythicHarvestableDefinition.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "Narrative/MythicQuestJournalComponent.h"
@@ -47,7 +48,7 @@ void UObjectiveTracker::BeginPlay() {
 
     BoundASC = ASC;
     for (const FObjectiveProgress &Prog : ActiveObjectives) {
-        if (Prog.Definition) {
+        if (Prog.Definition && !Prog.Definition->IsHarvestObjective()) {
             EnsureSubscribedToTag(Prog.Definition->TriggerEventTag);
         }
     }
@@ -269,7 +270,8 @@ void UObjectiveTracker::HandleGameplayEvent(const FGameplayEventData *Payload) {
     int32 NotifyIndex = 0;
     TArray<FMythicPendingObjectiveCompletion> PendingCompletions;
     for (FObjectiveProgress &Prog : ActiveObjectives) {
-        if (Prog.bCompleted || !Prog.Definition) {
+        if (Prog.bCompleted || !Prog.Definition
+            || Prog.Definition->IsHarvestObjective()) {
             continue;
         }
         if (Prog.Definition->TriggerEventTag != Payload->EventTag) {
@@ -296,6 +298,56 @@ void UObjectiveTracker::HandleGameplayEvent(const FGameplayEventData *Payload) {
 
 void UObjectiveTracker::ApplySharedKillCredit(const FGameplayEventData &Payload) {
     HandleGameplayEvent(&Payload);
+}
+
+bool UObjectiveTracker::MatchesHarvestableDefinition(
+    const UObjectiveDefinition *Objective,
+    const UMythicHarvestableDefinition *HarvestableDefinition) {
+    return Objective && HarvestableDefinition
+        && Objective->RequiredHarvestableDefinition == HarvestableDefinition;
+}
+
+void UObjectiveTracker::ApplyHarvestCompletionCredit(
+    const UMythicHarvestableDefinition &HarvestableDefinition,
+    const int32 CreditCount) {
+    ConsumeHarvestCompletionCredit(HarvestableDefinition, CreditCount);
+}
+
+EMythicHarvestQuestCreditConsumeResult
+UObjectiveTracker::ConsumeHarvestCompletionCredit(
+    const UMythicHarvestableDefinition &HarvestableDefinition,
+    const int32 CreditCount) {
+    if (CreditCount <= 0 || !GetOwner() || !GetOwner()->HasAuthority()) {
+        return EMythicHarvestQuestCreditConsumeResult::Rejected;
+    }
+    APlayerController *PC = Cast<APlayerController>(GetOwner());
+    if (!PC) {
+        return EMythicHarvestQuestCreditConsumeResult::Rejected;
+    }
+
+    int32 NotifyIndex = 0;
+    TArray<FMythicPendingObjectiveCompletion> PendingCompletions;
+    bool bAdvancedAny = false;
+    for (FObjectiveProgress &Progress : ActiveObjectives) {
+        if (Progress.bCompleted
+            || !MatchesHarvestableDefinition(
+                Progress.Definition, &HarvestableDefinition)) {
+            continue;
+        }
+        bAdvancedAny = true;
+        AdvanceObjectiveProgress(
+            Progress, true, static_cast<float>(CreditCount), PC,
+            FGameplayTag(), FGameplayTagContainer(), PendingCompletions,
+            NotifyIndex);
+    }
+
+    ProcessChainAdvance(PC, PendingCompletions, NotifyIndex);
+    if (bAdvancedAny) {
+        OnObjectivesChanged.Broadcast();
+    }
+    return bAdvancedAny
+        ? EMythicHarvestQuestCreditConsumeResult::ConsumedMatched
+        : EMythicHarvestQuestCreditConsumeResult::ConsumedNoMatch;
 }
 
 void UObjectiveTracker::AdvanceObjectiveProgress(FObjectiveProgress &Prog, bool bCountByMagnitude, float Magnitude,
@@ -481,7 +533,9 @@ void UObjectiveTracker::RestoreObjectives(const TArray<FSerializedObjectiveData>
         Prog.bCompleted = Data.bCompleted;
         ActiveObjectives.Add(Prog);
 
-        EnsureSubscribedToTag(Def->TriggerEventTag);
+        if (!Def->IsHarvestObjective()) {
+            EnsureSubscribedToTag(Def->TriggerEventTag);
+        }
     }
     UE_LOG(Myth, Log, TEXT("ObjectiveTracker::RestoreObjectives: restored %d objective(s) on %s."),
            ActiveObjectives.Num(), *GetNameSafe(GetOwner()));
@@ -498,7 +552,9 @@ void UObjectiveTracker::ServerAddObjective(UObjectiveDefinition *Definition) {
     Prog.Definition = Definition;
     ActiveObjectives.Add(Prog);
 
-    EnsureSubscribedToTag(Definition->TriggerEventTag);
+    if (!Definition->IsHarvestObjective()) {
+        EnsureSubscribedToTag(Definition->TriggerEventTag);
+    }
 
     UE_LOG(Myth, Log, TEXT("ObjectiveTracker: assigned objective '%s' (need %d x %s) to %s."),
            *Definition->DisplayText.ToString(), Definition->RequiredCount,
@@ -532,7 +588,9 @@ EObjectiveOfferResult UObjectiveTracker::ServerTryAddObjective(UObjectiveDefinit
                 Existing.CurrentCount = 0;
                 Existing.bCompleted = false;
                 Existing.CompletedTimeSeconds = 0.0f;
-                EnsureSubscribedToTag(Definition->TriggerEventTag);
+                if (!Definition->IsHarvestObjective()) {
+                    EnsureSubscribedToTag(Definition->TriggerEventTag);
+                }
                 OutProgress = Existing;
                 UE_LOG(Myth, Log, TEXT("ObjectiveTracker: RE-assigned repeatable objective '%s' to %s."),
                        *Definition->DisplayText.ToString(), *GetNameSafe(GetOwner()));
@@ -547,7 +605,9 @@ EObjectiveOfferResult UObjectiveTracker::ServerTryAddObjective(UObjectiveDefinit
 
     ActiveObjectives.Add(OutProgress);
 
-    EnsureSubscribedToTag(Definition->TriggerEventTag);
+    if (!Definition->IsHarvestObjective()) {
+        EnsureSubscribedToTag(Definition->TriggerEventTag);
+    }
 
     UE_LOG(Myth, Log, TEXT("ObjectiveTracker: assigned objective '%s' (need %d x %s) to %s."),
            *Definition->DisplayText.ToString(), Definition->RequiredCount,

@@ -1,8 +1,6 @@
-
 #include "Misc/AutomationTest.h"
 
-#include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
-#include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
+#include "Stats/MythicStatDefinition.h"
 #include "UI/ViewModels/MythicStatDisplay.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -10,50 +8,52 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     "Mythic.UI.StatDisplayFormats",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
-bool FMythicStatDisplayFormatsTest::RunTest(const FString &Parameters) {
-    using U = UMythicAttributeSet_Utility;
-    using O = UMythicAttributeSet_Offense;
+bool FMythicStatDisplayFormatsTest::RunTest(const FString& Parameters) {
+    TestEqual(TEXT("the migrated enum keeps Flat's serialized value"),
+              static_cast<uint8>(EMythicStatFormat::Flat), static_cast<uint8>(0));
+    TestEqual(TEXT("the migrated enum keeps Bipolar's serialized value"),
+              static_cast<uint8>(EMythicStatFormat::Bipolar), static_cast<uint8>(5));
 
-    {
-        const FMythicStatRule Rule = MythicStatDisplay::GetRule(U::GetItemQuantityFindAttribute());
-        TestEqual(TEXT("quantity find is an expected multiplier, so a percentage"),
-                  static_cast<uint8>(Rule.Format), static_cast<uint8>(EMythicStatFormat::Percent));
-        TestEqual(TEXT("quantity find says what it does"), Rule.Label, FString(TEXT("Extra Item Drops")));
+    FMythicStatNumberPresentation Percent;
+    Percent.Format = EMythicStatFormat::Percent;
+    Percent.DecimalPlaces = 1;
+    TestEqual(TEXT("a fraction is displayed as a percentage"),
+              MythicStatDisplay::FormatValue(0.6f, Percent).ToString(), FString(TEXT("60%")));
+    TestEqual(TEXT("default movement scale reads as 100 percent"),
+              MythicStatDisplay::FormatValue(1.0f, Percent).ToString(), FString(TEXT("100%")));
 
-        const FString Shown = MythicStatDisplay::FormatValue(0.6f, Rule.Format).ToString();
-        TestFalse(TEXT("a working quantity-find never prints as bare zero"), Shown == TEXT("0"));
-        TestTrue(TEXT("quantity find reads as a percentage"), Shown.Contains(TEXT("%")));
-    }
+    FMythicStatNumberPresentation Multiplier = Percent;
+    Multiplier.Format = EMythicStatFormat::Multiplier;
+    TestEqual(TEXT("canonical 0.97 incoming-damage multiplier reads as a three percent reduction"),
+              MythicStatDisplay::FormatValue(0.97f, Multiplier).ToString(), FString(TEXT("-3%")));
+    TestEqual(TEXT("a +0.06 additive contribution to a multiplier formats as six percentage points"),
+              MythicStatDisplay::FormatBonus(0.06f, Percent).ToString(), FString(TEXT("+6%")));
 
-    {
-        // The owner's rule for the one speed stat: 100% is default speed, 200% is double. The Multiplier format
-        // would print the default 1.0 as "+0%", which reads as the stat being absent.
-        const FMythicStatRule Rule = MythicStatDisplay::GetRule(U::GetMovementSpeedMultiplierAttribute());
-        TestEqual(TEXT("speed is shown as a percentage of default"),
-                  static_cast<uint8>(Rule.Format), static_cast<uint8>(EMythicStatFormat::Percent));
-        TestEqual(TEXT("default speed reads as 100%"),
-                  MythicStatDisplay::FormatValue(1.0f, Rule.Format).ToString(), FString(TEXT("100%")));
-        TestEqual(TEXT("double speed reads as 200%"),
-                  MythicStatDisplay::FormatValue(2.0f, Rule.Format).ToString(), FString(TEXT("200%")));
-    }
+    UMythicStatDefinition* Definition = NewObject<UMythicStatDefinition>(GetTransientPackage());
+    Definition->NumberPresentation = Multiplier;
+    const FMythicStatNumberPresentation Additive = MythicStatDisplay::ResolveModifierPresentation(
+        *Definition, EGameplayModOp::Additive);
+    TestEqual(TEXT("additive modifiers on multiplier stats use percent presentation"),
+              Additive.Format, EMythicStatFormat::Percent);
 
-    {
-        const FMythicStatRule Rule = MythicStatDisplay::GetRule(U::GetProficiencyXPBonusAttribute());
-        TestEqual(TEXT("proficiency xp bonus is a fraction shown as a percentage"),
-                  static_cast<uint8>(Rule.Format), static_cast<uint8>(EMythicStatFormat::Percent));
-    }
+    const FMythicStatNumberPresentation Compound = MythicStatDisplay::ResolveModifierPresentation(
+        *Definition, EGameplayModOp::MultiplyCompound);
+    TestEqual(TEXT("compound multipliers retain one-based multiplier presentation"),
+              Compound.Format, EMythicStatFormat::Multiplier);
+    TestEqual(TEXT("an additive contribution has zero identity even when the final stat is one-neutral"),
+              MythicStatDisplay::GetModifierContributionIdentity(EGameplayModOp::AddBase, 1.0f), 0.0f);
+    TestEqual(TEXT("a compound contribution has one identity even when the final stat is zero-neutral"),
+              MythicStatDisplay::GetModifierContributionIdentity(EGameplayModOp::MultiplyCompound, 0.0f), 1.0f);
 
-    {
-        const FMythicStatRule Rule = MythicStatDisplay::GetRule(U::GetItemRarityFindAttribute());
-        TestEqual(TEXT("rarity find is a fraction shown as a percentage"),
-                  static_cast<uint8>(Rule.Format), static_cast<uint8>(EMythicStatFormat::Percent));
-    }
-
-    {
-        const FMythicStatRule Rule = MythicStatDisplay::GetRule(O::GetCriticalHitChanceAttribute());
-        TestEqual(TEXT("crit chance is a probability shown as a percentage"),
-                  static_cast<uint8>(Rule.Format), static_cast<uint8>(EMythicStatFormat::Percent));
-    }
+    Definition->NeutralValue = 1.0f;
+    Definition->SheetVisibility = EMythicStatSheetVisibility::WhenModifiedOrNonNeutral;
+    TestFalse(TEXT("a neutral unmodified stat stays hidden"),
+              MythicStatDisplay::ShouldRender(*Definition, 1.0f, 1.0f));
+    TestTrue(TEXT("a GAS base/final difference makes the row visible"),
+             MythicStatDisplay::ShouldRender(*Definition, 1.0f, 0.97f));
+    Definition->SheetVisibility = EMythicStatSheetVisibility::Hidden;
+    TestFalse(TEXT("Hidden is absolute even for a modified stat"),
+              MythicStatDisplay::ShouldRender(*Definition, 1.0f, 0.97f));
 
     return true;
 }

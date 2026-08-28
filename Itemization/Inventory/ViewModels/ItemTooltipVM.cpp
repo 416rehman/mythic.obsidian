@@ -6,9 +6,84 @@
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
 #include "Itemization/Inventory/Fragments/Passive/AffixesFragment.h"
 #include "Itemization/Inventory/Fragments/Passive/TalentFragment.h"
-#include "UI/ViewModels/MythicEffectDescriber.h"
 #include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h"
-#include "Itemization/Inventory/Fragments/FragmentTypes.h"
+#include "GAS/Abilities/MythicGameplayAbility.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "GameModes/GameState/MythicGameState.h"
+#include "Itemization/Affixes/MythicPermanentStatLedger.h"
+#include "Itemization/Affixes/MythicItemizationDataRegistrySubsystem.h"
+#include "Itemization/Affixes/MythicTags_Affixes.h"
+#include "Itemization/MythicTags_Inventory.h"
+#include "Stats/MythicStatDefinition.h"
+#include "Settings/MythicCombatSettings.h"
+#include "UI/ViewModels/MythicStatDisplay.h"
+#include "Animation/AnimMontage.h"
+#include "Engine/GameInstance.h"
+#include "Engine/Texture2D.h"
+#include "Engine/World.h"
+
+namespace {
+
+bool ComposeItemLocalAttackAttribute(
+    const FGameplayAttribute &Attribute,
+    const UMythicStatDefinition &StatDefinition,
+    const UMythicItemizationDataRegistrySubsystem &Registry,
+    const TConstArrayView<FAffixDisplayData> DisplayAffixes,
+    float &OutValue) {
+    if (!Attribute.IsValid() || StatDefinition.Attribute != Attribute
+        || !FMath::IsFinite(StatDefinition.NeutralValue)) {
+        return false;
+    }
+
+    TArray<FMythicPermanentStatContribution> Contributions;
+    for (const FAffixDisplayData &DisplayData : DisplayAffixes) {
+        const UMythicStatDefinition *EntryStat = Registry.FindStat(DisplayData.StatTag);
+        if (!EntryStat || EntryStat->Attribute != Attribute) {
+            continue;
+        }
+        if (DisplayData.ViewData.Values.Num() != 1
+            || DisplayData.ViewData.Values[0].StatTag != DisplayData.StatTag
+            || !DisplayData.ViewData.RollGuid.IsValid()) {
+            return false;
+        }
+
+        const FMythicAffixValueViewData &Value = DisplayData.ViewData.Values[0];
+        FMythicPermanentStatContribution &Contribution = Contributions.AddDefaulted_GetRef();
+        Contribution.SourceGuid = DisplayData.ViewData.RollGuid;
+        Contribution.Attribute = Attribute;
+        Contribution.ModifierOp = Value.ModifierOp;
+        Contribution.Magnitude = Value.RawValue;
+        Contribution.Layer = EMythicPermanentStatContributionLayer::Equipment;
+    }
+
+    return !Contributions.IsEmpty()
+        && FMythicPermanentStatLedger::Compose(
+            StatDefinition.NeutralValue, Contributions, OutValue);
+}
+
+void ResolveAttackSpeedPlayRateBounds(const UMythicItemInstance &Item,
+                                      float &OutMinRate,
+                                      float &OutMaxRate) {
+    const AMythicGameState *GameState = nullptr;
+    if (const UWorld *World = Item.GetWorld()) {
+        GameState = World->GetGameState<AMythicGameState>();
+    }
+    if (!GameState) {
+        GameState = GetDefault<AMythicGameState>();
+    }
+
+    OutMinRate = GameState ? GameState->MinAttackSpeedPlayRate : 0.8f;
+    OutMaxRate = GameState ? GameState->MaxAttackSpeedPlayRate : 1.4f;
+}
+
+FText FormatAttacksPerSecond(const float AttacksPerSecond) {
+    FNumberFormattingOptions Options;
+    Options.SetMinimumFractionalDigits(2);
+    Options.SetMaximumFractionalDigits(2);
+    return FText::AsNumber(AttacksPerSecond, &Options);
+}
+
+} // namespace
 
 void UItemTooltipVM::SetName(FText InName) {
     if (UE_MVVM_SET_PROPERTY_VALUE(Name, InName)) {
@@ -98,37 +173,13 @@ void UItemTooltipVM::SetDurabilityPercent(float InDurabilityPercent) {
 
 float UItemTooltipVM::GetDurabilityPercent() const { return DurabilityPercent; }
 
-void UItemTooltipVM::SetDamageRange(FText InDamageRange) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(DamageRange, InDamageRange)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(DamageRange);
+void UItemTooltipVM::SetWeaponAttack(FMythicWeaponAttackViewData InWeaponAttack) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(WeaponAttack, InWeaponAttack)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(WeaponAttack);
     }
 }
 
-FText UItemTooltipVM::GetDamageRange() const { return DamageRange; }
-
-void UItemTooltipVM::SetDamageMin(float InDamageMin) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(DamageMin, InDamageMin)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(DamageMin);
-    }
-}
-
-float UItemTooltipVM::GetDamageMin() const { return DamageMin; }
-
-void UItemTooltipVM::SetDamageMax(float InDamageMax) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(DamageMax, InDamageMax)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(DamageMax);
-    }
-}
-
-float UItemTooltipVM::GetDamageMax() const { return DamageMax; }
-
-void UItemTooltipVM::SetAttackSpeed(float InAttackSpeed) {
-    if (UE_MVVM_SET_PROPERTY_VALUE(AttackSpeed, InAttackSpeed)) {
-        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(AttackSpeed);
-    }
-}
-
-float UItemTooltipVM::GetAttackSpeed() const { return AttackSpeed; }
+FMythicWeaponAttackViewData UItemTooltipVM::GetWeaponAttack() const { return WeaponAttack; }
 
 void UItemTooltipVM::SetWeight(float InWeight) {
     if (UE_MVVM_SET_PROPERTY_VALUE(Weight, InWeight)) {
@@ -170,21 +221,193 @@ void UItemTooltipVM::SetRequiredEquipTag(FGameplayTag InRequiredEquipTag) {
 
 FGameplayTag UItemTooltipVM::GetRequiredEquipTag() const { return RequiredEquipTag; }
 
-static void CollectAffixDisplayData(const TArray<FRolledAffix> &RolledAffixes, int32 ItemLevel,
-                                    TArray<FAffixDisplayData> &OutAffixes) {
-    for (const FRolledAffix &Rolled : RolledAffixes) {
-        FAffixDisplayData Entry;
-        Entry.Value = Rolled.Value;
-        Entry.bLowerIsBetter = Rolled.Definition.bLowerIsBetter;
-
-        const FMythicEffectLine Line =
-            MythicEffectDescriber::DescribeRolledModifier(Rolled.Attribute, Rolled.Value, Rolled.Definition, ItemLevel);
-        Entry.AttributeName = Line.Label.IsEmpty() ? FText::FromString(TEXT("Unknown")) : Line.Label;
-        Entry.RichText = Line.RichText;
-        Entry.bIsPercentage = Line.Format == EMythicStatFormat::Percent || Line.Format == EMythicStatFormat::Multiplier;
-
-        OutAffixes.Add(Entry);
+bool UItemTooltipVM::BuildAffixDisplayData(UMythicItemInstance *Item,
+                                           const UMythicItemizationDataRegistrySubsystem *Registry,
+                                           TArray<FAffixDisplayData> &OutAffixes) {
+    OutAffixes.Reset();
+    if (!Item || !Registry || !Registry->IsCoreSemanticReady()) {
+        return false;
     }
+
+    const UAffixesFragment *AffixFragment = Item->GetFragment<UAffixesFragment>();
+    if (!AffixFragment) {
+        return true;
+    }
+
+    // This is the same canonical context source used by live affix generation and rerolling: definition ItemType
+    // plus the instance's current semantic ItemTags. Never reconstruct progression context from asset names.
+    FGameplayTagContainer ItemContextTags;
+    Item->GetTypeProbe(ItemContextTags);
+    const int32 ItemLevel = FMath::Max(1, Item->GetItemLevel());
+    const bool bUseWeaponAttackPresentation = ShouldUseWeaponAttackPresentation(Item);
+
+    TArray<FAffixDisplayData> Candidate;
+    Candidate.Reserve(AffixFragment->GetAffixSnapshots().Items.Num());
+    for (const FMythicReplicatedAffixItem &SnapshotItem : AffixFragment->GetAffixSnapshots().Items) {
+        const FRolledAffix &Rolled = SnapshotItem.Affix;
+        FAffixDisplayData Entry;
+        if (!UMythicAffixViewDataLibrary::BuildViewDataWithItemContext(
+                Rolled, ItemContextTags, ItemLevel, Registry, Entry.ViewData)
+            || Entry.ViewData.Values.Num() != 1) {
+            return false; // Retain the immutable source snapshots and retry after presentation readiness changes.
+        }
+
+        const FMythicAffixValueViewData *Primary = &Entry.ViewData.Values[0];
+        if (Primary->StatTag != Entry.ViewData.PrimaryStatTag) {
+            return false;
+        }
+        const UMythicStatDefinition *StatDefinition = Registry->FindStat(Primary->StatTag);
+        if (!StatDefinition) {
+            return false;
+        }
+        Entry.StatTag = Primary->StatTag;
+        Entry.AttributeName = Entry.ViewData.DisplayName;
+        Entry.Value = Primary->RawValue;
+        Entry.bLowerIsBetter = Primary->ComparisonDirection == EMythicStatComparisonDirection::LowerIsBetter;
+        Entry.RichText = Entry.ViewData.RichText;
+        const EMythicStatFormat Format = Primary->NumberPresentation.Format;
+        Entry.bIsPercentage = Format == EMythicStatFormat::Percent
+            || Format == EMythicStatFormat::Multiplier;
+        Entry.bOwnedByWeaponAttackPresentation = bUseWeaponAttackPresentation
+            && Entry.ViewData.SourceKind == AFFIX_SOURCE_IMPLICIT
+            && IsWeaponAttackAttribute(StatDefinition->Attribute);
+
+        Candidate.Add(MoveTemp(Entry));
+    }
+
+    OutAffixes = MoveTemp(Candidate);
+    return true;
+}
+
+bool UItemTooltipVM::ShouldUseWeaponAttackPresentation(UMythicItemInstance *Item) {
+    if (!Item || !Item->GetFragment<UAttackFragment>()) {
+        return false;
+    }
+
+    const UItemDefinition *Definition = Item->GetItemDefinition();
+    return Definition && Definition->ItemType.MatchesTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON);
+}
+
+bool UItemTooltipVM::IsWeaponAttackAttribute(const FGameplayAttribute &Attribute) {
+    return Attribute == UMythicAttributeSet_Offense::GetDamagePerHitAttribute()
+        || Attribute == UMythicAttributeSet_Offense::GetAttackSpeedAttribute();
+}
+
+bool UItemTooltipVM::CalculateWeaponAttackMetrics(
+    const float InDamagePerHit,
+    const float InAttackSpeedBonus,
+    const float MontageDurationSeconds,
+    const float MinAttackSpeedPlayRate,
+    const float MaxAttackSpeedPlayRate,
+    FMythicWeaponAttackViewData &OutAttackData) {
+    OutAttackData = FMythicWeaponAttackViewData();
+    if (!FMath::IsFinite(InDamagePerHit) || InDamagePerHit < 0.0f
+        || !FMath::IsFinite(InAttackSpeedBonus)
+        || !FMath::IsFinite(MontageDurationSeconds)
+        || MontageDurationSeconds <= KINDA_SMALL_NUMBER
+        || !FMath::IsFinite(MinAttackSpeedPlayRate)
+        || !FMath::IsFinite(MaxAttackSpeedPlayRate)) {
+        return false;
+    }
+
+    const float PlayRate = UMythicGameplayAbility::ComputeAttackSpeedPlayRate(
+        InAttackSpeedBonus, MinAttackSpeedPlayRate, MaxAttackSpeedPlayRate);
+    if (!FMath::IsFinite(PlayRate) || PlayRate <= 0.0f) {
+        return false;
+    }
+
+    FMythicWeaponAttackViewData Candidate;
+    if (!MythicCombat::ResolveWeaponDamageRange(
+            InDamagePerHit,
+            Candidate.MinimumDamagePerHit,
+            Candidate.MaximumDamagePerHit,
+            Candidate.AverageDamagePerHit)) {
+        return false;
+    }
+    Candidate.AttackSpeedBonus = InAttackSpeedBonus;
+    Candidate.BaseAttacksPerSecond = 1.0f / MontageDurationSeconds;
+    Candidate.AttacksPerSecond = Candidate.BaseAttacksPerSecond * PlayRate;
+    Candidate.AttackTimeSeconds = MontageDurationSeconds / PlayRate;
+    Candidate.DamagePerSecond = Candidate.AverageDamagePerHit * Candidate.AttacksPerSecond;
+    if (!FMath::IsFinite(Candidate.BaseAttacksPerSecond)
+        || !FMath::IsFinite(Candidate.AttacksPerSecond)
+        || !FMath::IsFinite(Candidate.AttackTimeSeconds)
+        || !FMath::IsFinite(Candidate.DamagePerSecond)) {
+        return false;
+    }
+
+    OutAttackData = MoveTemp(Candidate);
+    return true;
+}
+
+bool UItemTooltipVM::BuildWeaponAttackDisplayData(
+    UMythicItemInstance *Item,
+    const UMythicItemizationDataRegistrySubsystem *Registry,
+    const TConstArrayView<FAffixDisplayData> DisplayAffixes,
+    FMythicWeaponAttackViewData &OutAttackData) {
+    OutAttackData = FMythicWeaponAttackViewData();
+    if (!ShouldUseWeaponAttackPresentation(Item)
+        || !Registry || !Registry->IsCoreSemanticReady()) {
+        return false;
+    }
+
+    const UAttackFragment *AttackFragment = Item->GetFragment<UAttackFragment>();
+    const UAnimMontage *AttackMontage = AttackFragment
+        ? AttackFragment->AttackConfig.AttackMontage
+        : nullptr;
+    if (!AttackMontage) {
+        return false;
+    }
+
+    const FGameplayAttribute DamageAttribute =
+        UMythicAttributeSet_Offense::GetDamagePerHitAttribute();
+    const FGameplayAttribute AttackSpeedAttribute =
+        UMythicAttributeSet_Offense::GetAttackSpeedAttribute();
+    const UMythicStatDefinition *DamageStat = Registry->FindStat(DamageAttribute);
+    const UMythicStatDefinition *AttackSpeedStat = Registry->FindStat(AttackSpeedAttribute);
+    if (!DamageStat || !AttackSpeedStat) {
+        return false;
+    }
+
+    float ComposedDamagePerHit = 0.0f;
+    float AttackSpeedBonus = 0.0f;
+    if (!ComposeItemLocalAttackAttribute(DamageAttribute, *DamageStat, *Registry,
+                                         DisplayAffixes, ComposedDamagePerHit)
+        || !ComposeItemLocalAttackAttribute(AttackSpeedAttribute, *AttackSpeedStat, *Registry,
+                                            DisplayAffixes, AttackSpeedBonus)) {
+        return false;
+    }
+
+    float MinPlayRate = 0.8f;
+    float MaxPlayRate = 1.4f;
+    ResolveAttackSpeedPlayRateBounds(*Item, MinPlayRate, MaxPlayRate);
+
+    FMythicWeaponAttackViewData Candidate;
+    const float BaseAttackCycleDuration =
+        AttackFragment->GetRuntimeNominalAttackCycleDuration();
+    if (!CalculateWeaponAttackMetrics(ComposedDamagePerHit, AttackSpeedBonus,
+                                      BaseAttackCycleDuration, MinPlayRate, MaxPlayRate,
+                                      Candidate)) {
+        return false;
+    }
+
+    Candidate.DamagePerHitText = FText::Format(
+        NSLOCTEXT("MythicItemAttack", "DamagePerHitRange", "{0} - {1}"),
+        MythicStatDisplay::FormatValue(Candidate.MinimumDamagePerHit,
+                                       DamageStat->NumberPresentation),
+        MythicStatDisplay::FormatValue(Candidate.MaximumDamagePerHit,
+                                       DamageStat->NumberPresentation));
+    Candidate.AttacksPerSecondText = FormatAttacksPerSecond(Candidate.AttacksPerSecond);
+    Candidate.DamagePerSecondText = MythicStatDisplay::FormatValue(
+        Candidate.DamagePerSecond, DamageStat->NumberPresentation);
+    if (Candidate.DamagePerHitText.IsEmpty() || Candidate.AttacksPerSecondText.IsEmpty()
+        || Candidate.DamagePerSecondText.IsEmpty()) {
+        return false;
+    }
+
+    Candidate.bIsValid = true;
+    OutAttackData = MoveTemp(Candidate);
+    return true;
 }
 
 UItemTooltipVM *UItemTooltipVM::CreateFromItemInstance(UObject *Outer, UMythicItemInstance *Item) {
@@ -211,13 +434,20 @@ UItemTooltipVM *UItemTooltipVM::CreateFromItemInstance(UObject *Outer, UMythicIt
     VM->SetStackMax(Def->StackSizeMax);
     VM->SetRequiredEquipTag(Def->RequiredEquipTag);
 
-    const UAffixesFragment *AffixFrag = Item->GetFragment<UAffixesFragment>();
-    if (AffixFrag) {
-        TArray<FAffixDisplayData> AffixData;
-        const int32 ItemLevel = Item->GetItemLevel();
-        CollectAffixDisplayData(AffixFrag->AffixesRuntimeReplicatedData.RolledCoreAffixes, ItemLevel, AffixData);
-        CollectAffixDisplayData(AffixFrag->AffixesRuntimeReplicatedData.RolledAffixes, ItemLevel, AffixData);
+    const UWorld *World = Item->GetWorld();
+    const UGameInstance *GameInstance = World ? World->GetGameInstance() : nullptr;
+    const UMythicItemizationDataRegistrySubsystem *Registry = GameInstance
+        ? GameInstance->GetSubsystem<UMythicItemizationDataRegistrySubsystem>()
+        : nullptr;
+    TArray<FAffixDisplayData> AffixData;
+    if (BuildAffixDisplayData(Item, Registry, AffixData)) {
         VM->SetAffixes(AffixData);
+
+        FMythicWeaponAttackViewData AttackData;
+        if (ShouldUseWeaponAttackPresentation(Item)
+            && BuildWeaponAttackDisplayData(Item, Registry, AffixData, AttackData)) {
+            VM->SetWeaponAttack(MoveTemp(AttackData));
+        }
     }
 
     const UTalentFragment *TalentFrag = Item->GetFragment<UTalentFragment>();
@@ -248,23 +478,6 @@ UItemTooltipVM *UItemTooltipVM::CreateFromItemInstance(UObject *Outer, UMythicIt
         VM->SetCurrentDurability(CurDur);
         VM->SetMaxDurability(MaxDur);
         VM->SetDurabilityPercent(MaxDur > 0.0f ? CurDur / MaxDur : 0.0f);
-    }
-
-    const UAttackFragment *AtkFrag = Item->GetFragment<UAttackFragment>();
-    if (AtkFrag) {
-        const FRolledAttributeSpec &DmgSpec = AtkFrag->AttackRuntimeReplicatedData.RolledDamageSpec;
-        float MinDmg = DmgSpec.Definition.GetScaledMin(Item->GetItemLevel());
-        float MaxDmg = DmgSpec.Definition.GetScaledMax(Item->GetItemLevel());
-        VM->SetDamageRange(FText::FromString(FString::Printf(TEXT("%d-%d"),
-            FMath::RoundToInt32(MinDmg), FMath::RoundToInt32(MaxDmg))));
-        VM->SetDamageMin(MinDmg);
-        VM->SetDamageMax(MaxDmg);
-
-        UAnimMontage *Montage = AtkFrag->AttackConfig.AttackMontage;
-        if (Montage) {
-            float Duration = Montage->GetPlayLength();
-            VM->SetAttackSpeed(Duration > 0.0f ? 1.0f / Duration : 0.0f);
-        }
     }
 
     return VM;

@@ -9,48 +9,56 @@ class MYTHIC_API UMythicAttributeSet_Utility : public UMythicAttributeSet {
     GENERATED_BODY()
 
 protected:
-    // Resolve scales with the player's level, and increases the player's maximum stamina.
+    /** Resolve scales with player level and increases maximum stamina. */
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_Resolve)
     FGameplayAttributeData Resolve;
 
-    // Stamina is a resource that is used to power actions such as skills, attacks, sprints, jumps, etc.
-    // This is the only resource in the game and is used in combat, exploration, and other activities.
+    /** Maximum stamina available to combat, traversal, and other stamina-consuming actions. */
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_MaxStamina)
     FGameplayAttributeData MaxStamina;
 
+    /** Current spendable stamina, clamped between zero and MaxStamina. */
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_CurrentStamina)
     FGameplayAttributeData CurrentStamina;
 
-    // Resolve Stamina Rate is the rate at which resolve regenerates per second.
+    /** Stamina restored per second while regeneration is permitted. */
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_StaminaRegenRate)
     FGameplayAttributeData StaminaRegenRate;
 
-    // Stamina Cost Reduction is a percentage that reduces the cost of stamina for actions.
+    /** Fractional stamina-cost reduction where 0.25 means twenty-five percent. */
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_StaminaCostReduction)
     FGameplayAttributeData StaminaCostReduction;
 
-    // Reduces cooldown of all abilities (Q/E)
+    /** Fractional cooldown reduction applied to eligible abilities. */
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_CooldownReduction)
     FGameplayAttributeData CooldownReduction;
 
-    // Maximum cap for cooldown reduction, defaults to 0.60 (60%)
+    /** Runtime cap for CooldownReduction; defaults to 0.60. */
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_MaxCooldownReduction)
     FGameplayAttributeData MaxCooldownReduction;
 
-    // bonus proficiency XP gained from all sources
+    /** Fractional bonus applied to proficiency XP earned from eligible sources. */
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_ProficiencyXPBonus)
     FGameplayAttributeData ProficiencyXPBonus;
 
-    // The one attribute that decides how fast the owner moves, read as a percentage: 1.0 is 100% (default speed),
-    // 2.0 is double. Gear, slows, haste and every other speed effect move this and nothing else.
+    /** Canonical movement scalar: 1.0 is authored speed and 2.0 is double speed. */
     UPROPERTY(BlueprintReadOnly, Category = "Utility", ReplicatedUsing = OnRep_MovementSpeedMultiplier)
     FGameplayAttributeData MovementSpeedMultiplier;
 
+    /** Multiplier used only for item-rarity reward selection; 1.0 is the authored baseline. */
     UPROPERTY(BlueprintReadOnly, Category = "Utility", ReplicatedUsing = OnRep_ItemRarityFind)
     FGameplayAttributeData ItemRarityFind;
 
+    /** Multiplier used only for item-quantity reward selection; 1.0 is the authored baseline. */
     UPROPERTY(BlueprintReadOnly, Category = "Utility", ReplicatedUsing = OnRep_ItemQuantityFind)
     FGameplayAttributeData ItemQuantityFind;
+
+    /**
+     * Multiplies authoritative harvesting work after exact-tool validation; 1.0 is baseline.
+     * This is a normal data-driven Utility stat and never selects a tool, node, reward, or proficiency.
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Utility", ReplicatedUsing = OnRep_HarvestWorkMultiplier)
+    FGameplayAttributeData HarvestWorkMultiplier;
 
 public:
     UMythicAttributeSet_Utility();
@@ -76,6 +84,7 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, MovementSpeedMultiplier)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, ItemRarityFind)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, ItemQuantityFind)
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Utility, HarvestWorkMultiplier)
 
     UFUNCTION()
     virtual void OnRep_Resolve(const FGameplayAttributeData &OldValue);
@@ -99,6 +108,8 @@ public:
     virtual void OnRep_ItemRarityFind(const FGameplayAttributeData &OldValue);
     UFUNCTION()
     virtual void OnRep_ItemQuantityFind(const FGameplayAttributeData &OldValue);
+    UFUNCTION()
+    virtual void OnRep_HarvestWorkMultiplier(const FGameplayAttributeData &OldValue);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 

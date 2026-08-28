@@ -6,6 +6,7 @@
 #include "AbilitySystemInterface.h"
 #include "DetourCrowdAIController.h"
 #include "Perception/AIPerceptionTypes.h"
+#include "World/LivingWorld/Activities/ActivityTypes.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "MythicAIController.generated.h"
 
@@ -13,7 +14,6 @@ class UMythicAbilitySystemComponent;
 class UAIPerceptionComponent;
 class UAISenseConfig_Sight;
 class UMythicActivityCatalog;
-struct FMythicActivityDef;
 
 struct FMythicAIDebugState {
     FVector EngageAnchorLocation = FVector::ZeroVector;
@@ -178,6 +178,7 @@ protected:
     UFUNCTION(BlueprintImplementableEvent, Category = "Mythic AI|Combat")
     void OnEngageHostileTarget(AActor *Target);
 
+    /** Blueprint hook fired after the controller releases its previously tracked hostile target. */
     UFUNCTION(BlueprintImplementableEvent, Category = "Mythic AI|Combat")
     void OnHostileTargetLost(AActor *PreviousTarget);
 };

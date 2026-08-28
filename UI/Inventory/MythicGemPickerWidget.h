@@ -65,6 +65,7 @@ public:
     /** Commits the gem on one row through the socket component's server RPC. */
     void SocketRow(int32 RowIndex);
 
+    /** Closes the picker and returns focus to the socket row that opened it. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Sockets")
     void Close();
 
@@ -91,6 +92,7 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UWidget> EmptyState;
 
+    /** Explains why no carried gem can be shown when the empty-state panel is visible. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> Txt_Empty;
 
@@ -102,6 +104,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Sockets", meta = (ClampMin = "0", ClampMax = "64"))
     int32 PrewarmRows = 12;
 
+    /** Name of the row text widget that displays the candidate gem's player-facing name. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Sockets")
     FName RowNameText = TEXT("NameText");
 
@@ -109,9 +112,11 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Sockets")
     FName RowDescriptionText = TEXT("DescriptionText");
 
+    /** Name of the row text widget that displays how many copies of the candidate gem are carried. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Sockets")
     FName RowCountText = TEXT("CountText");
 
+    /** Name of the row image widget that displays the candidate gem icon. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Sockets")
     FName RowIconImage = TEXT("IconImage");
 

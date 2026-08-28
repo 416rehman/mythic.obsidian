@@ -3,11 +3,12 @@
 #include "AI/NPCs/MythicNPCManager.h"
 #include "GameModes/Attributes/WorldAttributes.h"
 #include "Net/UnrealNetwork.h"
-#include "Resources/MythicResourceManagerComponent.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Subsystem/SaveSystem/MythicSaveGameSubsystem.h"
+#include "World/Harvesting/MythicHarvestWorldSubsystem.h"
+#include "Kismet/GameplayStatics.h"
 
 AMythicGameState::AMythicGameState(const FObjectInitializer &ObjectInitializer) {
     PrimaryActorTick.bCanEverTick = true;
@@ -18,9 +19,6 @@ AMythicGameState::AMythicGameState(const FObjectInitializer &ObjectInitializer) 
     AbilitySystemComponent = ObjectInitializer.CreateDefaultSubobject<UMythicAbilitySystemComponent>(this, TEXT("AbilitySystemComponent"));
     AbilitySystemComponent->SetIsReplicated(true);
     AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
-
-    ResourceManagerComponent = CreateDefaultSubobject<UMythicResourceManagerComponent>(TEXT("ResourceManagerComponent"));
-    ResourceManagerComponent->SetIsReplicated(true);
 
     WorldTierAttributes = CreateDefaultSubobject<UWorldTierAttributes>(TEXT("WorldTierAttributes"));
 }
@@ -106,6 +104,13 @@ void AMythicGameState::RemovePlayerState(APlayerState *PlayerState) {
 void AMythicGameState::BeginPlay() {
     Super::BeginPlay();
 
+    if (UWorld *World = GetWorld()) {
+        if (UMythicHarvestWorldSubsystem *HarvestWorld =
+                World->GetSubsystem<UMythicHarvestWorldSubsystem>()) {
+            HarvestWorld->RegisterPresentationCoordinator(*this);
+        }
+    }
+
     SetWorldTier(WorldTier);
 
     if (HasAuthority()) {
@@ -119,8 +124,30 @@ void AMythicGameState::BeginPlay() {
     if (HasAuthority()) {
         UWorld *World = GetWorld();
         UGameInstance *GI = World ? World->GetGameInstance() : nullptr;
-        if (UMythicSaveGameSubsystem *SaveSys = GI ? GI->GetSubsystem<UMythicSaveGameSubsystem>() : nullptr) {
-            SaveSys->LoadWorld(UMythicSaveGameSubsystem::DebugWorldSlot);
+        UMythicSaveGameSubsystem *SaveSys = GI
+            ? GI->GetSubsystem<UMythicSaveGameSubsystem>() : nullptr;
+        FString AuthorityWorldSlot;
+        if (SaveSys
+            && UMythicSaveGameSubsystem::TryResolveAuthorityWorldSlot(
+                AuthorityWorldSlot)) {
+            if (UGameplayStatics::DoesSaveGameExist(
+                    AuthorityWorldSlot, 0)) {
+                SaveSys->LoadWorld(AuthorityWorldSlot);
+            }
+            else {
+                UE_LOG(Myth, Display,
+                       TEXT("MythicGameState: authority world slot '%s' has no snapshot; starting a new world."),
+                       *AuthorityWorldSlot);
+            }
+        }
+        else if (World && World->GetNetMode() == NM_DedicatedServer) {
+#if UE_BUILD_SHIPPING
+            UE_LOG(Myth, Fatal,
+                   TEXT("Shipping dedicated server requires -MythicWorldSlot=<deployment-instance-id>; DebugWorld is forbidden."));
+#else
+            UE_LOG(Myth, Warning,
+                   TEXT("Dedicated server has no -MythicWorldSlot; world persistence and autosave are disabled for this development run."));
+#endif
         }
     }
 }
@@ -133,12 +160,45 @@ void AMythicGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &Out
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
     DOREPLIFETIME(AMythicGameState, AbilitySystemComponent);
-    DOREPLIFETIME(AMythicGameState, ResourceManagerComponent);
     DOREPLIFETIME(AMythicGameState, HighestWorldTier);
+    DOREPLIFETIME(AMythicGameState, HarvestPresentationStreamToken);
 }
 
-TArray<FTrackedDestructibleData> AMythicGameState::GetTrackedDestructibles() const {
-    return this->ResourceManagerComponent->GetTrackedDestructibles();
+void AMythicGameState::OnRep_HarvestPresentationStreamToken() {
+    if (UWorld *World = GetWorld()) {
+        if (UMythicHarvestWorldSubsystem *HarvestWorld =
+                World->GetSubsystem<UMythicHarvestWorldSubsystem>()) {
+            HarvestWorld->RegisterPresentationCoordinator(*this);
+        }
+    }
+}
+
+bool AMythicGameState::CanSetHarvestPresentationStreamToken(
+    const FMythicHarvestPresentationStreamToken &Token) const {
+    if (!HasAuthority() || !Token.IsValid()) {
+        return false;
+    }
+    if (!HarvestPresentationStreamToken.IsValid()) {
+        return true;
+    }
+    const EMythicHarvestPresentationStreamOrder Order =
+        FMythicHarvestPresentationStreamToken::Compare(
+            Token, HarvestPresentationStreamToken);
+    return Order == EMythicHarvestPresentationStreamOrder::Same
+        || Order == EMythicHarvestPresentationStreamOrder::Newer;
+}
+
+bool AMythicGameState::SetHarvestPresentationStreamToken(
+    const FMythicHarvestPresentationStreamToken &Token) {
+    if (!CanSetHarvestPresentationStreamToken(Token)) {
+        return false;
+    }
+    if (HarvestPresentationStreamToken == Token) {
+        return true;
+    }
+    HarvestPresentationStreamToken = Token;
+    ForceNetUpdate();
+    return true;
 }
 
 float AMythicGameState::EvaluateArmorMitigation(const UObject *WorldContextObject, float Armor) {

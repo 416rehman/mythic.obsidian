@@ -234,7 +234,7 @@ void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *
         if (InvComp) {
             FMythicInventorySlotEntry SlotEntry;
             if (InvComp->GetSlotEntry(InAbsoluteIndex, SlotEntry)) {
-                bSlotIsEquipment = SlotEntry.bEquipmentSlot;
+                bSlotIsEquipment = SlotEntry.IsGearSlot();
                 bSlotCanTake = SlotEntry.bCanPlayerTake;
             }
         }

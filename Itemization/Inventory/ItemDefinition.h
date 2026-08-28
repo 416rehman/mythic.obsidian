@@ -16,6 +16,9 @@ enum EItemRarity {
 };
 
 class UItemFragment;
+class USkeletalMesh;
+class UStaticMesh;
+class UTexture2D;
 
 UCLASS(Blueprintable, BlueprintType, EditInlineNew)
 class MYTHIC_API UItemDefinition : public UMythicDataAsset {
@@ -98,39 +101,51 @@ public:
 
 #if WITH_EDITOR
 
+    /** Configures this definition as a weapon and ensures its one Attack and one Affixes Fragment authoring shape. */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Weapon();
 
+    /** Configures this definition as a tool and ensures its one Attack Fragment authoring shape. */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Tool();
 
+    /** Configures this definition as gear and ensures its one Affixes Fragment authoring shape. */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Gear();
 
+    /** Configures this definition as an accessory and ensures its one Affixes Fragment authoring shape. */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Accessory();
 
+    /** Configures this definition as an artifact and ensures its one Affixes Fragment authoring shape. */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Artifact();
 
+    /** Configures this definition as a consumable and ensures its one Consumable Action Fragment authoring shape. */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Consumable();
 
+    /** Configures this definition as a learning item and ensures its one Consumable Action Fragment authoring shape. */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Learning();
 
+    /** Configures this definition as a farming item. */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Farming();
 
+    /** Configures this definition as a mining item. */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Mining();
 
+    /** Configures this definition as a placeable item. */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Placable();
 
+    /** Configures this definition as an exploration item. */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Exploration();
 
+    /** Configures this definition as a miscellaneous item. */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Misc();
 

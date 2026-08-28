@@ -48,9 +48,9 @@ bool FMythicItemCorruptionTest::RunTest(const FString &Parameters) {
         return false;
     }
 
-    FRolledAffix Affix;
-    Affix.bIsLocked = false;
-    Fragment->AffixesRuntimeReplicatedData.RolledAffixes.Add(Affix);
+    TArray<FRolledAffix> Affixes;
+    Affixes.AddDefaulted_GetRef().bIsLocked = false;
+    Fragment->AffixSnapshots.ReplaceAll(MoveTemp(Affixes));
 
     FText Reason;
 
@@ -58,7 +58,7 @@ bool FMythicItemCorruptionTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("a clean item accepts a craft op"), Fragment->CanApplyCraftOp(Reason));
     Fragment->SetAffixLocked(0, true);
     if (!TestTrue(TEXT("locking an affix on a clean item takes effect"),
-                  Fragment->AffixesRuntimeReplicatedData.RolledAffixes[0].bIsLocked)) {
+                  Fragment->AffixSnapshots.Items[0].Affix.bIsLocked)) {
         return false;
     }
 
@@ -71,7 +71,7 @@ bool FMythicItemCorruptionTest::RunTest(const FString &Parameters) {
     // The point of the whole feature: the verb itself is refused, not merely the gate function.
     Fragment->SetAffixLocked(0, false);
     TestTrue(TEXT("unlocking is refused on a corrupted item, so the lock still stands"),
-             Fragment->AffixesRuntimeReplicatedData.RolledAffixes[0].bIsLocked);
+             Fragment->AffixSnapshots.Items[0].Affix.bIsLocked);
 
     // Corruption is one-way; nothing may lift it.
     Fragment->ServerCorruptItem();

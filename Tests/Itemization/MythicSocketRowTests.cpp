@@ -9,27 +9,44 @@
 #include "Engine/World.h"
 // ItemDefinition.h, reached through the fragment headers, names USkeletalMesh without declaring it.
 #include "Engine/SkeletalMesh.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GameplayTagContainer.h"
+#include "Internationalization/StringTableRegistry.h"
+#include "Serialization/BufferArchive.h"
+#include "Serialization/MemoryReader.h"
+#include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 #include "Misc/ScopeExit.h"
 
-#include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "Itemization/Affixes/MythicAffixDefinition.h"
+#include "Itemization/Affixes/MythicItemizationDataRegistrySubsystem.h"
+#include "Itemization/Affixes/MythicTags_Affixes.h"
 #include "Itemization/Inventory/Fragments/Passive/MythicGemFragment.h"
 #include "Itemization/Inventory/Fragments/Passive/SocketsFragment.h"
+#include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Itemization/Sockets/MythicSocketTypes.h"
 #include "Itemization/Sockets/MythicTags_Sockets.h"
 #include "Player/MythicPlayerController.h"
+#include "Stats/MythicStatCategoryDefinition.h"
+#include "Stats/MythicStatDefinition.h"
 #include "UI/Inventory/MythicGemPickerWidget.h"
 
 namespace {
+
+const FName SocketStringTableId(TEXT("MythicSocketRowTests"));
 
 // Every socket verb is authority-gated on the fragment's owning actor, so none of them can be reached without a
 // live owner. The player controller is what the loot manager hands an item instance in the game, and it is the
 // actor the row reads bags off, so spawning one is the honest fixture rather than a stand-in.
 struct FMythicSocketFixture {
+    ~FMythicSocketFixture() {
+        FStringTableRegistry::Get().UnregisterStringTable(SocketStringTableId);
+    }
+
     UGameInstance *GameInstance = nullptr;
     AMythicPlayerController *PC = nullptr;
+    UMythicAffixDefinition *AffixDefinition = nullptr;
 };
 
 bool BuildSocketFixture(FAutomationTestBase &Test, FMythicSocketFixture &Out) {
@@ -46,41 +63,134 @@ bool BuildSocketFixture(FAutomationTestBase &Test, FMythicSocketFixture &Out) {
     if (!Test.TestNotNull(TEXT("the owning controller spawned"), Out.PC)) {
         return false;
     }
+
+    FStringTableRegistry::Get().UnregisterStringTable(SocketStringTableId);
+    FStringTableRegistry::Get().Internal_NewLocTable(
+        SocketStringTableId, TEXT("MythicSocketRowTests"));
+    auto AddText = [](const TCHAR *Key, const TCHAR *Source) {
+        FStringTableRegistry::Get().Internal_SetLocTableEntry(SocketStringTableId, Key, Source);
+        return FText::FromStringTable(SocketStringTableId, Key);
+    };
+
+    UMythicStatCategoryDefinition *Category =
+        NewObject<UMythicStatCategoryDefinition>(GetTransientPackage());
+    Category->DeveloperName = TEXT("Offense");
+    Category->DesignerPurpose = TEXT("Socket integration fixture.");
+    Category->CategoryTag = FGameplayTag::RequestGameplayTag(
+        FName(TEXT("Stat.Category.Offense")), true);
+    Category->DisplayName = AddText(TEXT("Offense"), TEXT("Offense"));
+
+    UMythicStatDefinition *Stat =
+        NewObject<UMythicStatDefinition>(GetTransientPackage());
+    Stat->DeveloperName = TEXT("Power");
+    Stat->DesignerPurpose = TEXT("Socket integration fixture.");
+    Stat->StatTag = FGameplayTag::RequestGameplayTag(
+        FName(TEXT("Stat.Attribute.Power")), true);
+    Stat->Attribute = UMythicAttributeSet_Offense::GetPowerAttribute();
+    Stat->DisplayName = AddText(TEXT("PowerStat"), TEXT("Power"));
+    Stat->Category.SetAsset(Category);
+    Stat->bCanBeAffixTarget = true;
+
+    Out.AffixDefinition = NewObject<UMythicAffixDefinition>(GetTransientPackage());
+    Out.AffixDefinition->DeveloperName = TEXT("Power");
+    Out.AffixDefinition->DesignerPurpose = TEXT("Socket integration fixture.");
+    Out.AffixDefinition->AffixTag = FGameplayTag::RequestGameplayTag(
+        FName(TEXT("Itemization.Affix.Power")), true);
+    Out.AffixDefinition->DisplayNameTemplate = AddText(
+        TEXT("PowerAffix"), TEXT("Power"));
+    Out.AffixDefinition->TargetStat.SetAsset(Stat);
+    Out.AffixDefinition->ModifierOp = EGameplayModOp::AddBase;
+    Out.AffixDefinition->StackingRule = EMythicAffixStackingRule::StackAll;
+    FMythicAffixTierProgressionDefinition &Progression =
+        Out.AffixDefinition->TierProgressions.AddDefaulted_GetRef();
+    Progression.DeveloperName = TEXT("Fallback");
+    Progression.TuningContext = TEXT("Core");
+    FMythicAffixTierDefinition &Tier = Progression.Tiers.AddDefaulted_GetRef();
+    Tier.DeveloperName = TEXT("Rank1");
+    Tier.Magnitude.Min = 1.0f;
+    Tier.Magnitude.Max = 5.0f;
+
+    UMythicItemizationDataRegistrySubsystem *Registry =
+        Out.GameInstance->GetSubsystem<UMythicItemizationDataRegistrySubsystem>();
+    if (!Test.TestNotNull(TEXT("the itemization registry exists"), Registry)) {
+        return false;
+    }
+    TArray<UObject *> Assets{Category, Stat, Out.AffixDefinition};
+    TArray<FText> Errors;
+    const bool bPublished = Registry->PublishCoreSemanticAssetsForTests(Assets, Errors);
+    for (const FText &Error : Errors) {
+        Test.AddError(Error.ToString());
+    }
     return Test.TestTrue(TEXT("the owner holds authority, so every refusal below is a real refusal"),
-                         Out.PC->HasAuthority());
+                         Out.PC->HasAuthority())
+        && Test.TestTrue(TEXT("the socket fixture publishes a complete typed semantic closure"),
+                         bPublished);
 }
 
-FRolledAffix MakeGemAffix() {
-    FRollDefinition Roll;
-    Roll.Min = 1.0f;
-    Roll.Max = 5.0f;
-    return FRolledAffix(UMythicAttributeSet_Offense::GetPowerAttribute(), 1, Roll, false);
+FRolledAffix MakeGemAffix(UMythicAffixDefinition *Definition,
+                          const FGuid SourceGemItemGuid = FGuid::NewGuid()) {
+    FRolledAffix Affix;
+    Affix.RollGuid = FGuid::NewGuid();
+    Affix.AffixDefinition.SetAsset(Definition);
+    Affix.TierRank = 1;
+    Affix.Magnitude = 3.0f;
+    Affix.Provenance.RollGroup = AFFIX_ROLL_GROUP_PREFIX;
+    Affix.Provenance.SourceKind = AFFIX_SOURCE_GEM;
+    Affix.Provenance.SourceItemGuid = SourceGemItemGuid;
+    Affix.Provenance.GeneratedItemLevel = 1;
+    Affix.Provenance.AlgorithmVersion = 1;
+    Affix.bIsLocked = true;
+    return Affix;
+}
+
+bool SocketTestGem(USocketsFragment *Fragment, UMythicAffixDefinition *Definition,
+                   const int32 SocketIndex, const FGameplayTag &GemType) {
+    const FGuid SourceGemItemGuid = FGuid::NewGuid();
+    const TArray<FRolledAffix> Grants{MakeGemAffix(Definition, SourceGemItemGuid)};
+    return Fragment && Fragment->ServerSocketGem(
+        SocketIndex, GemType, SourceGemItemGuid, Grants);
 }
 
 USocketsFragment *MakeSockets(AActor *Owner, int32 Count, const FGameplayTag &Colour) {
-    USocketsFragment *Frag = NewObject<USocketsFragment>(Owner);
-    Frag->SetOwner(Owner);
-    Frag->RolledSocketColor = Colour;
+    // Production item instances are outered to their owning actor/component, which gives nested fragments a
+    // world and therefore the GameInstance-scoped typed registry. A transient-package outer makes
+    // BuildSocketCandidates fail closed at ResolveRegistry even when the fixture published a valid closure.
+    UMythicItemInstance *Host = NewObject<UMythicItemInstance>(Owner);
+    Host->SetOwner(Owner);
+    UItemDefinition *Definition = NewObject<UItemDefinition>(Owner);
+    Definition->StackSizeMax = 1;
+    USocketsFragment *Template = NewObject<USocketsFragment>(Definition);
+    Template->RolledSocketColor = Colour;
+    Definition->Fragments.Add(Template);
+    Host->InitializeFixtureForTests(Definition, 1, 1);
+    USocketsFragment *Frag = const_cast<USocketsFragment *>(Host->GetFragment<USocketsFragment>());
+    if (!Frag) {
+        return nullptr;
+    }
     for (int32 i = 0; i < Count; ++i) {
-        Frag->ServerAddSocket();
+        if (!Frag->ServerAddSocket()) return nullptr;
     }
     return Frag;
 }
 
 // AddFragment hard-checks the owner's authority, so an instance whose SetOwner did not take must never reach it.
-UMythicItemInstance *MakeItem(AActor *Owner, const FGameplayTag &GemType, int32 GrantedAffixes) {
-    UMythicItemInstance *Item = NewObject<UMythicItemInstance>();
+UMythicItemInstance *MakeItem(AActor *Owner, UMythicAffixDefinition *Definition,
+                              const FGameplayTag &GemType, int32 GrantCount) {
+    UMythicItemInstance *Item = NewObject<UMythicItemInstance>(Owner);
     Item->SetOwner(Owner);
-    const bool bWantsFragment = GemType.IsValid() || GrantedAffixes > 0;
+    Item->EnsureNewItemInstanceGuid();
+    const bool bWantsFragment = GemType.IsValid() || GrantCount > 0;
     if (!Item->GetOwningActor() || !bWantsFragment) {
         return Item;
     }
     UMythicGemFragment *Template = NewObject<UMythicGemFragment>();
     Template->GemType = GemType;
-    for (int32 i = 0; i < GrantedAffixes; ++i) {
-        Template->GrantedAffixes.Add(MakeGemAffix());
+    TArray<FRolledAffix> Snapshots;
+    for (int32 i = 0; i < GrantCount; ++i) {
+        Snapshots.Add(MakeGemAffix(Definition, Item->GetItemInstanceGuid()));
     }
-    Item->AddFragment(Template);
+    Template->GrantedAffixSnapshots.ReplaceAll(MoveTemp(Snapshots));
+    Item->AddFragmentFixtureForTests(Template);
     return Item;
 }
 
@@ -168,29 +278,33 @@ bool FMythicSocketFragmentStateTest::RunTest(const FString &Parameters) {
     }
 
     USocketsFragment *Frag = MakeSockets(Fixture.PC, 3, FGameplayTag());
-    if (!TestEqual(TEXT("three sockets were opened on the item"), Frag->Sockets.Num(), 3)) {
+    if (!TestEqual(TEXT("three sockets were opened on the item"), Frag->GetSocketCount(), 3)) {
         return false;
     }
     TestEqual(TEXT("the count the row reads agrees with the array"), Frag->GetSocketCount(), 3);
     TestEqual(TEXT("and none of them is set yet"), Frag->GetFilledSocketCount(), 0);
 
-    Frag->ServerSocketGem(1, Ruby, {MakeGemAffix()});
+    TestTrue(TEXT("the canonical socket route accepts a source-provenanced gem"),
+             SocketTestGem(Frag, Fixture.AffixDefinition, 1, Ruby));
     TestEqual(TEXT("socketing changes no socket count"), Frag->GetSocketCount(), 3);
     TestEqual(TEXT("exactly one socket is now set"), Frag->GetFilledSocketCount(), 1);
-    if (TestTrue(TEXT("the array is still three long"), Frag->Sockets.IsValidIndex(2))) {
-        TestTrue(TEXT("the socket that took the gem is filled"), Frag->Sockets[1].bFilled);
+    if (TestNotNull(TEXT("the array is still three long"), Frag->GetSocketState(2))) {
+        TestTrue(TEXT("the socket that took the gem is filled"), Frag->IsSocketFilled(1));
         TestEqual(TEXT("and remembers which gem type it took"),
-                  Frag->Sockets[1].SocketedGemType.ToString(), Ruby.ToString());
-        TestEqual(TEXT("with the gem's granted affixes copied onto it"), Frag->Sockets[1].SocketedAffixes.Num(), 1);
-        TestFalse(TEXT("its neighbours are untouched"), Frag->Sockets[0].bFilled);
-        TestFalse(TEXT("on both sides"), Frag->Sockets[2].bFilled);
+                  Frag->GetSocketedGemType(1).ToString(), Ruby.ToString());
+        const FMythicReplicatedSocketItem *Filled = Frag->GetSocketState(1);
+        TestEqual(TEXT("with the gem's granted affixes copied onto it"),
+                  Filled ? Filled->SocketedAffixSnapshots.Num() : 0, 1);
+        TestFalse(TEXT("its neighbours are untouched"), Frag->IsSocketFilled(0));
+        TestFalse(TEXT("on both sides"), Frag->IsSocketFilled(2));
     }
 
     // A second gem into a set socket would silently replace the first and orphan the affixes it already applied.
-    Frag->ServerSocketGem(1, Sapphire, {MakeGemAffix()});
+    TestFalse(TEXT("the canonical route refuses a second gem"),
+              SocketTestGem(Frag, Fixture.AffixDefinition, 1, Sapphire));
     TestEqual(TEXT("a socket that already holds a gem takes no second one"), Frag->GetFilledSocketCount(), 1);
-    if (Frag->Sockets.IsValidIndex(1)) {
-        TestEqual(TEXT("and keeps the gem it had"), Frag->Sockets[1].SocketedGemType.ToString(), Ruby.ToString());
+    if (Frag->GetSocketState(1)) {
+        TestEqual(TEXT("and keeps the gem it had"), Frag->GetSocketedGemType(1).ToString(), Ruby.ToString());
     }
 
     // The gem type comes back so the caller can mint the gem into the bag; losing it silently destroys the gem.
@@ -198,20 +312,22 @@ bool FMythicSocketFragmentStateTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("unsocketing hands back the gem type that was in the slot"), Removed.ToString(), Ruby.ToString());
     TestEqual(TEXT("the socket count never moves"), Frag->GetSocketCount(), 3);
     TestEqual(TEXT("and the slot reads empty again"), Frag->GetFilledSocketCount(), 0);
-    if (TestTrue(TEXT("the array is still three long"), Frag->Sockets.IsValidIndex(1))) {
-        TestFalse(TEXT("the slot is cleared"), Frag->Sockets[1].bFilled);
-        TestFalse(TEXT("its gem type is cleared with it"), Frag->Sockets[1].SocketedGemType.IsValid());
-        TestEqual(TEXT("and so are the affixes it was granting"), Frag->Sockets[1].SocketedAffixes.Num(), 0);
+    if (TestNotNull(TEXT("the array is still three long"), Frag->GetSocketState(1))) {
+        TestFalse(TEXT("the slot is cleared"), Frag->IsSocketFilled(1));
+        TestFalse(TEXT("its gem type is cleared with it"), Frag->GetSocketedGemType(1).IsValid());
+        TestEqual(TEXT("and so are the affixes it was granting"),
+                  Frag->GetSocketState(1)->SocketedAffixSnapshots.Num(), 0);
     }
 
     TestFalse(TEXT("unsocketing an empty socket hands back nothing"), Frag->ServerUnsocketGem(1).IsValid());
     TestEqual(TEXT("and takes nothing away"), Frag->GetSocketCount(), 3);
 
     // The denominator for every refusal above: the emptied socket takes a gem again.
-    Frag->ServerSocketGem(1, Sapphire, {MakeGemAffix()});
+    TestTrue(TEXT("the emptied socket accepts a new source-provenanced gem"),
+             SocketTestGem(Frag, Fixture.AffixDefinition, 1, Sapphire));
     TestEqual(TEXT("the emptied socket takes the gem it just refused"), Frag->GetFilledSocketCount(), 1);
-    if (Frag->Sockets.IsValidIndex(1)) {
-        TestEqual(TEXT("and it is the new gem"), Frag->Sockets[1].SocketedGemType.ToString(), Sapphire.ToString());
+    if (Frag->GetSocketState(1)) {
+        TestEqual(TEXT("and it is the new gem"), Frag->GetSocketedGemType(1).ToString(), Sapphire.ToString());
     }
 
     return true;
@@ -240,29 +356,32 @@ bool FMythicSocketOutOfRangeTest::RunTest(const FString &Parameters) {
     }
 
     USocketsFragment *Frag = MakeSockets(Fixture.PC, 2, FGameplayTag());
-    if (!TestEqual(TEXT("two sockets were opened on the item"), Frag->Sockets.Num(), 2)) {
+    if (!TestEqual(TEXT("two sockets were opened on the item"), Frag->GetSocketCount(), 2)) {
         return false;
     }
 
     // A well the row never drew still names an index. Growing the array to meet it would hand the player a socket
     // the item never rolled.
-    Frag->ServerSocketGem(5, Ruby, {MakeGemAffix()});
-    TestEqual(TEXT("socketing past the end never grows the array"), Frag->Sockets.Num(), 2);
+    TestFalse(TEXT("socketing past the end is refused"),
+              SocketTestGem(Frag, Fixture.AffixDefinition, 5, Ruby));
+    TestEqual(TEXT("socketing past the end never grows the array"), Frag->GetSocketCount(), 2);
     TestEqual(TEXT("and sets nothing"), Frag->GetFilledSocketCount(), 0);
 
-    Frag->ServerSocketGem(-1, Ruby, {MakeGemAffix()});
-    TestEqual(TEXT("a negative index never grows the array either"), Frag->Sockets.Num(), 2);
+    TestFalse(TEXT("a negative socket index is refused"),
+              SocketTestGem(Frag, Fixture.AffixDefinition, -1, Ruby));
+    TestEqual(TEXT("a negative index never grows the array either"), Frag->GetSocketCount(), 2);
     TestEqual(TEXT("and sets nothing"), Frag->GetFilledSocketCount(), 0);
 
     TestFalse(TEXT("unsocketing past the end hands back nothing"), Frag->ServerUnsocketGem(5).IsValid());
-    TestEqual(TEXT("and leaves the array alone"), Frag->Sockets.Num(), 2);
+    TestEqual(TEXT("and leaves the array alone"), Frag->GetSocketCount(), 2);
 
     // The denominator: an index that IS in range fills, so the two refusals above were the range check and not an
     // inert fixture that could never socket anything.
-    Frag->ServerSocketGem(0, Ruby, {MakeGemAffix()});
+    TestTrue(TEXT("an in-range canonical insertion succeeds"),
+             SocketTestGem(Frag, Fixture.AffixDefinition, 0, Ruby));
     TestEqual(TEXT("an index inside the array fills its socket"), Frag->GetFilledSocketCount(), 1);
-    if (TestTrue(TEXT("the array is still two long"), Frag->Sockets.IsValidIndex(0))) {
-        TestTrue(TEXT("and it is the socket that was named"), Frag->Sockets[0].bFilled);
+    if (TestNotNull(TEXT("the array is still two long"), Frag->GetSocketState(0))) {
+        TestTrue(TEXT("and it is the socket that was named"), Frag->IsSocketFilled(0));
     }
 
     // The same ceiling on the other verb: sockets are rolled, and nothing may add past the table's hard cap.
@@ -306,19 +425,23 @@ bool FMythicSocketGemIdentityTest::RunTest(const FString &Parameters) {
     // will refuse - a click that does nothing, which is the failure the whole row was shaped to avoid.
     TestFalse(TEXT("nothing is not a gem"), UMythicGemPickerWidget::GetGemType(nullptr).IsValid());
 
-    UMythicItemInstance *Plain = MakeItem(Fixture.PC, FGameplayTag(), 0);
+    UMythicItemInstance *Plain = MakeItem(
+        Fixture.PC, Fixture.AffixDefinition, FGameplayTag(), 0);
     TestFalse(TEXT("an item carrying no gem fragment is not a gem"),
               UMythicGemPickerWidget::GetGemType(Plain).IsValid());
 
-    UMythicItemInstance *Typeless = MakeItem(Fixture.PC, FGameplayTag(), 1);
+    UMythicItemInstance *Typeless = MakeItem(
+        Fixture.PC, Fixture.AffixDefinition, FGameplayTag(), 1);
     TestFalse(TEXT("a gem fragment with affixes but no type is not a gem"),
               UMythicGemPickerWidget::GetGemType(Typeless).IsValid());
 
-    UMythicItemInstance *Barren = MakeItem(Fixture.PC, Ruby, 0);
+    UMythicItemInstance *Barren = MakeItem(
+        Fixture.PC, Fixture.AffixDefinition, Ruby, 0);
     TestFalse(TEXT("a gem fragment that grants nothing is not a gem the picker may offer"),
               UMythicGemPickerWidget::GetGemType(Barren).IsValid());
 
-    UMythicItemInstance *Gem = MakeItem(Fixture.PC, Ruby, 1);
+    UMythicItemInstance *Gem = MakeItem(
+        Fixture.PC, Fixture.AffixDefinition, Ruby, 1);
     TestEqual(TEXT("a typed gem that grants an affix answers with its type"),
               UMythicGemPickerWidget::GetGemType(Gem).ToString(), Ruby.ToString());
 
@@ -359,10 +482,14 @@ bool FMythicSocketCarriedGemsTest::RunTest(const FString &Parameters) {
         return false;
     }
 
-    UMythicItemInstance *RubyGem = MakeItem(Fixture.PC, Ruby, 1);
-    UMythicItemInstance *SapphireGem = MakeItem(Fixture.PC, Sapphire, 1);
-    UMythicItemInstance *Plain = MakeItem(Fixture.PC, FGameplayTag(), 0);
-    UMythicItemInstance *Barren = MakeItem(Fixture.PC, Ruby, 0);
+    UMythicItemInstance *RubyGem = MakeItem(
+        Fixture.PC, Fixture.AffixDefinition, Ruby, 1);
+    UMythicItemInstance *SapphireGem = MakeItem(
+        Fixture.PC, Fixture.AffixDefinition, Sapphire, 1);
+    UMythicItemInstance *Plain = MakeItem(
+        Fixture.PC, Fixture.AffixDefinition, FGameplayTag(), 0);
+    UMythicItemInstance *Barren = MakeItem(
+        Fixture.PC, Fixture.AffixDefinition, Ruby, 0);
     SeedSlots(Inv, {RubyGem, Plain, Barren, nullptr, SapphireGem});
 
     TArray<UMythicItemInstance *> Carried;
@@ -387,6 +514,124 @@ bool FMythicSocketCarriedGemsTest::RunTest(const FString &Parameters) {
     UMythicGemPickerWidget::CollectGems(Fixture.PC, Carried);
     TestEqual(TEXT("bags with no usable gem collect none"), Carried.Num(), 0);
 
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicCanonicalSocketProvenanceTest,
+    "Mythic.Itemization.Sockets.CanonicalProvenanceAndStableRollGuid",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicCanonicalSocketProvenanceTest::RunTest(const FString &Parameters) {
+    FMythicSocketFixture Fixture;
+    const bool bReady = BuildSocketFixture(*this, Fixture);
+    ON_SCOPE_EXIT {
+        if (Fixture.GameInstance) {
+            Fixture.GameInstance->Shutdown();
+        }
+    };
+    if (!bReady) {
+        return false;
+    }
+
+    USocketsFragment *Fragment = MakeSockets(Fixture.PC, 1, FGameplayTag());
+    if (!TestNotNull(TEXT("canonical socket fixture exists"), Fragment)) {
+        return false;
+    }
+    const FMythicReplicatedSocketItem *EmptySocket = Fragment->GetSocketState(0);
+    if (!TestNotNull(TEXT("authority generated a stable socket identity"), EmptySocket)) {
+        return false;
+    }
+    const FGuid SocketGuid = EmptySocket->SocketGuid;
+    const FGuid SourceGemGuid(100, 200, 300, 400);
+    const FGameplayTag Ruby = ITEMIZATION_GEM_RUBY.GetTag();
+    const TArray<FRolledAffix> Grants{
+        MakeGemAffix(Fixture.AffixDefinition, SourceGemGuid)};
+    const FGuid ExpectedRollGuid = USocketsFragment::DeriveSocketAffixRollGuid(
+        Fragment->GetOwningItemInstance()->GetItemInstanceGuid(), SocketGuid,
+        SourceGemGuid, Grants[0].RollGuid);
+
+    TestTrue(TEXT("canonical insertion commits"),
+             Fragment->ServerSocketGem(0, Ruby, SourceGemGuid, Grants));
+    const FMythicReplicatedSocketItem *Filled = Fragment->GetSocketState(0);
+    if (!TestNotNull(TEXT("filled socket state remains addressable"), Filled)
+        || !TestEqual(TEXT("one immutable grant was copied"), Filled->SocketedAffixSnapshots.Num(), 1)) {
+        return false;
+    }
+    const FRolledAffix &Copied = Filled->SocketedAffixSnapshots[0];
+    TestEqual(TEXT("host rekey uses the stable canonical tuple"), Copied.RollGuid, ExpectedRollGuid);
+    TestEqual(TEXT("source gem identity remains snapshot provenance"),
+              Copied.Provenance.SourceItemGuid, SourceGemGuid);
+    TestEqual(TEXT("origin socket identity remains snapshot provenance"),
+              Copied.Provenance.OriginSocketGuid, SocketGuid);
+    TestEqual(TEXT("socket source kind is explicit"), Copied.Provenance.SourceKind, AFFIX_SOURCE_SOCKET.GetTag());
+    TestEqual(TEXT("copying never rescales the gem magnitude"),
+              Copied.Magnitude, Grants[0].Magnitude);
+
+    TestEqual(TEXT("unsocket returns the gem type"), Fragment->ServerUnsocketGem(0), Ruby);
+    TestTrue(TEXT("reinserting the same grant into the same socket succeeds"),
+             Fragment->ServerSocketGem(0, Ruby, SourceGemGuid, Grants));
+    TestEqual(TEXT("reinsertion deterministically recreates the same host RollGuid"),
+              Fragment->GetSocketState(0)->SocketedAffixSnapshots[0].RollGuid, ExpectedRollGuid);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicSocketSaveFramingTest,
+    "Mythic.Itemization.Sockets.SaveRoundTripResetsDeltaBookkeeping",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicSocketSaveFramingTest::RunTest(const FString &Parameters) {
+    UMythicAffixDefinition *Definition = NewObject<UMythicAffixDefinition>(
+        GetTransientPackage());
+    Definition->AffixTag = FGameplayTag::RequestGameplayTag(
+        FName(TEXT("Itemization.Affix.Power")), true);
+    FMythicReplicatedSocketArray Source;
+    FMythicReplicatedSocketItem &Socket = Source.Items.AddDefaulted_GetRef();
+    Socket.SocketGuid = FGuid(11, 12, 13, 14);
+    Socket.SocketedGemType = ITEMIZATION_GEM_RUBY.GetTag();
+    Socket.SourceGemItemGuid = FGuid(21, 22, 23, 24);
+    Socket.bFilled = true;
+    Socket.SocketedAffixSnapshots.Add(MakeGemAffix(
+        Definition, Socket.SourceGemItemGuid));
+    Socket.SocketedAffixSnapshots[0].Provenance.SourceKind = AFFIX_SOURCE_SOCKET;
+    Socket.SocketedAffixSnapshots[0].Provenance.SourceItemGuid = Socket.SourceGemItemGuid;
+    Socket.SocketedAffixSnapshots[0].Provenance.OriginSocketGuid = Socket.SocketGuid;
+
+    FBufferArchive Buffer;
+    FObjectAndNameAsStringProxyArchive SaveArchive(Buffer, false);
+    SaveArchive.ArIsSaveGame = true;
+    Source.Serialize(SaveArchive);
+    if (!TestFalse(TEXT("bounded socket state saves without error"), SaveArchive.IsError())) {
+        return false;
+    }
+
+    FMythicReplicatedSocketArray Restored;
+    FMemoryReader Reader(Buffer, true);
+    FObjectAndNameAsStringProxyArchive LoadArchive(Reader, true);
+    LoadArchive.ArIsSaveGame = true;
+    Restored.Serialize(LoadArchive);
+    if (!TestFalse(TEXT("bounded socket state loads without error"), LoadArchive.IsError())
+        || !TestEqual(TEXT("one socket roundtrips"), Restored.Items.Num(), 1)) {
+        return false;
+    }
+    const FMythicReplicatedSocketItem &Loaded = Restored.Items[0];
+    TestEqual(TEXT("socket identity roundtrips"), Loaded.SocketGuid, Socket.SocketGuid);
+    TestEqual(TEXT("source gem identity roundtrips"), Loaded.SourceGemItemGuid, Socket.SourceGemItemGuid);
+    if (!TestEqual(TEXT("ordinary snapshot array roundtrips"),
+                   Loaded.SocketedAffixSnapshots.Num(), 1)) {
+        return false;
+    }
+    TestEqual(TEXT("socket save retains the direct Affix Definition reference"),
+              Loaded.SocketedAffixSnapshots[0].AffixDefinition.GetAsset(), Definition);
+    TestEqual(TEXT("socket save retains the singular rolled magnitude"),
+              Loaded.SocketedAffixSnapshots[0].Magnitude,
+              Socket.SocketedAffixSnapshots[0].Magnitude);
+    TestEqual(TEXT("snapshot socket origin roundtrips"),
+              Loaded.SocketedAffixSnapshots[0].Provenance.OriginSocketGuid, Socket.SocketGuid);
+    TestEqual(TEXT("replication id is rebuilt, never persisted"), Loaded.ReplicationID, INDEX_NONE);
+    TestEqual(TEXT("replication key is rebuilt, never persisted"), Loaded.ReplicationKey, INDEX_NONE);
     return true;
 }
 

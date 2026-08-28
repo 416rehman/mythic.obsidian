@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "Containers/ArrayView.h"
 #include "GAS/Executions/MythicCombatRoll.h"
+#include "Templates/Greater.h"
 #include "MythicCampsiteCore.generated.h"
 
 

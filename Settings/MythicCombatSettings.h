@@ -13,19 +13,6 @@
 #include "GAS/Effects/MythicCrowdControl.h"
 #include "MythicCombatSettings.generated.h"
 
-/** The central band a core affix rolls from: a level-1 base scaled by the shared level curve. */
-USTRUCT(BlueprintType)
-struct MYTHIC_API FMythicCoreAffixScaling {
-    GENERATED_BODY()
-
-    // The band at level 1. Units match the attribute (fractions for percentage affixes, flat for Armor).
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Core Affix")
-    float BaseMin = 0.0f;
-
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Core Affix")
-    float BaseMax = 0.0f;
-};
-
 UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic Combat"))
 class MYTHIC_API UMythicCombatSettings : public UDeveloperSettings {
     GENERATED_BODY()
@@ -38,6 +25,14 @@ public:
     // Increased-vs-More damage bucket configuration. Empty buckets (default) = the compose layer is inert.
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Damage Compose")
     FMythicDamageComposeConfig DamageCompose;
+
+    /**
+     * Upper endpoint of the uniform basic-weapon damage roll, expressed as a multiplier of DamagePerHit. The shared
+     * combat roll and item DPS projection both consume this value, so the displayed range cannot drift from hits.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Weapon Damage",
+              meta = (ClampMin = "1.0"))
+    float WeaponDamageMaximumMultiplier = 1.5f;
 
     /**
      * Which primary stat feeds which derived value, and by how much. Empty means primaries contribute nothing,
@@ -81,6 +76,7 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0"))
     float StatusBaseDamagePerTick = 3.0f;
 
+    /** Default status lifetime used when a status definition does not author its own duration band. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0"))
     float StatusBaseDurationSeconds = 5.0f;
 
@@ -91,6 +87,7 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0"))
     float StatusDamageScale = 1.0f;
 
+    /** Global multiplier applied to the resolved lifetime of every status effect. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0"))
     float StatusDurationScale = 1.0f;
 
@@ -133,27 +130,9 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combatant Level", meta = (ClampMin = "1.0"))
     float CombatantHealthTailGrowth = 1.05f;
 
+    /** Per-level damage multiplier used beyond the final authored combatant scaling key. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combatant Level", meta = (ClampMin = "1.0"))
     float CombatantDamageTailGrowth = 1.04f;
-
-    /**
-     * The one place "how hard should a core affix of this level hit" is expressed. A core affix whose attribute
-     * has a row here derives its min/max from BaseMin/BaseMax scaled by the level curve (with the same open-ended
-     * tail as combatant scaling), instead of the numbers authored on the item. An item that authors a non-zero band
-     * keeps it as its own level-1 identity - a chestplate outweighs boots - but the LEVEL dependence still comes
-     * from here alone. An item that authors zeros needs no damage authoring at all.
-     *
-     * Rarity never touches these bands: it drives affix COUNT (AffixCountByRarity), never affix size.
-     */
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Core Affix Scaling")
-    TMap<FGameplayAttribute, FMythicCoreAffixScaling> CoreAffixScaling;
-
-    // Level curve + compounding tail shared by every core affix row that does not author its own.
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Core Affix Scaling")
-    FCurveTableRowHandle CoreAffixLevelCurve;
-
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Core Affix Scaling", meta = (ClampMin = "1.0"))
-    float CoreAffixTailGrowth = 1.05f;
 
     /**
      * The authored growth of each primary with character level - the whole "primaries rise with level"
@@ -163,9 +142,11 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Primary Stats")
     FCurveTableRowHandle PlayerPowerCurve;
 
+    /** Authored player Strength progression sampled by the primary-stat growth effect. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Primary Stats")
     FCurveTableRowHandle PlayerStrengthCurve;
 
+    /** Per-level multiplier used for player primary stats beyond their final authored curve keys. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Primary Stats", meta = (ClampMin = "1.0"))
     float PlayerPrimaryTailGrowth = 1.01f;
 
@@ -196,19 +177,11 @@ namespace MythicCombat {
 MYTHIC_API float SampleOpenEnded(const FCurveTableRowHandle &Handle, float Level, float TailGrowth);
 
 /**
- * The centrally scaled min/max a core affix of this attribute rolls at this item level, or false when the
- * attribute has no central row (the caller keeps its authored numbers). The out-band is the settings base -
- * or the item's own non-zero authored band, its deliberate identity - scaled by the shared level curve.
- */
-/**
  * The combat level an entity standing here should carry: the authored level for the territory danger tier at
  * the position, lifted by the world tier's ItemLevelBase. Both actor spawn paths (NPC manager, Mass
  * embodiment) resolve through this one function.
  */
 MYTHIC_API int32 ResolveCombatLevelAt(const UWorld *World, const FVector &Location);
-
-MYTHIC_API bool ResolveCoreAffixBand(const FGameplayAttribute &Attribute, float AuthoredMin, float AuthoredMax,
-                                     float ItemLevel, float &OutMin, float &OutMax);
 
 /** The authored floor under any speed value. */
 MYTHIC_API float GetMinSpeedScale();
@@ -219,4 +192,13 @@ MYTHIC_API float GetMinSpeedScale();
  * Never below the authored floor and never negative.
  */
 MYTHIC_API float ComposeSpeedScale(float SpeedMultiplier, float SituationalScale, bool bSprinting);
+
+/**
+ * Resolves the global uniform basic-weapon damage band and its expected value from one composed DamagePerHit value.
+ * Returns false and zeroes every output for invalid input instead of allowing combat and presentation to diverge.
+ */
+MYTHIC_API bool ResolveWeaponDamageRange(float DamagePerHit,
+                                         float &OutMinimumDamage,
+                                         float &OutMaximumDamage,
+                                         float &OutAverageDamage);
 }

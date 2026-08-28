@@ -6,12 +6,29 @@
 #include "GAS/MythicTags_GAS.h"
 #include "GameModes/GameState/MythicGameState.h"
 #include "GameModes/Attributes/WorldAttributes.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "MythicAttributeSet_Utility.h"
 #include "Player/MythicPlayerController.h"
 #include "Player/Proficiency/ProficiencyComponent.h"
 #include "Player/Proficiency/ProficiencyDefinition.h"
 #include "GameFramework/PlayerState.h"
+#include "Itemization/Affixes/MythicItemizationDataRegistrySubsystem.h"
+#include "Stats/MythicStatDefinition.h"
 #include "World/Camping/MythicRestedXp.h"
+
+namespace {
+const UMythicStatDefinition *FindRegisteredStatDefinition(
+    const UMythicAttributeSet_Proficiencies &AttributeSet,
+    const FGameplayAttribute &Attribute) {
+    const UWorld *World = AttributeSet.GetWorld();
+    const UGameInstance *GameInstance = World ? World->GetGameInstance() : nullptr;
+    const UMythicItemizationDataRegistrySubsystem *Registry = GameInstance
+        ? GameInstance->GetSubsystem<UMythicItemizationDataRegistrySubsystem>() : nullptr;
+    return Registry && Registry->IsCoreSemanticReady()
+        ? Registry->FindStat(Attribute) : nullptr;
+}
+}
 
 void UMythicAttributeSet_Proficiencies::OnRep_CombatProficiency(const FGameplayAttributeData &OldValue) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Proficiencies, CombatProficiency, OldValue);
@@ -161,45 +178,28 @@ void UMythicAttributeSet_Proficiencies::GetLifetimeReplicatedProps(TArray<FLifet
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, OverallXpMax, COND_OwnerOnly, REPNOTIFY_Always);
 }
 
-float UMythicAttributeSet_Proficiencies::GetMaxValueForAttribute(const FGameplayAttribute &Attribute) {
-    if (Attribute == GetCombatProficiencyAttribute())
-        return GetCombatProficiencyMax();
-    if (Attribute == GetWoodcuttingProficiencyAttribute())
-        return GetWoodcuttingProficiencyMax();
-    if (Attribute == GetMiningProficiencyAttribute())
-        return GetMiningProficiencyMax();
-    if (Attribute == GetConstructionProficiencyAttribute())
-        return GetConstructionProficiencyMax();
-    if (Attribute == GetTradingProficiencyAttribute())
-        return GetTradingProficiencyMax();
-    if (Attribute == GetHuntingProficiencyAttribute())
-        return GetHuntingProficiencyMax();
-    if (Attribute == GetFishingProficiencyAttribute())
-        return GetFishingProficiencyMax();
-    if (Attribute == GetFarmingProficiencyAttribute())
-        return GetFarmingProficiencyMax();
-    if (Attribute == GetHarvestingProficiencyAttribute())
-        return GetHarvestingProficiencyMax();
-    if (Attribute == GetCraftingProficiencyAttribute())
-        return GetCraftingProficiencyMax();
-    if (Attribute == GetAlchemyProficiencyAttribute())
-        return GetAlchemyProficiencyMax();
-    if (Attribute == GetCookingProficiencyAttribute())
-        return GetCookingProficiencyMax();
-    if (Attribute == GetOverallXpAttribute())
-        return GetOverallXpMax();
-
+float UMythicAttributeSet_Proficiencies::GetMaxValueForAttribute(
+    const FGameplayAttribute &Attribute) const {
+    const UMythicStatDefinition *Current = FindRegisteredStatDefinition(*this, Attribute);
+    const UMythicStatDefinition *Capacity = Current
+        && Current->PairRole == EMythicStatPairRole::Current
+        ? Current->PairedStat.GetAsset() : nullptr;
+    if (Capacity && Capacity->PairRole == EMythicStatPairRole::Capacity
+        && Capacity->PairedStat.GetAsset() == Current && Capacity->Attribute.IsValid()) {
+        return Capacity->Attribute.GetNumericValue(this);
+    }
     return -1;
 }
 
 void UMythicAttributeSet_Proficiencies::PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) {
     Super::PreAttributeChange(Attribute, NewValue);
 
-    if (Attribute == GetOverallXpAttribute()) {
+    const UMythicStatDefinition *Definition = FindRegisteredStatDefinition(*this, Attribute);
+    if (!Definition || Attribute == GetOverallXpAttribute()) {
         return;
     }
 
-    if (Attribute.GetName().EndsWith(TEXT("Max"))) {
+    if (Definition->PairRole == EMythicStatPairRole::Capacity) {
         NewValue = FMath::Max(NewValue, 0.0f);
         return;
     }
@@ -213,7 +213,9 @@ void UMythicAttributeSet_Proficiencies::PreAttributeChange(const FGameplayAttrib
 void UMythicAttributeSet_Proficiencies::PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const {
     Super::PreAttributeBaseChange(Attribute, NewValue);
 
-    if (Attribute == GetOverallXpAttribute() || Attribute == GetOverallXpMaxAttribute() || Attribute.GetName().EndsWith(TEXT("Max"))) {
+    const UMythicStatDefinition *Definition = FindRegisteredStatDefinition(*this, Attribute);
+    if (!Definition || Definition->PairRole != EMythicStatPairRole::Current
+        || Attribute == GetOverallXpAttribute()) {
         return;
     }
 
@@ -302,14 +304,18 @@ float UMythicAttributeSet_Proficiencies::ApplyWorldTierXpMultiplier(float Scaled
 void UMythicAttributeSet_Proficiencies::PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) {
     Super::PostAttributeChange(Attribute, OldValue, NewValue);
 
-    if (Attribute.GetName().EndsWith(TEXT("Max")) && Attribute != GetOverallXpMaxAttribute()) {
+    const UMythicStatDefinition *Definition = FindRegisteredStatDefinition(*this, Attribute);
+    if (!Definition) {
+        return;
+    }
+    if (Definition->PairRole == EMythicStatPairRole::Capacity
+        && Attribute != GetOverallXpMaxAttribute()) {
         SetOverallXpMax(CalculateOverallXpMax());
     }
-    else {
-        if (Attribute != GetOverallXpAttribute()) {
-            auto OverallLevel = CalculateOverallXp();
-            SetOverallXp(OverallLevel);
-        }
+    else if (Definition->PairRole == EMythicStatPairRole::Current
+             && Attribute != GetOverallXpAttribute()) {
+        auto OverallLevel = CalculateOverallXp();
+        SetOverallXp(OverallLevel);
     }
 }
 

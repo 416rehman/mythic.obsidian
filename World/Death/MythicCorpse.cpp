@@ -406,7 +406,11 @@ void AMythicCorpse::SerializeCustomData(TArray<uint8> &OutCustomData) {
         return;
     }
     FSerializedInventoryData Data;
-    FSerializedInventoryData::Serialize(ContainerInventory, Data);
+    if (!FSerializedInventoryData::Serialize(ContainerInventory, Data)) {
+        UE_LOG(MythSaveLoad, Error, TEXT("Corpse inventory serialization failed"));
+        OutCustomData.Reset();
+        return;
+    }
 
     FMemoryWriter MemWriter(OutCustomData);
     FObjectAndNameAsStringProxyArchive Ar(MemWriter, false);
@@ -421,7 +425,9 @@ void AMythicCorpse::DeserializeCustomData(const TArray<uint8> &InCustomData) {
         FSerializedInventoryData Data;
         FSerializedInventoryData::StaticStruct()->SerializeItem(Ar, &Data, nullptr);
 
-        FSerializedInventoryData::Deserialize(ContainerInventory, Data);
+        if (Ar.IsError() || !FSerializedInventoryData::Deserialize(ContainerInventory, Data)) {
+            UE_LOG(MythSaveLoad, Error, TEXT("Corpse inventory restore failed closed"));
+        }
     }
 
     if (HasAuthority() && !bDecayStarted) {

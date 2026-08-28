@@ -8,6 +8,16 @@
 
 const FPrimaryAssetType UMythicAssetManager::ItemDefinitionType = TEXT("ItemDefinition");
 const FPrimaryAssetType UMythicAssetManager::ConversionRecipeType = TEXT("ConversionRecipe");
+const FPrimaryAssetType UMythicAssetManager::StatCategoryDefinitionType = TEXT("StatCategoryDefinition");
+const FPrimaryAssetType UMythicAssetManager::StatDefinitionType = TEXT("StatDefinition");
+const FPrimaryAssetType UMythicAssetManager::AffixDefinitionType = TEXT("AffixDefinition");
+const FPrimaryAssetType UMythicAssetManager::AffixPoolType = TEXT("AffixPool");
+const FPrimaryAssetType UMythicAssetManager::AffixRollPolicyType = TEXT("AffixRollPolicy");
+const FPrimaryAssetType UMythicAssetManager::AffixProfileType = TEXT("AffixProfile");
+const FPrimaryAssetType UMythicAssetManager::ItemizationRulesetType = TEXT("ItemizationRuleset");
+const FPrimaryAssetType UMythicAssetManager::HarvestToolTypeDefinitionType = TEXT("HarvestToolTypeDefinition");
+const FPrimaryAssetType UMythicAssetManager::HarvestableDefinitionType = TEXT("HarvestableDefinition");
+const FPrimaryAssetType UMythicAssetManager::ProficiencyDefinitionType = TEXT("ProficiencyDefinition");
 
 void UMythicAssetManager::StartInitialLoading() {
     Super::StartInitialLoading();

@@ -11,6 +11,7 @@
 #include "Itemization/Inventory/Fragments/Passive/MythicGemFragment.h"
 #include "Itemization/Sockets/MythicSocketTypes.h"
 #include "Mythic/Mythic.h"
+#include "Player/MythicPlayerController.h"
 
 UMythicSocketComponent::UMythicSocketComponent() {
     PrimaryComponentTick.bCanEverTick = false;
@@ -39,8 +40,21 @@ void UMythicSocketComponent::ServerSocketGem_Implementation(UMythicItemInstance 
     if (!Owner || !Owner->HasAuthority()) {
         return;
     }
-    if (!HostItem || !Gem) {
+    if (!HostItem || !Gem || HostItem == Gem || Gem->GetStacks() < 1) {
         UE_LOG(Myth, Warning, TEXT("SocketComponent::Socket: null host or gem."));
+        return;
+    }
+
+    // RPC object references are not authorization. Both physical items must still be in an inventory controlled by
+    // the caller; otherwise a client could name another player's replicated item and consume/socket it.
+    AController *Controller = GetOwningController();
+    const AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(Controller);
+    const TArray<UMythicInventoryComponent *> OwnedInventories = MythicPC
+                                                                     ? MythicPC->GetAllInventoryComponents()
+                                                                     : TArray<UMythicInventoryComponent *>();
+    if (!MythicPC || !OwnedInventories.Contains(HostItem->GetInventoryComponent())
+        || !OwnedInventories.Contains(Gem->GetInventoryComponent())) {
+        UE_LOG(Myth, Warning, TEXT("SocketComponent::Socket: caller does not own both item instances."));
         return;
     }
 
@@ -49,30 +63,38 @@ void UMythicSocketComponent::ServerSocketGem_Implementation(UMythicItemInstance 
         UE_LOG(Myth, Warning, TEXT("SocketComponent::Socket: host item has no sockets."));
         return;
     }
-    if (!SocketsFrag->Sockets.IsValidIndex(SocketIndex)) {
+    if (SocketIndex < 0 || SocketIndex >= SocketsFrag->GetSocketCount()) {
         UE_LOG(Myth, Warning, TEXT("SocketComponent::Socket: socket index %d out of range."), SocketIndex);
         return;
     }
-    if (SocketsFrag->Sockets[SocketIndex].bFilled) {
+    if (SocketsFrag->IsSocketFilled(SocketIndex)) {
         UE_LOG(Myth, Warning, TEXT("SocketComponent::Socket: socket %d already filled."), SocketIndex);
         return;
     }
 
-    const UMythicGemFragment *GemFrag = Gem->GetFragment<UMythicGemFragment>();
+    UMythicGemFragment *GemFrag = const_cast<UMythicGemFragment *>(Gem->GetFragment<UMythicGemFragment>());
+    if (GemFrag) {
+        GemFrag->RequestRuntimeData();
+    }
     if (!GemFrag || !GemFrag->IsGem()) {
-        UE_LOG(Myth, Warning, TEXT("SocketComponent::Socket: item is not a gem."));
+        UE_LOG(Myth, Warning, TEXT("SocketComponent::Socket: item is not a registry-ready gem."));
         return;
     }
 
-    const FGameplayTag SocketColor = SocketsFrag->Sockets[SocketIndex].SocketColor;
+    const FGameplayTag SocketColor = SocketsFrag->GetSocketColor(SocketIndex);
     if (!FMythicSocketMath::IsGemCompatible(GemFrag->GetGemType(), SocketColor)) {
         UE_LOG(Myth, Warning, TEXT("SocketComponent::Socket: gem %s incompatible with socket color %s."),
                *GemFrag->GetGemType().ToString(), *SocketColor.ToString());
         return;
     }
 
-    SocketsFrag->ServerSocketGem(SocketIndex, GemFrag->GetGemType(), GemFrag->GrantedAffixes);
-    Gem->ConsumeItem(1);
+    TArray<FRolledAffix> GemSnapshots;
+    GemFrag->GetGrantedAffixSnapshots(GemSnapshots);
+    if (SocketsFrag->ServerSocketGem(SocketIndex, GemFrag->GetGemType(), Gem->GetItemInstanceGuid(),
+                                     GemSnapshots)) {
+        // Consumption is last: a failed provenance rekey, effect apply or socket-state commit never destroys a gem.
+        Gem->ConsumeItem(1);
+    }
 }
 
 void UMythicSocketComponent::ServerUnsocketGem_Implementation(UMythicItemInstance *HostItem, int32 SocketIndex) {
@@ -82,6 +104,12 @@ void UMythicSocketComponent::ServerUnsocketGem_Implementation(UMythicItemInstanc
     }
     if (!HostItem) {
         UE_LOG(Myth, Warning, TEXT("SocketComponent::Unsocket: null host."));
+        return;
+    }
+
+    const AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(GetOwningController());
+    if (!MythicPC || !MythicPC->GetAllInventoryComponents().Contains(HostItem->GetInventoryComponent())) {
+        UE_LOG(Myth, Warning, TEXT("SocketComponent::Unsocket: caller does not own the host item."));
         return;
     }
 

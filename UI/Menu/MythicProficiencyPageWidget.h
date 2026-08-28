@@ -22,9 +22,11 @@ USTRUCT()
 struct FMythicProficiencyFamily {
     GENERATED_BODY()
 
+    /** Localized section heading shown above this family of proficiency tracks. */
     UPROPERTY(EditDefaultsOnly, Category = "Family")
     FText Label;
 
+    /** Track tags assigned to this family in player-facing display order. */
     UPROPERTY(EditDefaultsOnly, Category = "Family", meta = (Categories = "Proficiency"))
     TArray<FGameplayTag> Tracks;
 };
@@ -75,10 +77,11 @@ protected:
     virtual void NativeOnActivated() override;
     virtual void NativeOnDeactivated() override;
 
-    /** Rows are added here. */
+    /** Optional Blueprint panel that receives the generated proficiency family sections and track rows. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UPanelWidget> TrackList;
 
+    /** Optional empty-state label shown when the player has no valid proficiency summaries. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> Txt_Empty;
 
@@ -86,15 +89,19 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
     TObjectPtr<UMaterialInterface> BarMaterialAsset;
 
+    /** Progress-bar fill color at zero progress. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
     FLinearColor BarFillStart = FLinearColor(0.62f, 0.74f, 0.40f, 1.0f);
 
+    /** Progress-bar fill color at full progress. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
     FLinearColor BarFillEnd = FLinearColor(0.32f, 0.44f, 0.20f, 1.0f);
 
+    /** Text color used for proficiency track names. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
     FLinearColor NameColor = FLinearColor(0.93f, 0.88f, 0.76f, 1.0f);
 
+    /** Low-emphasis text color used for levels and progress details. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
     FLinearColor SubtleColor = FLinearColor(0.66f, 0.60f, 0.50f, 1.0f);
 
@@ -110,6 +117,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
     float BarWidth = 220.0f;
 
+    /** Fixed row height of each progress bar in slate units. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
     float BarHeight = 14.0f;
 
@@ -117,9 +125,11 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
     float NameColumnWidth = 170.0f;
 
+    /** Fixed width reserved for the numeric level column. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
     float LevelColumnWidth = 52.0f;
 
+    /** Fixed width reserved for current-versus-required XP text. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Proficiency")
     float ProgressColumnWidth = 76.0f;
 

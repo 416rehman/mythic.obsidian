@@ -260,7 +260,7 @@ void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *I
     for (int32 SlotIdx = 0; SlotIdx < AllSlots.Num(); ++SlotIdx) {
         const FMythicInventorySlotEntry &Entry = AllSlots[SlotIdx];
         if (Entry.SlotDefinition) {
-            if (Entry.bEquipmentSlot) {
+            if (Entry.IsGearSlot()) {
                 EquipmentIndices.Add(SlotIdx);
             }
             else {
@@ -396,7 +396,7 @@ void UInventoryVM::RefreshAggregates(UMythicInventoryComponent *Inventory) {
     int32 NumUsed = 0;
     int32 NumTotal = 0;
     for (const FMythicInventorySlotEntry &Entry : AllSlots) {
-        if (Entry.bEquipmentSlot) {
+        if (Entry.IsGearSlot()) {
             continue;
         }
         if (!Entry.SlotDefinition) {

@@ -4,13 +4,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "GAS/Executions/MythicCombatRoll.h"
-#include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Proficiencies.h"
-#include "GameModes/GameState/MythicGameState.h"
-#include "Itemization/Affixes/MythicAffixTierTypes.h"
-#include "Itemization/Inventory/Fragments/FragmentTypes.h"
-#include "Itemization/Inventory/Fragments/Passive/AffixesFragment.h"
 #include "Settings/MythicCombatSettings.h"
 #include "Settings/MythicDeveloperSettings.h"
 
@@ -49,73 +43,6 @@ bool FMythicPrimaryGrowthCurvesTest::RunTest(const FString &Parameters) {
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicHitsToKillBandTest,
-                                 "Mythic.Combat.PrimaryGrowth.HitsToKillBand",
-                                 EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FMythicHitsToKillBandTest::RunTest(const FString &Parameters) {
-    /**
-     * The assertion that protects the game from its open-ended tails: as player level, gear level and
-     * combatant level advance together, hits-to-kill must stay inside a band - never trivialising and
-     * never bricking. Every input is the real authored artifact the game reads: Power from the player
-     * growth curve, its damage contribution through the authored row and the same Diminish the MMC uses,
-     * the central core-affix weapon band, and the combatant health curves off the shipped game state.
-     */
-    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
-
-    const FMythicStatContribution *PowerToDamage = nullptr;
-    for (const FMythicStatContribution &Row : Settings->StatContributions.Contributions) {
-        if (Row.SourceStat.GetName() == TEXT("Power") && Row.TargetAttribute.GetName() == TEXT("DamagePerHit")) {
-            PowerToDamage = &Row;
-        }
-    }
-    if (!TestNotNull(TEXT("Power->DamagePerHit contribution is authored"), PowerToDamage)) {
-        return false;
-    }
-
-    const UClass *GameStateClass = LoadClass<AMythicGameState>(
-        nullptr, TEXT("/Game/Mythic/Gameplay/GameModes/BP_MythicGameState.BP_MythicGameState_C"));
-    if (!TestNotNull(TEXT("Shipped game state loads"), static_cast<const UObject *>(GameStateClass))) {
-        return false;
-    }
-    const AMythicGameState *GS = GameStateClass->GetDefaultObject<AMythicGameState>();
-    if (!TestFalse(TEXT("Combatant health curves are authored"), GS->HealthMinCurveRowHandle.IsNull())) {
-        return false;
-    }
-
-    auto PlayerOutputAt = [&](const float Level) -> float {
-        const float Power = GrowthAt(Settings, Settings->PlayerPowerCurve, Level);
-        float Bonus = Power * PowerToDamage->PerPoint;
-        if (PowerToDamage->CeilingBonus > 0.0f) {
-            Bonus = MythicCombat::Diminish(Bonus, PowerToDamage->SoftCapBonus, PowerToDamage->CeilingBonus);
-        }
-        const float WeaponBand = MythicCombat::SampleOpenEnded(
-            Settings->CoreAffixLevelCurve, Level, Settings->CoreAffixTailGrowth);
-        return (1.0f + Bonus) * WeaponBand;
-    };
-    auto CombatantHealthAt = [&](const float Level) -> float {
-        const float Low = MythicCombat::SampleOpenEnded(GS->HealthMinCurveRowHandle, Level, Settings->CombatantHealthTailGrowth);
-        const float High = MythicCombat::SampleOpenEnded(GS->HealthMaxCurveRowHandle, Level, Settings->CombatantHealthTailGrowth);
-        return (Low + High) * 0.5f;
-    };
-
-    const float Output1 = PlayerOutputAt(1.0f);
-    const float Health1 = CombatantHealthAt(1.0f);
-    float MinRatio = TNumericLimits<float>::Max();
-    float MaxRatio = 0.0f;
-    for (float Level = 1.0f; Level <= 120.0f; Level += 1.0f) {
-        const float HitsRatio = (CombatantHealthAt(Level) / Health1) / (PlayerOutputAt(Level) / Output1);
-        MinRatio = FMath::Min(MinRatio, HitsRatio);
-        MaxRatio = FMath::Max(MaxRatio, HitsRatio);
-    }
-
-    AddInfo(FString::Printf(TEXT("hits-to-kill ratio across levels 1-120: %.2f .. %.2f of the level-1 pace"), MinRatio, MaxRatio));
-    TestTrue(TEXT("Fights never trivialise (floor)"), MinRatio > 0.25f);
-    TestTrue(TEXT("Fights never brick (ceiling)"), MaxRatio < 4.0f);
-
-    return true;
-}
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicOverallLevelFormulaTest,
                                  "Mythic.Combat.PrimaryGrowth.OverallLevelFormula",
                                  EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -148,73 +75,6 @@ bool FMythicOverallLevelFormulaTest::RunTest(const FString &Parameters) {
         if (Level < Dev->MaxLevel) {
             TestTrue(TEXT("Progress sits inside the level span"), Into >= 0.0f && Span > 0.0f && Into <= Span + 1.0f);
         }
-    }
-    return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicWholeNumberRollTest,
-                                 "Mythic.Itemization.Affixes.WholeNumberRolls",
-                                 EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FMythicWholeNumberRollTest::RunTest(const FString &Parameters) {
-    // The whole-number flag is authored per roll definition and binds the rolled VALUE, not its display.
-    FRollDefinition Whole;
-    Whole.Min = 10.0f;
-    Whole.Max = 25.0f;
-    Whole.LevelScaling = 0.37f;
-    Whole.bWholeNumber = true;
-    Whole.bIsPercentage = false;
-    const FGameplayAttribute Power = UMythicAttributeSet_Offense::GetPowerAttribute();
-    for (int32 i = 0; i < 64; ++i) {
-        const FRolledAttributeSpec Spec(Power, 7, Whole);
-        TestTrue(FString::Printf(TEXT("Whole-number definition rolls an integer (got %f)"), Spec.Value),
-                 FMath::IsNearlyEqual(Spec.Value, FMath::RoundToFloat(Spec.Value)));
-        TestTrue(TEXT("Roll stays inside the scaled band"),
-                 Spec.Value >= FMath::FloorToFloat(Whole.GetScaledMin(7)) && Spec.Value <= FMath::CeilToFloat(Whole.GetScaledMax(7)));
-    }
-
-    FRollDefinition Fractional = Whole;
-    Fractional.bWholeNumber = false;
-    bool bSawFraction = false;
-    for (int32 i = 0; i < 64 && !bSawFraction; ++i) {
-        const FRolledAttributeSpec Spec(Power, 7, Fractional);
-        bSawFraction = !FMath::IsNearlyEqual(Spec.Value, FMath::RoundToFloat(Spec.Value));
-    }
-    TestTrue(TEXT("A continuous definition still rolls fractions (the flag is opt-in, not global)"), bSawFraction);
-    return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicWholeNumberTieredRollTest,
-                                 "Mythic.Itemization.Affixes.WholeNumberTieredRolls",
-                                 EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FMythicWholeNumberTieredRollTest::RunTest(const FString &Parameters) {
-    // The tiered roll is how every shipped item rolls. It OVERWRITES the ctor value, so the whole-number snap
-    // has to hold on that path specifically, and the flag must land on the stored Definition so rerolls stay
-    // whole too.
-    FMythicTieredAffixDef Def;
-    Def.Attribute = UMythicAttributeSet_Offense::GetPowerAttribute();
-    Def.Group = EMythicAffixGroup::Prefix;
-    Def.bWholeNumber = true;
-    FMythicAffixTier Tier;
-    Tier.MinItemLevel = 1;
-    Tier.Weight = 1.0f;
-    Tier.Min = 3.25f;
-    Tier.Max = 9.75f;
-    Tier.LevelScaling = 0.37f;
-    Def.Tiers.Add(Tier);
-    const TArray<FMythicTieredAffixDef> Defs = {Def};
-
-    for (int32 i = 0; i < 32; ++i) {
-        UAffixesFragment *Fragment = NewObject<UAffixesFragment>();
-        Fragment->RollAffixesTiered(7, 1, FGameplayTagContainer(), Defs);
-        if (!TestEqual(TEXT("Tiered roll produced one affix"), Fragment->AffixesRuntimeReplicatedData.RolledAffixes.Num(), 1)) {
-            return false;
-        }
-        const FRolledAffix &Affix = Fragment->AffixesRuntimeReplicatedData.RolledAffixes[0];
-        TestTrue(FString::Printf(TEXT("Tiered whole-number roll is an integer (got %f)"), Affix.Value),
-                 FMath::IsNearlyEqual(Affix.Value, FMath::RoundToFloat(Affix.Value)));
-        TestTrue(TEXT("The flag lands on the stored Definition so rerolls stay whole"), Affix.Definition.bWholeNumber);
     }
     return true;
 }

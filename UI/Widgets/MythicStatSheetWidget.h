@@ -99,12 +99,9 @@ class MYTHIC_API UMythicStatSheetWidget : public UCommonActivatableWidget {
     GENERATED_BODY()
 
 public:
+    /** Returns the live view model that owns the stat sheet's data and Ability System bindings. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Stats")
     UMythicStatSheetViewModel *GetStatSheetViewModel() const { return ViewModel; }
-
-    /** Progressive disclosure toggle — wire to a checkbox or a controller face button. */
-    UFUNCTION(BlueprintCallable, Category = "Mythic|Stats")
-    void ToggleShowUnmodified();
 
 protected:
     virtual void NativeConstruct() override;
@@ -135,8 +132,7 @@ protected:
 
     /** Sections that start closed. Later drawers a player opens on demand, not walls they scroll past. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
-    TArray<EMythicStatCategory> DefaultCollapsedSections = {
-        EMythicStatCategory::Utility, EMythicStatCategory::Survival, EMythicStatCategory::Proficiency};
+    TArray<FGameplayTag> DefaultCollapsedCategoryTags;
 
     /**
      * The house section header, shared with every other screen.
@@ -148,15 +144,19 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
     TSubclassOf<class UMythicSectionHeader> SectionHeaderClass;
 
+    /** Default text colour for stat labels. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
     FLinearColor LabelColor = FLinearColor(0.910f, 0.886f, 0.839f, 0.80f);
 
+    /** Default text colour for final stat values. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
     FLinearColor ValueColor = FLinearColor(0.910f, 0.886f, 0.839f, 1.0f);
 
+    /** Text colour used for beneficial current-minus-base deltas. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
     FLinearColor BonusColor = FLinearColor(0.788f, 0.663f, 0.416f, 1.0f);
 
+    /** Text colour used for detrimental current-minus-base deltas. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Stats")
     FLinearColor PenaltyColor = FLinearColor(0.651f, 0.357f, 0.294f, 1.0f);
 
@@ -187,7 +187,7 @@ private:
     void BuildSummaryCardPool();
     void BuildTooltipPool();
     void ApplySummaries();
-    void ApplyPrimaryTooltip(FMythicStatRowWidgets &Row, const struct FMythicStatLine &Line);
+    void ApplyContributionTooltip(FMythicStatRowWidgets &Row, const struct FMythicStatLine &Line);
 
     UFUNCTION()
     void HandleSectionToggled(class UMythicSectionHeader *Header);
@@ -211,11 +211,11 @@ private:
     TArray<int32> Shape;
 
     /** Category behind each pooled header, rebuilt every Rebuild, so a header click knows its drawer. */
-    TArray<EMythicStatCategory> HeaderCategories;
+    TArray<FGameplayTag> HeaderCategories;
 
-    TSet<EMythicStatCategory> CollapsedSections;
+    TSet<FGameplayTag> CollapsedSections;
 
-    int32 UsedPrimaryTooltips = 0;
+    int32 UsedContributionTooltips = 0;
 
     bool bCollapseInitialized = false;
 

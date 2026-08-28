@@ -14,6 +14,7 @@
 #include "GameFramework/Pawn.h"
 #include "Itemization/Inventory/Fragments/Passive/MythicGemFragment.h"
 #include "Itemization/Inventory/Fragments/Passive/SocketsFragment.h"
+#include "Itemization/Affixes/MythicItemizationDataRegistrySubsystem.h"
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
@@ -24,7 +25,7 @@
 #include "UI/Inventory/MythicSocketRowWidget.h"
 #include "UI/MythicUIManagerSubsystem.h"
 #include "UI/MythicUIStyle.h"
-#include "UI/ViewModels/MythicEffectDescriber.h"
+#include "UI/ViewModels/MythicAffixViewData.h"
 #include "UI/ViewModels/MythicStatTextLibrary.h"
 
 namespace {
@@ -37,14 +38,38 @@ FText GemLeafName(const FGameplayTag &GemType) {
     return FText::FromString(Full.FindLastChar(TEXT('.'), Dot) ? Full.RightChop(Dot + 1) : Full);
 }
 
-FText DescribeGem(const UMythicGemFragment *Gem, int32 ItemLevel, bool bRich) {
+FText DescribeGem(const UMythicGemFragment *Gem, bool bRich) {
+    const UWorld *World = Gem ? Gem->GetWorld() : nullptr;
+    const UGameInstance *GameInstance = World ? World->GetGameInstance() : nullptr;
+    const UMythicItemizationDataRegistrySubsystem *Registry = GameInstance
+        ? GameInstance->GetSubsystem<UMythicItemizationDataRegistrySubsystem>()
+        : nullptr;
+    if (!Gem || !Registry) {
+        return FText::GetEmpty();
+    }
+
+    TArray<FRolledAffix> Snapshots;
+    Gem->GetGrantedAffixSnapshots(Snapshots);
     TArray<FText> Lines;
-    Lines.Reserve(Gem->GrantedAffixes.Num());
-    for (const FRolledAffix &Affix : Gem->GrantedAffixes) {
-        const FMythicEffectLine Line =
-            MythicEffectDescriber::DescribeRolledModifier(Affix.Attribute, Affix.Value, Affix.Definition, ItemLevel);
-        Lines.Add(bRich ? Line.RichText
-                        : FText::Format(NSLOCTEXT("Mythic", "GemPickerAffix", "{0} {1}"), Line.Value, Line.Label));
+    Lines.Reserve(Snapshots.Num());
+    for (const FRolledAffix &Snapshot : Snapshots) {
+        FMythicAffixViewData View;
+        if (!UMythicAffixViewDataLibrary::BuildViewData(Snapshot, Registry, View)) {
+            // The compact snapshot remains authoritative and the owning slot refreshes when its closure is ready.
+            continue;
+        }
+        if (bRich) {
+            Lines.Add(View.RichText);
+            continue;
+        }
+        TArray<FText> Values;
+        Values.Reserve(View.Values.Num());
+        for (const FMythicAffixValueViewData &Value : View.Values) {
+            Values.Add(FText::Format(NSLOCTEXT("Mythic", "GemPickerAffix", "{0} {1}"),
+                                     Value.FormattedValue, Value.StatLabel));
+        }
+        Lines.Add(Values.IsEmpty() ? View.DisplayName
+                                   : FText::Join(FText::FromString(TEXT(" / ")), Values));
     }
     return FText::Join(FText::FromString(TEXT("   ")), Lines);
 }
@@ -150,11 +175,11 @@ void UMythicGemPickerWidget::OpenForSocket(UMythicItemInstance *HostItem, int32 
     SocketColor = FGameplayTag();
 
     const USocketsFragment *Sockets = HostItem ? HostItem->GetFragment<USocketsFragment>() : nullptr;
-    if (!Sockets || !Sockets->Sockets.IsValidIndex(SocketIndex)) {
+    if (!Sockets || SocketIndex < 0 || SocketIndex >= Sockets->GetSocketCount()) {
         UE_LOG(Myth, Warning, TEXT("GemPicker: socket %d does not exist on the item."), SocketIndex);
         return;
     }
-    SocketColor = Sockets->Sockets[SocketIndex].SocketColor;
+    SocketColor = Sockets->GetSocketColor(SocketIndex);
 
     if (SlotLabel) {
         SlotLabel->SetText(SocketColor.IsValid()
@@ -200,10 +225,10 @@ void UMythicGemPickerWidget::OpenForSocket(UMythicItemInstance *HostItem, int32 
         if (const UMythicGemFragment *Frag = Gem->GetFragment<UMythicGemFragment>()) {
             UWidget *Desc = Row.Widget->GetWidgetFromName(RowDescriptionText);
             if (URichTextBlock *Rich = Cast<URichTextBlock>(Desc)) {
-                Rich->SetText(DescribeGem(Frag, Gem->GetItemLevel(), true));
+                Rich->SetText(DescribeGem(Frag, true));
             }
             else if (UTextBlock *Plain = Cast<UTextBlock>(Desc)) {
-                Plain->SetText(DescribeGem(Frag, Gem->GetItemLevel(), false));
+                Plain->SetText(DescribeGem(Frag, false));
             }
         }
 

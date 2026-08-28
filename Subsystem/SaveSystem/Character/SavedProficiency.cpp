@@ -3,12 +3,13 @@
 #include "Mythic/Player/Proficiency/ProficiencyDefinition.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
-#include "AttributeSet.h"
 #include "Mythic/Mythic.h"
 
-void FSerializedProficiencyHelper::Serialize(UProficiencyComponent *Component, TArray<FSerializedProficiencyData> &OutData) {
+bool FSerializedProficiencyHelper::Serialize(
+    UProficiencyComponent *Component,
+    TArray<FSerializedProficiencyData> &OutData) {
     if (!Component) {
-        return;
+        return false;
     }
 
     UAbilitySystemComponent *ASC = nullptr;
@@ -18,87 +19,101 @@ void FSerializedProficiencyHelper::Serialize(UProficiencyComponent *Component, T
         }
     }
 
-    OutData.Empty();
+    if (!ASC) {
+        UE_LOG(MythSaveLoad, Error,
+               TEXT("SavedProficiency::Serialize - authoritative ASC is unavailable."));
+        return false;
+    }
+
+    TArray<FSerializedProficiencyData> StagedData;
+    TSet<const UProficiencyDefinition *> SeenDefinitions;
 
     for (const FProficiency &Prof : Component->Proficiencies) {
+        const FGameplayAttribute ProgressAttribute = Prof.GetProgressAttribute();
+        if (!Prof.Definition || SeenDefinitions.Contains(Prof.Definition)
+            || !ProgressAttribute.IsValid()
+            || !ASC->HasAttributeSetForAttribute(ProgressAttribute)) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SavedProficiency::Serialize - rejected track without a typed, installed Progress Stat: %s"),
+                   *GetNameSafe(Prof.Definition));
+            return false;
+        }
+        SeenDefinitions.Add(Prof.Definition);
+
         FSerializedProficiencyData Data;
-
-        if (Prof.Definition) {
-            Data.ProficiencyAsset = FSoftObjectPath(Prof.Definition);
+        Data.ProficiencyDefinition = Prof.Definition;
+        Data.CurrentXP = ASC->GetNumericAttributeBase(ProgressAttribute);
+        if (!FMath::IsFinite(Data.CurrentXP) || Data.CurrentXP < 0.0f) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SavedProficiency::Serialize - rejected non-finite or negative XP for %s."),
+                   *GetNameSafe(Prof.Definition));
+            return false;
         }
 
-        if (Prof.ProgressAttribute.IsValid()) {
-            if (UStruct *AttrSet = Prof.ProgressAttribute.GetAttributeSetClass()) {
-                Data.ProgressAttributeSetClass = AttrSet->GetPathName();
-            }
-            Data.ProgressAttributeName = Prof.ProgressAttribute.GetName();
-
-            if (ASC) {
-                Data.CurrentXP = ASC->GetNumericAttribute(Prof.ProgressAttribute);
-            }
-        }
-
-        OutData.Add(Data);
+        StagedData.Add(Data);
 
         UE_LOG(MythSaveLoad, Log, TEXT("SavedProficiency::Serialize - %s (XP: %.1f)"),
                Prof.Definition ? *Prof.Definition->GetName() : TEXT("NULL"), Data.CurrentXP);
     }
+    OutData = MoveTemp(StagedData);
+    return true;
 }
 
-void FSerializedProficiencyHelper::Deserialize(UProficiencyComponent *Component, const TArray<FSerializedProficiencyData> &InData) {
+bool FSerializedProficiencyHelper::Deserialize(
+    UProficiencyComponent *Component,
+    const TArray<FSerializedProficiencyData> &InData) {
     if (!Component) {
-        return;
+        return false;
     }
 
-    // The authored defaults survive the load: a save knows the XP of the tracks it recorded, never the roster.
-    // Replacing the roster with the save's list made every track vanish for a fresh character (empty stub save)
-    // and would silently drop any proficiency added to the game after a save was written.
-    TArray<FProficiency> Authored = MoveTemp(Component->Proficiencies);
-    Component->Proficiencies.Empty();
+    TMap<FSoftObjectPath, int32> RosterIndexByDefinition;
+    for (int32 Index = 0; Index < Component->Proficiencies.Num(); ++Index) {
+        const FProficiency &Proficiency = Component->Proficiencies[Index];
+        if (!Proficiency.Definition) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SavedProficiency::Deserialize - authored roster contains a null definition."));
+            return false;
+        }
+        const FSoftObjectPath DefinitionPath(Proficiency.Definition);
+        if (!DefinitionPath.IsValid() || RosterIndexByDefinition.Contains(DefinitionPath)) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SavedProficiency::Deserialize - authored roster contains a duplicate definition: %s."),
+                   *DefinitionPath.ToString());
+            return false;
+        }
+        RosterIndexByDefinition.Add(DefinitionPath, Index);
+    }
 
+    TMap<FSoftObjectPath, float> SavedXpByDefinition;
     for (const FSerializedProficiencyData &Data : InData) {
-        FProficiency Prof;
-
-        Prof.Definition = Cast<UProficiencyDefinition>(Data.ProficiencyAsset.TryLoad());
-        if (!Prof.Definition) {
-            UE_LOG(MythSaveLoad, Error, TEXT("SavedProficiency::Deserialize - Failed to load definition: %s"),
-                   *Data.ProficiencyAsset.ToString());
-            continue;
+        const FSoftObjectPath DefinitionPath = Data.ProficiencyDefinition.ToSoftObjectPath();
+        if (!DefinitionPath.IsValid() || !FMath::IsFinite(Data.CurrentXP)
+            || Data.CurrentXP < 0.0f || SavedXpByDefinition.Contains(DefinitionPath)
+            || !RosterIndexByDefinition.Contains(DefinitionPath)) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SavedProficiency::Deserialize - rejected invalid or duplicate typed entry: %s"),
+                   *DefinitionPath.ToString());
+            return false;
         }
-
-        if (!Data.ProgressAttributeSetClass.IsEmpty() && !Data.ProgressAttributeName.IsEmpty()) {
-            UClass *SetClass = LoadClass<UAttributeSet>(nullptr, *Data.ProgressAttributeSetClass);
-            if (SetClass) {
-                FProperty *Prop = SetClass->FindPropertyByName(FName(*Data.ProgressAttributeName));
-                if (Prop) {
-                    Prof.ProgressAttribute = FGameplayAttribute(Prop);
-                }
-                else {
-                    UE_LOG(MythSaveLoad, Error, TEXT("SavedProficiency::Deserialize - Property not found: %s in %s"),
-                           *Data.ProgressAttributeName, *Data.ProgressAttributeSetClass);
-                }
-            }
-            else {
-                UE_LOG(MythSaveLoad, Error, TEXT("SavedProficiency::Deserialize - Class not found: %s"),
-                       *Data.ProgressAttributeSetClass);
-            }
-        }
-
-        Prof.SavedXP = Data.CurrentXP;
-
-        Component->Proficiencies.Add(Prof);
-
-        UE_LOG(MythSaveLoad, Log, TEXT("SavedProficiency::Deserialize - Restored %s (XP: %.1f)"),
-               *Prof.Definition->GetName(), Prof.SavedXP);
+        SavedXpByDefinition.Add(DefinitionPath, Data.CurrentXP);
     }
 
-    for (FProficiency &Default : Authored) {
-        const bool bRestored = Default.Definition && Component->Proficiencies.ContainsByPredicate(
-            [&Default](const FProficiency &P) { return P.Definition == Default.Definition; });
-        if (Default.Definition && !bRestored) {
-            Component->Proficiencies.Add(MoveTemp(Default));
+    // The authored component owns the roster. Save data can restore XP for an existing typed definition, but it
+    // cannot inject arbitrary tracks or duplicate the same track under a reconstructed attribute identity.
+    TArray<float> StagedXp;
+    StagedXp.Init(0.0f, Component->Proficiencies.Num());
+    for (const TPair<FSoftObjectPath, float> &Pair : SavedXpByDefinition) {
+        StagedXp[RosterIndexByDefinition.FindChecked(Pair.Key)] = Pair.Value;
+    }
+    for (int32 Index = 0; Index < Component->Proficiencies.Num(); ++Index) {
+        FProficiency &Proficiency = Component->Proficiencies[Index];
+        Proficiency.SavedXP = StagedXp[Index];
+        if (SavedXpByDefinition.Contains(FSoftObjectPath(Proficiency.Definition))) {
+            UE_LOG(MythSaveLoad, Log, TEXT("SavedProficiency::Deserialize - Restored %s (XP: %.1f)"),
+                   *Proficiency.Definition->GetName(), Proficiency.SavedXP);
         }
     }
 
     UE_LOG(MythSaveLoad, Log, TEXT("SavedProficiency::Deserialize - Restored %d proficiencies"), Component->Proficiencies.Num());
+    return true;
 }

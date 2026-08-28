@@ -66,7 +66,7 @@ void UMythicDeveloperSettings::GetStartupAssetPaths(TArray<FSoftObjectPath> &Out
     if (!DefaultMountClass.IsNull()) {
         OutPaths.Add(DefaultMountClass.ToSoftObjectPath());
     }
-    if (!RidingProficiency.IsNull()) {
-        OutPaths.Add(RidingProficiency.ToSoftObjectPath());
+    if (!ActiveItemizationRuleset.IsNull()) {
+        OutPaths.Add(ActiveItemizationRuleset.ToSoftObjectPath());
     }
 }

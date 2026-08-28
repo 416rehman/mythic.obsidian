@@ -1,7 +1,6 @@
 
 #include "Misc/AutomationTest.h"
 #include "World/Gathering/MythicHarvestPressureRules.h"
-#include "World/Gathering/MythicGatherRules.h"
 #include "World/Gathering/MythicYieldQuality.h"
 
 namespace {
@@ -112,25 +111,6 @@ bool FMythicHarvestPressureTest::RunTest(const FString &Parameters) {
         TestTrue(TEXT("multiplier recovers upward as pressure fallows"), MMid > MStart && MEnd > MMid);
         TestEqual(TEXT("fully-recovered cell is byte-identical (1.0)"), MEnd, 1.0f);
         TestFalse(TEXT("recovered cell no longer respawn-gated"), HP::IsRespawnGated(P20, Tuned.RespawnGateThreshold));
-    }
-
-    {
-        using GR = FMythicGatherRules;
-        const FMythicHarvestPressureConfig Def;
-        TestEqual(TEXT("depleted yield @P0 == plain tier yield (tier 0)"),
-                  GR::DepletedYieldMultiplier(0, 0.0f, Tuned), GR::TierYieldMultiplier(0));
-        TestEqual(TEXT("depleted yield inert-config == plain tier yield (tier 2)"),
-                  GR::DepletedYieldMultiplier(2, 50.0f, Def), GR::TierYieldMultiplier(2));
-        TestEqual(TEXT("depleted respawn @P0 == plain scaled respawn (tier 1)"),
-                  GR::DepletedRespawnDelay(300.0f, 1, 0.0f, Tuned), GR::ScaledRespawnDelay(300.0f, 1));
-
-        TestTrue(TEXT("hammered cell yields less than un-pressured"),
-                 GR::DepletedYieldMultiplier(2, 6.5f, Tuned) < GR::TierYieldMultiplier(2));
-        TestTrue(TEXT("hammered cell regrows slower than un-pressured"),
-                 GR::DepletedRespawnDelay(300.0f, 2, 5.0f, Tuned) > GR::ScaledRespawnDelay(300.0f, 2));
-        TestEqual(TEXT("disabled respawn stays disabled under pressure"), GR::DepletedRespawnDelay(0.0f, 2, 50.0f, Tuned), 0.0f);
-        TestTrue(TEXT("gather-rules gate fires past threshold"), GR::IsRespawnGated(10.0f, Tuned));
-        TestFalse(TEXT("gather-rules gate off below threshold"), GR::IsRespawnGated(1.0f, Tuned));
     }
 
     return true;

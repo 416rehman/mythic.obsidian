@@ -91,9 +91,13 @@ void UMythicAttributeSet_Defense::PostGameplayEffectExecute(const FGameplayEffec
         if (Absorbed > 0.0f) {
             const UAbilitySystemComponent *ASC = GetOwningAbilitySystemComponent();
             const APawn *Avatar = ASC ? Cast<APawn>(ASC->GetAvatarActor()) : nullptr;
-            if (AMythicPlayerController *PC = Avatar ? Cast<AMythicPlayerController>(Avatar->GetController()) : nullptr) {
-                const bool bBroke = (GetShield() <= 0.0f && ShieldBeforeChange > 0.0f);
-                PC->ClientShowShieldAbsorbed(FMath::RoundToInt(Absorbed), bBroke);
+            const bool bBroke = GetShield() <= 0.0f && ShieldBeforeChange > 0.0f;
+            if (bBroke && ASC && ASC->IsOwnerActorAuthoritative()) {
+                if (AMythicPlayerController *PC = Avatar ? Cast<AMythicPlayerController>(Avatar->GetController()) : nullptr) {
+                    // Exact shield magnitudes travel through the bounded resolved-combat-text batch. This rare reliable
+                    // RPC is retained only for the shield-break callout.
+                    PC->ClientShowShieldBroken();
+                }
             }
         }
     }

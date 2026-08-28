@@ -7,18 +7,45 @@ class URPGAbilitySystemComponent;
 class UGameplayEffect;
 class URPGTargetType;
 
+/**
+ * Exact typed identity for a destructible collision target.
+ *
+ * Component implementations own their FHitResult instance index; actor implementations own one actor-wide
+ * identity. Unrelated sibling components are never inferred as the target.
+ */
+struct MYTHIC_API FMythicDestructibleTargetIdentity {
+    const UObject *TargetObject = nullptr;
+    int32 InstanceIndex = INDEX_NONE;
+    bool bPerInstance = false;
+
+    bool IsValid() const { return TargetObject != nullptr; }
+
+    /** Resolves an exact hit component first, then an exact actor implementation, and otherwise fails closed. */
+    static FMythicDestructibleTargetIdentity Resolve(const FHitResult &Hit);
+
+    /** Resolves only an actor-level implementation for target data that carries no component geometry. */
+    static FMythicDestructibleTargetIdentity ResolveActor(const AActor *Actor);
+};
+
 
 USTRUCT(BlueprintType, Blueprintable)
 struct FMythicDamageContainer {
     GENERATED_BODY()
 
     FMythicDamageContainer() {}
-    // The DamageCalculationEffect is applied to the player to calculate the damage. I.e setting the TotalDamage attribute
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = MythicDamageContainer)
+    /**
+     * Effect applied to the attacker to calculate the hit from live GAS attributes, such as writing TotalDamage.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = MythicDamageContainer,
+              meta = (ToolTip = "Effect applied to the attacker to calculate the hit from live GAS attributes."))
     TSubclassOf<UGameplayEffect> DamageCalculationEffect;
 
-    // The DamageApplicationEffect is applied to the target to apply the damage. I.e applying the damage from the TotalDamage attribute to the target's health
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = MythicDamageContainer)
+    /**
+     * Effect applied once to each resolved target to consume the calculated damage, such as subtracting TotalDamage
+     * from Health.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = MythicDamageContainer,
+              meta = (ToolTip = "Effect applied once to each resolved target to consume the calculated damage."))
     TSubclassOf<UGameplayEffect> DamageApplicationEffect;
 };
 
@@ -29,26 +56,34 @@ struct FMythicDamageContainerSpec {
 
     FMythicDamageContainerSpec() {}
 
-    UPROPERTY(BlueprintReadOnly, Category = GameplayEffectContainer)
+    /** Effect context shared by the calculation and per-target application specs for this damage dispatch. */
+    UPROPERTY(BlueprintReadOnly, Category = GameplayEffectContainer,
+              meta = (ToolTip = "Effect context shared by every Gameplay Effect spec in this damage dispatch."))
     FGameplayEffectContextHandle EffectContextHandle;
 
-    /** Computed target data */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = GameplayEffectContainer)
+    /** Canonical living-actor targets that receive the damage-application spec once each. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = GameplayEffectContainer,
+              meta = (ToolTip = "Canonical living-actor targets that receive the damage-application spec once each."))
     FGameplayAbilityTargetDataHandle TargetsHandle;
 
-    /** DestructibleTargetsHandle */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = GameplayEffectContainer)
+    /** Exact actor or component-instance hit data routed to destructible-world handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = GameplayEffectContainer,
+              meta = (ToolTip = "Exact destructible hits routed to world handling; component hits retain their component, instance Item, and geometry."))
     FGameplayAbilityTargetDataHandle DestructibleTargetsHandle;
 
-    /** Damage Context Effect Spec */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = GameplayEffectContainer)
+    /** Source-side spec that calculates this hit from the attacker's captured GAS attributes. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = GameplayEffectContainer,
+              meta = (ToolTip = "Source-side spec that calculates this hit from the attacker's captured GAS attributes."))
     FGameplayEffectSpecHandle DamageCalculationEffectSpec;
 
-    /** Damage Application Effect Spec */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = GameplayEffectContainer)
+    /** Per-target spec that consumes the calculated damage and emits target-side hit feedback. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = GameplayEffectContainer,
+              meta = (ToolTip = "Per-target spec that consumes the calculated damage and emits target-side hit feedback."))
     FGameplayEffectSpecHandle DamageApplicationEffectSpec;
 
-    bool IsDestructible(AActor *Actor);
-
+    /**
+     * Adds exact hit data and actor-only data without inferring destructible sibling components. Component-backed
+     * destructibles must arrive as FHitResult entries so their component, instance Item, and geometry survive.
+     */
     void AddTargets(const TArray<FHitResult> &HitResults, const TArray<AActor *> &TargetActors);
 };

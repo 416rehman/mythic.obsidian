@@ -3,8 +3,8 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Itemization/MythicDataAsset.h"
+#include "Stats/MythicStatTypes.h"
 #include "Templates/SubclassOf.h"
-#include "UI/ViewModels/MythicStatDisplay.h"
 #include "MythicStatSummary.generated.h"
 
 class UAbilitySystemComponent;
@@ -22,6 +22,7 @@ class MYTHIC_API UMythicStatSummaryCalculation : public UObject {
     GENERATED_BODY()
 
 public:
+    /** Computes the current headline value from the supplied Ability System Component without mutating state. */
     UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Mythic|Stats")
     float Calculate(const UAbilitySystemComponent *ASC) const;
     virtual float Calculate_Implementation(const UAbilitySystemComponent *ASC) const { return 0.0f; }
@@ -33,32 +34,33 @@ class MYTHIC_API UMythicStatSummaryDefinition : public UMythicDataAsset {
     GENERATED_BODY()
 
 public:
-    // Stable identity (Stat.Summary.*). The panel keys its card pool on this so a reorder re-texts rather than rebuilds.
+    /** Stable Stat.Summary.* identity used to preserve card identity when designers reorder the library. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Summary", meta = (Categories = "Stat.Summary"))
     FGameplayTag SummaryId;
 
-    // The one word players say aloud when they compare gear. Keep it a word, not a sentence.
+    /** Short player-facing heading, such as Damage, Toughness, or Recovery. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Summary")
     FText Label;
 
-    // What the number means, shown on the card's tooltip. Supports the project's rich-text markup.
+    /** Player-facing explanation shown in the summary card tooltip; rich-text markup is supported. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Summary", meta = (MultiLine = true))
     FText Description;
 
+    /** Optional icon displayed on the summary card. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Summary")
     TSoftObjectPtr<UTexture2D> Icon;
 
-    // The Blueprint that computes this summary. Its Calculate override is the whole definition of the number.
+    /** Pure Blueprint calculation class that defines how this headline value is derived from GAS. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Summary")
     TSubclassOf<UMythicStatSummaryCalculation> CalculationClass;
 
     // How the card reads its number — through the sheet's one formatter, so "1,240" and "38%" cannot grow a
     // second formatting path.
+    /** Canonical number format shared with ordinary stat-sheet rows. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Summary")
     EMythicStatFormat Format = EMythicStatFormat::Integer;
 
-    // This summary's value for a given ability system, computed on read. Zero when no calculation is authored, so a
-    // half-authored row reads as a plain zero rather than crashing or showing a stale number.
+    /** Computes this summary on demand; returns zero when no calculation class is authored. */
     UFUNCTION(BlueprintPure, Category = "Summary")
     float Compute(const UAbilitySystemComponent *ASC) const;
 };
@@ -69,6 +71,7 @@ class MYTHIC_API UMythicStatSummaryLibrary : public UMythicDataAsset {
     GENERATED_BODY()
 
 public:
+    /** Summary definitions in player-facing display order. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Summary")
     TArray<TObjectPtr<UMythicStatSummaryDefinition>> Summaries;
 };

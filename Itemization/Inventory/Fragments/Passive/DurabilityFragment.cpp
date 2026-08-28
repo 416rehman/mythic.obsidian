@@ -5,7 +5,6 @@
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/ItemDefinition.h"
-#include "Itemization/Inventory/Fragments/Passive/AffixesFragment.h"
 #include "Player/MythicPlayerController.h"
 
 void UDurabilityFragment::OnInstanced(UMythicItemInstance *Instance) {
@@ -40,6 +39,25 @@ void UDurabilityFragment::ServerApplyWear(int32 Amount) {
             NotifyDurabilityBeat(EMythicItemDurabilityBeat::LowWarning);
         }
     }
+}
+
+bool UDurabilityFragment::ServerConsumeReceiptWear(const int64 Amount) {
+    const AActor *Owner = GetOwningActor();
+    if (!Owner || !Owner->HasAuthority() || Amount <= 0
+        || DurabilityConfig.MaxDurability <= 0) {
+        return false;
+    }
+    // A recovered cumulative receipt is a semantic cost interval, while the
+    // physical durability pool is saturating. If another valid authority cost
+    // already broke the item, this interval is still consumed and must never
+    // reappear after repair.
+    if (DurabilityRuntimeReplicatedData.bBroken
+        || DurabilityRuntimeReplicatedData.Current <= 0) {
+        return true;
+    }
+    ServerApplyWear(static_cast<int32>(FMath::Min<int64>(Amount,
+                                                        MAX_int32)));
+    return true;
 }
 
 void UDurabilityFragment::ServerRepair(int32 Amount) {
@@ -92,8 +110,11 @@ void UDurabilityFragment::NotifyAffixesOfBrokenState(bool bBroken) const {
     if (!Inst) {
         return;
     }
-    if (const UAffixesFragment *Affixes = Inst->GetFragment<UAffixesFragment>()) {
-        const_cast<UAffixesFragment *>(Affixes)->OnDurabilityBrokenStateChanged(bBroken);
+    if (UMythicInventoryComponent *Inventory = Inst->GetInventoryComponent();
+        Inventory && Inst->GetSlot() != INDEX_NONE) {
+        // The application component re-enumerates the whole host here. Breaking disables base and socket/gem
+        // snapshots together; repair restores the exact authoritative set and recomputes cross-item winners.
+        Inventory->NotifyItemInstanceUpdated(Inst->GetSlot());
     }
 }
 

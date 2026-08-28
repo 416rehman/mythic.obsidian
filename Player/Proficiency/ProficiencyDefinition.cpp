@@ -2,10 +2,18 @@
 #include "Mythic.h"
 #include "ProficiencyComponent.h"
 #include "Rewards/AttributeReward.h"
+#include "Itemization/Affixes/MythicAffixTypes.h"
+#include "Stats/MythicStatDefinition.h"
+#include "System/MythicAssetManager.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/DataValidation.h"
 
 const UProficiencyDefinition *UProficiencyDefinition::FindByProgressAttribute(const FGameplayAttribute &Attribute) {
     static TMap<FGameplayAttribute, TWeakObjectPtr<const UProficiencyDefinition>> Cache;
+#if WITH_EDITOR
+    // Editor asset replacement and property editing can invalidate either side of this derived cache.
+    Cache.Reset();
+#endif
     if (const TWeakObjectPtr<const UProficiencyDefinition> *Found = Cache.Find(Attribute)) {
         if (Found->IsValid()) {
             return Found->Get();
@@ -14,22 +22,57 @@ const UProficiencyDefinition *UProficiencyDefinition::FindByProgressAttribute(co
     const FAssetRegistryModule &Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
     TArray<FAssetData> Assets;
     Registry.Get().GetAssetsByClass(UProficiencyDefinition::StaticClass()->GetClassPathName(), Assets, true);
+    Assets.Sort([](const FAssetData &Left, const FAssetData &Right) {
+        return Left.GetSoftObjectPath().ToString() < Right.GetSoftObjectPath().ToString();
+    });
+    const UProficiencyDefinition *Match = nullptr;
     for (const FAssetData &Asset : Assets) {
         const UProficiencyDefinition *Def = Cast<UProficiencyDefinition>(Asset.GetAsset());
-        if (Def && Def->ProgressAttribute == Attribute) {
-            Cache.Add(Attribute, Def);
-            return Def;
+        if (Def && Def->GetProgressAttribute() == Attribute) {
+            if (Match) {
+                UE_LOG(Myth, Error,
+                       TEXT("Duplicate Proficiency Definitions map the same canonical Progress Stat: %s and %s."),
+                       *Match->GetPathName(), *Def->GetPathName());
+                return nullptr;
+            }
+            Match = Def;
         }
     }
-    return nullptr;
+    if (Match) {
+        Cache.Add(Attribute, Match);
+    }
+    return Match;
 }
 
 FAttributeGoal::FAttributeGoal() {}
 
-FAttributeGoal::FAttributeGoal(FGameplayAttribute InAttribute, float InGoal, EGameplayModOp::Type InModifier): Attribute(InAttribute), Goal(InGoal),
-    Modifier(InModifier) {}
+FAttributeGoal::FAttributeGoal(FMythicStatDefinitionHandle InStatDefinition,
+                               const float InGoal,
+                               const EGameplayModOp::Type InModifier)
+    : TargetStat(MoveTemp(InStatDefinition)), Goal(InGoal), Modifier(InModifier) {}
 
 UProficiencyDefinition::UProficiencyDefinition() {}
+
+FPrimaryAssetId UProficiencyDefinition::GetPrimaryAssetId() const {
+    return FPrimaryAssetId(UMythicAssetManager::ProficiencyDefinitionType,
+                           GetFName());
+}
+
+const UMythicStatDefinition *UProficiencyDefinition::GetProgressStatDefinition() const {
+    return ProgressStat.GetAsset();
+}
+
+FGameplayAttribute UProficiencyDefinition::GetProgressAttribute() const {
+    const UMythicStatDefinition *Definition = GetProgressStatDefinition();
+    return Definition ? Definition->Attribute : FGameplayAttribute();
+}
+
+FGameplayAttribute UProficiencyDefinition::GetProgressCapacityAttribute() const {
+    const UMythicStatDefinition *Definition = GetProgressStatDefinition();
+    const UMythicStatDefinition *Capacity = Definition
+        ? Definition->PairedStat.GetAsset() : nullptr;
+    return Capacity ? Capacity->Attribute : FGameplayAttribute();
+}
 
 float UProficiencyDefinition::CalcXPCostForLevelUp(int32 Level, const UProficiencyDefinition *Def) {
     if (!Def) {
@@ -80,6 +123,116 @@ float UProficiencyDefinition::CalcXPRemainingForLevel(float CurrentXP, int32 Tar
     return FMath::Max(RequiredXP - CurrentXP, 0.0f);
 }
 #if WITH_EDITOR
+EDataValidationResult UProficiencyDefinition::IsDataValid(FDataValidationContext &Context) const {
+    EDataValidationResult Result = Super::IsDataValid(Context);
+    auto Error = [&Context, &Result](const FText &Message) {
+        Context.AddError(Message);
+        Result = EDataValidationResult::Invalid;
+    };
+
+    if (Name.IsEmptyOrWhitespace()) {
+        Error(NSLOCTEXT("MythicProficiencyDefinition", "MissingName",
+                        "A localized proficiency Name is required."));
+    }
+    if (!TrackTag.IsValid()) {
+        Error(NSLOCTEXT("MythicProficiencyDefinition", "MissingTrackTag",
+                        "A gameplay-semantic Track Tag is required."));
+    }
+    const UMythicStatDefinition *ProgressDefinition = ProgressStat.Asset.LoadSynchronous();
+    const UMythicStatDefinition *CapacityDefinition = ProgressDefinition
+        ? ProgressDefinition->PairedStat.Asset.LoadSynchronous() : nullptr;
+    const bool bHasValidProgressPair =
+        ProgressDefinition && ProgressStat.IsValid() && ProgressDefinition->Attribute.IsValid()
+        && ProgressDefinition->PairRole == EMythicStatPairRole::Current
+        && CapacityDefinition && CapacityDefinition->Attribute.IsValid()
+        && CapacityDefinition->PairRole == EMythicStatPairRole::Capacity
+        && CapacityDefinition->PairedStat.GetAsset() == ProgressDefinition;
+    if (!bHasValidProgressPair) {
+        Error(NSLOCTEXT("MythicProficiencyDefinition", "InvalidProgressStat",
+                        "Progress Stat must directly reference a canonical current-value Stat Definition with a reciprocal capacity pair."));
+    }
+    else if (ProgressDefinition->SheetVisibility != EMythicStatSheetVisibility::Hidden
+             || CapacityDefinition->SheetVisibility != EMythicStatSheetVisibility::Hidden) {
+        Error(NSLOCTEXT(
+            "MythicProficiencyDefinition", "ProgressStatVisibleOnCharacterSheet",
+            "Proficiency current and capacity Stat Definitions must both be Hidden from the character stat sheet; proficiency progression belongs on its dedicated progression UI."));
+    }
+    if (MaxLevel < 1) {
+        Error(NSLOCTEXT("MythicProficiencyDefinition", "InvalidMaxLevel",
+                        "Max Level must be at least one."));
+    }
+    if (!FMath::IsFinite(GrowthRate) || GrowthRate <= 0.0f) {
+        Error(NSLOCTEXT("MythicProficiencyDefinition", "InvalidGrowthRate",
+                        "Growth Rate must be finite and greater than zero."));
+    }
+    if (!FMath::IsFinite(BaseXPPerAction) || BaseXPPerAction <= 0.0f) {
+        Error(NSLOCTEXT("MythicProficiencyDefinition", "InvalidBaseXP",
+                        "Base XP Per Action must be finite and greater than zero."));
+    }
+    if (AttributeGoals.IsEmpty()) {
+        Error(NSLOCTEXT("MythicProficiencyDefinition", "MissingAttributeGoals",
+                        "At least one typed Attribute Goal is required."));
+    }
+    if (KeyMilestones.IsEmpty()) {
+        Error(NSLOCTEXT("MythicProficiencyDefinition", "MissingMilestones",
+                        "At least one Key Milestone is required."));
+    }
+    else if (KeyMilestones.Num() > MaxLevel) {
+        Error(NSLOCTEXT("MythicProficiencyDefinition", "TooManyMilestones",
+                        "Key Milestone count cannot exceed Max Level."));
+    }
+    if (!AttributeGoals.IsEmpty()
+        && (AttributeGoals.Num() > MaxLevel || MaxLevel % AttributeGoals.Num() != 0)) {
+        Error(NSLOCTEXT("MythicProficiencyDefinition", "UnevenAttributeGoalDistribution",
+                        "Max Level must divide evenly by Attribute Goal count so each authored goal is granted exactly."));
+    }
+
+    TSet<FSoftObjectPath> SeenStatDefinitions;
+    for (int32 GoalIndex = 0; GoalIndex < AttributeGoals.Num(); ++GoalIndex) {
+        const FAttributeGoal &Goal = AttributeGoals[GoalIndex];
+        const FSoftObjectPath StatPath = Goal.TargetStat.Asset.ToSoftObjectPath();
+        const UMythicStatDefinition *Definition = Goal.TargetStat.Asset.LoadSynchronous();
+        if (!Definition || !Goal.TargetStat.IsValid() || !Definition->Attribute.IsValid()) {
+            Error(FText::Format(
+                NSLOCTEXT("MythicProficiencyDefinition", "InvalidGoalTarget",
+                          "Attribute Goal {0} must directly reference a registered Stat Definition with a valid GAS attribute."),
+                FText::AsNumber(GoalIndex)));
+        }
+        else if (SeenStatDefinitions.Contains(StatPath)) {
+            Error(FText::Format(
+                NSLOCTEXT("MythicProficiencyDefinition", "DuplicateGoalTarget",
+                          "Attribute Goal {0} duplicates another goal's Stat Definition."),
+                FText::AsNumber(GoalIndex)));
+        }
+        else {
+            SeenStatDefinitions.Add(StatPath);
+        }
+
+        const EGameplayModOp::Type Operation = Goal.Modifier.GetValue();
+        if (!MythicAffix::IsSupportedModifierOp(Operation)) {
+            Error(FText::Format(
+                NSLOCTEXT("MythicProficiencyDefinition", "InvalidGoalModifier",
+                          "Attribute Goal {0} uses an operation unsupported by the permanent-stat ledger."),
+                FText::AsNumber(GoalIndex)));
+        }
+        if (!FMath::IsFinite(Goal.Goal)) {
+            Error(FText::Format(
+                NSLOCTEXT("MythicProficiencyDefinition", "NonFiniteGoal",
+                          "Attribute Goal {0} must be finite."),
+                FText::AsNumber(GoalIndex)));
+        }
+        else if (MythicAffix::ModifierRequiresNonZeroMagnitude(Operation)
+                 && FMath::IsNearlyZero(Goal.Goal)) {
+            Error(FText::Format(
+                NSLOCTEXT("MythicProficiencyDefinition", "ZeroMultiplicativeGoal",
+                          "Attribute Goal {0} requires a non-zero value for its multiplicative or divisive operation."),
+                FText::AsNumber(GoalIndex)));
+        }
+    }
+
+    return Result;
+}
+
 FString UProficiencyDefinition::GetProgressionBreakdown() const {
     if (GrowthRate > 1.4f) {
         UE_LOG(Myth, Warning, TEXT("High growth rate of %.2f may result in very high XP requirements for later levels."), GrowthRate);
@@ -140,8 +293,9 @@ FString UProficiencyDefinition::GetProgressionBreakdown() const {
 
             const UAttributeReward *AttributeRwdDef = Cast<UAttributeReward>(RewardDef);
             if (AttributeRwdDef) {
+                const UMythicStatDefinition *Stat = AttributeRwdDef->TargetStat.GetAsset();
                 MilestoneText += FString::Printf(TEXT(" (%s %s%.0f)"),
-                                                 *AttributeRwdDef->Attribute.GetName(),
+                                                 Stat ? *Stat->DeveloperName.ToString() : TEXT("Invalid Stat"),
                                                  AttributeRwdDef->Modifier == EGameplayModOp::Additive ? TEXT("+") : TEXT("*"),
                                                  AttributeRwdDef->Magnitude);
             }

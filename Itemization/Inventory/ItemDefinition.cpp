@@ -44,70 +44,95 @@ void UItemDefinition::EnsureFragment() {
 }
 
 void UItemDefinition::Weapon() {
+    Modify();
     ItemType = ITEMIZATION_TYPE_EQUIPMENT_WEAPON;
     EnsureFragment<UAttackFragment>();
-    Modify();
+    EnsureFragment<UAffixesFragment>();
+    PostEditChange();
+    MarkPackageDirty();
 }
 
 void UItemDefinition::Tool() {
+    Modify();
     ItemType = ITEMIZATION_TYPE_EQUIPMENT_TOOL;
     EnsureFragment<UAttackFragment>();
-    Modify();
+    PostEditChange();
+    MarkPackageDirty();
 }
 
 void UItemDefinition::Gear() {
+    Modify();
     ItemType = ITEMIZATION_TYPE_EQUIPMENT_GEAR;
     EnsureFragment<UAffixesFragment>();
-    Modify();
+    PostEditChange();
+    MarkPackageDirty();
 }
 
 void UItemDefinition::Accessory() {
+    Modify();
     ItemType = ITEMIZATION_TYPE_EQUIPMENT_ACCESSORY;
     EnsureFragment<UAffixesFragment>();
-    Modify();
+    PostEditChange();
+    MarkPackageDirty();
 }
 
 void UItemDefinition::Artifact() {
+    Modify();
     ItemType = ITEMIZATION_TYPE_EQUIPMENT_ARTIFACT;
     EnsureFragment<UAffixesFragment>();
-    Modify();
+    PostEditChange();
+    MarkPackageDirty();
 }
 
 void UItemDefinition::Consumable() {
+    Modify();
     ItemType = ITEMIZATION_TYPE_CONSUMABLE;
     EnsureFragment<UConsumableActionFragment>();
-    Modify();
+    PostEditChange();
+    MarkPackageDirty();
 }
 
 void UItemDefinition::Learning() {
+    Modify();
     ItemType = ITEMIZATION_TYPE_LEARNING;
     EnsureFragment<UConsumableActionFragment>();
-    Modify();
+    PostEditChange();
+    MarkPackageDirty();
 }
 
 void UItemDefinition::Farming() {
-    ItemType = ITEMIZATION_TYPE_FARMING;
     Modify();
+    ItemType = ITEMIZATION_TYPE_FARMING;
+    PostEditChange();
+    MarkPackageDirty();
 }
 
 void UItemDefinition::Mining() {
-    ItemType = ITEMIZATION_TYPE_MINING;
     Modify();
+    ItemType = ITEMIZATION_TYPE_MINING;
+    PostEditChange();
+    MarkPackageDirty();
 }
 
 void UItemDefinition::Placable() {
-    ItemType = ITEMIZATION_TYPE_PLACABLE;
     Modify();
+    ItemType = ITEMIZATION_TYPE_PLACABLE;
+    PostEditChange();
+    MarkPackageDirty();
 }
 
 void UItemDefinition::Exploration() {
-    ItemType = ITEMIZATION_TYPE_EXPLORATION;
     Modify();
+    ItemType = ITEMIZATION_TYPE_EXPLORATION;
+    PostEditChange();
+    MarkPackageDirty();
 }
 
 void UItemDefinition::Misc() {
-    ItemType = ITEMIZATION_TYPE_MISC;
     Modify();
+    ItemType = ITEMIZATION_TYPE_MISC;
+    PostEditChange();
+    MarkPackageDirty();
 }
 
 void UItemDefinition::PostLoad() {
@@ -127,13 +152,48 @@ void UItemDefinition::PreSave(FObjectPreSaveContext SaveContext) {
 EDataValidationResult UItemDefinition::IsDataValid(FDataValidationContext &Context) const {
     EDataValidationResult Result = Super::IsDataValid(Context);
 
+    int32 AttackFragmentCount = 0;
+    int32 AffixesFragmentCount = 0;
+
     for (int32 Index = 0; Index < Fragments.Num(); ++Index) {
         if (!Fragments[Index]) {
             Context.AddError(FText::Format(
                 NSLOCTEXT("ItemDefinition", "NullFragmentError", "Null fragment at index {0}"),
                 FText::AsNumber(Index)));
             Result = EDataValidationResult::Invalid;
+            continue;
         }
+
+        FText FragmentError;
+        if (!Fragments[Index]->IsValidFragment(FragmentError)) {
+            Context.AddError(FText::Format(
+                NSLOCTEXT(
+                    "ItemDefinition", "InvalidFragmentError",
+                    "Fragment {0} ({1}) at '{2}' is invalid: {3}"),
+                FText::AsNumber(Index),
+                FText::FromString(Fragments[Index]->GetClass()->GetName()),
+                FText::FromString(Fragments[Index]->GetPathName()),
+                FragmentError.IsEmpty()
+                    ? NSLOCTEXT("ItemDefinition", "MissingFragmentDiagnostic", "No diagnostic was provided")
+                    : FragmentError));
+            Result = EDataValidationResult::Invalid;
+        }
+        AttackFragmentCount += Cast<UAttackFragment>(Fragments[Index]) ? 1 : 0;
+        AffixesFragmentCount += Cast<UAffixesFragment>(Fragments[Index]) ? 1 : 0;
+    }
+
+    if (AttackFragmentCount > 1 || AffixesFragmentCount > 1) {
+        Context.AddError(NSLOCTEXT(
+            "ItemDefinition", "DuplicateAuthorityFragmentError",
+            "An Item Definition may contain at most one Attack Fragment and one Affixes Fragment."));
+        Result = EDataValidationResult::Invalid;
+    }
+    if (ItemType.MatchesTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON)
+        && (AttackFragmentCount != 1 || AffixesFragmentCount != 1)) {
+        Context.AddError(NSLOCTEXT(
+            "ItemDefinition", "InvalidWeaponFragmentShapeError",
+            "Every weapon requires exactly one action-only Attack Fragment and one typed Affixes Fragment."));
+        Result = EDataValidationResult::Invalid;
     }
 
     if (ItemType.IsValid()) {

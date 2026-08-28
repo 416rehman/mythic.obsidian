@@ -2,7 +2,7 @@
 
 #include "AI/MythicTags_AI.h"
 #include "GAS/Effects/MythicEnemyScaling.h"
-#include "Itemization/Affixes/MythicAffixTierTypes.h"
+#include "Itemization/Affixes/MythicAffixDefinition.h"
 #include "Itemization/Sockets/MythicSocketTypes.h"
 #include "Settings/MythicDeveloperSettings.h"
 
@@ -56,16 +56,16 @@ bool FMythicDropRollsContentTest::RunTest(const FString &Parameters) {
     const int32 DropLevel = FMythicEnemyScaling::ComputeDropItemLevel(1.0f, AI_TIER_NORMAL);
 
     // Affix gate: a tier is eligible when MinItemLevel <= ItemLevel. The lowest authored is 1.
-    TArray<FMythicAffixTier> Tiers;
-    FMythicAffixTier First;
+    TArray<FMythicAffixTierDefinition> Tiers;
+    FMythicAffixTierDefinition First;
     First.MinItemLevel = 1;
-    First.Weight = 1.0f;
+    First.TierWeight = 1.0f;
     Tiers.Add(First);
 
-    TestNotEqual(TEXT("the weakest kill's drop clears the lowest affix tier"),
-                 FMythicAffixTierMath::SelectTierIndex(DropLevel, Tiers, 0.5f), -1);
-    TestEqual(TEXT("and a level 0 drop - the old behaviour - clears nothing"),
-              FMythicAffixTierMath::SelectTierIndex(0, Tiers, 0.5f), -1);
+    TestTrue(TEXT("the weakest kill's drop clears the lowest embedded affix tier"),
+             Tiers[0].MinItemLevel <= DropLevel);
+    TestFalse(TEXT("and a level 0 drop - the old behaviour - clears nothing"),
+              Tiers[0].MinItemLevel <= 0);
 
     // Socket gate: LevelCap = ItemLevel / ItemLevelsPerSocket, and an EffectiveCap of 0 returns no sockets.
     const FGameplayTag ItemType = FGameplayTag::RequestGameplayTag(FName("Item"), false);

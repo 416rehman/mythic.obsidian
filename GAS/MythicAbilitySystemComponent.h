@@ -18,13 +18,24 @@ public:
 
     virtual void BeginPlay() override;
 
+    /** Rebuild persistent equipment-affix handles after possession, avatar swaps and reconnect actor-info setup. */
+    virtual void InitAbilityActorInfo(AActor *InOwnerActor, AActor *InAvatarActor) override;
+
+    /** Registers an activated Mythic ability in its local activation group before activation callbacks run. */
+    virtual void NotifyAbilityActivated(FGameplayAbilitySpecHandle Handle, UGameplayAbility *Ability) override;
+
+    /** Unregisters an ended Mythic ability from its local activation group before end callbacks run. */
+    virtual void NotifyAbilityEnded(FGameplayAbilitySpecHandle Handle, UGameplayAbility *Ability,
+                                    bool bWasCancelled) override;
+
     void SetTagRelationshipMapping(UMythicAbilityTagRelationshipMapping *NewMapping);
 
-    // Returns all the AttributeSets that are currently registered to this AbilitySystemComponent
+    /** Returns every Mythic attribute set currently registered to this ability-system component. */
     UFUNCTION(BlueprintCallable, Category = MythicAbilitySystemComponent)
     const TArray<UMythicAttributeSet *> &GetAttributeSets() const;
 
-    int32 ActivationGroupCounts[static_cast<uint8>(EMythicAbilityActivationGroup::MAX)];
+    /** Active ability count for each activation group on this local authority or predicting client ASC. */
+    int32 ActivationGroupCounts[static_cast<uint8>(EMythicAbilityActivationGroup::MAX)] = {};
 
     using TShouldCancelAbilityFunc = TFunctionRef<bool(const UMythicGameplayAbility *MythicAbility, FGameplayAbilitySpecHandle Handle)>;
 
@@ -39,10 +50,17 @@ public:
 
     void AbilityInputTagPressed(const FGameplayTag &InputTag);
     void AbilityInputTagReleased(const FGameplayTag &InputTag);
+
+    /** Queues one already-authorized exact ability spec for the normal input processing lifecycle. */
+    void AbilityInputSpecPressed(FGameplayAbilitySpecHandle SpecHandle);
+
+    /** Queues release for one previously pressed exact ability spec without matching any dynamic input tags. */
+    void AbilityInputSpecReleased(FGameplayAbilitySpecHandle SpecHandle);
+
     void ProcessAbilityInput(float DeltaTime, bool bGamePaused);
     void ClearAbilityInput();
 
-    // Execute a gameplay cue on ALL clients via NetMulticast (for effects everyone should see)
+    /** Executes a transient gameplay cue on every client through the authoritative unreliable multicast path. */
     UFUNCTION(BlueprintCallable, Category = "GameplayCue")
     void ExecuteGameplayCueMulticast(FGameplayTag CueTag, const FGameplayCueParameters &CueParams);
 

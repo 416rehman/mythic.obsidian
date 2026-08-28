@@ -2,33 +2,41 @@
 
 #include "CoreMinimal.h"
 #include "SavedWorldActor.h"
-#include "SavedDestructible.h"
 #include "SavedWorldFlags.h"
 #include "GameplayTagContainer.h"
+#include "World/Harvesting/MythicHarvestRewardOutboxSubsystem.h"
+#include "World/Harvesting/MythicHarvestSaveTypes.h"
 #include "WorldData.generated.h"
 
 USTRUCT(BlueprintType)
 struct FSerializedWorldData {
     GENERATED_BODY()
 
-
-    // All saveable actors (both placed and runtime-spawned)
+    /** Saveable placed and runtime actors; Blueprint may inspect/author the serialized DTO but does not load it. */
     UPROPERTY(BlueprintReadWrite)
     TArray<FSerializedWorldActorData> SavedActors;
 
-    UPROPERTY(BlueprintReadWrite)
-    TArray<FSerializedDestructibleData> DestroyedResources;
-
-    UPROPERTY()
+    /** Opaque living-world subsystem payload serialized through its native archive contract. */
+    UPROPERTY(SaveGame)
     TArray<uint8> LivingWorldBlob;
 
-
-    UPROPERTY()
+    /** Persisted unlocked points of interest. */
+    UPROPERTY(SaveGame)
     TArray<FSerializedPOIUnlock> UnlockedPOIs;
 
-    UPROPERTY()
+    /** Stable digging-site identifiers already consumed in this world. */
+    UPROPERTY(SaveGame)
     TArray<int32> ConsumedDigSiteIds;
 
-    UPROPERTY()
+    /** Authoritative living-world flags captured for the save slot. */
+    UPROPERTY(SaveGame)
     FGameplayTagContainer WorldFlags;
+
+    /** Versioned stable-node lifecycle snapshot; contains no paths, transforms, indices, claims, or partial work. */
+    UPROPERTY(SaveGame)
+    FMythicHarvestWorldSaveV1 HarvestWorld;
+
+    /** Frozen deterministic harvest grants and completion idempotency keys, including unresolved delivery remainder. */
+    UPROPERTY(SaveGame)
+    FMythicHarvestRewardOutboxSaveV1 HarvestRewardOutbox;
 };

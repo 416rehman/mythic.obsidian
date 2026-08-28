@@ -50,7 +50,12 @@ float UXPReward::CalculateXP(UAbilitySystemComponent *AbilitySystemComponent, UP
         return PreScaledXP;
     }
 
-    float CurrentProgress = AbilitySystemComponent->GetNumericAttribute(Proficiency->ProgressAttribute);
+    const FGameplayAttribute ProgressAttribute = Proficiency->GetProgressAttribute();
+    if (!ProgressAttribute.IsValid()
+        || !AbilitySystemComponent->HasAttributeSetForAttribute(ProgressAttribute)) {
+        return 0.0f;
+    }
+    float CurrentProgress = AbilitySystemComponent->GetNumericAttribute(ProgressAttribute);
     int32 CurrentLevel = UProficiencyDefinition::CalcLevelAtXP(CurrentProgress, Proficiency);
 
     int32 LevelDifference = TargetLvl - CurrentLevel;

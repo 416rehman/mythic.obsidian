@@ -1,10 +1,33 @@
 #include "Misc/AutomationTest.h"
+#include "Engine/AssetManager.h"
 
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/MythicStatContribution.h"
 #include "Settings/MythicCombatSettings.h"
-#include "UI/ViewModels/MythicStatDisplay.h"
+#include "Stats/MythicStatCategoryDefinition.h"
+#include "Stats/MythicStatDefinition.h"
+#include "System/MythicAssetManager.h"
+
+namespace {
+UMythicStatDefinition* LoadStatDefinition(const FGameplayAttribute& Attribute) {
+    if (!Attribute.IsValid()) {
+        return nullptr;
+    }
+
+    UAssetManager& AssetManager = UAssetManager::Get();
+    TArray<FPrimaryAssetId> StatIds;
+    AssetManager.GetPrimaryAssetIdList(UMythicAssetManager::StatDefinitionType, StatIds);
+    for (const FPrimaryAssetId& StatId : StatIds) {
+        UMythicStatDefinition* Definition = Cast<UMythicStatDefinition>(
+            AssetManager.GetPrimaryAssetPath(StatId).TryLoad());
+        if (Definition && Definition->Attribute == Attribute) {
+            return Definition;
+        }
+    }
+    return nullptr;
+}
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicPrimaryStatTierTest,
@@ -12,24 +35,34 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicPrimaryStatTierTest::RunTest(const FString &Parameters) {
-    // The panel has a causal structure - Primary feeds Derived feeds Summarized - and that causality is the
-    // mental model. A primary listed among its own outputs hides it.
-    const FMythicStatRule PowerRule = MythicStatDisplay::GetRule(UMythicAttributeSet_Offense::GetPowerAttribute());
-    const FMythicStatRule StrengthRule = MythicStatDisplay::GetRule(UMythicAttributeSet_Defense::GetStrengthAttribute());
+    const FPrimaryAssetId PrimaryCategoryId(
+        UMythicAssetManager::StatCategoryDefinitionType, FName(TEXT("Stat.Category.Primary")));
+    const UMythicStatDefinition* Power = LoadStatDefinition(UMythicAttributeSet_Offense::GetPowerAttribute());
+    const UMythicStatDefinition* Strength = LoadStatDefinition(UMythicAttributeSet_Defense::GetStrengthAttribute());
+    if (!TestNotNull(TEXT("Power has a canonical StatDefinition"), Power)
+        || !TestNotNull(TEXT("Strength has a canonical StatDefinition"), Strength)) {
+        return false;
+    }
 
-    TestEqual(TEXT("Power is a primary, not an offense stat among its own outputs"),
-              PowerRule.Category, EMythicStatCategory::Primary);
-    TestEqual(TEXT("Strength is a primary"), StrengthRule.Category, EMythicStatCategory::Primary);
+    TestEqual(TEXT("Power is in the authored Primary category"), Power->Category.GetPrimaryAssetId(), PrimaryCategoryId);
+    TestEqual(TEXT("Strength is in the authored Primary category"), Strength->Category.GetPrimaryAssetId(), PrimaryCategoryId);
 
     // Things a primary derives must NOT themselves be primary, or the tier stops meaning anything.
-    const FMythicStatRule DamageRule =
-        MythicStatDisplay::GetRule(UMythicAttributeSet_Offense::GetDamagePerHitAttribute());
-    const FMythicStatRule ArmorRule = MythicStatDisplay::GetRule(UMythicAttributeSet_Defense::GetArmorAttribute());
-    TestNotEqual(TEXT("damage per hit is derived, not primary"), DamageRule.Category, EMythicStatCategory::Primary);
-    TestNotEqual(TEXT("armor is derived, not primary"), ArmorRule.Category, EMythicStatCategory::Primary);
+    const UMythicStatDefinition* Damage = LoadStatDefinition(UMythicAttributeSet_Offense::GetDamagePerHitAttribute());
+    const UMythicStatDefinition* Armor = LoadStatDefinition(UMythicAttributeSet_Defense::GetArmorAttribute());
+    if (!TestNotNull(TEXT("DamagePerHit has a canonical StatDefinition"), Damage)
+        || !TestNotNull(TEXT("Armor has a canonical StatDefinition"), Armor)) {
+        return false;
+    }
+    TestNotEqual(TEXT("damage per hit is derived, not primary"), Damage->Category.GetPrimaryAssetId(), PrimaryCategoryId);
+    TestNotEqual(TEXT("armor is derived, not primary"), Armor->Category.GetPrimaryAssetId(), PrimaryCategoryId);
 
-    TestFalse(TEXT("the primary tier has a heading of its own"),
-              MythicStatDisplay::GetCategoryLabel(EMythicStatCategory::Primary).IsEmpty());
+    const UMythicStatCategoryDefinition* PrimaryCategory = Cast<UMythicStatCategoryDefinition>(
+        UAssetManager::Get().GetPrimaryAssetPath(PrimaryCategoryId).TryLoad());
+    TestNotNull(TEXT("the primary category is a real asset"), PrimaryCategory);
+    if (PrimaryCategory) {
+        TestFalse(TEXT("the primary category owns its localized heading"), PrimaryCategory->DisplayName.IsEmpty());
+    }
 
     return true;
 }
@@ -70,11 +103,12 @@ bool FMythicTooltipMatchesGameplayTest::RunTest(const FString &Parameters) {
         // And it must be a real number a player can act on, not a silent zero.
         TestTrue(TEXT("a primary at 42 is contributing something"), TooltipFraction > 0.0f);
 
-        // Named by the shared rule table rather than a string typed into the tooltip.
-        const FString Label = MythicStatDisplay::GetRule(Row.TargetAttribute).Label.IsEmpty()
-                                  ? MythicStatDisplay::MakeFriendlyLabel(Row.TargetAttribute.GetName())
-                                  : MythicStatDisplay::GetRule(Row.TargetAttribute).Label;
-        TestFalse(TEXT("every contribution line has a name"), Label.IsEmpty());
+        const UMythicStatDefinition* TargetDefinition = LoadStatDefinition(Row.TargetAttribute);
+        TestNotNull(TEXT("every contribution target has a StatDefinition"), TargetDefinition);
+        if (TargetDefinition) {
+            TestFalse(TEXT("every contribution line uses its localized canonical label"),
+                      TargetDefinition->DisplayName.IsEmpty());
+        }
     }
 
     TestTrue(TEXT("Power has contributions to show at all"), Shown > 0);

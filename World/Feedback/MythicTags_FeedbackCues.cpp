@@ -1,6 +1,8 @@
 
 #include "GAS/Feedback/MythicTags_FeedbackCues.h"
 
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_GameplayCue_Damage_Hit, "GameplayCue.Damage.Hit", "A canonical damage application landed on a target");
+
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_GameplayCue_Combat_KillConfirm, "GameplayCue.Combat.KillConfirm", "A credited external kill landed (fired on the killer's ASC)");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_GameplayCue_Combat_Crit, "GameplayCue.Combat.Crit", "A critical hit landed (fired on the attacker's ASC)");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_GameplayCue_Combat_Reaction, "GameplayCue.Combat.Reaction", "An elemental status reaction fired (fired on the target's ASC)");

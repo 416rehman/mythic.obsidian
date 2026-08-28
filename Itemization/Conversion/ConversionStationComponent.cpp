@@ -653,7 +653,7 @@ int32 UConversionStationComponent::ResolveCrafterProficiencyLevel(AController *C
             if (!ASC) {
                 return 0;
             }
-            const float CurrentXP = ASC->GetNumericAttribute(ProfDef->ProgressAttribute);
+            const float CurrentXP = ASC->GetNumericAttribute(ProfDef->GetProgressAttribute());
             return UProficiencyDefinition::CalcLevelAtXP(CurrentXP, ProfDef);
         }
     }

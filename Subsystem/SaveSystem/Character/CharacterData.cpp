@@ -3,6 +3,7 @@
 #include "Mythic/Player/MythicPlayerState.h"
 #include "Mythic/Itemization/InventoryProviderInterface.h"
 #include "Mythic/Itemization/Inventory/MythicInventoryComponent.h"
+#include "Mythic/Itemization/Inventory/MythicItemInstance.h"
 #include "Mythic/Player/Proficiency/ProficiencyComponent.h"
 #include "Mythic/Player/MythicPlayerController.h"
 #include "Mythic/Player/MythicFactionStandingComponent.h"
@@ -21,6 +22,10 @@
 #include "Mythic/World/Trading/MythicTradeContractComponent.h"
 #include "Mythic/World/LivingWorld/LivingWorldTypes.h"
 #include "Mythic/Objectives/ObjectiveTracker.h"
+#include "Mythic/World/Harvesting/MythicHarvestReceiptLedgerComponent.h"
+#include "Mythic/World/Harvesting/MythicHarvestRewardEscrowComponent.h"
+#include "Mythic/World/Harvesting/MythicHarvestRewardOutboxSubsystem.h"
+#include "Mythic/World/Harvesting/MythicHarvestWorldSubsystem.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 
@@ -74,7 +79,11 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
     if (ProfComp) {
         UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Found ProficiencyComponent, serializing %d proficiencies..."),
                ProfComp->Proficiencies.Num());
-        FSerializedProficiencyHelper::Serialize(ProfComp, OutData.Proficiencies);
+        if (!FSerializedProficiencyHelper::Serialize(ProfComp, OutData.Proficiencies)) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SerializedCharacterData::Serialize: proficiency graph rejected the save transaction."));
+            return false;
+        }
         UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d proficiencies"), OutData.Proficiencies.Num());
     }
     else {
@@ -199,10 +208,21 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
         TArray<UMythicInventoryComponent *> InventoryComponents = InvProvider->GetAllInventoryComponents();
         UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Found %d inventory components"), InventoryComponents.Num());
 
-        for (UMythicInventoryComponent *InventoryComp : InventoryComponents) {
+        const FGuid InventorySaveGuid = FGuid::NewGuid();
+        for (int32 InventoryIndex = 0; InventoryIndex < InventoryComponents.Num(); ++InventoryIndex) {
+            UMythicInventoryComponent *InventoryComp = InventoryComponents[InventoryIndex];
             if (InventoryComp) {
                 FSerializedInventoryData InvData;
-                FSerializedInventoryData::Serialize(InventoryComp, InvData);
+                FMythicInventoryRestoreContext SaveContext;
+                SaveContext.SaveGameGuid = InventorySaveGuid;
+                SaveContext.StableContainerId = FString::Printf(
+                    TEXT("character/inventory/%d"), InventoryIndex);
+                if (!FSerializedInventoryData::Serialize(InventoryComp, InvData, SaveContext)) {
+                    UE_LOG(MythSaveLoad, Error,
+                           TEXT("SerializedCharacterData::Serialize: inventory %d failed atomically"),
+                           InventoryIndex);
+                    return false;
+                }
                 OutData.Inventories.Add(InvData);
                 UE_LOG(MythSaveLoad, Log, TEXT("  - Serialized inventory '%s' with %d slots"), *InventoryComp->GetName(), InvData.Slots.Num());
             }
@@ -210,6 +230,35 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
     }
     else {
         UE_LOG(MythSaveLoad, Warning, TEXT("SerializedCharacterData::Serialize: SourceActor does not implement IInventoryProviderInterface!"));
+    }
+
+    if (const AMythicPlayerState *MythPS =
+            Cast<AMythicPlayerState>(PS)) {
+        const UMythicHarvestReceiptLedgerComponent *ReceiptLedger =
+            MythPS->GetHarvestReceiptLedger();
+        FName ReceiptDiagnostic;
+        if (!ReceiptLedger
+            || !ReceiptLedger->BuildSaveSnapshot(
+                OutData.HarvestReceiptLedger, ReceiptDiagnostic)) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SerializedCharacterData::Serialize: harvest receipt ledger rejected snapshot (%s)"),
+                   *ReceiptDiagnostic.ToString());
+            return false;
+        }
+        const UMythicHarvestRewardEscrowComponent *RewardEscrow =
+            MythPS->GetHarvestRewardEscrow();
+        FName EscrowDiagnostic;
+        if (!RewardEscrow
+            || !RewardEscrow->BuildSaveSnapshot(
+                OutData.HarvestItemEscrow, EscrowDiagnostic)
+            || !FMythicHarvestItemEscrowSaveV1::ValidateReceiptBinding(
+                OutData.HarvestItemEscrow,
+                OutData.HarvestReceiptLedger, EscrowDiagnostic)) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SerializedCharacterData::Serialize: harvest item escrow rejected snapshot (%s)"),
+                   *EscrowDiagnostic.ToString());
+            return false;
+        }
     }
 
 
@@ -234,6 +283,28 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
     APlayerState *PS = nullptr;
     APlayerController *PC = nullptr;
     ResolveCharacterActors(TargetActor, PS, PC);
+
+    if (!InData.HarvestReceiptLedger.WorldWatermarks.IsEmpty()) {
+        UWorld *World = TargetActor->GetWorld();
+        UMythicHarvestWorldSubsystem *HarvestWorld = World
+            ? World->GetSubsystem<UMythicHarvestWorldSubsystem>() : nullptr;
+        UMythicHarvestRewardOutboxSubsystem *HarvestOutbox = World
+            ? World->GetSubsystem<
+                UMythicHarvestRewardOutboxSubsystem>() : nullptr;
+        const FGuid ActiveEpoch = HarvestWorld
+            ? HarvestWorld->GetWorldEpoch() : FGuid();
+        for (const FMythicSavedHarvestReceiptWorldWatermarkV1 &Watermark :
+             InData.HarvestReceiptLedger.WorldWatermarks) {
+            if (Watermark.WorldEpoch == ActiveEpoch
+                && (!HarvestOutbox
+                    || HarvestOutbox->GetLastIssuedWorldSnapshotSequence()
+                        < Watermark.MinimumAcceptedSnapshotSequence)) {
+                UE_LOG(MythSaveLoad, Error,
+                       TEXT("SerializedCharacterData::Deserialize: active world snapshot predates compacted harvest receipts"));
+                return false;
+            }
+        }
+    }
     AActor *ProfHost = PC ? static_cast<AActor *>(PC) : TargetActor;
     AActor *InvHost = PC ? static_cast<AActor *>(PC) : TargetActor;
 
@@ -261,7 +332,11 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
     }
 
     if (ProfComp) {
-        FSerializedProficiencyHelper::Deserialize(ProfComp, InData.Proficiencies);
+        if (!FSerializedProficiencyHelper::Deserialize(ProfComp, InData.Proficiencies)) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SerializedCharacterData::Deserialize: proficiency payload rejected atomically."));
+            return false;
+        }
         ProfComp->ApplyLoadedProficiencies();
         UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d proficiencies"), ProfComp->Proficiencies.Num());
     }
@@ -406,11 +481,13 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
         LedgerToGuard->SetRestoring(true);
     }
 
+    bool bInventoriesRestored = true;
     if (IInventoryProviderInterface *InvProvider = Cast<IInventoryProviderInterface>(InvHost)) {
         TArray<UMythicInventoryComponent *> InventoryComponents = InvProvider->GetAllInventoryComponents();
         for (int32 i = 0; i < InventoryComponents.Num() && i < InData.Inventories.Num(); ++i) {
             if (InventoryComponents[i]) {
-                FSerializedInventoryData::Deserialize(InventoryComponents[i], InData.Inventories[i]);
+                bInventoriesRestored &= FSerializedInventoryData::Deserialize(
+                    InventoryComponents[i], InData.Inventories[i]);
             }
         }
     }
@@ -418,6 +495,37 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
     if (LedgerToGuard) {
         LedgerToGuard->SetRestoring(false);
         LedgerToGuard->ResyncCurrencyBaseline();
+    }
+
+    if (!bInventoriesRestored) {
+        UE_LOG(MythSaveLoad, Error,
+               TEXT("SerializedCharacterData::Deserialize: one or more corrupt inventory slots were quarantined"));
+        return false;
+    }
+
+    if (AMythicPlayerState *MythPS = Cast<AMythicPlayerState>(PS)) {
+        UMythicHarvestReceiptLedgerComponent *ReceiptLedger =
+            MythPS->GetHarvestReceiptLedger();
+        FName ReceiptDiagnostic;
+        if (!ReceiptLedger
+            || !ReceiptLedger->RestoreSaveSnapshot(
+                InData.HarvestReceiptLedger, ReceiptDiagnostic)) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SerializedCharacterData::Deserialize: harvest receipt ledger rejected restore (%s)"),
+                   *ReceiptDiagnostic.ToString());
+            return false;
+        }
+        UMythicHarvestRewardEscrowComponent *RewardEscrow =
+            MythPS->GetHarvestRewardEscrow();
+        FName EscrowDiagnostic;
+        if (!RewardEscrow
+            || !RewardEscrow->RestoreSaveSnapshot(
+                InData.HarvestItemEscrow, EscrowDiagnostic)) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SerializedCharacterData::Deserialize: harvest item escrow rejected restore (%s)"),
+                   *EscrowDiagnostic.ToString());
+            return false;
+        }
     }
 
 

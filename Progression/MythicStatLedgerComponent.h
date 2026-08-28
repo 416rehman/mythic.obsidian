@@ -12,6 +12,7 @@ struct FGameplayEventData;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMythicOnCounterChanged, FGameplayTag, Tag, int64, NewValue);
 
+/** Spawnable authoritative component that records and replicates gameplay-tagged progression counters. */
 UCLASS(ClassGroup = (Mythic), meta = (BlueprintSpawnableComponent))
 class MYTHIC_API UMythicStatLedgerComponent : public UActorComponent {
     GENERATED_BODY()
@@ -19,33 +20,32 @@ class MYTHIC_API UMythicStatLedgerComponent : public UActorComponent {
 public:
     UMythicStatLedgerComponent();
 
-    // SERVER: add Delta to Tag's character counter and (when bAccountToo) the account counter, then broadcast
-    // OnCounterChanged(Tag, newCharValue). No-op off authority, for an invalid tag, or while restoring a save
-    // (bIsRestoring) — so the event-driven binds below never double-count a reload. Every other Stat.* producer
-    // (loot/craft/discovery/quest/deed systems) calls this directly; it is the single write seam into the ledger.
+    /**
+     * Authority-only additive write to an exact Stat.* counter. Optionally mirrors the delta to the account ledger;
+     * invalid tags and save-restore calls are ignored, and successful writes broadcast On Counter Changed.
+     */
     UFUNCTION(BlueprintCallable, Category = "Progression|Stats")
     void RecordStat(FGameplayTag Tag, int64 Delta = 1, bool bAccountToo = true);
 
-    // SERVER (Wave P, P6i): RECORD-IF-GREATER write — the personal-best lane (Stat.Fish.Record.<Species> biggest
-    // catch, and any future "largest/farthest/fastest" ledger). Pure math: FMythicStatLedger::ApplyMax. Returns TRUE
-    // when THIS call raised the character record (the caller's trophy-mint/cue edge); ties and smaller values change
-    // nothing and return false. Same authority/restore/validity guards as RecordStat; broadcasts OnCounterChanged
-    // only on a genuine new record.
+    /**
+     * Authority-only personal-best write for largest, farthest, or fastest records. Returns true only when Value
+     * raises the character record; ties and lower values do not mutate or broadcast.
+     */
     UFUNCTION(BlueprintCallable, Category = "Progression|Stats")
     bool RecordStatMax(FGameplayTag Tag, int64 Value, bool bAccountToo = true);
 
-    // Pure: exact-tag character counter (0 if never recorded).
+    /** Returns the exact character counter for Tag, or zero when that statistic has never been recorded. */
     UFUNCTION(BlueprintPure, Category = "Progression|Stats")
     int64 GetCounter(FGameplayTag Tag) const;
 
-    // Pure: hierarchical rollup of the character counters under PrefixTag (e.g. Stat.Kill => Generic + Boss).
+    /** Returns the sum of character counters matching PrefixTag, including all child gameplay tags. */
     UFUNCTION(BlueprintPure, Category = "Progression|Stats")
     int64 GetCounterRollup(FGameplayTag PrefixTag) const;
 
     const TArray<FMythicStatCounter> &GetCharacterCounters() const { return CharacterCounters.Items; }
     const TArray<FMythicStatCounter> &GetAccountCounters() const { return AccountCounters.Items; }
 
-    // Broadcast on every RecordStat (server-side). See delegate doc above.
+    /** Authority-side notification carrying the exact changed tag and its new character-ledger value. */
     UPROPERTY(BlueprintAssignable, Category = "Progression|Stats")
     FMythicOnCounterChanged OnCounterChanged;
 
@@ -69,12 +69,11 @@ protected:
 
     bool bIsRestoring = false;
 
-    // ── Distance odometer (OPT-IN; DEFAULT OFF) ──
-    // A single coarse repeating timer sampling the pawn's position — NEVER per-frame. Off by default (zero cost); a
-    // designer enables it per-project. Records Stat.Distance.Traveled in centimetres.
+    /** Enables coarse timer-based distance tracking into Stat.Distance.Traveled; disabled has no runtime sampling cost. */
     UPROPERTY(EditDefaultsOnly, Category = "Progression|Stats")
     bool bDistanceOdometerEnabled = false;
 
+    /** Seconds between distance samples while the optional odometer is enabled. */
     UPROPERTY(EditDefaultsOnly, Category = "Progression|Stats", meta = (ClampMin = "0.5"))
     float DistanceSampleInterval = 5.0f;
 

@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "GameFramework/GameState.h"
 #include "Itemization/InventoryProviderInterface.h"
+#include "Itemization/Inventory/MythicItemFactorySubsystem.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Mythic/Itemization/Inventory/MythicInventoryComponent.h"
 #include "Settings/MythicDeveloperSettings.h"
@@ -18,14 +19,9 @@ UMythicItemInstance *UMythicLootManagerSubsystem::Create(UItemDefinition *item_d
         return nullptr;
     }
 
-    UMythicItemInstance *ItemInstance = NewObject<UMythicItemInstance>();
-    if (!ItemInstance) {
-        UE_LOG(Myth, Warning, TEXT("Failed to create item instance"));
-        return nullptr;
-    }
-
+    AActor *ItemOwner = nullptr;
     if (TargetRecipient) {
-        ItemInstance->SetOwner(TargetRecipient);
+        ItemOwner = TargetRecipient;
     }
     else {
         auto GameMode = GetWorld()->GetAuthGameMode();
@@ -33,12 +29,38 @@ UMythicItemInstance *UMythicLootManagerSubsystem::Create(UItemDefinition *item_d
             UE_LOG(Myth, Warning, TEXT("GameMode is null. GameMode is only available on the server."));
             return nullptr;
         }
-        auto GameState = GameMode->GameState;
-        ItemInstance->SetOwner(GameState);
+        ItemOwner = GameMode->GameState;
     }
-    ItemInstance->Initialize(item_def, quantity_if_stackable, level);
+    if (!ItemOwner) {
+        UE_LOG(Myth, Warning, TEXT("Failed to resolve authoritative owner for item %s"), *item_def->GetName());
+        return nullptr;
+    }
 
-    return ItemInstance;
+    UMythicItemFactorySubsystem *Factory = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UMythicItemFactorySubsystem>() : nullptr;
+    if (!Factory) {
+        UE_LOG(Myth, Error, TEXT("Item factory is unavailable; item %s was not created"), *item_def->GetName());
+        return nullptr;
+    }
+
+    FMythicCreateItemRequest Request;
+    Request.ItemDefinition = item_def;
+    Request.Quantity = FMath::Max(1, quantity_if_stackable);
+    Request.ItemLevel = FMath::Max(1, level);
+    Request.OwningActor = ItemOwner;
+    FMythicCreateItemResult Result = Factory->CreateItemReady(Request);
+    if (!Result.IsSuccess()) {
+        UE_LOG(Myth, Warning, TEXT("Item %s creation failed closed (%s, status %d)"),
+               *item_def->GetName(), *Result.DiagnosticCode.ToString(), static_cast<int32>(Result.Status));
+        if (Result.Status == EMythicCreateItemStatus::NotReady) {
+            // This synchronous compatibility API never blocks. It starts the exact closure prewarm so a deliberate
+            // retry can succeed; new reward/loot flows should call UMythicItemFactorySubsystem::CreateItemAsync.
+            Factory->RequestItemDefinitionReadyAsync(item_def, FOnMythicItemDefinitionReady());
+        }
+        return nullptr;
+    }
+
+    return Result.Item;
 }
 
 AMythicWorldItem *UMythicLootManagerSubsystem::CreateAndSpawn(UItemDefinition *item_def, const FVector &location, AController *TargetRecipient, int32 level = 0,
@@ -62,7 +84,7 @@ AMythicWorldItem *UMythicLootManagerSubsystem::CreateAndGive(UItemDefinition *It
         return nullptr;
     }
     if (!DefaultWorldItemClass) {
-        UE_LOG(Myth, Warning, TEXT("Default world item class is not set - Use SetDefaultWorldItemClass to set it."));
+        UE_LOG(Myth, Warning, TEXT("Default world item class is not configured in Mythic developer settings."));
         return nullptr;
     }
 
@@ -81,13 +103,16 @@ AMythicWorldItem *UMythicLootManagerSubsystem::CreateAndGive(UItemDefinition *It
     }
 
     UMythicItemInstance *ItemInstance = Create(ItemDef, QtyIfStackable, TargetRecipient, Lvl);
+    if (!ItemInstance) {
+        return nullptr;
+    }
 
     return Inventory->AddItem(ItemInstance, TargetRecipient);
 }
 
 AMythicWorldItem *UMythicLootManagerSubsystem::Spawn(UMythicItemInstance *item, const FVector &location, float radius, AController *TargetRecipient) {
     if (!DefaultWorldItemClass) {
-        UE_LOG(Myth, Warning, TEXT("Default world item class is not set - Use SetDefaultWorldItemClass to set it."));
+        UE_LOG(Myth, Warning, TEXT("Default world item class is not configured in Mythic developer settings."));
         return nullptr;
     }
 
@@ -236,13 +261,14 @@ void UMythicLootManagerSubsystem::RunWorldItemFXPass() {
 }
 
 void UMythicLootManagerSubsystem::Initialize(FSubsystemCollectionBase &Collection) {
+    Collection.InitializeDependency<UMythicItemFactorySubsystem>();
     Super::Initialize(Collection);
 
     const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
     if (!Settings || Settings->DefaultWorldItemClass.IsNull()) {
         UE_LOG(Myth, Warning,
-               TEXT("LootManager: DefaultWorldItemClass is not set in project settings (Mythic > Loot). Loot will "
-                    "only work in worlds whose game mode assigns it."));
+               TEXT("LootManager: DefaultWorldItemClass is not set in project settings (Mythic > Loot). World-item "
+                    "drops are disabled."));
         return;
     }
 
@@ -253,10 +279,6 @@ void UMythicLootManagerSubsystem::Initialize(FSubsystemCollectionBase &Collectio
         return;
     }
     UE_LOG(Myth, Log, TEXT("LootManager: world-item class resolved to %s."), *DefaultWorldItemClass->GetName());
-}
-
-void UMythicLootManagerSubsystem::SetDefaultWorldItemClass(const TSubclassOf<AMythicWorldItem> &NewDefaultWorldItemClass) {
-    DefaultWorldItemClass = NewDefaultWorldItemClass;
 }
 
 void UMythicLootManagerSubsystem::DestroyWorldItem(AMythicWorldItem *WorldItem, AController *Controller) {

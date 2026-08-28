@@ -36,6 +36,14 @@ struct FMythicGameplayEffectContext : public FGameplayEffectContext {
 
     static FMythicGameplayEffectContext *ExtractEffectContext(struct FGameplayEffectContextHandle Handle);
 
+    /**
+     * Pins the authoritative ASC used as this context's GAS source identity. This is the invariant fallback for a
+     * truly actor-less world status whose stack is owned by the GameState ASC; actor hazards own transient source ASCs.
+     */
+    void SetInstigatorAbilitySystemComponentForStacking(UAbilitySystemComponent *SourceASC) {
+        InstigatorAbilitySystemComponent = SourceASC;
+    }
+
     void SetAbilitySource(const IMythicAbilitySourceInterface *InObject, float InSourceLevel);
 
     const IMythicAbilitySourceInterface *GetAbilitySource() const;
@@ -79,7 +87,6 @@ public:
     float GetShieldAbsorbed() const { return ShieldAbsorbed; }
     void SetShieldAbsorbed(float InShieldAbsorbed) { ShieldAbsorbed = InShieldAbsorbed; }
 
-
     virtual FGameplayEffectContext *Duplicate() const override {
         FMythicGameplayEffectContext *NewContext = new FMythicGameplayEffectContext();
         *NewContext = *this;
@@ -121,6 +128,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|GAS|GameplayEffectContext")
     static void ResolveInstigator(AActor *Instigator, APawn *&OutPawn, AController *&OutController, APlayerState *&OutPlayerState);
 
+    /** Marks the effect context as a critical hit. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static void SetCriticalHit(UPARAM(ref) FGameplayEffectContextHandle &ContextHandle, bool bInIsCriticalHit) {
         if (ContextHandle.IsValid()) {
@@ -131,6 +139,7 @@ public:
         }
     }
 
+    /** Marks the effect context as applying bleed. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static void SetBleed(UPARAM(ref) FGameplayEffectContextHandle &ContextHandle, bool bInIsBleed) {
         if (ContextHandle.IsValid()) {
@@ -141,6 +150,7 @@ public:
         }
     }
 
+    /** Marks the effect context as applying burn. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static void SetBurn(UPARAM(ref) FGameplayEffectContextHandle &ContextHandle, bool bInIsBurn) {
         if (ContextHandle.IsValid()) {
@@ -151,6 +161,7 @@ public:
         }
     }
 
+    /** Marks the effect context as applying poison. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static void SetPoison(UPARAM(ref) FGameplayEffectContextHandle &ContextHandle, bool bInIsPoison) {
         if (ContextHandle.IsValid()) {
@@ -161,6 +172,7 @@ public:
         }
     }
 
+    /** Marks the effect context as applying stun. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static void SetStun(UPARAM(ref) FGameplayEffectContextHandle &ContextHandle, bool bInIsStun) {
         if (ContextHandle.IsValid()) {
@@ -171,6 +183,7 @@ public:
         }
     }
 
+    /** Marks the effect context as applying slow. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static void SetSlow(UPARAM(ref) FGameplayEffectContextHandle &ContextHandle, bool bInIsSlow) {
         if (ContextHandle.IsValid()) {
@@ -181,6 +194,7 @@ public:
         }
     }
 
+    /** Marks the effect context as applying weaken. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static void SetWeaken(UPARAM(ref) FGameplayEffectContextHandle &ContextHandle, bool bInIsWeaken) {
         if (ContextHandle.IsValid()) {
@@ -191,6 +205,7 @@ public:
         }
     }
 
+    /** Marks the effect context as applying freeze. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static void SetFreeze(UPARAM(ref) FGameplayEffectContextHandle &ContextHandle, bool bInIsFreeze) {
         if (ContextHandle.IsValid()) {
@@ -201,6 +216,7 @@ public:
         }
     }
 
+    /** Marks the effect context as applying terrify. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static void SetTerrify(UPARAM(ref) FGameplayEffectContextHandle &ContextHandle, bool bInIsTerrify) {
         if (ContextHandle.IsValid()) {
@@ -211,6 +227,7 @@ public:
         }
     }
 
+    /** Returns whether the effect context represents a critical hit. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static bool GetCriticalHit(const FGameplayEffectContextHandle &ContextHandle) {
         if (ContextHandle.IsValid()) {
@@ -222,6 +239,7 @@ public:
         return false;
     }
 
+    /** Returns whether the effect context applies bleed. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static bool GetBleed(const FGameplayEffectContextHandle &ContextHandle) {
         if (ContextHandle.IsValid()) {
@@ -233,6 +251,7 @@ public:
         return false;
     }
 
+    /** Returns whether the effect context applies burn. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static bool GetBurn(const FGameplayEffectContextHandle &ContextHandle) {
         if (ContextHandle.IsValid()) {
@@ -244,6 +263,7 @@ public:
         return false;
     }
 
+    /** Returns whether the effect context applies poison. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static bool GetPoison(const FGameplayEffectContextHandle &ContextHandle) {
         if (ContextHandle.IsValid()) {
@@ -255,6 +275,7 @@ public:
         return false;
     }
 
+    /** Returns whether the effect context applies stun. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static bool GetStun(const FGameplayEffectContextHandle &ContextHandle) {
         if (ContextHandle.IsValid()) {
@@ -266,6 +287,7 @@ public:
         return false;
     }
 
+    /** Returns whether the effect context applies slow. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static bool GetSlow(const FGameplayEffectContextHandle &ContextHandle) {
         if (ContextHandle.IsValid()) {
@@ -277,6 +299,7 @@ public:
         return false;
     }
 
+    /** Returns whether the effect context applies weaken. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static bool GetWeaken(const FGameplayEffectContextHandle &ContextHandle) {
         if (ContextHandle.IsValid()) {
@@ -288,6 +311,7 @@ public:
         return false;
     }
 
+    /** Returns whether the effect context applies freeze. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static bool GetFreeze(const FGameplayEffectContextHandle &ContextHandle) {
         if (ContextHandle.IsValid()) {
@@ -299,6 +323,7 @@ public:
         return false;
     }
 
+    /** Returns whether the effect context applies terrify. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static bool GetTerrify(const FGameplayEffectContextHandle &ContextHandle) {
         if (ContextHandle.IsValid()) {
@@ -310,6 +335,7 @@ public:
         return false;
     }
 
+    /** Marks the effect context as a dodged hit. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static void SetDodged(UPARAM(ref) FGameplayEffectContextHandle &ContextHandle, bool bInIsDodged) {
         if (ContextHandle.IsValid()) {
@@ -320,6 +346,7 @@ public:
         }
     }
 
+    /** Returns whether the effect context represents a dodged hit. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
     static bool GetDodged(const FGameplayEffectContextHandle &ContextHandle) {
         if (ContextHandle.IsValid()) {

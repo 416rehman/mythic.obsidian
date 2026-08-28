@@ -68,7 +68,7 @@
 #include "Itemization/Storage/MythicStorageContainer.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "GameModes/Attributes/WorldAttributes.h"
-#include "Resources/MythicResourceManagerComponent.h"
+#include "World/Harvesting/MythicHarvestWorldSubsystem.h"
 #include "UI/MythicDamageNumberSubsystem.h"
 #include "Engine/LocalPlayer.h"
 
@@ -1621,26 +1621,16 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
                     WTA->GetLegendaryDropRateMultiplier(), WTA->GetMythicDropRateMultiplier(),
                     WTA->GetEnemyHealthMultiplier(), WTA->GetEnemyDamageMultiplier());
             }
-            const TArray<FTrackedDestructibleData> Tracked = MGS->GetTrackedDestructibles();
-            int32 Depleted = 0;
-            double NextRespawn = TNumericLimits<double>::Max();
-            if (const UMythicResourceManagerComponent *RM = MGS->GetComponentByClass<UMythicResourceManagerComponent>()) {
-                const TArray<FTrackedDestructibleData> &Gone = RM->GetDestroyedItems();
-                Depleted = Gone.Num();
-                for (const FTrackedDestructibleData &D : Gone) {
-                    if (D.RespawnTime > 0.0) {
-                        NextRespawn = FMath::Min(NextRespawn, D.RespawnTime);
-                    }
-                }
+            int32 Providers = 0;
+            int32 Available = 0;
+            int32 Unavailable = 0;
+            if (const UMythicHarvestWorldSubsystem *Harvest =
+                    World->GetSubsystem<UMythicHarvestWorldSubsystem>()) {
+                Harvest->GetNodeCounts(Providers, Available, Unavailable);
             }
-            if (NextRespawn == TNumericLimits<double>::Max()) {
-                Detail += FString::Printf(TEXT("{white}Resources: tracked {yellow}%d{white} depleted {yellow}%d{white} next respawn {grey}n/a{white}\n"),
-                                          Tracked.Num(), Depleted);
-            } else {
-                const double InS = NextRespawn - WorldTime;
-                Detail += FString::Printf(TEXT("{white}Resources: tracked {yellow}%d{white} depleted {yellow}%d{white} next respawn in {yellow}%.0fs{white}\n"),
-                                          Tracked.Num(), Depleted, FMath::Max(0.0, InS));
-            }
+            Detail += FString::Printf(
+                TEXT("{white}Harvest: providers {yellow}%d{white} available {yellow}%d{white} unavailable {yellow}%d{white}\n"),
+                Providers, Available, Unavailable);
         } else {
             Detail += TEXT("{grey}(no AMythicGameState - wrong game mode?)\n");
         }

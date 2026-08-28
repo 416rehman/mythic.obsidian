@@ -4,6 +4,13 @@
 #include "MythicTags_GAS.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "System/MythicAssetManager.h"
+#include "Itemization/Affixes/MythicAffixApplicationComponent.h"
+
+namespace {
+bool IsValidActivationGroup(const EMythicAbilityActivationGroup Group) {
+    return static_cast<uint8>(Group) < static_cast<uint8>(EMythicAbilityActivationGroup::MAX);
+}
+}
 
 void UMythicAbilitySystemComponent::GetAdditionalActivationTagRequirements(const FGameplayTagContainer &AbilityTags,
                                                                            FGameplayTagContainer &OutActivationRequired,
@@ -27,6 +34,42 @@ void UMythicAbilitySystemComponent::BeginPlay() {
                                            });
         }
     }
+}
+
+void UMythicAbilitySystemComponent::InitAbilityActorInfo(AActor *InOwnerActor, AActor *InAvatarActor) {
+    Super::InitAbilityActorInfo(InOwnerActor, InAvatarActor);
+
+    if (!InOwnerActor || !InOwnerActor->HasAuthority()) {
+        return;
+    }
+    UMythicAffixApplicationComponent *Application =
+        InOwnerActor->FindComponentByClass<UMythicAffixApplicationComponent>();
+    if (!Application && InAvatarActor) {
+        Application = InAvatarActor->FindComponentByClass<UMythicAffixApplicationComponent>();
+    }
+    if (Application) {
+        Application->NotifyAbilitySystemActorInfoChanged(this);
+    }
+}
+
+void UMythicAbilitySystemComponent::NotifyAbilityActivated(
+    const FGameplayAbilitySpecHandle Handle, UGameplayAbility *Ability) {
+    // Register first: activation delegates are allowed to query groups or synchronously end the ability.
+    if (UMythicGameplayAbility *MythicAbility = Cast<UMythicGameplayAbility>(Ability)) {
+        AddAbilityToActivationGroup(MythicAbility->GetActivationGroup(), MythicAbility);
+    }
+
+    Super::NotifyAbilityActivated(Handle, Ability);
+}
+
+void UMythicAbilitySystemComponent::NotifyAbilityEnded(
+    const FGameplayAbilitySpecHandle Handle, UGameplayAbility *Ability, const bool bWasCancelled) {
+    // Unregister first so end delegates can immediately activate abilities that the ending group blocked.
+    if (UMythicGameplayAbility *MythicAbility = Cast<UMythicGameplayAbility>(Ability)) {
+        RemoveAbilityFromActivationGroup(MythicAbility->GetActivationGroup(), MythicAbility);
+    }
+
+    Super::NotifyAbilityEnded(Handle, Ability, bWasCancelled);
 }
 
 void UMythicAbilitySystemComponent::SetTagRelationshipMapping(UMythicAbilityTagRelationshipMapping *NewMapping) {
@@ -74,6 +117,25 @@ void UMythicAbilitySystemComponent::AbilityInputTagReleased(const FGameplayTag &
     else {
         UE_LOG(Myth, Warning, TEXT("ASC::AbilityInputTagReleased: InputTag is NOT VALID!"));
     }
+}
+
+void UMythicAbilitySystemComponent::AbilityInputSpecPressed(
+    const FGameplayAbilitySpecHandle SpecHandle) {
+    if (SpecHandle.IsValid() && FindAbilitySpecFromHandle(SpecHandle)) {
+        InputPressedSpecHandles.AddUnique(SpecHandle);
+        InputHeldSpecHandles.AddUnique(SpecHandle);
+    }
+}
+
+void UMythicAbilitySystemComponent::AbilityInputSpecReleased(
+    const FGameplayAbilitySpecHandle SpecHandle) {
+    if (!SpecHandle.IsValid()) {
+        return;
+    }
+    if (FindAbilitySpecFromHandle(SpecHandle)) {
+        InputReleasedSpecHandles.AddUnique(SpecHandle);
+    }
+    InputHeldSpecHandles.Remove(SpecHandle);
 }
 
 void UMythicAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bGamePaused) {
@@ -181,6 +243,12 @@ void UMythicAbilitySystemComponent::Multicast_ExecuteGameplayCue_Implementation(
 }
 
 bool UMythicAbilitySystemComponent::IsActivationGroupBlocked(EMythicAbilityActivationGroup Group) const {
+    if (!ensureMsgf(IsValidActivationGroup(Group),
+                    TEXT("IsActivationGroupBlocked: Invalid activation group [%d]."),
+                    static_cast<uint8>(Group))) {
+        return true;
+    }
+
     bool bBlocked = false;
 
     switch (Group) {
@@ -194,18 +262,28 @@ bool UMythicAbilitySystemComponent::IsActivationGroupBlocked(EMythicAbilityActiv
         break;
 
     default:
-        checkf(false, TEXT("IsActivationGroupBlocked: Invalid ActivationGroup [%d]\n"), static_cast<uint8>(Group));
-        break;
+        return true;
     }
 
     return bBlocked;
 }
 
 void UMythicAbilitySystemComponent::AddAbilityToActivationGroup(EMythicAbilityActivationGroup Group, UMythicGameplayAbility *MythicAbility) {
-    check(MythicAbility);
-    check(ActivationGroupCounts[static_cast<uint8>(Group)] < INT32_MAX);
+    if (!ensureMsgf(MythicAbility, TEXT("AddAbilityToActivationGroup requires a valid Mythic ability."))
+        || !ensureMsgf(IsValidActivationGroup(Group),
+                       TEXT("AddAbilityToActivationGroup: Invalid activation group [%d]."),
+                       static_cast<uint8>(Group))) {
+        return;
+    }
 
-    ActivationGroupCounts[static_cast<uint8>(Group)]++;
+    int32 &GroupCount = ActivationGroupCounts[static_cast<uint8>(Group)];
+    if (!ensureMsgf(GroupCount < INT32_MAX,
+                    TEXT("AddAbilityToActivationGroup overflow for group [%d] and ability [%s]."),
+                    static_cast<uint8>(Group), *GetNameSafe(MythicAbility))) {
+        return;
+    }
+
+    ++GroupCount;
 
     constexpr bool bReplicateCancelAbility = false;
 
@@ -219,8 +297,7 @@ void UMythicAbilitySystemComponent::AddAbilityToActivationGroup(EMythicAbilityAc
         break;
 
     default:
-        checkf(false, TEXT("AddAbilityToActivationGroup: Invalid ActivationGroup [%d]\n"), static_cast<uint8>(Group));
-        break;
+        return;
     }
 
     const int32 ExclusiveCount = ActivationGroupCounts[static_cast<uint8>(EMythicAbilityActivationGroup::Exclusive_Replaceable)] + ActivationGroupCounts[
@@ -231,10 +308,21 @@ void UMythicAbilitySystemComponent::AddAbilityToActivationGroup(EMythicAbilityAc
 }
 
 void UMythicAbilitySystemComponent::RemoveAbilityFromActivationGroup(EMythicAbilityActivationGroup Group, UMythicGameplayAbility *MythicAbility) {
-    check(MythicAbility);
-    check(ActivationGroupCounts[static_cast<uint8>(Group)] > 0);
+    if (!ensureMsgf(MythicAbility, TEXT("RemoveAbilityFromActivationGroup requires a valid Mythic ability."))
+        || !ensureMsgf(IsValidActivationGroup(Group),
+                       TEXT("RemoveAbilityFromActivationGroup: Invalid activation group [%d]."),
+                       static_cast<uint8>(Group))) {
+        return;
+    }
 
-    ActivationGroupCounts[static_cast<uint8>(Group)]--;
+    int32 &GroupCount = ActivationGroupCounts[static_cast<uint8>(Group)];
+    if (!ensureMsgf(GroupCount > 0,
+                    TEXT("RemoveAbilityFromActivationGroup underflow for group [%d] and ability [%s]."),
+                    static_cast<uint8>(Group), *GetNameSafe(MythicAbility))) {
+        return;
+    }
+
+    --GroupCount;
 }
 
 void UMythicAbilitySystemComponent::CancelActivationGroupAbilities(EMythicAbilityActivationGroup Group, UMythicGameplayAbility *IgnoreMythicAbility,

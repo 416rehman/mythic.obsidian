@@ -2,6 +2,8 @@
 
 #include "NativeGameplayTags.h"
 
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_GameplayCue_Damage_Hit);
+
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_GameplayCue_Combat_KillConfirm);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_GameplayCue_Combat_Crit);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_GameplayCue_Combat_Reaction);

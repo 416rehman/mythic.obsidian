@@ -17,13 +17,14 @@ MYTHIC_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_STATUS_CONTROL_MAGNITU
 
 class UAbilitySystemComponent;
 class UMythicStatusEffectDefinition;
+enum class EMythicStatusControlOperation : uint8;
 
 UCLASS(BlueprintType)
 class MYTHIC_API UMythicStatusEffectLibrary : public UMythicDataAsset {
     GENERATED_BODY()
 
 public:
-    // Every status the game can apply. Adding a status here is all that is required to make it live.
+    /** Every canonical status definition the game can apply and expose to UI or tools. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status")
     TArray<TObjectPtr<UMythicStatusEffectDefinition>> Statuses;
 };
@@ -33,22 +34,29 @@ class MYTHIC_API UMythicStatusRegistry : public UGameInstanceSubsystem {
     GENERATED_BODY()
 
 public:
-    // Definition for a Status.Type.* tag. Null when no status is authored for the tag.
+    /** Returns the canonical definition for a Status.Type.* tag, or null when the tag is not authored. */
     UFUNCTION(BlueprintPure, Category = "Status")
     UMythicStatusEffectDefinition *FindStatus(FGameplayTag StatusType) const;
 
     // Definition whose buildup attribute matches, used to turn a buildup change back into its status.
     UMythicStatusEffectDefinition *FindStatusByBuildupAttribute(const FGameplayAttribute &BuildupAttribute) const;
 
-    // Every authored status, for UI enumeration and cheats.
+    /** Returns every canonical authored status for deterministic UI and tooling enumeration. */
     UFUNCTION(BlueprintPure, Category = "Status")
     TArray<UMythicStatusEffectDefinition *> GetAllStatuses() const;
 
-    // Applies a status straight to a target, bypassing buildup. Fires the onset cue and honours reactions.
+    /** Applies a canonical status directly to a target, bypassing buildup while retaining cues and reactions. */
     UFUNCTION(BlueprintCallable, Category = "Status", meta = (DefaultToSelf = "Instigator"))
     static bool ApplyStatusToActor(AActor *Target, FGameplayTag StatusType, AActor *Instigator);
 
-    // Applies an already-resolved status to an ASC. Returns false when the status has no effect authored.
+    /**
+     * Resolves the ASC that owns an applied status stack. Player/NPC sources retain their gameplay ASC; an ASC-less
+     * actor receives a lightweight, server-only source ASC so distinct hazards keep independent rolls, caps, and
+     * attribution. Only truly actor-less world damage shares the GameState ASC. The defender is never substituted.
+     */
+    static UAbilitySystemComponent *ResolveStatusEffectSourceASC(AActor *Instigator, UAbilitySystemComponent *TargetASC);
+
+    /** Applies an already-resolved status to an ASC. Returns false when the status has no effect authored. */
     static bool ApplyStatusEffect(UAbilitySystemComponent *TargetASC, const UMythicStatusEffectDefinition *Definition, AActor *Instigator, AActor *Causer);
 
     // Plays a cue on the target through the Mythic ASC multicast path. No-op for an unset tag.
@@ -81,11 +89,10 @@ public:
     static float ResolveApplierPowerMultiplier(const AActor *Instigator);
 
     /**
-     * The combined strength of every active control status of one kind on a target, read from the per-application
-     * ControlMagnitude each carries, returned as a ready-to-multiply factor. Reductions (slow, weaken) stack
-     * multiplicatively and are floored so they can never reach a full stop; bonuses (terrify) stack the same way
-     * upward. When no active application carries a magnitude the pre-band constant is used once, so nothing
-     * regresses before a band is authored. Returns 1.0 when the target carries no status of this kind.
+     * The combined strength of every active control-status handle of one kind on a target. Each handle carries the
+     * exact multiplicative aggregate snapshotted from all of its application rolls. Reductions (Slow, Weaken) are
+     * floored so they can never reach a full stop; bonuses (Terrify) multiply upward. When no authored aggregate is
+     * present, the pre-band constant is used once. Returns 1.0 when the target carries no status of this kind.
      */
     static float GetControlReductionMultiplier(const UAbilitySystemComponent *TargetASC, FGameplayTag StateTag, float FallbackMagnitude);
     static float GetControlBonusMultiplier(const UAbilitySystemComponent *TargetASC, FGameplayTag StateTag, float FallbackMagnitude);
@@ -98,6 +105,21 @@ public:
      * A status with no authored band is playable before it is tuned rather than silently dealing nothing.
      */
     static float RollMagnitudeOrBase(const FRollDefinition &Range, float BaseWhenUnauthored, float Scale, float Roll01);
+
+    /**
+     * Adds one rolled stack to the snapshotted aggregate tick magnitude. Once the authored cap is reached,
+     * reapplication preserves the aggregate so refreshing duration cannot reroll or rewrite existing stacks.
+     */
+    static float ResolveStackedDamageMagnitude(float ExistingAggregate, float NewStackRoll,
+                                               int32 ExistingStackCount, int32 StackLimit);
+
+    /**
+     * Folds one rolled control stack into its equivalent aggregate fraction. This snapshots every roll, so UE's
+     * newest-spec stack replacement cannot make earlier Slow/Weaken/Terrify applications drift with the newest roll.
+     */
+    static float ResolveStackedControlMagnitude(float ExistingAggregate, float NewStackRoll,
+                                                int32 ExistingStackCount, int32 StackLimit,
+                                                EMythicStatusControlOperation Operation);
 
     // Rolls a range, scales it by the applier's multiplier, and never returns a negative.
     static float RollScaledMagnitude(const FRollDefinition &Range, int32 Level, float SourceMultiplier, float Roll01);

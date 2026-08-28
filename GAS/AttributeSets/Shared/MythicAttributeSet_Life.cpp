@@ -5,13 +5,62 @@
 #include "GAS/MythicTags_GAS.h"
 #include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
 #include "GAS/MythicAbilitySystemComponent.h"
+#include "GAS/Feedback/MythicCombatTextTypes.h"
 #include "GAS/Feedback/MythicTags_FeedbackCues.h"
+#include "GAS/Effects/MythicStatusEffectDefinition.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
+#include "Player/MythicPlayerController.h"
 #include "Itemization/InventoryProviderInterface.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
 #include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h"
+
+namespace {
+AMythicPlayerController *ResolveCombatTextPlayerFromActor(AActor *Actor) {
+    APawn *Pawn = nullptr;
+    AController *Controller = nullptr;
+    APlayerState *PlayerState = nullptr;
+    UMythicGameplayEffectContextLibrary::ResolveInstigator(Actor, Pawn, Controller, PlayerState);
+    return Cast<AMythicPlayerController>(Controller);
+}
+
+AMythicPlayerController *ResolveCombatTextPlayer(UAbilitySystemComponent *ASC, AActor *FallbackActor) {
+    if (ASC) {
+        if (AMythicPlayerController *OwnerPC = ResolveCombatTextPlayerFromActor(ASC->GetOwnerActor())) {
+            return OwnerPC;
+        }
+        if (AMythicPlayerController *AvatarPC = ResolveCombatTextPlayerFromActor(ASC->GetAvatarActor())) {
+            return AvatarPC;
+        }
+    }
+    return ResolveCombatTextPlayerFromActor(FallbackActor);
+}
+
+void RouteResolvedCombatText(const FMythicResolvedCombatTextEvent &BaseEvent,
+                             UAbilitySystemComponent *SourceASC,
+                             UAbilitySystemComponent *TargetASC) {
+    AMythicPlayerController *SourcePC = ResolveCombatTextPlayer(SourceASC, BaseEvent.SourceActor);
+    AMythicPlayerController *TargetPC = ResolveCombatTextPlayer(TargetASC, BaseEvent.TargetActor);
+    const bool bSourceIsTargetViewer = SourcePC && SourcePC == TargetPC;
+
+    if (UMythicAttributeSet_Life::ShouldRouteResolvedCombatTextToSource(SourcePC != nullptr,
+                                                                       bSourceIsTargetViewer)) {
+        FMythicResolvedCombatTextEvent OutgoingEvent = BaseEvent;
+        OutgoingEvent.bOutgoingForViewer = true;
+        SourcePC->QueueResolvedCombatText(OutgoingEvent);
+    }
+
+    // A self-authored hit is still damage this viewer received. Route one incoming copy so outgoing-only mode does
+    // not turn fall, survival, or other self damage into damage dealt.
+    if (UMythicAttributeSet_Life::ShouldRouteResolvedCombatTextToTarget(TargetPC != nullptr)) {
+        FMythicResolvedCombatTextEvent IncomingEvent = BaseEvent;
+        IncomingEvent.bOutgoingForViewer = false;
+        TargetPC->QueueResolvedCombatText(IncomingEvent);
+    }
+}
+}
 
 UMythicAttributeSet_Life::UMythicAttributeSet_Life()
     : MaxHealth(100.0f)
@@ -108,10 +157,14 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
             return;
         }
 
-        const float DamageDone = GetDamage();
+        // Damage is a one-way meta attribute. Invalid or negative values fail closed instead of corrupting Health
+        // or turning an accidental sign error into untracked healing.
+        const float RawDamage = GetDamage();
+        const float DamageDone = FMath::IsFinite(RawDamage) ? FMath::Max(0.0f, RawDamage) : 0.0f;
 
         const float NewHealth = FMath::Clamp(GetHealth() - DamageDone, 0.0f, GetMaxHealth());
         SetHealth(NewHealth);
+        const float AppliedHealthDamage = ResolveAppliedHealthDamage(HealthBeforeAttributeChange, NewHealth);
 
         if (ComputeOutOfHealthLatch(GetHealth()) && !bOutOfHealth && !bInDeathPreHook
             && ASC && ASC->IsOwnerActorAuthoritative()) {
@@ -126,9 +179,51 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
         SetDamage(0.0f);
 
         const FMythicGameplayEffectContext *MythicCtx = FMythicGameplayEffectContext::ExtractEffectContext(EffectContext);
-        const float TotalDealt = DamageDone + (MythicCtx ? FMath::Max(0.0f, MythicCtx->GetShieldAbsorbed()) : 0.0f);
+        const float RawShieldAbsorbed = MythicCtx ? MythicCtx->GetShieldAbsorbed() : 0.0f;
+        const float ShieldAbsorbed = ResolveAppliedShieldDamage(RawShieldAbsorbed);
+        const float TotalDealt = DamageDone + ShieldAbsorbed;
 
         if (TotalDealt > 0.0f) {
+            const bool bAuthoritative = ASC && ASC->IsOwnerActorAuthoritative();
+            const UMythicStatusEffectDefinition *StatusDefinition =
+                ResolvePeriodicStatusDefinition(Data.EffectSpec.GetPeriod(), EffectContext);
+            AActor *CombatTextSource = Instigator;
+            if (ASC && StatusDefinition && ASC->GetWorld()
+                && Instigator == ASC->GetWorld()->GetGameState()) {
+                // Only a truly actor-less world status uses the GameState source. Physical hazards own their source
+                // identity; the causer here is therefore optional player-facing attribution for world-authored damage.
+                CombatTextSource = Causer;
+            }
+
+            if (ShouldEmitResolvedCombatText(AppliedHealthDamage, bAuthoritative)) {
+                FMythicResolvedCombatTextEvent CombatText;
+                CombatText.SourceActor = CombatTextSource;
+                CombatText.TargetActor = ASC->GetAvatarActor();
+                CombatText.WorldLocation = CombatText.TargetActor
+                    ? CombatText.TargetActor->GetActorLocation()
+                    : FVector::ZeroVector;
+                CombatText.Magnitude = AppliedHealthDamage;
+                CombatText.StatusDefinition = const_cast<UMythicStatusEffectDefinition *>(StatusDefinition);
+                CombatText.Origin = StatusDefinition
+                    ? EMythicCombatTextOrigin::StatusTick
+                    : (Instigator ? EMythicCombatTextOrigin::DirectDamage
+                                  : EMythicCombatTextOrigin::EnvironmentalDamage);
+                CombatText.bCritical = !StatusDefinition && MythicCtx && MythicCtx->IsCriticalHit();
+                RouteResolvedCombatText(CombatText, InstigatorASC, ASC);
+            }
+
+            if (ShouldEmitResolvedCombatText(ShieldAbsorbed, bAuthoritative)) {
+                FMythicResolvedCombatTextEvent ShieldText;
+                ShieldText.SourceActor = CombatTextSource;
+                ShieldText.TargetActor = ASC->GetAvatarActor();
+                ShieldText.WorldLocation = ShieldText.TargetActor
+                    ? ShieldText.TargetActor->GetActorLocation()
+                    : FVector::ZeroVector;
+                ShieldText.Magnitude = ShieldAbsorbed;
+                ShieldText.Origin = EMythicCombatTextOrigin::ShieldAbsorption;
+                RouteResolvedCombatText(ShieldText, InstigatorASC, ASC);
+            }
+
             const bool bDirectExternalHit =
                 (Data.EffectSpec.GetPeriod() <= 0.0f) && Instigator && (Instigator != ASC->GetOwnerActor());
             if (bDirectExternalHit) {
@@ -155,7 +250,8 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
                                 continue;
                             }
                             for (const FMythicInventorySlotEntry &Slot : Inv->GetAllSlots()) {
-                                if (!Slot.bEquipmentSlot || !Slot.SlottedItemInstance) {
+                                if (!Slot.IsGearSlot()
+                                    || !Slot.SlottedItemInstance) {
                                     continue;
                                 }
                                 if (Slot.SlottedItemInstance->GetFragment<UAttackFragment>()) {
@@ -244,6 +340,38 @@ void UMythicAttributeSet_Life::RefreshOutOfHealthLatch() {
 
 bool UMythicAttributeSet_Life::ComputeOutOfHealthLatch(float NewHealth) {
     return NewHealth <= 0.0f;
+}
+
+float UMythicAttributeSet_Life::ResolveAppliedHealthDamage(const float OldHealth, const float NewHealth) {
+    if (!FMath::IsFinite(OldHealth) || !FMath::IsFinite(NewHealth)) {
+        return 0.0f;
+    }
+    return FMath::Max(0.0f, OldHealth - NewHealth);
+}
+
+float UMythicAttributeSet_Life::ResolveAppliedShieldDamage(const float RawShieldAbsorbed) {
+    return FMath::IsFinite(RawShieldAbsorbed) ? FMath::Max(0.0f, RawShieldAbsorbed) : 0.0f;
+}
+
+bool UMythicAttributeSet_Life::ShouldEmitResolvedCombatText(const float ResolvedMagnitude, const bool bAuthoritative) {
+    return bAuthoritative && FMath::IsFinite(ResolvedMagnitude) && ResolvedMagnitude > 0.0f;
+}
+
+bool UMythicAttributeSet_Life::ShouldRouteResolvedCombatTextToSource(const bool bHasSourceViewer,
+                                                                    const bool bSourceIsTargetViewer) {
+    return bHasSourceViewer && !bSourceIsTargetViewer;
+}
+
+bool UMythicAttributeSet_Life::ShouldRouteResolvedCombatTextToTarget(const bool bHasTargetViewer) {
+    return bHasTargetViewer;
+}
+
+const UMythicStatusEffectDefinition *UMythicAttributeSet_Life::ResolvePeriodicStatusDefinition(
+    const float Period, const FGameplayEffectContextHandle &Context) {
+    if (!FMath::IsFinite(Period) || Period <= 0.0f || !Context.IsValid()) {
+        return nullptr;
+    }
+    return Cast<UMythicStatusEffectDefinition>(Context.GetSourceObject());
 }
 
 EMythicLethalOutcome UMythicAttributeSet_Life::ResolveLethalOutcome(const bool bWouldBeLethal, const bool bCoopDownStateEnabled,

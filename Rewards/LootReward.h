@@ -15,17 +15,15 @@ USTRUCT(BlueprintType)
 struct FLootTableEntry {
     GENERATED_BODY()
 
-    // Soft reference to the class of the item to spawn
+    /** Item definition eligible to be generated when this loot-table row succeeds. */
     UPROPERTY(EditAnywhere)
     UItemDefinition *Item = nullptr;
 
-    // The qty range to spawn, inclusive. (random amount between min and max will be spawned)
-    // If item is not stackable, this will be ignored
+    /** Inclusive stack-size roll for stackable items; ignored by non-stackable item definitions. */
     UPROPERTY(EditAnywhere, meta=(ClampMin="1", ClampMax="100"))
     FInt32Interval StackRange = FInt32Interval(1, 1);
 
-    // Override the drop chance of this item. If greater than 0, player's exp will not affect the drop chance of this item and will use this value instead.
-    // If false, the global drop chance will be used (which is affected by player's Exp in relation to the Item's Rarity).
+    /** Absolute row drop chance in the range 0..1; zero delegates to the rarity-weighted global chance. */
     UPROPERTY(EditAnywhere, meta=(ClampMin="0.0", ClampMax="1.0"))
     float OverrideDropChance = 0.0f;
 };
@@ -35,15 +33,15 @@ class MYTHIC_API UMythicLootTable : public UDataAsset {
     GENERATED_BODY()
 
 public:
-    // The list of items to spawn
+    /** Candidate item rows evaluated when this table is drawn. */
     UPROPERTY(EditAnywhere)
     TArray<FLootTableEntry> Entries;
 
-    // Max number of items to spawn from this table. This does not guarantee that this many items will spawn, it's just the max.
+    /** Maximum successful item rows emitted by one table draw; chance rolls may produce fewer. */
     UPROPERTY(EditAnywhere, meta=(ClampMin="1", ClampMax="100"))
     int32 MaxItems = 1;
 
-    // Chance to spawn items from this table - 0.0 to 1.0 (1.0 will always spawn)
+    /** Probability that this table is drawn, from zero to one. */
     UPROPERTY(EditAnywhere, meta=(ClampMin="0.0", ClampMax="1.0"))
     float DropChance = 0.3f;
 };
@@ -52,18 +50,15 @@ USTRUCT(BlueprintType, Blueprintable)
 struct FLootTableOverride {
     GENERATED_BODY()
 
-    // Array of loot tables to use for this source. For each table, a draw will be made to determine if items from that table will be spawned.
-    // If table(s) are drawn, the items will be randomly selected from the table(s) based on their drop chance.
+    /** Loot tables independently rolled for this source before eligible item rows are selected. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     TArray<UMythicLootTable *> LootTables;
 
-    // If true, each player will get their own separate loot from this source
-    // i.e if a player mines a rock, only one instance of the rock is spawned for all players, once someone loots it, it's gone.
-    // but if this is true, a player mines the rock, and each player gets their own rock to loot, player 1 can loot their rock, and player 2 can loot their rock.
+    /** Whether each eligible player receives a private, independently interactable copy of this source's loot. */
     UPROPERTY(EditAnywhere)
     bool IsPrivate = false;
 
-    // If true, this source will skip the global loot table.
+    /** Whether this source omits the global loot table and rolls only the tables authored above. */
     UPROPERTY(EditAnywhere)
     bool bSkipGlobal = false;
 };
@@ -73,24 +68,19 @@ USTRUCT(BlueprintType, Blueprintable)
 struct FLootRewardContext : public FRewardContext {
     GENERATED_BODY()
 
-    // The inventory in which to place the item. If not specified, the item will be dropped in the drop location instead.
-    // If the inventory is full, the item will drop at the inventory owner's location.
+    /** Optional destination inventory; absent or full inventories cause generated items to become world drops. */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess=true))
     TObjectPtr<UMythicInventoryComponent> PutInInventory = nullptr;
 
-    // The item will be spawned here. If not specified, the item will be spawned at the player's location.
-    // Defaults to the player's location.
-    // ONLY USED IF PutInInventory is not specified.
+    /** World-drop location used when no inventory accepts the item; zero resolves to the player's location. */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess=true))
     FVector SpawnLocation = FVector::ZeroVector;
 
-    // Item level to spawn items at.
+    /** Item level supplied to item generation for every result from this reward. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     int32 ItemLevel = 0;
 
-    // C2 — combat tier of the SOURCE enemy (Normal=1..Boss=5, per GetAITierInt; 0 = unknown/none == Normal, inert).
-    // Escalates drop count / rarity / a boss rarity floor. Defaults to 0 so any caller that doesn't set it (and the
-    // legacy loot path) behaves EXACTLY as before. Set at the kill site via GetAITierInt(SlainNPC->EnemyTier).
+    /** Source enemy tier from 1 (Normal) to 5 (Boss); zero is inert, while higher tiers improve count and rarity. */
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
     int32 EnemyTierInt = 0;
 };
@@ -114,13 +104,11 @@ public:
 
     static bool ResolveEntryDropChance(float OverrideDropChance, int32 RarityIndex, TConstArrayView<float> RarityWeights, float &OutChance);
 
-    // The loot table to use
+    /** Source-specific loot tables and private/global-table policy used by this reward. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loot Reward Context")
     FLootTableOverride OverridenLootSource;
 
-    // Give items from loot table(s)
-    // TO DROP AN ITEM: Do NOT provide an inventory, and optionally provide a location to drop the item at, if no location is provided, player's location will be used.
-    // TO PUT AN ITEM IN AN INVENTORY: Provide an inventory. If inventory is full, inventory owner's location will be used to drop the item.
+    /** Rolls Reward's configured tables and grants results to Context's inventory or world-drop destination. */
     UFUNCTION(BlueprintCallable, Category = "Loot Reward")
     static bool GiveLootReward(ULootReward *Reward, FLootRewardContext Context);
 };

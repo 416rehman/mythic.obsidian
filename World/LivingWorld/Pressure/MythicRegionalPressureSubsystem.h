@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -36,30 +35,20 @@ public:
     void NotifyHuntingKillNear(const FVector &Location);
 
 
-    /** Record ONE completed harvest on the cell at Location: pushes Pressure.Harvest (Amount, or the configured
-     *  HarvestPressurePerGather when Amount <= 0). Server-authoritative (AddPressure self-guards). Call from the owner
-     *  gather-completion one-liner, or from content/BP. */
-    UFUNCTION(BlueprintCallable, Category = "Mythic|Harvest Pressure")
+    /** Records exactly one native authoritative completion; Blueprint cannot emit economy pressure. */
     void ServerRegisterHarvest(const FVector &Location, float Amount = 0.0f);
 
-    /** Yield multiplier for a tier-N node at Location after commons depletion (1.0 when disabled / pressure 0 / inert
-     *  weights; drops toward the floor as the cell is hammered). */
-    UFUNCTION(BlueprintCallable, Category = "Mythic|Harvest Pressure")
-    float QueryHarvestYieldMultiplier(const FVector &Location, int32 ResourceTier = 0);
+    /** Returns only the regional pressure multiplier; definition-authored material quantity remains the sole base. */
+    float QueryHarvestYieldMultiplier(const FVector &Location);
 
-    /** Respawn delay for a tier-N node at Location after commons depletion (baseline when disabled / pressure 0 / inert
-     *  weights; lengthens as the cell is hammered). */
-    UFUNCTION(BlueprintCallable, Category = "Mythic|Harvest Pressure")
-    float ScaledHarvestRespawnDelay(const FVector &Location, float BaseDelay, int32 ResourceTier = 0);
+    /** Applies only regional pressure to a definition-authored base delay; no hardcoded resource-tier curve exists. */
+    float ScaledHarvestRespawnDelay(const FVector &Location, float BaseDelay);
 
-    /** Is regrowth GATED at Location by commons depletion? (false when disabled / pressure below the threshold). A
-     *  ruined grove stays gone until it lies fallow enough to decay below RespawnGateThreshold. */
-    UFUNCTION(BlueprintCallable, Category = "Mythic|Harvest Pressure")
+    /** Returns whether regional depletion currently gates native regrowth at Location. */
     bool IsHarvestRespawnGated(const FVector &Location);
 
     /** Degrade a rolled produced-quality tier by the cell's commons depletion (Pristine→Fine→Common, never below
      *  Common). Returns RolledTier unchanged when disabled / pressure 0 / inert quality weight. */
-    UFUNCTION(BlueprintCallable, Category = "Mythic|Harvest Pressure")
     EMythicYieldQuality DepleteHarvestQuality(const FVector &Location, EMythicYieldQuality RolledTier);
 
     int32 GetLiveSourceCount() const;

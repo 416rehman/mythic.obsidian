@@ -17,11 +17,11 @@ USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicStatContribution {
     GENERATED_BODY()
 
-    // The primary stat read from the character, e.g. Power or Strength.
+    /** Primary GAS stat read from the character, such as Power or Strength. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Contribution")
     FGameplayAttribute SourceStat;
 
-    // The derived value it feeds, e.g. BaseWeaponDamage or MaxHealth.
+    /** Derived GAS attribute this row increases, such as Base Weapon Damage or Maximum Health. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Contribution")
     FGameplayAttribute TargetAttribute;
 
@@ -48,10 +48,12 @@ struct MYTHIC_API FMythicStatContribution {
     float CeilingBonus = 0.0f;
 };
 
+/** Complete data-authored set of primary-to-derived stat contribution rows evaluated as one configuration. */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicStatContributionConfig {
     GENERATED_BODY()
 
+    /** Authored source-to-target scaling rows evaluated together for derived-stat calculations. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Contribution")
     TArray<FMythicStatContribution> Contributions;
 

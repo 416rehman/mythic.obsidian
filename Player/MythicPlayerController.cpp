@@ -38,6 +38,7 @@
 #include "AI/Cognition/CognitiveBrainComponent.h"
 #include "AI/Party/PartySubsystem.h"
 #include "UI/MythicDamageNumberSubsystem.h"
+#include "World/Harvesting/MythicHarvestToolTypeDefinition.h"
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Inventory/Fragments/Passive/YieldQualityFragment.h"
 #include "Itemization/Inventory/MythicCurrency.h"
@@ -71,6 +72,7 @@
 #include "World/LivingWorld/Morality/MoralSignature.h"
 #include "World/LivingWorld/MythicTags_LivingWorld.h"
 #include "Player/MythicFactionStandingComponent.h"
+#include "World/Harvesting/MythicHarvestFocusComponent.h"
 
 namespace {
 FName MythicRarityTagName(EItemRarity Rarity) {
@@ -121,6 +123,8 @@ AMythicPlayerController::AMythicPlayerController() {
     EnvironmentHazard = CreateDefaultSubobject<UMythicEnvironmentHazardComponent>(TEXT("EnvironmentHazard"));
 
     ChronicleRelay = CreateDefaultSubobject<UMythicChronicleRelayComponent>(TEXT("ChronicleRelay"));
+
+    HarvestFocusComponent = CreateDefaultSubobject<UMythicHarvestFocusComponent>(TEXT("HarvestFocusComponent"));
 }
 
 
@@ -145,6 +149,7 @@ UMythicInventoryComponent *AMythicPlayerController::GetInventoryForItemType(cons
 
 void AMythicPlayerController::OnPossess(APawn *InPawn) {
     Super::OnPossess(InPawn);
+    LastPresentedHarvestFeedbackSequence = 0;
 
     if (AMythicPlayerState *PS = GetPlayerState<AMythicPlayerState>()) {
         if (UMythicPlayerRegistrySubsystem *Registry = GetWorld() ? GetWorld()->GetSubsystem<UMythicPlayerRegistrySubsystem>() : nullptr) {
@@ -154,6 +159,9 @@ void AMythicPlayerController::OnPossess(APawn *InPawn) {
 
     if (this->IsLocalPlayerController()) {
         OnPossessedOnClient();
+        if (HarvestFocusComponent) {
+            HarvestFocusComponent->RefreshLocalFocus();
+        }
     }
 }
 
@@ -163,12 +171,15 @@ void AMythicPlayerController::OnUnPossess() {
     }
 
     Super::OnUnPossess();
+    if (HarvestFocusComponent) {
+        HarvestFocusComponent->RefreshLocalFocus();
+    }
 }
 
 void AMythicPlayerController::OnRep_PlayerState() {
     Super::OnRep_PlayerState();
 
-
+    LastPresentedHarvestFeedbackSequence = 0;
     OnPossessedOnClient();
 }
 
@@ -657,7 +668,7 @@ void AMythicPlayerController::ServerSellAllJunk_Implementation(AMythicVendor *Ve
             const bool bJunk = MythicLootFilter::IsJunk(Item->IsMarkedJunk(),
                                                         static_cast<int32>(Def->Rarity.GetValue()),
                                                         MythicLootFilter::DefaultMaxJunkRarity,
-                                                        Def->Value, bIsCurrency, Entry.bEquipmentSlot, bCanTake);
+                                                        Def->Value, bIsCurrency, Entry.IsGearSlot(), bCanTake);
             if (!bJunk) {
                 continue;
             }
@@ -1162,10 +1173,69 @@ void AMythicPlayerController::ServerIssueCompanionOrder_Implementation(AMythicNP
     Party->IssueCompanionOrder(PlayerKey, Companion, Order, OrderTarget);
 }
 
-void AMythicPlayerController::ClientShowGatherProgress_Implementation(FVector Location, int32 HitsRemaining) {
-}
+void AMythicPlayerController::ClientReceiveHarvestFeedback_Implementation(
+    const FMythicHarvestClientFeedback &Feedback) {
+    // Every authority response carries a positive sequence, allowing this unreliable
+    // presentation stream to discard duplicates and reordered older feedback.
+    if (Feedback.ServerSequence > 0) {
+        if (Feedback.ServerSequence <= LastPresentedHarvestFeedbackSequence) {
+            return;
+        }
+        LastPresentedHarvestFeedbackSequence = Feedback.ServerSequence;
+    }
+    OnHarvestFeedback(Feedback);
+    if (Feedback.Outcome != EMythicHarvestOutcome::Rejected) {
+        return;
+    }
 
-void AMythicPlayerController::ClientShowGatherDepleted_Implementation(FVector Location) {
+    const FText ToolName = Feedback.RequiredToolType
+        ? Feedback.RequiredToolType->DisplayName
+        : NSLOCTEXT("MythicHarvest", "GenericTool", "the proper tool");
+    FText Message;
+    switch (Feedback.RejectReason) {
+        case EMythicHarvestRejectReason::NoTool:
+        case EMythicHarvestRejectReason::WrongTool:
+            Message = FText::Format(
+                NSLOCTEXT("MythicHarvest", "RequiresTool", "Requires {0}"),
+                ToolName);
+            break;
+        case EMythicHarvestRejectReason::ToolTierTooLow:
+            Message = FText::Format(
+                NSLOCTEXT("MythicHarvest", "RequiresToolTier",
+                          "Requires {0} (Tier {1})"),
+                ToolName, FText::AsNumber(Feedback.RequiredToolTier));
+            break;
+        case EMythicHarvestRejectReason::ToolBroken:
+            Message = FText::Format(
+                NSLOCTEXT("MythicHarvest", "ToolBroken", "{0} is broken"),
+                ToolName);
+            break;
+        case EMythicHarvestRejectReason::NodeDepleted:
+            Message = NSLOCTEXT("MythicHarvest", "NodeDepleted",
+                                "This resource is regrowing");
+            break;
+        case EMythicHarvestRejectReason::ClaimedByOther:
+            Message = NSLOCTEXT("MythicHarvest", "ClaimedByOther",
+                                "Another player is harvesting this resource");
+            break;
+        case EMythicHarvestRejectReason::OutOfRange:
+            Message = NSLOCTEXT("MythicHarvest", "OutOfRange",
+                                "Move closer to harvest");
+            break;
+        case EMythicHarvestRejectReason::NoLineOfSight:
+            Message = NSLOCTEXT("MythicHarvest", "NoLineOfSight",
+                                "The resource is obstructed");
+            break;
+        default:
+            return;
+    }
+
+    FMythicHudNotice Notice;
+    Notice.Kind = EMythicNoticeKind::Warning;
+    Notice.Text = Message;
+    Notice.Accent = FLinearColor(0.95f, 0.68f, 0.22f);
+    Notice.StackKey = FName(TEXT("HarvestRequirement"));
+    RaiseHudNotice(Notice);
 }
 
 void AMythicPlayerController::ClientNotifyProficiencyLevel_Implementation(const FText &ProfName, int32 NewLevel, const FText &MilestoneName) {
@@ -1327,8 +1397,8 @@ void AMythicPlayerController::NotifyTalkedToNPC(const FGameplayTag &NpcTag) {
     ASC->HandleGameplayEvent(GAS_EVENT_TALKED_TO_NPC, &Payload);
 }
 
-void AMythicPlayerController::ClientShowShieldAbsorbed_Implementation(int32 Absorbed, bool bBroke) {
-    const APawn *AvatarPawn = GetPawn();
+void AMythicPlayerController::ClientShowShieldBroken_Implementation() {
+    APawn *AvatarPawn = GetPawn();
     if (!AvatarPawn) {
         return;
     }
@@ -1338,12 +1408,8 @@ void AMythicPlayerController::ClientShowShieldAbsorbed_Implementation(int32 Abso
     }
     if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
         const FVector Location = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 70.0f);
-        DamageNumbers->AddCombatText(Location, FString::Printf(TEXT("%d"), Absorbed),
-                                             FLinearColor(0.4f, 0.7f, 1.0f), 1.0f);
-        if (bBroke) {
-            DamageNumbers->AddCombatText(Location + FVector(0.0f, 0.0f, 40.0f), TEXT("Shield Broken!"),
-                                                 FLinearColor(0.6f, 0.9f, 1.0f), 1.5f);
-        }
+        DamageNumbers->AddCombatText(Location + FVector(0.0f, 0.0f, 40.0f), TEXT("Shield Broken!"),
+                                     FLinearColor(0.6f, 0.9f, 1.0f), 1.5f);
     }
 }
 
@@ -1358,6 +1424,48 @@ void AMythicPlayerController::ClientShowDodge_Implementation() {
     }
     if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
         DamageNumbers->AddDodgeNumber(AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 90.0f));
+    }
+}
+
+void AMythicPlayerController::QueueResolvedCombatText(const FMythicResolvedCombatTextEvent &Event) {
+    if (!HasAuthority()) {
+        return;
+    }
+
+    PendingResolvedCombatText.Add(Event);
+    if (PendingResolvedCombatText.Num() >= MaxResolvedCombatTextBatchSize) {
+        FlushResolvedCombatTextQueue();
+        return;
+    }
+
+    if (!ResolvedCombatTextFlushTimer.IsValid()) {
+        ResolvedCombatTextFlushTimer = GetWorldTimerManager().SetTimerForNextTick(
+            this, &AMythicPlayerController::FlushResolvedCombatTextQueue);
+    }
+}
+
+void AMythicPlayerController::FlushResolvedCombatTextQueue() {
+    if (ResolvedCombatTextFlushTimer.IsValid()) {
+        GetWorldTimerManager().ClearTimer(ResolvedCombatTextFlushTimer);
+    }
+    ResolvedCombatTextFlushTimer.Invalidate();
+    if (PendingResolvedCombatText.IsEmpty()) {
+        return;
+    }
+
+    TArray<FMythicResolvedCombatTextEvent> Batch = MoveTemp(PendingResolvedCombatText);
+    PendingResolvedCombatText.Reset();
+    ClientReceiveResolvedCombatTextBatch(Batch);
+}
+
+void AMythicPlayerController::ClientReceiveResolvedCombatTextBatch_Implementation(
+    const TArray<FMythicResolvedCombatTextEvent> &Events) {
+    if (UWorld *World = GetWorld()) {
+        if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+            for (const FMythicResolvedCombatTextEvent &Event : Events) {
+                DamageNumbers->AddResolvedCombatText(Event);
+            }
+        }
     }
 }
 
@@ -1656,9 +1764,11 @@ void AMythicPlayerController::ServerRerollItemAffixes_Implementation(UMythicItem
                                                        Settings->RerollCostPerLevelFraction, Settings->RerollCostPerRarityFraction);
     }
 
+    TArray<UMythicInventoryComponent *> CurrencyInventories;
     if (RerollCost > 0) {
         int32 Wallet = 0;
-        for (const UMythicInventoryComponent *Inv : GetAllInventoryComponents()) {
+        CurrencyInventories = GetAllInventoryComponents();
+        for (const UMythicInventoryComponent *Inv : CurrencyInventories) {
             if (Inv) {
                 Wallet += Inv->GetTotalCurrency();
             }
@@ -1667,8 +1777,17 @@ void AMythicPlayerController::ServerRerollItemAffixes_Implementation(UMythicItem
             ClientNotifyTradeResult(EMythicTradeResult::InsufficientFunds);
             return;
         }
+    }
+
+    // The affix component publishes snapshots only after its complete equipped-stat transaction succeeds. Charge
+    // after that commit so invalid data, a stale closure, or a GAS reconciliation failure can never consume currency.
+    if (!const_cast<UAffixesFragment *>(Affixes)->RerollUnlockedAffixes(Item->GetItemLevel())) {
+        return;
+    }
+
+    if (RerollCost > 0) {
         int32 Remaining = RerollCost;
-        for (UMythicInventoryComponent *Inv : GetAllInventoryComponents()) {
+        for (UMythicInventoryComponent *Inv : CurrencyInventories) {
             if (Remaining <= 0) {
                 break;
             }
@@ -1676,9 +1795,10 @@ void AMythicPlayerController::ServerRerollItemAffixes_Implementation(UMythicItem
                 Remaining -= Inv->SpendCurrency(Remaining);
             }
         }
+        ensureAlwaysMsgf(Remaining == 0,
+                         TEXT("Reroll committed but the prevalidated currency debit was short by %d."),
+                         Remaining);
     }
-
-    const_cast<UAffixesFragment *>(Affixes)->RerollUnlockedAffixes(Item->GetItemLevel());
 }
 
 bool AMythicPlayerController::IsWithinStationRange(float DistSq, float RangeSq) {
@@ -1703,6 +1823,9 @@ void AMythicPlayerController::ServerSetItemAffixLocked_Implementation(UMythicIte
 
 void AMythicPlayerController::SetupInputComponent() {
     Super::SetupInputComponent();
+    if (HarvestFocusComponent) {
+        HarvestFocusComponent->InitializeLocalInput(InputComponent);
+    }
 }
 
 void AMythicPlayerController::PostProcessInput(const float DeltaTime, const bool bGamePaused) {

@@ -20,6 +20,8 @@ enum class ESortMode : uint8 {
 
 class UInventoryVM;
 class AMythicWorldItem;
+class UMythicAffixApplicationComponent;
+struct FRolledAffix;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnActiveSlotChanged, int32, NewIndex, int32, OldIndex);
 
@@ -38,8 +40,9 @@ struct FMythicInventorySlotEntry : public FFastArraySerializerItem {
     UPROPERTY()
     TObjectPtr<UMythicItemInstance> SlottedItemInstance = nullptr;
 
+    /** Replicated profile-authored slot domain; current profile data initializes it and save payloads never override it. */
     UPROPERTY()
-    bool bEquipmentSlot = false;
+    EMythicInventorySlotDomain SlotDomain = EMythicInventorySlotDomain::Carried;
 
     UPROPERTY()
     FGameplayTag GroupTag;
@@ -61,6 +64,9 @@ struct FMythicInventorySlotEntry : public FFastArraySerializerItem {
 
     UPROPERTY()
     TObjectPtr<UInventorySlotDefinition> SlotDefinition = nullptr;
+
+    /** True for gear slots - armor, accessories, weapon, tools - whose item is active solely by slot membership. */
+    bool IsGearSlot() const { return SlotDomain == EMythicInventorySlotDomain::Equipment; }
 
     void ClientUpdateActiveState(UMythicInventoryComponent* Owner);
     void ServerUpdateActiveState();
@@ -125,9 +131,11 @@ struct TStructOpsTypeTraits<FMythicInventoryFastArray> : TStructOpsTypeTraitsBas
 UCLASS(Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class MYTHIC_API UMythicInventoryComponent : public UActorComponent {
 protected:
+    /** Local presentation model built for this inventory on clients that render it. */
     UPROPERTY(Transient, BlueprintReadOnly, Category = "ViewModel")
     UInventoryVM *ViewModel = nullptr;
 
+    /** View-model collection key used when publishing this inventory to the UI layer. */
     UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category = "ViewModel")
     FName ViewModelIdentifier = FName();
 
@@ -136,6 +144,7 @@ public:
     UFUNCTION(BlueprintCallable, Category="ViewModel")
     void SetupLocalViewModel();
 
+    /** Broadcast locally after the inventory view model has been created or refreshed. */
     UPROPERTY(BlueprintAssignable, Category = "ViewModel")
     FOnViewModelCreated OnViewModelCreated;
 protected:
@@ -213,6 +222,11 @@ public:
 
     bool SetItemInSlotInternal(int32 SlotIndex, UMythicItemInstance *ItemInstance);
 
+    /** Applies a staged base-affix snapshot set to GAS while the equipped item's replicated data is still unchanged. */
+    bool ReconcileEquippedAffixSnapshotMutationTransactional(
+        UMythicItemInstance *ItemInstance,
+        TConstArrayView<FRolledAffix> ProposedSnapshots) const;
+
     // Add to inventory. Will stack if possible, otherwise will add to any available slot, and if no room is available, will drop the item to the ground. Returns pointer to the dropped item.
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly)
     AMythicWorldItem *AddItem(UMythicItemInstance *ItemInstance, AController *TargetRecipient);
@@ -260,15 +274,19 @@ public:
 
 
     /** Delegates */
+    /** Broadcast when the authoritative contents or presentation state of one slot changes. */
     UPROPERTY(BlueprintAssignable, Category = "Slots")
     FOnSlotUpdated OnSlotUpdated;
 
+    /** Broadcast after the inventory gains or loses addressable slots. */
     UPROPERTY(BlueprintAssignable, Category = "Slots")
     FOnInventorySizeChanged OnInventorySizeChanged;
 
+    /** Broadcast after an inventory item is successfully transferred into a world pickup. */
     UPROPERTY(BlueprintAssignable, Category = "Slots")
     FOnItemDropped OnItemDropped;
 
+    /** Returns the local presentation model created for this inventory, or null before setup. */
     UFUNCTION(BlueprintPure, Category = "ViewModel")
     UInventoryVM *GetViewModel() const;
 
@@ -293,6 +311,9 @@ public:
     UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
     void ServerSwapSlots(int32 SlotA, int32 SlotB);
 
+    /** Authoritative result-bearing implementation used by the RPC and tests/callers that need commit status. */
+    bool TrySwapSlotsTransactional(int32 SlotA, int32 SlotB);
+
     // move item from this inventory to a target inventory using AddToAnySlot
     UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
     void ServerQuickMoveToInventory(int32 SourceSlotIndex, UMythicInventoryComponent *TargetInventory);
@@ -313,9 +334,20 @@ public:
     UFUNCTION(BlueprintPure, Category = "Slots")
     bool CanUseItemInSlot(int32 SlotIndex) const;
 
-    void NotifyItemInstanceUpdated(int32 SlotIndex);
+    void NotifyItemInstanceUpdated(int32 SlotIndex, bool bReconcileAffixes = true);
 
 protected:
+    struct FStagedSlotMutation {
+        UMythicInventoryComponent *Inventory = nullptr;
+        int32 SlotIndex = INDEX_NONE;
+        UMythicItemInstance *ExpectedItem = nullptr;
+        UMythicItemInstance *ProposedItem = nullptr;
+    };
+
+    static bool CommitSlotMutationsTransactional(TConstArrayView<FStagedSlotMutation> Mutations);
+    static bool ValidateFinalSlotLayout(TConstArrayView<FStagedSlotMutation> Mutations);
+    UMythicAffixApplicationComponent *ResolveAffixApplicationComponent() const;
+
     bool DestroySlot(int32 SlotIndex);
 
     void DestroyAllSlots();

@@ -2,7 +2,6 @@
 #include "World/LivingWorld/Pressure/MythicRegionalPressureSubsystem.h"
 
 #include "World/LivingWorld/Pressure/MythicTags_Pressure.h"
-#include "World/Gathering/MythicGatherRules.h"
 #include "World/Farming/MythicFarmPlot.h"
 #include "World/Farming/MythicTags_Farming.h"
 #include "World/Camping/MythicInfluenceSourceComponent.h"
@@ -171,20 +170,23 @@ void UMythicRegionalPressureSubsystem::ServerRegisterHarvest(const FVector &Loca
     }
 }
 
-float UMythicRegionalPressureSubsystem::QueryHarvestYieldMultiplier(const FVector &Location, int32 ResourceTier) {
+float UMythicRegionalPressureSubsystem::QueryHarvestYieldMultiplier(const FVector &Location) {
     if (!bHarvestPressureEnabled) {
-        return FMythicGatherRules::TierYieldMultiplier(ResourceTier);
+        return 1.0f;
     }
     const float Pressure = QueryPressure(Location, TAG_Pressure_Harvest);
-    return FMythicGatherRules::DepletedYieldMultiplier(ResourceTier, Pressure, HarvestConfig);
+    return FMythicHarvestPressureRules::DepletionYieldMultiplier(Pressure, HarvestConfig);
 }
 
-float UMythicRegionalPressureSubsystem::ScaledHarvestRespawnDelay(const FVector &Location, float BaseDelay, int32 ResourceTier) {
+float UMythicRegionalPressureSubsystem::ScaledHarvestRespawnDelay(const FVector &Location, float BaseDelay) {
+    if (BaseDelay <= 0.0f) {
+        return BaseDelay;
+    }
     if (!bHarvestPressureEnabled) {
-        return FMythicGatherRules::ScaledRespawnDelay(BaseDelay, ResourceTier);
+        return BaseDelay;
     }
     const float Pressure = QueryPressure(Location, TAG_Pressure_Harvest);
-    return FMythicGatherRules::DepletedRespawnDelay(BaseDelay, ResourceTier, Pressure, HarvestConfig);
+    return BaseDelay * FMythicHarvestPressureRules::RespawnDelayMultiplier(Pressure, HarvestConfig);
 }
 
 bool UMythicRegionalPressureSubsystem::IsHarvestRespawnGated(const FVector &Location) {
@@ -192,7 +194,7 @@ bool UMythicRegionalPressureSubsystem::IsHarvestRespawnGated(const FVector &Loca
         return false;
     }
     const float Pressure = QueryPressure(Location, TAG_Pressure_Harvest);
-    return FMythicGatherRules::IsRespawnGated(Pressure, HarvestConfig);
+    return FMythicHarvestPressureRules::IsRespawnGated(Pressure, HarvestConfig.RespawnGateThreshold);
 }
 
 EMythicYieldQuality UMythicRegionalPressureSubsystem::DepleteHarvestQuality(const FVector &Location, EMythicYieldQuality RolledTier) {

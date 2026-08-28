@@ -23,6 +23,9 @@
 #include "World/LivingWorld/Acquaintance/MythicAcquaintanceComponent.h"
 #include "World/LivingWorld/Chronicle/MythicDossierComponent.h"
 #include "World/Trading/MythicTradeContractComponent.h"
+#include "Itemization/Affixes/MythicAffixApplicationComponent.h"
+#include "World/Harvesting/MythicHarvestReceiptLedgerComponent.h"
+#include "World/Harvesting/MythicHarvestRewardEscrowComponent.h"
 #include "MythicPlayerRegistrySubsystem.h"
 #include "Player/MythicPlayerController.h"
 #include "Engine/World.h"
@@ -33,6 +36,9 @@ AMythicPlayerState::AMythicPlayerState() {
     MythicAbilitySystemComponent->SetIsReplicated(true);
     MythicAbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
     UE_LOG(LogTemp, Verbose, TEXT("MythicAbilitySystemComponent %s created"), *MythicAbilitySystemComponent->GetName());
+
+    AffixApplicationComponent =
+        CreateDefaultSubobject<UMythicAffixApplicationComponent>(TEXT("AffixApplicationComponent"));
 
     SetNetUpdateFrequency(30);
 
@@ -76,6 +82,13 @@ AMythicPlayerState::AMythicPlayerState() {
     Dossier = CreateDefaultSubobject<UMythicDossierComponent>(TEXT("Dossier"));
 
     TradeContracts = CreateDefaultSubobject<UMythicTradeContractComponent>(TEXT("TradeContracts"));
+
+    HarvestReceiptLedger =
+        CreateDefaultSubobject<UMythicHarvestReceiptLedgerComponent>(
+            TEXT("HarvestReceiptLedger"));
+    HarvestRewardEscrow =
+        CreateDefaultSubobject<UMythicHarvestRewardEscrowComponent>(
+            TEXT("HarvestRewardEscrow"));
 }
 
 UAbilitySystemComponent *AMythicPlayerState::GetAbilitySystemComponent() const {

@@ -145,35 +145,36 @@ void UMythicSocketRowWidget::RefreshWells() {
         if (!Well.Root) {
             continue;
         }
-        if (!Sockets->Sockets.IsValidIndex(i)) {
+        if (i < 0 || i >= Sockets->GetSocketCount()) {
             Well.Root->SetVisibility(ESlateVisibility::Collapsed);
             Well.Proxy->SocketIndex = INDEX_NONE;
             continue;
         }
 
-        const FMythicSocketSlot &SocketSlot = Sockets->Sockets[i];
-        const bool bFits = Gems.ContainsByPredicate([&SocketSlot](UMythicItemInstance *Gem) {
-            return FMythicSocketMath::IsGemCompatible(UMythicGemPickerWidget::GetGemType(Gem), SocketSlot.SocketColor);
+        const FGameplayTag SocketColor = Sockets->GetSocketColor(i);
+        const bool bFilled = Sockets->IsSocketFilled(i);
+        const bool bFits = Gems.ContainsByPredicate([SocketColor](UMythicItemInstance *Gem) {
+            return FMythicSocketMath::IsGemCompatible(UMythicGemPickerWidget::GetGemType(Gem), SocketColor);
         });
-        const bool bCanFill = !SocketSlot.bFilled && bFits && GemPicker != nullptr;
+        const bool bCanFill = !bFilled && bFits && GemPicker != nullptr;
 
         // Three states a player can tell apart at a glance: a filled well, an empty one they can fill, and
         // one nothing they carry can fill.
         if (Well.Plate && Kit) {
-            const EMythicUIState PlateState = SocketSlot.bFilled ? EMythicUIState::Selected
-                                              : bCanFill         ? EMythicUIState::Normal
-                                                                 : EMythicUIState::Disabled;
+            const EMythicUIState PlateState = bFilled ? EMythicUIState::Selected
+                                              : bCanFill ? EMythicUIState::Normal
+                                                         : EMythicUIState::Disabled;
             Well.Plate->SetBrush(Kit->MakeBrush(WellComponentId, PlateState, WellSize));
         }
 
-        const FGameplayTag MarkTag = SocketSlot.bFilled ? SocketSlot.SocketedGemType : SocketSlot.SocketColor;
+        const FGameplayTag MarkTag = bFilled ? Sockets->GetSocketedGemType(i) : SocketColor;
         const FMythicGemMark *Entry = MarkTag.IsValid() ? FindMark(MarkTag) : nullptr;
         UTexture2D *Icon = Entry ? Entry->Mark.LoadSynchronous() : nullptr;
         if (Well.Mark) {
             if (Icon) {
                 Well.Mark->SetBrushFromTexture(Icon, true);
                 FLinearColor Tint = Entry->Colour;
-                Tint.A *= SocketSlot.bFilled ? 1.0f : RestrictedMarkOpacity;
+                Tint.A *= bFilled ? 1.0f : RestrictedMarkOpacity;
                 Well.Mark->SetColorAndOpacity(Tint);
                 Well.Mark->SetVisibility(ESlateVisibility::HitTestInvisible);
             }
@@ -187,7 +188,7 @@ void UMythicSocketRowWidget::RefreshWells() {
         // HitTestInvisible drops the hit area with it; the fillable case leaves the hit to that one child.
         Well.Root->SetVisibility(bCanFill ? ESlateVisibility::SelfHitTestInvisible
                                           : ESlateVisibility::HitTestInvisible);
-        Well.Root->SetRenderOpacity(bCanFill || SocketSlot.bFilled ? 1.0f : InertWellOpacity);
+        Well.Root->SetRenderOpacity(bCanFill || bFilled ? 1.0f : InertWellOpacity);
     }
 
     const FText Trailing = FText::Format(NSLOCTEXT("Mythic", "SocketRowCount", "{0} of {1} set"),
@@ -208,7 +209,8 @@ void UMythicSocketRowWidget::OpenPickerFor(int32 SocketIndex) {
     }
 
     const USocketsFragment *Sockets = Item->GetFragment<USocketsFragment>();
-    if (!Sockets || !Sockets->Sockets.IsValidIndex(SocketIndex) || Sockets->Sockets[SocketIndex].bFilled) {
+    if (!Sockets || SocketIndex < 0 || SocketIndex >= Sockets->GetSocketCount()
+        || Sockets->IsSocketFilled(SocketIndex)) {
         return;
     }
 

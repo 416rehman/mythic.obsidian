@@ -4,7 +4,6 @@
 #include "Rewards/RewardBase.h"
 #include "Destructible.generated.h"
 
-class UMythicResourceManagerComponent;
 UINTERFACE(NotBlueprintable, MinimalAPI)
 class UDestructible : public UInterface {
     GENERATED_BODY()

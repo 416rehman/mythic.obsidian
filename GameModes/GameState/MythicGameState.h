@@ -5,16 +5,39 @@
 #include "AbilitySystemInterface.h"
 #include "ModularGameState.h"
 #include "GAS/MythicAbilitySystemComponent.h"
-#include "Resources/MythicResourceManagerComponent.h"
+#include "World/Harvesting/MythicHarvestReplicationTypes.h"
 #include "MythicGameState.generated.h"
 
-struct FTrackedDestructibleDataArray;
-class UMythicResourceManagerComponent;
 class URewardManager;
+class UMythicHarvestWorldSubsystem;
 class UWorldTierAttributes;
 UCLASS(Config = Game, Abstract, Blueprintable, BlueprintType)
 class MYTHIC_API AMythicGameState : public AGameStateBase, public IAbilitySystemInterface {
     GENERATED_BODY()
+
+    friend class UMythicHarvestWorldSubsystem;
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FMythicHarvestPresentationStreamRestoreTest;
+#endif
+
+    /**
+     * Always-relevant coordinator for one opaque client harvest-presentation stream.
+     * It contains no destroyed-node state and is deliberately unrelated to the authority-only durable WorldEpoch.
+     */
+    UPROPERTY(ReplicatedUsing = OnRep_HarvestPresentationStreamToken)
+    FMythicHarvestPresentationStreamToken HarvestPresentationStreamToken;
+
+    /** Activates a received presentation stream only through the client harvest subsystem's reset/replay barrier. */
+    UFUNCTION()
+    void OnRep_HarvestPresentationStreamToken();
+
+    /** Returns whether authority can publish this same or strictly newer token without stream regression. */
+    bool CanSetHarvestPresentationStreamToken(
+        const FMythicHarvestPresentationStreamToken &Token) const;
+
+    /** Publishes an opaque stream token from the sole authority harvest subsystem and forces a GameState update. */
+    bool SetHarvestPresentationStreamToken(
+        const FMythicHarvestPresentationStreamToken &Token);
 
     UPROPERTY()
     bool IsSessionJoinTimeInitialized = false;
@@ -22,23 +45,22 @@ class MYTHIC_API AMythicGameState : public AGameStateBase, public IAbilitySystem
     virtual void OnRep_ReplicatedWorldTimeSecondsDouble() override;
 
 protected:
-    // The ability system component subobject for game-wide things (primarily gameplay cues)
+    /** GameState-owned replicated ASC for world-wide effects and cues; null is invalid after initialization. */
     UPROPERTY(Replicated, VisibleAnywhere, Category = "Mythic")
     TObjectPtr<UMythicAbilitySystemComponent> AbilitySystemComponent;
 
-    // Resource Manager Component - Used to track instanced static mesh based resources
-    UPROPERTY(Blueprintable, BlueprintReadOnly, Replicated, VisibleAnywhere, Category = "Mythic")
-    TObjectPtr<UMythicResourceManagerComponent> ResourceManagerComponent;
-
-    // Array of World Attributes Initialization Effects - Index 0 is the lowest tier, index 1 is the next tier, etc.
+    /** Authored world-tier initialization effect; an unset class disables tier attribute initialization. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic")
     TSubclassOf<UGameplayEffect> WorldTierAttributesInitializationEffect;
 
-    // Handle to the currently active World Tier Attributes Initialization Effect
+    /**
+     * Runtime handle for the authority-owned world-tier initialization effect; Blueprint may inspect it read-only,
+     * an invalid handle means no tier effect is active, and the value has no units.
+     */
     UPROPERTY(BlueprintReadOnly)
     FActiveGameplayEffectHandle ActiveWorldTierInitEffectHandle;
 public:
-    // raw armor -> incoming-damage reduction fraction [0,1], used by the damage application execution
+    /** Authored raw-armor mitigation curve used by both damage execution and UI; output units are a [0,1] fraction. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     FCurveTableRowHandle ArmorMitigationCurveRowHandle;
 
@@ -49,32 +71,35 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Combat", meta = (WorldContext = "WorldContextObject"))
     static float EvaluateArmorMitigation(const UObject *WorldContextObject, float Armor);
 
-    // post-mitigation damage floor: high armor can never reduce a non-zero hit below this (keeps targets killable)
+    /** Authored post-mitigation floor for nonzero hits; negative values are invalid and units are damage points. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float MinChipDamage = 1.0f;
 
-    // status-tag damage modifiers, consumed by the damage application execution pre-mitigation
+    /** Authored pre-mitigation Rage damage bonus; units are an additive fractional multiplier. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float RageDamageBonus = 0.25f;
 
+    /** Authored pre-mitigation Weakened damage penalty; units are an additive fractional multiplier. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float WeakenedDamagePenalty = 0.25f;
 
+    /** Authored pre-mitigation Terrified damage bonus; units are an additive fractional multiplier. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float TerrifiedDamageBonus = 0.25f;
 
+    /** Authored pre-mitigation Fortify damage reduction; units are an additive fractional multiplier. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float FortifyDamageReduction = 0.25f;
 
-    // bonus proficiency XP fraction while GAS.Buff.Enlighten is active, applied at the proficiency XP grant path
+    /** Authored Enlighten proficiency-XP bonus; units are an additive fractional multiplier. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float EnlightenProficiencyBonus = 0.5f;
 
-    // Bounds on the attack montage play rate once AttackSpeed is applied. The floor keeps a stacked slow from
-    // stalling a montage, which never finishes and leaves the ability running.
+    /** Authored lower bound for attack montage play rate; positive values are unitless rate multipliers. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float MinAttackSpeedPlayRate = 0.8f;
 
+    /** Authored upper bound for attack montage play rate; values must not be below the minimum and are unitless. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     float MaxAttackSpeedPlayRate = 1.4f;
 
@@ -100,63 +125,74 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float ProbabilitySoftCap = 0.5f;
 
-    // Upper bound on UMythicAttributeSet_Utility::CooldownReduction when it scales ability cooldown durations
-    // (effective cooldown = base * (1 - clamp(CDR, 0, MaxCooldownReduction))). A safety cap, NOT a balance lever:
-    // it keeps a sliver of cooldown so stacked CDR gear can't reach a degenerate zero/instant cooldown. 0.8 = at
-    // most 80% faster. Applied in UMythicGameplayAbility::ApplyCooldown.
+    /**
+     * Safety ceiling used by cooldown-duration scaling; authored values are clamped to [0,1] and units are a
+     * reduction fraction. It prevents stacked cooldown reduction from reaching a degenerate zero duration.
+     */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MaxCooldownReduction = 0.8f;
 
-    // Minimum Health Curve Row Handle - Used for initializing the health of the NPC's at their level
+    /** Authored minimum-health-by-level curve for NPC initialization; curve outputs use health points. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     FCurveTableRowHandle HealthMinCurveRowHandle;
 
-    // Maximum Health Curve Row Handle - Used for initializing the health of the NPC's at their level
+    /** Authored maximum-health-by-level curve for NPC initialization; curve outputs use health points. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     FCurveTableRowHandle HealthMaxCurveRowHandle;
 
-    // Minimum Damage Curve Row Handle - Used for initializing the damage of the NPC's at their level
+    /** Authored minimum-damage-by-level curve for NPC initialization; curve outputs use damage points. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     FCurveTableRowHandle DamageMinCurveRowHandle;
 
-    // Maximum Damage Curve Row Handle - Used for initializing the damage of the NPC's at their level
+    /** Authored maximum-damage-by-level curve for NPC initialization; curve outputs use damage points. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     FCurveTableRowHandle DamageMaxCurveRowHandle;
 
-    // Common Loot Chance Curve Row Handle - Used for determining the chance of common loot drops at a given level
+    /** Authored common-loot chance-by-level curve; curve outputs use probability fractions. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Loot")
     FCurveTableRowHandle CommonLootChanceCurveRowHandle;
 
-    // Rare Loot Chance Curve Row Handle - Used for determining the chance of uncommon loot drops at a given level
+    /** Authored rare-loot chance-by-level curve; curve outputs use probability fractions. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Loot")
     FCurveTableRowHandle RareLootChanceCurveRowHandle;
 
-    // Epic Loot Chance Curve Row Handle - Used for determining the chance of rare loot drops at a given level
+    /** Authored epic-loot chance-by-level curve; curve outputs use probability fractions. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Loot")
     FCurveTableRowHandle EpicLootChanceCurveRowHandle;
 
-    // Legendary Loot Chance Curve Row Handle - Used for determining the chance of legendary loot drops at a given level
+    /** Authored legendary-loot chance-by-level curve; curve outputs use probability fractions. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Loot")
     FCurveTableRowHandle LegendaryLootChanceCurveRowHandle;
 
-    // Mythic Loot Chance Curve Row Handle - Used for determining the chance of mythic loot drops at a given level
+    /** Authored mythic-loot chance-by-level curve; curve outputs use probability fractions. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Loot")
     FCurveTableRowHandle MythicLootChanceCurveRowHandle;
 
-    // World tier attributes
+    /**
+     * GameState-owned world attribute set; Blueprint may inspect its replicated/read-only values, null is invalid
+     * after component initialization, and individual attributes define their own units.
+     */
     UPROPERTY(BlueprintReadOnly)
     UWorldTierAttributes *WorldTierAttributes;
 
-    // Default World Tier
+    /**
+     * Current authority-owned world tier; Blueprint may inspect but not mutate it directly, values are clamped to
+     * [1, MaxWorldTier], and units are discrete progression tiers.
+     */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic")
     uint8 WorldTier;
 
-    // Max World Tier - Used to clamp the World Tier to a maximum value
+    /**
+     * Authored upper bound for WorldTier; Blueprint may inspect it read-only, values below one are invalid content,
+     * and units are discrete progression tiers.
+     */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic")
     uint8 MaxWorldTier = 4;
 
-    // Highest World Tier ever reached (monotonic — never decreases). Replicated for UI. Advanced via AdvanceWorldTier;
-    // seeded from the starting/loaded WorldTier in BeginPlay so it is never below the current tier.
+    /**
+     * Highest authority tier ever reached, replicated for UI; Blueprint may inspect it read-only, it never decreases
+     * or falls below WorldTier, and units are discrete progression tiers.
+     */
     UPROPERTY(BlueprintReadOnly, Replicated, Category = "Mythic")
     uint8 HighestWorldTier = 0;
 
@@ -168,10 +204,10 @@ public:
 
     static uint8 ComputeHighestTier(uint8 PrevHighest, uint8 NewTier) { return FMath::Max(PrevHighest, NewTier); }
 
-    // SERVER: advance the world tier by one (clamped at MaxWorldTier), update the monotonic HighestWorldTier, and
-    // reapply the tier attributes effect (so ExperienceGainMultiplier etc. refresh) via SetWorldTier.
-    // NOTE: the design TRIGGER (what content raises the tier — a capstone/boss-clear reward) is NOT wired yet; this is
-    // currently only reachable via the MythAdvanceWorldTier dev console command.
+    /**
+     * Advances the authority world tier once, clamped at MaxWorldTier, updates HighestWorldTier, and reapplies the
+     * tier attribute effect. Non-authority calls are rejected; the function has no return value or units.
+     */
     UFUNCTION(BlueprintCallable, Category = "Mythic")
     void AdvanceWorldTier();
 
@@ -187,11 +223,13 @@ public:
 
     virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override;
 
-    // Gets the ability system component used for game wide things
+    /**
+     * Returns the GameState-owned ability system used for world-wide effects; Blueprint receives read-only access,
+     * null is invalid after component initialization, and the result has no units.
+     */
     UFUNCTION(BlueprintCallable, Category = "Mythic")
     UMythicAbilitySystemComponent *GetMythicAbilitySystemComponent() const { return AbilitySystemComponent; }
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
-    TArray<FTrackedDestructibleData> GetTrackedDestructibles() const;
 };

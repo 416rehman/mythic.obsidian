@@ -160,7 +160,7 @@ int32 AMythicVendor::ResolveTraderLevel(AMythicPlayerController *Trader) const {
     for (const FProficiency &P : Prof->Proficiencies) {
         if (P.Definition == TradingProficiency) {
             if (const UAbilitySystemComponent *ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Trader)) {
-                const float CurrentXP = ASC->GetNumericAttribute(TradingProficiency->ProgressAttribute);
+                const float CurrentXP = ASC->GetNumericAttribute(TradingProficiency->GetProgressAttribute());
                 return UProficiencyDefinition::CalcLevelAtXP(CurrentXP, TradingProficiency);
             }
             break;

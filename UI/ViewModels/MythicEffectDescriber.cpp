@@ -4,15 +4,27 @@
 
 #include "GameplayEffect.h"
 #include "Itemization/Inventory/Fragments/FragmentTypes.h"
+#include "Stats/MythicStatDefinition.h"
 
 namespace {
-bool AttributeIsGoodWhenHigher(const FGameplayAttribute &Attribute) {
-    static const TSet<FString> LowerIsBetter = {
-        TEXT("IncomingDamageMultiplier"),
-        TEXT("BurnBuildup"), TEXT("BleedBuildup"), TEXT("PoisonBuildup"),
-        TEXT("SlowBuildup"), TEXT("FreezeBuildup"), TEXT("StunBuildup"),
-    };
-    return !LowerIsBetter.Contains(Attribute.GetName());
+bool IsEffectDescriberMultiplyOperation(const TEnumAsByte<EGameplayModOp::Type> Op) {
+    return Op == EGameplayModOp::MultiplyAdditive || Op == EGameplayModOp::MultiplyCompound;
+}
+
+bool IsBeneficial(const UMythicStatDefinition& Definition, float Magnitude,
+                  TEnumAsByte<EGameplayModOp::Type> Op) {
+    if (Definition.ComparisonDirection == EMythicStatComparisonDirection::Neutral) {
+        return false;
+    }
+
+    const float Change = IsEffectDescriberMultiplyOperation(Op)
+        ? Magnitude - 1.0f
+        : Op == EGameplayModOp::Override
+            ? Magnitude - Definition.NeutralValue
+            : Magnitude;
+    return Definition.ComparisonDirection == EMythicStatComparisonDirection::HigherIsBetter
+        ? Change >= 0.0f
+        : Change <= 0.0f;
 }
 
 void BuildRichText(FMythicEffectLine &Line) {
@@ -40,24 +52,27 @@ FMythicEffectLine DescribeModifier(const FGameplayAttribute &Attribute, float Ma
         return Line;
     }
 
-    const FMythicStatRule Rule = MythicStatDisplay::GetRule(Attribute);
-    const EMythicStatFormat Format = MythicStatDisplay::ResolveRollFormat(Attribute, Op);
+    const UMythicStatDefinition* Definition = MythicStatDisplay::FindResidentDefinition(Attribute);
+    if (!Definition) {
+        Line.Label = MythicStatDisplay::GetUnknownStatDiagnostic();
+        return Line;
+    }
+    const FMythicStatNumberPresentation Presentation =
+        MythicStatDisplay::ResolveModifierPresentation(*Definition, Op);
 
-    Line.Label = FText::FromString(Rule.Label);
+    Line.Label = Definition->DisplayName;
     Line.RawMagnitude = Magnitude;
-    Line.Format = Format;
+    Line.Format = Presentation.Format;
+    Line.bPositive = IsBeneficial(*Definition, Magnitude, Op);
 
-    if (Op == EGameplayModOp::Multiplicitive) {
-        Line.Value = MythicStatDisplay::FormatValue(Magnitude, EMythicStatFormat::Multiplier);
-        Line.bPositive = (Magnitude >= 1.0f) == AttributeIsGoodWhenHigher(Attribute);
+    if (IsEffectDescriberMultiplyOperation(Op)) {
+        Line.Value = MythicStatDisplay::FormatValue(Magnitude, Presentation);
     }
     else if (Op == EGameplayModOp::Override) {
-        Line.Value = MythicStatDisplay::FormatValue(Magnitude, Format);
-        Line.bPositive = AttributeIsGoodWhenHigher(Attribute);
+        Line.Value = MythicStatDisplay::FormatValue(Magnitude, Presentation);
     }
     else {
-        Line.Value = MythicStatDisplay::FormatBonus(Magnitude, Format);
-        Line.bPositive = (Magnitude >= 0.0f) == AttributeIsGoodWhenHigher(Attribute);
+        Line.Value = MythicStatDisplay::FormatBonus(Magnitude, Presentation);
     }
 
     BuildRichText(Line);
@@ -68,20 +83,24 @@ FMythicEffectLine DescribeRolledModifier(const FGameplayAttribute &Attribute, fl
                                          int32 ItemLevel) {
     FMythicEffectLine Line = DescribeModifier(Attribute, Value, Roll.Modifier);
 
-    const EMythicStatFormat Forced = MythicStatDisplay::ResolveRollFormat(Attribute, Roll.Modifier, Roll.bIsPercentage);
-    if (Forced != Line.Format) {
-        Line.Format = Forced;
-        Line.Value = MythicStatDisplay::FormatBonus(Value, Forced);
+    const UMythicStatDefinition* Definition = MythicStatDisplay::FindResidentDefinition(Attribute);
+    if (!Definition) {
+        return Line;
     }
-    if (Roll.bLowerIsBetter) {
-        Line.bPositive = Value <= 0.0f;
+    const FMythicStatNumberPresentation Presentation = MythicStatDisplay::ResolveModifierPresentation(
+        *Definition, Roll.Modifier);
+    if (Presentation.Format != Line.Format) {
+        Line.Format = Presentation.Format;
+        Line.Value = Roll.Modifier == EGameplayModOp::Override
+            ? MythicStatDisplay::FormatValue(Value, Presentation)
+            : MythicStatDisplay::FormatBonus(Value, Presentation);
     }
 
     const float ScaledMin = Roll.GetScaledMin(ItemLevel);
     const float ScaledMax = Roll.GetScaledMax(ItemLevel);
     if (!FMath::IsNearlyEqual(ScaledMin, ScaledMax, 0.0001f)) {
-        const FText MinText = MythicStatDisplay::FormatValue(ScaledMin, Line.Format);
-        const FText MaxText = MythicStatDisplay::FormatValue(ScaledMax, Line.Format);
+        const FText MinText = MythicStatDisplay::FormatValue(ScaledMin, Presentation);
+        const FText MaxText = MythicStatDisplay::FormatValue(ScaledMax, Presentation);
         Line.Range = FText::FromString(FString::Printf(TEXT("[%s-%s]"), *MinText.ToString(), *MaxText.ToString()));
     }
 

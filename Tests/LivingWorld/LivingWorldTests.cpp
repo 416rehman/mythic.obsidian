@@ -49,10 +49,10 @@
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/Fragments/Passive/AffixesFragment.h"
 #include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h"
+#include "UObject/UnrealType.h"
 #include "World/EnvironmentController/MythicEnvironmentController.h"
 #include "World/EnvironmentController/EnvironmentTypes.h"
 #include "Subsystem/SaveSystem/Character/SavedInventory.h"
-#include "Resources/MythicResourceManagerComponent.h"
 #include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
 #include "Player/MythicCharacter.h"
 #include "Player/MythicPlayerState.h"
@@ -1363,24 +1363,6 @@ bool FMythicEffectiveStaminaCostTest::RunTest(const FString &Parameters) {
 
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FMythicResourceRespawnGateTest,
-    "Mythic.Resources.RespawnGate",
-    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
-
-bool FMythicResourceRespawnGateTest::RunTest(const FString &Parameters) {
-    using R = UMythicResourceManagerComponent;
-    TestTrue(TEXT("destroyed, elapsed → respawn"), R::ShouldRespawnDestructible(0, 100.0f, 150.0f));
-    TestTrue(TEXT("destroyed, exactly at time → respawn"), R::ShouldRespawnDestructible(0, 100.0f, 100.0f));
-    TestFalse(TEXT("destroyed, not elapsed → wait"), R::ShouldRespawnDestructible(0, 100.0f, 50.0f));
-    TestFalse(TEXT("not destroyed → no respawn"), R::ShouldRespawnDestructible(5, 100.0f, 150.0f));
-    TestFalse(TEXT("zero respawn time → no respawn"), R::ShouldRespawnDestructible(0, 0.0f, 150.0f));
-    TestFalse(TEXT("negative respawn time → no respawn"), R::ShouldRespawnDestructible(0, -1.0f, 150.0f));
-
-    return true;
-}
-
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicSignificanceHysteresisTest,
     "Mythic.LivingWorld.Significance.TierHysteresis",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
@@ -1517,63 +1499,39 @@ bool FMythicWeatherCanTransitionTest::RunTest(const FString &Parameters) {
 
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FMythicAttackActivationPlanTest,
-    "Mythic.Itemization.Attack.ActivationPlan",
+    FMythicAttackActionOnlyContractTest,
+    "Mythic.Itemization.Attack.ActionOnlyContract",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
-bool FMythicAttackActivationPlanTest::RunTest(const FString &Parameters) {
-    FAttackActivationPlan Plan = UAttackFragment::PlanAttackActivation( false, false);
-    TestTrue(TEXT("fresh: apply damage"), Plan.bApplyDamage);
-    TestTrue(TEXT("fresh: grant ability"), Plan.bGrantAbility);
+bool FMythicAttackActionOnlyContractTest::RunTest(const FString &Parameters) {
+    TestTrue(TEXT("fresh activation grants the attack ability"), UAttackFragment::ShouldGrantAttackAbility(false));
+    TestFalse(TEXT("a live ability is not granted twice"), UAttackFragment::ShouldGrantAttackAbility(true));
 
-    Plan = UAttackFragment::PlanAttackActivation(true, false);
-    TestFalse(TEXT("damage applied: do NOT re-apply"), Plan.bApplyDamage);
-    TestTrue(TEXT("damage applied but no ability: still GRANT"), Plan.bGrantAbility);
+    const UClass *AttackClass = UAttackFragment::StaticClass();
+    TestNull(TEXT("attack fragments have no legacy authored damage build data"),
+             FindFProperty<FProperty>(AttackClass, TEXT("AttackBuildData")));
+    TestNull(TEXT("attack fragments have no replicated or saved runtime-stat payload"),
+             FindFProperty<FProperty>(AttackClass, TEXT("AttackRuntimeReplicatedData")));
+    TestNull(TEXT("attack fragments have no unused client-only bookkeeping payload"),
+             FindFProperty<FProperty>(AttackClass, TEXT("AttackRuntimeClientOnlyData")));
 
-    Plan = UAttackFragment::PlanAttackActivation(true, true);
-    TestFalse(TEXT("both done: no apply"), Plan.bApplyDamage);
-    TestFalse(TEXT("both done: no grant"), Plan.bGrantAbility);
+    const FProperty *ConfigProperty = FindFProperty<FProperty>(AttackClass, TEXT("AttackConfig"));
+    TestNotNull(TEXT("action configuration remains reflected"), ConfigProperty);
+    if (ConfigProperty) {
+        TestTrue(TEXT("action configuration remains replicated"), ConfigProperty->HasAnyPropertyFlags(CPF_Net));
+        TestFalse(TEXT("immutable action configuration rehydrates from the live Item Definition"),
+                  ConfigProperty->HasAnyPropertyFlags(CPF_SaveGame));
+    }
 
-    Plan = UAttackFragment::PlanAttackActivation(false, true);
-    TestTrue(TEXT("ability live, damage missing: apply damage"), Plan.bApplyDamage);
-    TestFalse(TEXT("ability live: do NOT double-grant"), Plan.bGrantAbility);
-
-    Plan = UAttackFragment::PlanAttackActivation( false, false);
-    TestTrue(TEXT("re-equip after a clean deactivate: GRANT the ability again"), Plan.bGrantAbility);
-    TestTrue(TEXT("re-equip after a clean deactivate: re-apply the damage attribute"), Plan.bApplyDamage);
-
-    return true;
-}
-
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FMythicArmorEquipEventGateTest,
-    "Mythic.Itemization.Affixes.ArmorEquipGate",
-    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
-
-bool FMythicArmorEquipEventGateTest::RunTest(const FString &Parameters) {
-    auto Gate = [&](bool bCanonical, bool bHasWeapon, bool bAlready) {
-        return UAffixesFragment::ShouldEmitArmorEquipEvent(bCanonical, bHasWeapon, bAlready);
-    };
-
-    TestTrue(TEXT("armor first equip: canonical, no weapon, not emitted → fire"), Gate(true, false, false));
-    TestFalse(TEXT("weapon-with-affixes: suppressed (weapon emits via AttackFragment)"), Gate(true, true, false));
-    TestFalse(TEXT("non-canonical affixes fragment: suppressed (dedup)"), Gate(false, false, false));
-    TestFalse(TEXT("already emitted this equip → no re-fire"), Gate(true, false, true));
-    TestFalse(TEXT("all suppressors set → false"), Gate(false, true, true));
-
-    return true;
-}
-
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FMythicAffixesBrokenGateTest,
-    "Mythic.Itemization.Affixes.BrokenGate",
-    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
-
-bool FMythicAffixesBrokenGateTest::RunTest(const FString &Parameters) {
-    TestTrue(TEXT("working item applies affixes"), UAffixesFragment::ShouldApplyAffixes(false));
-    TestFalse(TEXT("broken item suppresses affixes"), UAffixesFragment::ShouldApplyAffixes(true));
+    const FProperty *ServerStateProperty = FindFProperty<FProperty>(AttackClass, TEXT("AttackRuntimeServerOnlyData"));
+    TestNotNull(TEXT("authority-only ability bookkeeping remains reflected for object lifetime tracking"), ServerStateProperty);
+    if (ServerStateProperty) {
+        TestTrue(TEXT("authority-only bookkeeping is transient"), ServerStateProperty->HasAnyPropertyFlags(CPF_Transient));
+        TestFalse(TEXT("authority-only bookkeeping is not replicated"), ServerStateProperty->HasAnyPropertyFlags(CPF_Net));
+        TestFalse(TEXT("authority-only bookkeeping is not persisted"), ServerStateProperty->HasAnyPropertyFlags(CPF_SaveGame));
+        TestFalse(TEXT("authority-only bookkeeping is not Blueprint-visible"),
+                  ServerStateProperty->HasAnyPropertyFlags(CPF_BlueprintVisible));
+    }
 
     return true;
 }
@@ -1595,29 +1553,6 @@ bool FMythicHourAsDayTimeTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("19:00 = Evening (upper boundary)"), HourAsDayTime(19), Evening);
     TestEqual(TEXT("20:00 = Night (lower boundary)"), HourAsDayTime(20), Night);
     TestEqual(TEXT("23:00 = Night"), HourAsDayTime(23), Night);
-
-    return true;
-}
-
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FMythicAffixReversalTest,
-    "Mythic.Itemization.Affixes.ModReversal",
-    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
-
-bool FMythicAffixReversalTest::RunTest(const FString &Parameters) {
-    using A = UAffixesFragment;
-    float Out = 0.0f;
-
-    TestTrue(TEXT("additive reversible"), A::ComputeReversedModValue(EGameplayModOp::Additive, 50.0f, Out));
-    TestEqual(TEXT("additive reversal = -value"), Out, -50.0f);
-    TestTrue(TEXT("multiplicitive reversible"), A::ComputeReversedModValue(EGameplayModOp::Multiplicitive, 2.0f, Out));
-    TestEqual(TEXT("mult reversal = 1/value"), Out, 0.5f);
-    TestTrue(TEXT("division reversible"), A::ComputeReversedModValue(EGameplayModOp::Division, 4.0f, Out));
-    TestEqual(TEXT("div reversal = 1/value"), Out, 0.25f);
-    TestFalse(TEXT("zero multiplicitive not reversible"), A::ComputeReversedModValue(EGameplayModOp::Multiplicitive, 0.0f, Out));
-    TestFalse(TEXT("zero division not reversible"), A::ComputeReversedModValue(EGameplayModOp::Division, 0.0f, Out));
-    TestFalse(TEXT("override not reversible"), A::ComputeReversedModValue(EGameplayModOp::Override, 5.0f, Out));
 
     return true;
 }

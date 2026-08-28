@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "ItemDefinition.h"
+#include "MythicItemFactoryTypes.h"
 #include "Mythic/Utility/MythicReplicatedObject.h"
 #include "Net/UnrealNetwork.h"
 #include "MythicItemInstance.generated.h"
@@ -9,35 +10,45 @@
 class UItemFragment;
 class UMythicInventorySlot;
 class UMythicInventoryComponent;
+struct FCompiledAffixProfile;
 
 UCLASS(Blueprintable, BlueprintType)
 class MYTHIC_API UMythicItemInstance : public UMythicReplicatedObject {
     GENERATED_BODY()
 
 protected:
-    // object pointer to the item definition data asset
+    /** Item definition that supplied this instance's immutable authored data. */
     UPROPERTY(ReplicatedUsing=OnRep_ItemDefinition, BlueprintReadOnly, Category = "Item", SaveGame)
     UItemDefinition *ItemDefinition;
 
-    // Item Fragments copied from the item definition
+    /** Runtime fragment copies materialized from the item definition for this instance. */
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
     TArray<TObjectPtr<UItemFragment>> ItemFragments;
 
-    // Quantity of item (Current size of stack), with a setter to make sure its never over the max stack size
+    /** Current stack quantity, clamped by the definition's maximum stack size. */
     UPROPERTY(ReplicatedUsing=OnRep_Quantity, BlueprintReadOnly, Category = "Item", meta = (ClampMin = "1"), SaveGame)
     int32 Quantity = 1;
 
+    /** Inventory component that currently owns this item instance; null while the item is in transit or world-owned. */
     UPROPERTY(ReplicatedUsing=OnRep_OwningInventory, BlueprintReadOnly, Category = "Item")
     TObjectPtr<UMythicInventoryComponent> OwningInventory;
 
+    /** Replicated index of this item inside its owning inventory, or -1 when it is not assigned to a slot. */
     UPROPERTY(ReplicatedUsing=OnRep_SlotIndex, BlueprintReadOnly, Category = "Item")
     int32 SlotIndex = -1;
 
-    // The level of the item
+    /** Item level used by affix, reward, and scaling calculations. */
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item", SaveGame)
     int32 ItemLevel = 1;
 
-    // Tags assigned to the item - these are dynamic and can be changed at runtime
+    /**
+     * Stable identity for this physical item. Affix rolls and socket provenance derive from it, so it persists across
+     * save, replication, transfer, and reconnect.
+     */
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item|Identity", SaveGame)
+    FGuid ItemInstanceGuid;
+
+    /** Dynamic gameplay tags assigned to this item instance at runtime. */
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item", SaveGame)
     FGameplayTagContainer ItemTags;
 
@@ -47,6 +58,7 @@ protected:
     // gameplay tag) keeps it OUT of the item's type probe (GetTypeProbe) so it can never affect slot whitelisting or
     // conversion-ingredient matching. Set only via ServerSetMarkedJunk (authority). Auto-junk (low rarity) is derived,
     // not stored — see MythicLootFilter::IsJunk.
+    /** Persisted authority-owned manual junk mark; intentionally excluded from the item's type-tag probe. */
     UPROPERTY(ReplicatedUsing=OnRep_MarkedJunk, BlueprintReadOnly, Category = "Item", SaveGame)
     bool bMarkedJunk = false;
 
@@ -76,31 +88,61 @@ public:
         DOREPLIFETIME(UMythicItemInstance, SlotIndex);
         DOREPLIFETIME(UMythicItemInstance, ItemFragments);
         DOREPLIFETIME(UMythicItemInstance, ItemLevel);
+        DOREPLIFETIME_CONDITION(UMythicItemInstance, ItemInstanceGuid, COND_OwnerOnly);
         DOREPLIFETIME(UMythicItemInstance, ItemTags);
         DOREPLIFETIME(UMythicItemInstance, bMarkedJunk);
     }
 
     void SetStackSize(const int32 newQuantity);
 
-    // Get the quantity of the item
+    /** Returns the current stack quantity. */
     UFUNCTION(BlueprintCallable, Category = "Item")
     int32 GetStacks() const { return Quantity; }
 
-    // Get the level of the item
+    /** Returns the item level used by itemization scaling. */
     UFUNCTION(BlueprintCallable, Category = "Item")
     int32 GetItemLevel() const { return ItemLevel; }
 
-    void Initialize(UItemDefinition *ItemDef, const int32 quantityIfStackable, const int32 level);
+    /** Returns the persistent identity of this physical item used by affix, socket, save, and replication provenance. */
+    UFUNCTION(BlueprintPure, Category = "Item|Identity")
+    FGuid GetItemInstanceGuid() const { return ItemInstanceGuid; }
+
+    // Assigns a random identity to a newly-created or intentionally copied physical item. Authority only.
+    bool AssignNewItemInstanceGuid();
+
+    // Idempotent fresh-item helper used before fragments materialize affix RollGuids.
+    bool EnsureNewItemInstanceGuid();
+
+    /**
+     * Builds all new-item state off the replication/inventory graph and commits only after affix generation succeeds.
+     * OptionalCompiledProfile must be the exact immutable, prewarmed closure selected by the item factory.
+     */
+    FMythicItemInitializeResult InitializeTransactional(
+        const FMythicCreateItemRequest &Request,
+        const FCompiledAffixProfile *OptionalCompiledProfile);
 
     static int32 ClampInitialStackQuantity(int32 Requested, int32 StackSizeMax);
 
-    // Get the item definition
+    /**
+     * Creates an unowned current-format stack split that preserves immutable gameplay state while assigning a new
+     * physical item identity and rekeying every item-owned affix/socket identity. Returns null without mutating this
+     * item when the complete clone cannot be validated.
+     */
+    UMythicItemInstance *CloneForStackSplit(UObject *NewOuter, int32 NewQuantity) const;
+
+    /** Returns the authored definition from which this item instance was created. */
     UFUNCTION(BlueprintCallable, Category = "Item")
     UItemDefinition *GetItemDefinition() const {
         return ItemDefinition;
     }
 
-    void AddFragment(TObjectPtr<UItemFragment> Fragment);
+#if WITH_DEV_AUTOMATION_TESTS
+    /** Test-only fixture seam; production item creation must use the transactional item factory. */
+    void InitializeFixtureForTests(UItemDefinition *ItemDef, int32 QuantityIfStackable, int32 Level);
+
+    /** Test-only fixture seam that clones one already-materialized fragment without invoking production generation. */
+    void AddFragmentFixtureForTests(TObjectPtr<UItemFragment> Fragment);
+#endif
 
     void OnActiveItem();
 
@@ -112,11 +154,11 @@ public:
 
     int32 GetSlot() const;
 
-    // Get Inventory Component, can be null if the item is not in an inventory
+    /** Returns the inventory currently containing this item, or null while it is unowned or in transit. */
     UFUNCTION(BlueprintCallable, Category = "Item")
     UMythicInventoryComponent *GetInventoryComponent() const;
 
-    // Get Inventory Owner, can be null if the item is not in an inventory
+    /** Returns the actor that owns the containing inventory, or null when this item is not in an inventory. */
     UFUNCTION(BlueprintCallable, Category = "Item")
     AActor *GetInventoryOwner() const;
 
@@ -126,7 +168,7 @@ public:
 
     bool HasTag(const FGameplayTag &Tag) const;
 
-    // Loot-filter (P5): read the persisted manual "junk" mark. Valid on server + owning client (replicated).
+    /** Returns the replicated manual junk mark; automatic loot-filter classification is evaluated separately. */
     UFUNCTION(BlueprintCallable, Category = "Item")
     bool IsMarkedJunk() const { return bMarkedJunk; }
 
@@ -153,6 +195,9 @@ public:
 
         return nullptr;
     }
+
+    /** Counts live runtime fragments whose class is Child Of Fragment Class; used to fail closed on authority duplicates. */
+    int32 CountFragmentsOfClass(TSubclassOf<UItemFragment> FragmentClass) const;
 
     void ConsumeItem(int32 StackQty = 1);
 

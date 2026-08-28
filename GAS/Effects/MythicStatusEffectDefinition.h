@@ -12,27 +12,37 @@
 class UGameplayEffect;
 class UTexture2D;
 
+/** How a control magnitude changes its consumer's baseline multiplier. */
+UENUM(BlueprintType)
+enum class EMythicStatusControlOperation : uint8 {
+    /** Multiplies downward, such as Slow or Weaken. */
+    Reduction,
+
+    /** Multiplies upward, such as Terrify's damage-taken amplification. */
+    Bonus,
+};
+
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicStatusReaction {
     GENERATED_BODY()
 
-    // Reaction fires only when the target already carries this tag as the status lands (e.g. Burn onto Status.State.Poisoned).
+    /** Tag that must already be present on the target when this status lands for the reaction to fire. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction")
     FGameplayTag RequiredTargetTag;
 
-    // Gameplay event broadcast on the target so abilities can react. Leave unset for a purely cosmetic reaction.
+    /** Gameplay event broadcast on the target; leave unset for a purely cosmetic reaction. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction")
     FGameplayTag ReactionEventTag;
 
-    // Cue played on the target when the reaction fires.
+    /** Gameplay cue played on the target when the reaction fires. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction", meta = (Categories = "GameplayCue"))
     FGameplayTag ReactionCueTag;
 
-    // Remove the effects granting RequiredTargetTag: the reaction consumes what it combined with.
+    /** Whether the reaction removes effects granting RequiredTargetTag after combining the statuses. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction")
     bool bConsumeExistingStatus = true;
 
-    // Skip applying this status because the reaction replaces it. Clear this to have both land.
+    /** Whether the reaction replaces this incoming status instead of allowing both statuses to remain. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction")
     bool bSuppressStatusApplication = true;
 };
@@ -42,29 +52,30 @@ class MYTHIC_API UMythicStatusEffectDefinition : public UMythicDataAsset {
     GENERATED_BODY()
 
 public:
-    // Identity of this status (Status.Type.*). Abilities, weapons and procs request a status by this tag.
+    /** Canonical Status.Type.* identity requested by abilities, weapons, procs, UI, and tooling. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Identity", meta = (Categories = "Status.Type"))
     FGameplayTag StatusType;
 
-    // Tag the applied effect grants on the target while it is active (GAS.Debuff.*). Drives UI, AI and damage modifiers.
+    /** State tag granted while active; drives UI, AI, reactions, and conditional damage rules. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Identity")
     FGameplayTag GrantedStateTag;
 
-    // Effect applied once buildup crosses the threshold. Author it as a Blueprint GameplayEffect.
+    /** GameplayEffect applied after buildup crosses the threshold or a direct application succeeds. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     TSubclassOf<UGameplayEffect> EffectToApply;
 
-    // Attribute that accumulates toward this status. Hits add to it; crossing the threshold applies the effect.
+    /** Attribute that accumulates buildup until the effective threshold applies this status. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FGameplayAttribute BuildupAttribute;
 
-    // Attribute in 0..1 that resists this status. Raises the buildup needed and gates the on-hit roll.
+    /** Resistance attribute that raises required buildup and gates the status-application roll. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FGameplayAttribute ResistanceAttribute;
 
     /**
-     * Damage each tick, rolled per application. Leave Min and Max at zero for a status that deals no damage. The
-     * effect must read it through the SetByCaller.Status.Damage tag for this to reach the target.
+     * Damage each tick contributed by one application. Aggregate-by-source statuses snapshot and sum each roll into
+     * one bounded per-source tick magnitude; a capped reapplication can refresh duration without rewriting prior
+     * rolls. The GameplayEffect must read SetByCaller.Status.Damage with stack-count factoring disabled.
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FRollDefinition DamagePerTick;
@@ -77,14 +88,17 @@ public:
     FRollDefinition DurationSeconds;
 
     /**
-     * Strength of a control status, rolled per application - the slow's bite, the weaken's penalty, the terrify's
-     * damage bump - as a 0..1 fraction. This is the third axis, separate from damage and duration, so a slow build
-     * can bite harder rather than only last longer. Leave Min and Max at zero to fall back to the effect's own
-     * authored constant, so nothing regresses before a band is tuned. Reaches the effect through the
-     * SetByCaller.Status.ControlMagnitude tag.
+     * Strength contributed by one application - the slow's bite, the weaken's penalty, the terrify's damage bump -
+     * as a 0..1 fraction. Every roll is snapshotted into one equivalent multiplicative aggregate, so UE replacing a
+     * stacked spec cannot rewrite earlier rolls. ControlOperation chooses whether the product moves below or above
+     * 1.0. Leave Min and Max at zero to fall back to the effect's own authored constant.
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FRollDefinition ControlMagnitude;
+
+    /** Whether stacked ControlMagnitude rolls combine below or above the consumer's 1.0 baseline. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
+    EMythicStatusControlOperation ControlOperation = EMythicStatusControlOperation::Reduction;
 
     /**
      * Applier stat added on top of Power-scaled base damage, named by data exactly as BuildupAttribute and
@@ -94,40 +108,42 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FGameplayAttribute BonusDamageAttribute;
 
-    // Applier stat that scales DurationSeconds. Same rule: unset means the authored band is the whole story.
+    /** Applier multiplier attribute that scales DurationSeconds; unset leaves the authored band unchanged. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FGameplayAttribute DurationMultiplierAttribute;
 
-    // Applier stat that scales ControlMagnitude, so gear can make a slow bite harder. A Bonus* fraction, diminished
-    // like the others. Unset means the authored band is the whole story; a control status with no band ignores it.
+    /**
+     * Applier bonus attribute that scales ControlMagnitude after diminishing rules; unset leaves the authored band
+     * unchanged, and a status with no control band ignores it.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FGameplayAttribute ControlMagnitudeAttribute;
 
-    // Hard crowd control. Obeys HardCC immunity and the diminishing-returns escalation rules.
+    /** Whether this status obeys hard-CC immunity and diminishing-return escalation rules. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     bool bHardCrowdControl = false;
 
-    // Cue fired on the target the moment the status lands.
+    /** Gameplay cue fired on the target at status onset. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Feedback", meta = (Categories = "GameplayCue"))
     FGameplayTag OnsetCueTag;
 
-    // Combinations with statuses already on the target. First match wins.
+    /** Ordered reactions against statuses already on the target; the first matching entry wins. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Reactions")
     TArray<FMythicStatusReaction> Reactions;
 
-    // Player-facing name shown on badges and tooltips.
+    /** Player-facing localized name shown on badges, combat teaching, and tooltips. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Presentation")
     FText DisplayName;
 
-    // Player-facing description. Supports rich text markup.
+    /** Player-facing localized description; rich-text markup is supported. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Presentation", meta = (MultiLine = true))
     FText Description;
 
-    // Badge icon.
+    /** Soft badge icon used by status UI without forcing eager texture loading. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Presentation")
     TSoftObjectPtr<UTexture2D> Icon;
 
-    // Tint used for the badge, damage numbers and cue colouring.
+    /** Canonical tint used by badges, periodic damage numbers, and status-aware cue presentation. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Presentation")
     FLinearColor DisplayColor = FLinearColor::White;
 };

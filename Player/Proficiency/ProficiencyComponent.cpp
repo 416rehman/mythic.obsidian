@@ -12,9 +12,113 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
 #include "GAS/MythicTags_GAS.h"
 #include "GameModes/GameState/MythicGameState.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "Itemization/Affixes/MythicAffixApplicationComponent.h"
+#include "Itemization/Affixes/MythicAffixRng.h"
+#include "Itemization/Affixes/MythicItemizationDataRegistrySubsystem.h"
+#include "Stats/MythicStatDefinition.h"
+#include "UObject/UObjectGlobals.h"
+
+namespace {
+enum class EProficiencyRewardSourceKind : uint8 {
+    AuthoredMilestone = 1,
+    GeneratedAttributeGoal = 2
+};
+
+FGuid MakeProficiencyRewardSourceGuid(const UProficiencyDefinition &Definition,
+                                      const EProficiencyRewardSourceKind SourceKind,
+                                      const int32 PlacementIndex,
+                                      const int32 RewardSlot) {
+    const FPrimaryAssetId DefinitionId = Definition.GetPrimaryAssetId();
+    if (!DefinitionId.IsValid() || PlacementIndex < 0 || RewardSlot < 0) {
+        return FGuid();
+    }
+
+    // A source is the typed authored placement, not its current balance payload or derived final reward-array index.
+    // Designers can retune a reward or move a key milestone through MaxLevel balancing without orphaning the prior
+    // permanent-ledger source. The explicit kind prevents authored and generated placement coordinates from aliasing.
+    FMythicAffixCanonicalWriter Writer("MYTHIC_PROFICIENCY_REWARD_SOURCE_PAYLOAD_V3");
+    Writer.AddPrimaryAssetId(DefinitionId);
+    Writer.AddUInt8(static_cast<uint8>(SourceKind));
+    Writer.AddInt32(PlacementIndex);
+    Writer.AddInt32(RewardSlot);
+    return Writer.IsValid()
+        ? FMythicAffixRngFactory::GuidFromCanonicalBytes(
+              "MYTHIC_PROFICIENCY_REWARD_SOURCE_V3", Writer.GetBytes())
+        : FGuid();
+}
+
+URewardBase *MaterializeProficiencyReward(const UProficiencyDefinition &Definition,
+                                          const int32 AuthoredMilestoneIndex,
+                                          const int32 RewardSlot,
+                                          const URewardBase &AuthoredReward) {
+    UObject *RuntimeOuter = GetTransientPackageAsObject();
+    const FName RuntimeName = MakeUniqueObjectName(
+        RuntimeOuter, AuthoredReward.GetClass(), FName(TEXT("ProficiencyReward")));
+    URewardBase *RuntimeReward = DuplicateObject<URewardBase>(
+        &AuthoredReward, RuntimeOuter, RuntimeName);
+    if (!RuntimeReward) {
+        return nullptr;
+    }
+
+    RuntimeReward->SetFlags(RF_Transient);
+    RuntimeReward->ClearFlags(RF_Public | RF_Standalone);
+    if (UAttributeReward *AttributeReward = Cast<UAttributeReward>(RuntimeReward)) {
+        AttributeReward->PermanentSourceGuid = MakeProficiencyRewardSourceGuid(
+            Definition, EProficiencyRewardSourceKind::AuthoredMilestone,
+            AuthoredMilestoneIndex, RewardSlot);
+        if (!AttributeReward->PermanentSourceGuid.IsValid()) {
+            return nullptr;
+        }
+    }
+    return RuntimeReward;
+}
+
+bool MaterializeProficiencyMilestone(const UProficiencyDefinition &Definition,
+                                     const int32 TrackIndex,
+                                     const int32 AuthoredMilestoneIndex,
+                                     const FMilestone &AuthoredMilestone,
+                                     FMilestone &OutMilestone) {
+    FMilestone CompiledMilestone;
+    CompiledMilestone.Icon = AuthoredMilestone.Icon;
+    CompiledMilestone.Name = AuthoredMilestone.Name;
+    CompiledMilestone.Rewards.Reserve(AuthoredMilestone.Rewards.Num());
+
+    for (int32 RewardSlot = 0; RewardSlot < AuthoredMilestone.Rewards.Num(); ++RewardSlot) {
+        const URewardBase *AuthoredReward = AuthoredMilestone.Rewards[RewardSlot];
+        if (!AuthoredReward) {
+            UE_LOG(Myth, Error,
+                   TEXT("Proficiency %s contains a null authored reward at track index %d, reward slot %d."),
+                   *GetNameSafe(&Definition), TrackIndex, RewardSlot);
+            return false;
+        }
+
+        URewardBase *RuntimeReward = MaterializeProficiencyReward(
+            Definition, AuthoredMilestoneIndex, RewardSlot, *AuthoredReward);
+        if (!RuntimeReward) {
+            UE_LOG(Myth, Error,
+                   TEXT("Proficiency %s could not materialize track index %d, reward slot %d."),
+                   *GetNameSafe(&Definition), TrackIndex, RewardSlot);
+            return false;
+        }
+        CompiledMilestone.Rewards.Add(RuntimeReward);
+    }
+
+    OutMilestone = MoveTemp(CompiledMilestone);
+    return true;
+}
+}
 
 void FProficiency::GenerateTrack() {
+    // Compiled rewards are disposable derivations. Any invalid rebuild must leave no stale track or definition-owned
+    // reward references behind for save restore to consume.
+    this->Track.Reset();
+    if (!this->Definition) {
+        UE_LOG(Myth, Error, TEXT("Proficiency: Missing Definition"));
+        return;
+    }
+
     const int NumKeyMilestones = this->Definition->KeyMilestones.Num();
     const int NumGoals = this->Definition->AttributeGoals.Num();
     const int MaxLevel = this->Definition->MaxLevel;
@@ -36,21 +140,40 @@ void FProficiency::GenerateTrack() {
             const int milestone_level = MaxLevel - 1 - (milestones_added * MilestoneInterval);
 
             if (i == milestone_level) {
-                this->Track[i] = this->Definition->KeyMilestones[NumKeyMilestones - milestones_added - 1];
+                const int32 AuthoredMilestoneIndex =
+                    NumKeyMilestones - milestones_added - 1;
+                const FMilestone &AuthoredMilestone =
+                    this->Definition->KeyMilestones[AuthoredMilestoneIndex];
+                if (!MaterializeProficiencyMilestone(
+                        *this->Definition, i, AuthoredMilestoneIndex,
+                        AuthoredMilestone, this->Track[i])) {
+                    this->Track.Reset();
+                    return;
+                }
                 milestones_added++;
             }
         }
 
         const auto &ChosenGoal = this->Definition->AttributeGoals[i % NumGoals];
 
-        UAttributeReward *AttributeReward = NewObject<UAttributeReward>();
-        AttributeReward->Attribute = ChosenGoal.Attribute;
+        constexpr int32 GeneratedRewardOrdinal = 0;
+        UAttributeReward *AttributeReward = NewObject<UAttributeReward>(
+            GetTransientPackageAsObject(), NAME_None, RF_Transient);
+        AttributeReward->PermanentSourceGuid = MakeProficiencyRewardSourceGuid(
+            *this->Definition, EProficiencyRewardSourceKind::GeneratedAttributeGoal,
+            i, GeneratedRewardOrdinal);
+        AttributeReward->TargetStat = ChosenGoal.TargetStat;
         AttributeReward->Modifier = ChosenGoal.Modifier;
         AttributeReward->Magnitude = ChosenGoal.Goal / GoalRewardSplitCount;
 
-        if (!this->Track[i].Rewards.Contains(AttributeReward)) {
-            this->Track[i].Rewards.Add(AttributeReward);
+        if (!AttributeReward->PermanentSourceGuid.IsValid()) {
+            UE_LOG(Myth, Error,
+                   TEXT("Proficiency %s could not derive a permanent reward source identity for track index %d."),
+                   *GetNameSafe(this->Definition), i);
+            this->Track.Reset();
+            return;
         }
+        this->Track[i].Rewards.Add(AttributeReward);
     }
 }
 
@@ -63,12 +186,20 @@ void FProficiency::Instantiate() {
     GenerateTrack();
 }
 
+FGameplayAttribute FProficiency::GetProgressAttribute() const {
+    return Definition ? Definition->GetProgressAttribute() : FGameplayAttribute();
+}
+
+FGameplayAttribute FProficiency::GetProgressCapacityAttribute() const {
+    return Definition ? Definition->GetProgressCapacityAttribute() : FGameplayAttribute();
+}
+
 void UProficiencyComponent::OnAttributeChanged(const FOnAttributeChangeData &OnAttributeChangeData) {
     auto NewValue = OnAttributeChangeData.NewValue;
     auto OldValue = OnAttributeChangeData.OldValue;
 
     auto Proficiency = this->Proficiencies.FindByPredicate([&OnAttributeChangeData](const FProficiency &Proficiency) {
-        return Proficiency.ProgressAttribute == OnAttributeChangeData.Attribute;
+        return Proficiency.GetProgressAttribute() == OnAttributeChangeData.Attribute;
     });
     if (!Proficiency) {
         UE_LOG(Myth, Error, TEXT("Proficiency: Missing Proficiency"));
@@ -85,7 +216,7 @@ void UProficiencyComponent::OnAttributeChanged(const FOnAttributeChangeData &OnA
 
     if (bIsRestoring) {
         if (bClampToMax) {
-            ASC->SetNumericAttributeBase(Proficiency->ProgressAttribute, Proficiency->MaxXP);
+            ASC->SetNumericAttributeBase(Proficiency->GetProgressAttribute(), Proficiency->MaxXP);
         }
         return;
     }
@@ -95,7 +226,7 @@ void UProficiencyComponent::OnAttributeChanged(const FOnAttributeChangeData &OnA
 
     if (NewLevel <= OldLevel) {
         if (bClampToMax) {
-            ASC->SetNumericAttributeBase(Proficiency->ProgressAttribute, Proficiency->MaxXP);
+            ASC->SetNumericAttributeBase(Proficiency->GetProgressAttribute(), Proficiency->MaxXP);
         }
         return;
     }
@@ -134,45 +265,49 @@ void UProficiencyComponent::OnAttributeChanged(const FOnAttributeChangeData &OnA
     }
 
     if (bClampToMax) {
-        ASC->SetNumericAttributeBase(Proficiency->ProgressAttribute, Proficiency->MaxXP);
+        ASC->SetNumericAttributeBase(Proficiency->GetProgressAttribute(), Proficiency->MaxXP);
     }
 }
 
-void UProficiencyComponent::ConfigureProgressionAttribute(FProficiency &Proficiency) {
-    auto Def = Proficiency.Definition;
-    if (!Def) {
-        return;
+bool UProficiencyComponent::ConfigureProgressionAttribute(FProficiency &Proficiency) {
+    UProficiencyDefinition *Def = Proficiency.Definition;
+    UGameInstance *GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    const UMythicItemizationDataRegistrySubsystem *Registry = GameInstance
+        ? GameInstance->GetSubsystem<UMythicItemizationDataRegistrySubsystem>() : nullptr;
+    const UMythicStatDefinition *ProgressStat = Def ? Def->GetProgressStatDefinition() : nullptr;
+    const UMythicStatDefinition *CapacityStat = ProgressStat
+        ? ProgressStat->PairedStat.GetAsset() : nullptr;
+    const FGameplayAttribute ProgressAttribute = ProgressStat
+        ? ProgressStat->Attribute : FGameplayAttribute();
+    const FGameplayAttribute CapacityAttribute = CapacityStat
+        ? CapacityStat->Attribute : FGameplayAttribute();
+    if (!Def || !Registry || !Registry->IsCoreSemanticReady() || !ProgressStat || !CapacityStat
+        || Registry->FindStat(ProgressStat->GetPrimaryAssetId()) != ProgressStat
+        || Registry->FindStat(CapacityStat->GetPrimaryAssetId()) != CapacityStat
+        || ProgressStat->PairRole != EMythicStatPairRole::Current
+        || CapacityStat->PairRole != EMythicStatPairRole::Capacity
+        || CapacityStat->PairedStat.GetAsset() != ProgressStat
+        || !ProgressAttribute.IsValid() || !CapacityAttribute.IsValid()
+        || !ASC->HasAttributeSetForAttribute(ProgressAttribute)
+        || !ASC->HasAttributeSetForAttribute(CapacityAttribute)) {
+        UE_LOG(Myth, Error,
+               TEXT("Proficiency '%s' rejected an unavailable, unregistered, unpaired, or uninstalled Progress Stat."),
+               *GetNameSafe(Def));
+        return false;
     }
 
-    auto HasAttribute = ASC->HasAttributeSetForAttribute(Proficiency.ProgressAttribute);
-    if (!HasAttribute) {
-        UAttributeSet *AttributeSet = NewObject<UAttributeSet>(ASC->GetOwner(), Proficiency.ProgressAttribute.GetAttributeSetClass());
-        ASC->AddSpawnedAttribute(AttributeSet);
-        UE_LOG(Myth, Warning, TEXT("Proficiency: AttributeSet for Attribute %s granted because it wasn't"), *Proficiency.ProgressAttribute.AttributeName)
-    }
-
-    ASC->GetGameplayAttributeValueChangeDelegate(Proficiency.ProgressAttribute).RemoveAll(this);
-    ASC->GetGameplayAttributeValueChangeDelegate(Proficiency.ProgressAttribute).AddUObject(this, &UProficiencyComponent::OnAttributeChanged);
+    ASC->GetGameplayAttributeValueChangeDelegate(ProgressAttribute).RemoveAll(this);
+    ASC->GetGameplayAttributeValueChangeDelegate(ProgressAttribute).AddUObject(
+        this, &UProficiencyComponent::OnAttributeChanged);
 
     Proficiency.MaxXP = ceil(UProficiencyDefinition::CalcCumulativeXPForLevel(Def->MaxLevel, Def));
 
-    // Seed the paired *Max attribute. OverallXpMax is a weighted aggregate of these, and an unseeded 0
-    // leaves the whole account at level 1 forever: the header lies and the primary-growth GE grants
-    // nothing, because both divide by it.
-    const FString MaxAttrName = Proficiency.ProgressAttribute.AttributeName + TEXT("Max");
-    if (const UClass *SetClass = Proficiency.ProgressAttribute.GetAttributeSetClass()) {
-        for (TFieldIterator<FProperty> It(SetClass); It; ++It) {
-            if (It->GetName() == MaxAttrName) {
-                const FGameplayAttribute MaxAttr(*It);
-                if (ASC->HasAttributeSetForAttribute(MaxAttr)) {
-                    ASC->SetNumericAttributeBase(MaxAttr, Proficiency.MaxXP);
-                }
-                break;
-            }
-        }
-    }
+    // Seed the explicitly paired capacity stat. Overall XP and primary growth consume this GAS value.
+    ASC->SetNumericAttributeBase(CapacityAttribute, Proficiency.MaxXP);
 
-    UE_LOG(Myth, Log, TEXT("Proficiency: Bound to %s (MaxXP: %.1f)"), *Proficiency.ProgressAttribute.AttributeName, Proficiency.MaxXP);
+    UE_LOG(Myth, Log, TEXT("Proficiency: Bound to %s / %s (MaxXP: %.1f)"),
+           *ProgressAttribute.GetName(), *CapacityAttribute.GetName(), Proficiency.MaxXP);
+    return true;
 }
 
 void UProficiencyComponent::ReapplyRewardsForLevel(FProficiency &Proficiency, int32 TargetLevel) {
@@ -191,7 +326,8 @@ void UProficiencyComponent::ReapplyRewardsForLevel(FProficiency &Proficiency, in
     for (int32 Level = 1; Level < TargetLevel && Level < Proficiency.Track.Num(); ++Level) {
         auto &Milestone = Proficiency.Track[Level];
         for (auto Reward : Milestone.Rewards) {
-            if (Reward && Reward->CanReapplyOnLoad()) {
+            // Attribute rewards are restored as one source-addressed ledger set before any other reward replays.
+            if (Reward && !Reward->IsA<UAttributeReward>() && Reward->CanReapplyOnLoad()) {
                 Reward->Give(Context);
                 ReappliedCount++;
             }
@@ -219,23 +355,96 @@ void UProficiencyComponent::ApplyLoadedProficiencies() {
     ASC = OwnerASI->GetAbilitySystemComponent();
     checkf(ASC, TEXT("The parent actor of the ProficiencyComponent returned a null AbilitySystemComponent"));
 
-    TArray<TPair<FProficiency *, int32>> ToReapply;
-    TSet<FGameplayAttribute> ResetAttrs;
-
-    for (auto &Proficiency : this->Proficiencies) {
-        Proficiency.Instantiate();
-
-        int32 Level = 0;
-        if (Proficiency.SavedXP > 0.0f) {
-            Level = UProficiencyDefinition::CalcLevelAtXP(Proficiency.SavedXP, Proficiency.Definition);
-
-            UE_LOG(Myth, Log, TEXT("Proficiency %s: Restoring XP=%.1f, Level=%d"),
-                   *Proficiency.Definition->Name.ToString(), Proficiency.SavedXP, Level);
-
-            bIsRestoring = true;
+    UGameInstance *GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    UMythicItemizationDataRegistrySubsystem *Registry = GameInstance
+        ? GameInstance->GetSubsystem<UMythicItemizationDataRegistrySubsystem>() : nullptr;
+    if (!Registry || !Registry->IsCoreSemanticReady()) {
+        if (Registry && !bSemanticDataRequestPending) {
+            bSemanticDataRequestPending = true;
+            TWeakObjectPtr<UProficiencyComponent> WeakThis(this);
+            Registry->RequestCoreSemanticDataAsync(FOnMythicItemizationDataReady::CreateLambda(
+                [WeakThis](const bool bSuccess) {
+                    if (!WeakThis.IsValid()) return;
+                    WeakThis->bSemanticDataRequestPending = false;
+                    if (bSuccess) {
+                        WeakThis->ApplyLoadedProficiencies();
+                    }
+                    else {
+                        UE_LOG(Myth, Error,
+                               TEXT("Proficiency initialization failed because canonical Stat Definitions did not become ready."));
+                    }
+                }));
         }
+        return;
+    }
 
-        ConfigureProgressionAttribute(Proficiency);
+    UMythicAffixApplicationComponent *Application = nullptr;
+    if (AActor *OwnerActor = ASC->GetOwnerActor()) {
+        Application = OwnerActor->FindComponentByClass<UMythicAffixApplicationComponent>();
+    }
+    if (!Application) {
+        if (AActor *AvatarActor = ASC->GetAvatarActor()) {
+            Application = AvatarActor->FindComponentByClass<UMythicAffixApplicationComponent>();
+        }
+    }
+    if (!Application) {
+        UE_LOG(Myth, Error,
+               TEXT("Proficiency initialization requires the authoritative permanent-stat application component."));
+        return;
+    }
+
+    // Reject the complete roster before binding delegates or writing any GAS base. The roster is a semantic graph,
+    // so duplicate definitions/tags/progress stats are a whole-graph failure rather than partially usable content.
+    TSet<const UProficiencyDefinition *> SeenDefinitions;
+    TSet<FGameplayTag> SeenTrackTags;
+    TSet<const UMythicStatDefinition *> SeenProgressStats;
+    for (const FProficiency &Proficiency : Proficiencies) {
+        const UProficiencyDefinition *Definition = Proficiency.Definition;
+        const UMythicStatDefinition *ProgressStat = Definition
+            ? Definition->GetProgressStatDefinition() : nullptr;
+        const UMythicStatDefinition *CapacityStat = ProgressStat
+            ? ProgressStat->PairedStat.GetAsset() : nullptr;
+        const FGameplayAttribute ProgressAttribute = ProgressStat
+            ? ProgressStat->Attribute : FGameplayAttribute();
+        const FGameplayAttribute CapacityAttribute = CapacityStat
+            ? CapacityStat->Attribute : FGameplayAttribute();
+        if (!Definition || SeenDefinitions.Contains(Definition)
+            || !Definition->TrackTag.IsValid() || SeenTrackTags.Contains(Definition->TrackTag)
+            || !ProgressStat || SeenProgressStats.Contains(ProgressStat) || !CapacityStat
+            || Registry->FindStat(ProgressStat->GetPrimaryAssetId()) != ProgressStat
+            || Registry->FindStat(CapacityStat->GetPrimaryAssetId()) != CapacityStat
+            || ProgressStat->PairRole != EMythicStatPairRole::Current
+            || CapacityStat->PairRole != EMythicStatPairRole::Capacity
+            || CapacityStat->PairedStat.GetAsset() != ProgressStat
+            || !ProgressAttribute.IsValid() || !CapacityAttribute.IsValid()
+            || !ASC->HasAttributeSetForAttribute(ProgressAttribute)
+            || !ASC->HasAttributeSetForAttribute(CapacityAttribute)
+            || !FMath::IsFinite(Proficiency.SavedXP) || Proficiency.SavedXP < 0.0f) {
+            UE_LOG(Myth, Error,
+                   TEXT("Proficiency initialization rejected the complete roster at %s."),
+                   *GetNameSafe(Definition));
+            return;
+        }
+        SeenDefinitions.Add(Definition);
+        SeenTrackTags.Add(Definition->TrackTag);
+        SeenProgressStats.Add(ProgressStat);
+    }
+
+    TGuardValue<bool> RestoringGuard(bIsRestoring, true);
+    TArray<TPair<FProficiency *, int32>> ToReapply;
+    TArray<FGuid> OwnedPermanentSourceGuids;
+    TArray<FMythicPermanentStatSourceSpec> DesiredPermanentSources;
+    TSet<FGuid> SeenPermanentSourceGuids;
+
+    for (FProficiency &Proficiency : Proficiencies) {
+        Proficiency.Instantiate();
+        if (Proficiency.Track.Num() != Proficiency.Definition->MaxLevel
+            || !ConfigureProgressionAttribute(Proficiency)) {
+            UE_LOG(Myth, Error,
+                   TEXT("Proficiency initialization failed closed while compiling %s."),
+                   *GetNameSafe(Proficiency.Definition));
+            return;
+        }
 
         if (Proficiency.MaxXP > 0.0f && Proficiency.SavedXP > Proficiency.MaxXP) {
             UE_LOG(Myth, Warning, TEXT("Proficiency %s: SavedXP %.1f exceeds MaxXP %.1f. Clamping."),
@@ -243,15 +452,32 @@ void UProficiencyComponent::ApplyLoadedProficiencies() {
             Proficiency.SavedXP = Proficiency.MaxXP;
         }
 
-        ASC->SetNumericAttributeBase(Proficiency.ProgressAttribute, Proficiency.SavedXP);
+        const int32 Level = UProficiencyDefinition::CalcLevelAtXP(
+            Proficiency.SavedXP, Proficiency.Definition);
+        UE_LOG(Myth, Log, TEXT("Proficiency %s: Restoring XP=%.1f, Level=%d"),
+               *Proficiency.Definition->Name.ToString(), Proficiency.SavedXP, Level);
+        ASC->SetNumericAttributeBase(Proficiency.GetProgressAttribute(), Proficiency.SavedXP);
 
-        for (int32 TrackLevel = 1; TrackLevel < Level && TrackLevel < Proficiency.Track.Num(); ++TrackLevel) {
+        for (int32 TrackLevel = 0; TrackLevel < Proficiency.Track.Num(); ++TrackLevel) {
             for (const auto &Reward : Proficiency.Track[TrackLevel].Rewards) {
                 const UAttributeReward *AttrReward = Cast<UAttributeReward>(Reward);
-                if (!AttrReward || !AttrReward->Attribute.IsValid()) {
+                if (!AttrReward) {
                     continue;
                 }
-                ResetAttrs.Add(AttrReward->Attribute);
+                if (!AttrReward->PermanentSourceGuid.IsValid()
+                    || SeenPermanentSourceGuids.Contains(AttrReward->PermanentSourceGuid)) {
+                    UE_LOG(Myth, Error,
+                           TEXT("Proficiency reward source identity is invalid or duplicated on %s."),
+                           *GetNameSafe(Proficiency.Definition));
+                    return;
+                }
+                SeenPermanentSourceGuids.Add(AttrReward->PermanentSourceGuid);
+                OwnedPermanentSourceGuids.Add(AttrReward->PermanentSourceGuid);
+                if (TrackLevel >= 1 && TrackLevel < Level) {
+                    DesiredPermanentSources.Add(FMythicPermanentStatSourceSpec{
+                        AttrReward->PermanentSourceGuid, AttrReward->TargetStat,
+                        AttrReward->Modifier, AttrReward->Magnitude});
+                }
             }
         }
 
@@ -260,26 +486,22 @@ void UProficiencyComponent::ApplyLoadedProficiencies() {
         }
     }
 
-    if (ASC) {
-        for (const FGameplayAttribute &Attr : ResetAttrs) {
-            if (ASC->HasAttributeSetForAttribute(Attr)) {
-                const UAttributeSet *CDO = Attr.GetAttributeSetClass()->GetDefaultObject<UAttributeSet>();
-                ASC->SetNumericAttributeBase(Attr, Attr.GetNumericValue(CDO));
-            }
-        }
+    if (!Application->ReplacePermanentStatSourceSetTransactional(
+            OwnedPermanentSourceGuids, DesiredPermanentSources)) {
+        UE_LOG(Myth, Error,
+               TEXT("Proficiency reward restore failed closed because its complete typed source set was rejected."));
+        return;
     }
 
     for (const TPair<FProficiency *, int32> &Entry : ToReapply) {
         ReapplyRewardsForLevel(*Entry.Key, Entry.Value);
     }
-
-    bIsRestoring = false;
 }
 
 FProficiency* UProficiencyComponent::FindCombatProficiency() {
     const FGameplayAttribute CombatAttr = UMythicAttributeSet_Proficiencies::GetCombatProficiencyAttribute();
     for (auto &Proficiency : Proficiencies) {
-        if (Proficiency.ProgressAttribute == CombatAttr) {
+        if (Proficiency.GetProgressAttribute() == CombatAttr) {
             return &Proficiency;
         }
     }
@@ -304,11 +526,15 @@ void UProficiencyComponent::GrantProficiencyXP(UProficiencyDefinition *Definitio
 
 void UProficiencyComponent::GrantProficiencyXPWithContext(UProficiencyDefinition *Definition, float Amount,
                                                           FGameplayTagContainer ContextTags) {
-    if (!Definition || Amount <= 0.0f) {
-        return;
-    }
-    if (!ASC || !GetOwner() || !GetOwner()->HasAuthority()) {
-        return;
+    TryGrantProficiencyXPWithContext(Definition, Amount, ContextTags);
+}
+
+bool UProficiencyComponent::TryGrantProficiencyXPWithContext(
+    UProficiencyDefinition *Definition, const float Amount,
+    const FGameplayTagContainer &ContextTags) {
+    if (!Definition || !FMath::IsFinite(Amount) || Amount <= 0.0f
+        || !ASC || !GetOwner() || !GetOwner()->HasAuthority()) {
+        return false;
     }
 
     FProficiency *Prof = nullptr;
@@ -318,17 +544,24 @@ void UProficiencyComponent::GrantProficiencyXPWithContext(UProficiencyDefinition
             break;
         }
     }
-    if (!Prof || !Prof->ProgressAttribute.IsValid()) {
+    const FGameplayAttribute ProgressAttribute = Prof
+        ? Prof->GetProgressAttribute() : FGameplayAttribute();
+    if (!Prof || !ProgressAttribute.IsValid()
+        || !ASC->HasAttributeSetForAttribute(ProgressAttribute)) {
         UE_LOG(Myth, Warning, TEXT("ProficiencyComponent: no proficiency configured for %s, cannot grant XP"),
                *GetNameSafe(Definition));
-        return;
+        return false;
     }
 
-    const float Current = ASC->GetNumericAttributeBase(Prof->ProgressAttribute);
-    ASC->SetNumericAttributeBase(Prof->ProgressAttribute, Current + Amount);
+    const float Current = ASC->GetNumericAttributeBase(ProgressAttribute);
+    const float Updated = Current + Amount;
+    if (!FMath::IsFinite(Current) || !FMath::IsFinite(Updated)) {
+        return false;
+    }
+    ASC->SetNumericAttributeBase(ProgressAttribute, Updated);
 
     UE_LOG(Myth, Log, TEXT("ProficiencyComponent: granted %.1f %s XP (%.1f -> %.1f)"),
-           Amount, *GetNameSafe(Definition), Current, Current + Amount);
+           Amount, *GetNameSafe(Definition), Current, Updated);
 
     {
         FGameplayEventData Payload;
@@ -343,6 +576,7 @@ void UProficiencyComponent::GrantProficiencyXPWithContext(UProficiencyDefinition
         Payload.InstigatorTags.AppendTags(ContextTags);
         ASC->HandleGameplayEvent(GAS_EVENT_PROFICIENCY_GAINED, &Payload);
     }
+    return true;
 }
 
 float UProficiencyComponent::ComputeXpOverflow(float CurrentXP, float Amount, float MaxXP) {
@@ -362,15 +596,18 @@ void UProficiencyComponent::ApplyDeathPenalty(float PenaltyFraction) {
     }
 
     FProficiency *CombatProf = FindCombatProficiency();
-    if (!CombatProf || !CombatProf->ProgressAttribute.IsValid()) {
+    const FGameplayAttribute ProgressAttribute = CombatProf
+        ? CombatProf->GetProgressAttribute() : FGameplayAttribute();
+    if (!CombatProf || !ProgressAttribute.IsValid()
+        || !ASC->HasAttributeSetForAttribute(ProgressAttribute)) {
         return;
     }
 
-    const float OldXP = ASC->GetNumericAttributeBase(CombatProf->ProgressAttribute);
+    const float OldXP = ASC->GetNumericAttributeBase(ProgressAttribute);
     const int32 OldLevel = UProficiencyDefinition::CalcLevelAtXP(OldXP, CombatProf->Definition);
     const float LevelFloorXP = UProficiencyDefinition::CalcCumulativeXPForLevel(OldLevel, CombatProf->Definition);
     const float NewXP = ComputeXpAfterDeathPenalty(OldXP, PenaltyFraction, LevelFloorXP);
-    ASC->SetNumericAttributeBase(CombatProf->ProgressAttribute, NewXP);
+    ASC->SetNumericAttributeBase(ProgressAttribute, NewXP);
 
     UE_LOG(Myth, Log, TEXT("ProficiencyComponent: death penalty, combat XP %.1f -> %.1f (%.0f%% loss, level %d floor %.1f)"),
            OldXP, NewXP, PenaltyFraction * 100.0f, OldLevel, LevelFloorXP);
@@ -402,8 +639,10 @@ FProficiencySummary UProficiencyComponent::GetSummary(int32 Index) const {
     Summary.Description = Prof.Definition->Description;
     Summary.Icon = Prof.Definition->Icon;
 
-    if (ASC) {
-        Summary.CurrentXP = ASC->GetNumericAttributeBase(Prof.ProgressAttribute);
+    const FGameplayAttribute ProgressAttribute = Prof.GetProgressAttribute();
+    if (ASC && ProgressAttribute.IsValid()
+        && ASC->HasAttributeSetForAttribute(ProgressAttribute)) {
+        Summary.CurrentXP = ASC->GetNumericAttributeBase(ProgressAttribute);
     } else {
         Summary.CurrentXP = Prof.SavedXP;
     }
@@ -433,6 +672,41 @@ FProficiencySummary UProficiencyComponent::GetSummary(int32 Index) const {
     }
 
     return Summary;
+}
+
+bool UProficiencyComponent::TryGetLevelForDefinition(
+    const UProficiencyDefinition *Definition, int32 &OutLevel) const {
+    OutLevel = 0;
+    if (!Definition) {
+        return false;
+    }
+
+    const FProficiency *Match = nullptr;
+    for (const FProficiency &Proficiency : Proficiencies) {
+        if (Proficiency.Definition != Definition) {
+            continue;
+        }
+        if (Match) {
+            return false;
+        }
+        Match = &Proficiency;
+    }
+    if (!Match) {
+        return false;
+    }
+
+    float CurrentXP = Match->SavedXP;
+    const FGameplayAttribute ProgressAttribute = Match->GetProgressAttribute();
+    if (ASC && ProgressAttribute.IsValid()
+        && ASC->HasAttributeSetForAttribute(ProgressAttribute)) {
+        CurrentXP = ASC->GetNumericAttributeBase(ProgressAttribute);
+    }
+    if (!FMath::IsFinite(CurrentXP) || CurrentXP < 0.0f) {
+        return false;
+    }
+
+    OutLevel = UProficiencyDefinition::CalcLevelAtXP(CurrentXP, Definition);
+    return OutLevel >= 0;
 }
 
 void UProficiencyComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {

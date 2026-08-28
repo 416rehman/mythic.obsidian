@@ -16,20 +16,25 @@ USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicStatDiminishing {
     GENERATED_BODY()
 
+    /** GAS multiplier attribute whose high-end growth is controlled by this row. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Diminishing")
     FGameplayAttribute Attribute;
 
+    /** Bonus fraction that retains full value before diminishing begins; 1.0 means +100%. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Diminishing", meta = (ClampMin = "0.0"))
     float SoftCapBonus = 1.0f;
 
+    /** Asymptotic bonus-fraction ceiling; set to zero to leave this attribute uncurved. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Diminishing", meta = (ClampMin = "0.0"))
     float CeilingBonus = 4.0f;
 };
 
+/** Complete data-authored collection of per-stat diminishing curves and safe fallback behavior. */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicStatDiminishingConfig {
     GENERATED_BODY()
 
+    /** Per-attribute diminishing curves; an authored row overrides the default curve below. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Diminishing")
     TArray<FMythicStatDiminishing> Stats;
 
@@ -40,6 +45,7 @@ struct MYTHIC_API FMythicStatDiminishingConfig {
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Diminishing", meta = (ClampMin = "0.0"))
     float DefaultSoftCapBonus = 1.0f;
 
+    /** Default asymptotic ceiling for attributes without a row; zero keeps those attributes uncapped. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Diminishing", meta = (ClampMin = "0.0"))
     float DefaultCeilingBonus = 0.0f;
 };

@@ -7,6 +7,7 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
 #include "AbilitySystemLog.h"
+#include "Animation/AnimMontage.h"
 #include "Mythic.h"
 #include "MythicAbilityCost.h"
 #include "MythicDamageContainer.h"
@@ -20,6 +21,7 @@
 #include "Itemization/Inventory/Fragments/ItemFragment.h"
 #include "Itemization/MythicTags_Inventory.h"
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
+#include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GameModes/GameState/MythicGameState.h"
@@ -91,14 +93,19 @@ FMythicDamageContainerSpec UMythicGameplayAbility::MakeDamageContainerSpec(const
     FMythicDamageContainerSpec ReturnSpec;
 
     if (OverrideGameplayLevel == INDEX_NONE) {
-        OverrideGameplayLevel = OverrideGameplayLevel = this->GetAbilityLevel();
+        OverrideGameplayLevel = GetAbilityLevel();
     }
-    auto OwningASC = GetAbilitySystemComponentFromActorInfo();
-    if (!OwningASC) {
-        UE_LOG(Myth, Error, TEXT("UMythicGameplayAbility::MakeDamageContainerSpec: no owning ASC (stale/null actor info)"));
+    UAbilitySystemComponent *OwningASC = GetAbilitySystemComponentFromActorInfo();
+    const FGameplayAbilityActorInfo *ActorInfo = GetCurrentActorInfo();
+    if (!OwningASC || !ActorInfo || !CurrentSpecHandle.IsValid()) {
+        UE_LOG(Myth, Error,
+               TEXT("UMythicGameplayAbility::MakeDamageContainerSpec: no active spec/actor info/owning ASC"));
         return ReturnSpec;
     }
-    ReturnSpec.EffectContextHandle = OwningASC->MakeEffectContext();
+    // Preserve the active ability, exact SourceObject (the live item fragment), ability-source metadata, and
+    // effect causer. Building a generic ASC context here silently strips the provenance that weapon procs,
+    // attribution, combat telemetry, and downstream execution calculations rely on.
+    ReturnSpec.EffectContextHandle = MakeEffectContext(CurrentSpecHandle, ActorInfo);
 
     if (Container.DamageCalculationEffect) {
         FGameplayEffectSpecHandle DamageCalculationSpecHandle = OwningASC->MakeOutgoingSpec(Container.DamageCalculationEffect, OverrideGameplayLevel,
@@ -172,7 +179,7 @@ void UMythicGameplayAbility::SendEvent(FGameplayAbilityTargetDataHandle TargetDa
 TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainerSpec(const FMythicDamageContainerSpec &ContainerSpec) {
     TArray<FActiveGameplayEffectHandle> AllEffects;
 
-    if (!CurrentActorInfo->IsNetAuthority()) {
+    if (!CurrentActorInfo || !CurrentActorInfo->IsNetAuthority()) {
         return AllEffects;
     }
 
@@ -217,34 +224,64 @@ TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainer
 TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainer(const FMythicDamageContainer &Container, const TArray<FHitResult> &HitResults,
                                                                                  const TArray<AActor *> &TargetActors,
                                                                                  int32 OverrideGameplayLevel) {
+    return ApplyDamageContainerNative(Container, HitResults, TargetActors,
+                                      OverrideGameplayLevel, true);
+}
+
+TArray<FActiveGameplayEffectHandle> UMythicGameplayAbility::ApplyDamageContainerNative(
+    const FMythicDamageContainer &Container,
+    const TArray<FHitResult> &HitResults,
+    const TArray<AActor *> &TargetActors,
+    const int32 OverrideGameplayLevel,
+    const bool bApplySourceWear) {
     TArray<FActiveGameplayEffectHandle> AllEffects;
 
-    if (!CurrentActorInfo->IsNetAuthority()) {
+    if (!CurrentActorInfo || !CurrentActorInfo->IsNetAuthority()) {
         return AllEffects;
     }
 
-    if (TargetActors.IsEmpty() || HitResults.IsEmpty()) {
+    if (TargetActors.IsEmpty() && HitResults.IsEmpty()) {
         UE_LOG(Myth, Warning, TEXT("No Targets"));
     }
 
-    if (!TargetActors.IsEmpty() && !HitResults.IsEmpty()) {
-        if (UObject *Src = GetCurrentSourceObject()) {
-            if (UItemFragment *SourceFragment = Cast<UItemFragment>(Src)) {
-                if (UMythicItemInstance *Inst = SourceFragment->GetOwningItemInstance()) {
-                    if (const UDurabilityFragment *Durability = Inst->GetFragment<UDurabilityFragment>()) {
-                        if (Durability->IsBroken()) {
-                            return AllEffects;
-                        }
-                        const_cast<UDurabilityFragment *>(Durability)->ServerApplyWear(1);
-                    }
-                }
-            }
-        }
+    // A hit result already identifies its actor. Requiring a duplicate ActorArray here made callers provide the same
+    // target twice to FMythicDamageContainerSpec, which could apply damage twice. Either canonical representation is
+    // sufficient to prove that this activation connected and should wear the weapon once.
+    if ((!TargetActors.IsEmpty() || !HitResults.IsEmpty()) && bApplySourceWear
+        && !TryApplySourceDurabilityWear(1)) {
+        return AllEffects;
     }
 
     FMythicDamageContainerSpec Spec = MakeDamageContainerSpec(Container, OverrideGameplayLevel);
     AddTargetsToDamageContainerSpec(Spec, HitResults, TargetActors);
     return ApplyDamageContainerSpec(Spec);
+}
+
+bool UMythicGameplayAbility::TryApplySourceDurabilityWear(const int32 Amount) {
+    if (Amount < 0 || !CurrentActorInfo || !CurrentActorInfo->IsNetAuthority()) {
+        return false;
+    }
+    UObject *Source = GetCurrentSourceObject();
+    UItemFragment *SourceFragment = Cast<UItemFragment>(Source);
+    UMythicItemInstance *Item = SourceFragment
+        ? SourceFragment->GetOwningItemInstance()
+        : nullptr;
+    UDurabilityFragment *Durability = Item
+        ? const_cast<UDurabilityFragment *>(
+              Item->GetFragment<UDurabilityFragment>())
+        : nullptr;
+    // Durability remains opt-in for general ability sources. Harvest-tool composition is validated separately and
+    // therefore always supplies one; an unrelated spell or innate ability must not lose damage just for lacking it.
+    if (!Durability) {
+        return true;
+    }
+    if (Durability->IsBroken()) {
+        return false;
+    }
+    if (Amount > 0) {
+        Durability->ServerApplyWear(Amount);
+    }
+    return true;
 }
 
 void UMythicGameplayAbility::AddTargetsToDamageContainerSpec(FMythicDamageContainerSpec &ContainerSpec, const TArray<FHitResult> &HitResults,
@@ -693,6 +730,30 @@ float UMythicGameplayAbility::GetClampedAttackSpeedPlayRate() const {
     }
 
     return ComputeAttackSpeedPlayRate(PlayRate - 1.0f, MinRate, MaxRate);
+}
+
+FName UMythicGameplayAbility::SelectAttackMontageSection(
+    const UAttackFragment *AttackFragment) const {
+    TArray<FName> SectionNames;
+    if (!AttackFragment
+        || !AttackFragment->GetRuntimeAttackSectionNames(SectionNames)
+        || SectionNames.IsEmpty()) {
+        return NAME_None;
+    }
+
+    const FPredictionKey &PredictionKey =
+        GetCurrentActivationInfo().GetActivationPredictionKey();
+    int32 SectionIndex = INDEX_NONE;
+    if (PredictionKey.IsValidKey()) {
+        FRandomStream PredictionStream(static_cast<int32>(GetTypeHash(PredictionKey)));
+        SectionIndex = PredictionStream.RandRange(0, SectionNames.Num() - 1);
+    }
+    else {
+        SectionIndex = FMath::RandHelper(SectionNames.Num());
+    }
+    return SectionNames.IsValidIndex(SectionIndex)
+        ? SectionNames[SectionIndex]
+        : NAME_None;
 }
 
 float UMythicGameplayAbility::ComputeAttackSpeedPlayRate(float AttackSpeedBonus, float MinRate, float MaxRate) {

@@ -33,7 +33,7 @@ class UMythicRenownTierTable;
 class UMythicTitleRegistry;
 class UGameplayEffect;
 class AMythicMount;
-class UProficiencyDefinition;
+class UMythicItemizationRuleset;
 
 UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic"))
 class MYTHIC_API UMythicDeveloperSettings : public UDeveloperSettings {
@@ -175,12 +175,8 @@ public:
     TSoftObjectPtr<UMythicLootTable> GlobalLootTable;
 
     /**
-     * The AMythicWorldItem subclass every dropped/overflowing item spawns as.
-     *
-     * UMythicLootManagerSubsystem::DefaultWorldItemClass had NO way to be set: its only setter is plain C++ with zero
-     * callers and no UFUNCTION, and a GameInstanceSubsystem CDO is not editor-editable. So it was always null, and the
-     * null-guards in CreateAndGive / Spawn made EVERY loot grant a silent early-return. This config field is what the
-     * subsystem resolves on Initialize, so the class is a project setting like the global loot table beside it.
+     * The AMythicWorldItem subclass used for every dropped or overflowing item. The server-only loot subsystem resolves
+     * this project setting during initialization; there is no per-map or Blueprint override path that can drift.
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loot")
     TSoftClassPtr<AMythicWorldItem> DefaultWorldItemClass;
@@ -322,6 +318,14 @@ public:
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.0"))
     float StatusBuildupDecayPerSecond = 0.0f;
+
+    /**
+     * Active typed release/season control plane for affix generation. It owns the exact concrete profile closure;
+     * unset means affix generation remains unavailable and fails closed.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Itemization",
+              meta = (AssetBundles = "Runtime"))
+    TSoftObjectPtr<UMythicItemizationRuleset> ActiveItemizationRuleset;
 
     /**
      * Item types that count as GATHERED when acquired rather than looted, matched against the item's type tag and
@@ -667,15 +671,6 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Homestead")
     bool bEnableHomesteadRaids = false;
 
-    /**
-     * The CONSTRUCTION proficiency track (a DATA asset on the generic proficiency system) fed by homestead building
-     * (shell large / repair medium / deploy small — every feed anti-grind capped). The ConstructionProficiency ASC
-     * attribute has existed as a ghost track; this asset finally connects it. Unset = building grants no proficiency
-     * XP (the transactions still work; warned once). Mirrors Mounts.RidingProficiency.
-     */
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Homestead")
-    TSoftObjectPtr<UProficiencyDefinition> ConstructionProficiency;
-
     // ─────────────────────────────────── Trading (Wave O) ───────────────────────────────────
     /**
      * TRADING master switch (Wave O). When FALSE (default), the trade-ledger subsystem is never created (no commit
@@ -748,14 +743,6 @@ public:
     /** Seconds between whistle summons (per player; boundary inclusive). <= 0 disables the cooldown. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Mounts", meta = (ClampMin = "0.0"))
     float MountSummonCooldown = 30.0f;
-
-    /**
-     * The RIDING proficiency track (a DATA asset on the generic proficiency system) granted XP by taming (and future
-     * riding payoffs) when UMythicGA_Tame has no CDO-level override. Unset = taming grants no proficiency XP (the
-     * roster mint still happens). Preloaded at startup.
-     */
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Mounts")
-    TSoftObjectPtr<UProficiencyDefinition> RidingProficiency;
 
     // ─────────────────────────────── Batched world FX ───────────────────────────────
     /**

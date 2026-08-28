@@ -13,58 +13,57 @@
 struct FMilestone;
 class UProficiencyDefinition;
 
+/** Replication-safe, presentation-ready snapshot of one player's proficiency progress. */
 USTRUCT(BlueprintType)
 struct FProficiencySummary {
     GENERATED_BODY()
 
-    // name of the proficiency track
+    /** Localized player-facing name of the proficiency track. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     FText Name;
 
-    // Stable identity of the track, so a consumer can group or look one up without matching display names.
+    /** Stable track identity used for grouping and lookup without matching localized display text. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     FGameplayTag TrackTag;
 
-    // description of the proficiency track
+    /** Localized player-facing description of the proficiency track. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     FText Description;
 
-    // current level reached
+    /** Current level reached on this track. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     int32 Level = 0;
 
-    // current cumulative experience
+    /** Current lifetime XP accumulated on this track. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     float CurrentXP = 0.0f;
 
-    // cumulative experience required for the current level
+    /** Lifetime XP threshold at which the current level began. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     float LevelXPStart = 0.0f;
 
-    // cumulative experience required for the next level
+    /** Lifetime XP threshold required to reach the next level. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     float LevelXPEnd = 0.0f;
 
-    // progress fraction towards the next level
+    /** Normalized progress from the current level to the next in the range 0..1. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     float ProgressFraction = 0.0f;
 
-    // The next key milestone ahead of the current level. Empty once every milestone on the track is earned.
-    // Levelling a track is only worth doing if you can see what it is building towards, so this rides along
-    // with the summary rather than making every caller walk the generated track itself.
+    /** Next named milestone ahead of the player; empty after every milestone has been earned. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     FText NextMilestoneName;
 
-    // The level that milestone lands on. 0 when there is none left.
+    /** Level of the next named milestone, or zero when the track has no remaining milestone. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     int32 NextMilestoneLevel = 0;
 
-    // The track's mark, copied off the definition. The UI reads summaries and never the definition, so without
-    // this the icon simply cannot reach the page.
+    /** Soft player-facing icon copied from the definition for presentation without loading the definition in UI. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency Summary")
     TSoftObjectPtr<UTexture2D> Icon;
 };
 
+/** Runtime state for one typed proficiency definition and its transiently compiled reward track. */
 USTRUCT(BlueprintType, Blueprintable)
 struct FProficiency {
     GENERATED_BODY()
@@ -72,16 +71,18 @@ struct FProficiency {
     void Instantiate();
     void GenerateTrack();
 
-    // The definition of the proficiency
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency")
-    UProficiencyDefinition *Definition = nullptr;
+    /** Resolves the current-XP GAS attribute from the definition's canonical Progress Stat. */
+    FGameplayAttribute GetProgressAttribute() const;
 
-    // The ASC attribute indicating the progress of this proficiency
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency")
-    FGameplayAttribute ProgressAttribute = FGameplayAttribute();
+    /** Resolves the Max-XP GAS attribute from the Progress Stat's typed capacity pair. */
+    FGameplayAttribute GetProgressCapacityAttribute() const;
 
-    // The generated proficiency track
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Proficiency")
+    /** Sole authored identity and tuning source for this proficiency track. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proficiency")
+    TObjectPtr<UProficiencyDefinition> Definition = nullptr;
+
+    /** Transient compiled milestone/reward track rebuilt from Definition; never saved or replicated as authority. */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, NotReplicated, Category = "Proficiency")
     TArray<FMilestone> Track = TArray<FMilestone>();
 
     float SavedXP = 0.0f;
@@ -89,34 +90,35 @@ struct FProficiency {
     float MaxXP = 0.0f;
 };
 
+/** Authority-owned, owner-replicated proficiency progression and reward orchestration component. */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class MYTHIC_API UProficiencyComponent : public UActorComponent {
     GENERATED_BODY()
 
 public:
+    /** Authored proficiency roster; each entry must reference one unique definition and Progress Stat. */
     UPROPERTY(Replicated, EditAnywhere, BlueprintReadOnly, Category = "Proficiency")
     TArray<FProficiency> Proficiencies;
 
     UPROPERTY()
-    UAbilitySystemComponent *ASC;
+    TObjectPtr<UAbilitySystemComponent> ASC;
 
     /**
-     * SERVER: apply staged FProficiency::SavedXP to the ASC for every proficiency (Instantiate ->
-     * ConfigureProgressionAttribute -> clamp -> SetNumericAttributeBase -> ReapplyRewardsForLevel), guarded by
-     * bIsRestoring. Authority only. Called from BeginPlay (cold start) AND from the save-load finished path
-     * (CharacterData::Deserialize) — the latter is required because async character load completes AFTER BeginPlay,
-     * so without a re-apply the loaded XP would stage into the struct but never reach the ASC. Idempotent:
-     * SetNumericAttributeBase is an absolute set and only CanReapplyOnLoad rewards are re-Given.
+     * Authority-only restore of the complete authored roster after canonical Stat Definitions are ready. The call
+     * validates the roster before mutation, writes staged XP, atomically replaces source-addressed permanent stat
+     * rewards, and replays only load-safe non-attribute rewards; repeated calls are idempotent.
      */
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     void ApplyLoadedProficiencies();
 
-    // server: grant combat proficiency XP to the owning player (applies ProficiencyXPBonus and Enlighten scaling)
+    /** Authority-only convenience entry point that grants scaled XP to the configured Combat proficiency. */
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     void GrantCombatXP(float Amount);
 
-    // server: grant XP to ANY proficiency by its definition (the generic primitive — used by crafting completion,
-    // reusable for gathering/etc). No-op off-authority, Amount<=0, null Def, or a Def this player has no proficiency for.
+    /**
+     * Authority-only generic XP grant for an authored proficiency definition. Invalid amounts, unknown definitions,
+     * and non-authority calls are ignored; valid grants include the player's proficiency XP multipliers.
+     */
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     void GrantProficiencyXP(UProficiencyDefinition *Definition, float Amount);
 
@@ -134,7 +136,16 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     void GrantProficiencyXPWithContext(UProficiencyDefinition *Definition, float Amount, FGameplayTagContainer ContextTags);
 
-    // server: apply death penalty to combat proficiency XP (reduces current XP by PenaltyFraction)
+    /**
+     * Native authority seam used by durable delivery. Returns true only when the exact typed track consumed the
+     * finite positive amount; reaching the track cap still counts as consumption so a receipt cannot retry forever.
+     */
+    bool TryGrantProficiencyXPWithContext(
+        UProficiencyDefinition *Definition,
+        float Amount,
+        const FGameplayTagContainer &ContextTags);
+
+    /** Reduces Combat proficiency XP by a normalized penalty fraction on authority without crossing the level floor. */
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     void ApplyDeathPenalty(float PenaltyFraction);
 
@@ -148,15 +159,23 @@ public:
 
     bool IsRestoring() const { return bIsRestoring; }
 
-    // returns a summary of the proficiency at the specified index
+    /** Returns display-ready progress and milestone data for one roster index, or an empty summary if invalid. */
     UFUNCTION(BlueprintCallable, Category = "Proficiency")
     FProficiencySummary GetSummary(int32 Index) const;
 
+    /**
+     * Resolves the live level for one exact Proficiency Definition without tag/name lookup. Returns false for a
+     * missing/duplicated roster entry or invalid XP state and never mutates progression.
+     */
+    bool TryGetLevelForDefinition(
+        const UProficiencyDefinition *Definition, int32 &OutLevel) const;
+
 protected:
     bool bIsRestoring = false;
+    bool bSemanticDataRequestPending = false;
 
     void OnAttributeChanged(const FOnAttributeChangeData &OnAttributeChangeData);
-    void ConfigureProgressionAttribute(FProficiency &Proficiency);
+    bool ConfigureProgressionAttribute(FProficiency &Proficiency);
 
     void ReapplyRewardsForLevel(FProficiency &Proficiency, int32 TargetLevel);
 

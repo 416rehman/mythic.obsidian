@@ -5,6 +5,8 @@
 #include "Engine/World.h"
 #include "Player/MythicPlayerState.h"
 #include "Subsystem/SaveSystem/Character/CharacterData.h"
+#include "World/Harvesting/MythicHarvestReceiptLedgerComponent.h"
+#include "World/Harvesting/MythicHarvestRewardEscrowComponent.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -39,6 +41,31 @@ bool FMythicCharacterNameTest::RunTest(const FString &Parameters) {
         return false;
     }
 
+    // Harvest restore is fail-closed, so a save fixture has to carry the seeded ledger headers every real character
+    // is created with.
+    UMythicHarvestReceiptLedgerComponent *ReceiptLedger = PlayerState->GetHarvestReceiptLedger();
+    UMythicHarvestRewardEscrowComponent *RewardEscrow = PlayerState->GetHarvestRewardEscrow();
+    if (!TestNotNull(TEXT("the player state owns a harvest receipt ledger"), ReceiptLedger)
+        || !TestNotNull(TEXT("the player state owns a harvest reward escrow"), RewardEscrow)) {
+        return false;
+    }
+
+    FMythicHarvestReceiptLedgerSaveV1 SeededLedger;
+    FMythicHarvestItemEscrowSaveV1 SeededEscrow;
+    FName SeedDiagnostic;
+    if (!ReceiptLedger->BuildSaveSnapshot(SeededLedger, SeedDiagnostic)) {
+        AddError(FString::Printf(
+            TEXT("a freshly seeded receipt ledger failed to build a valid snapshot (%s)"),
+            *SeedDiagnostic.ToString()));
+        return false;
+    }
+    if (!RewardEscrow->BuildSaveSnapshot(SeededEscrow, SeedDiagnostic)) {
+        AddError(FString::Printf(
+            TEXT("a freshly seeded reward escrow failed to build a valid snapshot (%s)"),
+            *SeedDiagnostic.ToString()));
+        return false;
+    }
+
     const FString FromManifest = TEXT("Rhoslyn");
 
     // What OnPostLogin does before the load: the manifest name reaches the player state.
@@ -49,14 +76,20 @@ bool FMythicCharacterNameTest::RunTest(const FString &Parameters) {
     // A save written before this character had a name. Deserialize must not apply the empty string.
     FSerializedCharacterData Older;
     Older.CharacterName = FString();
-    FSerializedCharacterData::Deserialize(PlayerState, Older);
+    Older.HarvestReceiptLedger = SeededLedger;
+    Older.HarvestItemEscrow = SeededEscrow;
+    TestTrue(TEXT("a save with no name still deserializes"),
+             FSerializedCharacterData::Deserialize(PlayerState, Older));
     TestEqual(TEXT("a save with no name leaves the manifest name standing"),
               PlayerState->GetPlayerName(), FromManifest);
 
     // A save that does carry a name is still allowed to restore it, or renaming could never persist.
     FSerializedCharacterData Named;
     Named.CharacterName = TEXT("Aldreth");
-    FSerializedCharacterData::Deserialize(PlayerState, Named);
+    Named.HarvestReceiptLedger = SeededLedger;
+    Named.HarvestItemEscrow = SeededEscrow;
+    TestTrue(TEXT("a save that carries a name deserializes"),
+             FSerializedCharacterData::Deserialize(PlayerState, Named));
     TestEqual(TEXT("a save that carries a name restores it"), PlayerState->GetPlayerName(), TEXT("Aldreth"));
 
     return true;

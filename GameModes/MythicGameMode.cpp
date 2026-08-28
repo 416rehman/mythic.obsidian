@@ -24,8 +24,6 @@
 #include "UObject/Package.h"
 
 namespace {
-    const FString WorldSaveSlot = UMythicSaveGameSubsystem::DebugWorldSlot;
-
     /**
      * Deliberately never the OS login name. The character page treats a name starting with the OS user or the
      * machine name as a leaked identity and prints "Unnamed" instead - so seeding the manifest with it produced
@@ -169,7 +167,13 @@ void AMythicGameMode::BeginPlay() {
         return;
     }
 
-    GetWorldTimerManager().SetTimer(AutosaveTimerHandle, this, &AMythicGameMode::HandleAutosaveTimer, AutosaveIntervalSeconds, true);
+    if (UMythicSaveGameSubsystem::TryResolveAuthorityWorldSlot(
+            AuthorityWorldSaveSlot)) {
+        GetWorldTimerManager().SetTimer(
+            AutosaveTimerHandle, this,
+            &AMythicGameMode::HandleAutosaveTimer,
+            AutosaveIntervalSeconds, true);
+    }
 }
 
 void AMythicGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason) {
@@ -187,7 +191,10 @@ void AMythicGameMode::HandleAutosaveTimer() {
         return;
     }
 
-    SaveSys->SaveWorld(WorldSaveSlot);
+    if (AuthorityWorldSaveSlot.IsEmpty()) {
+        return;
+    }
+    SaveSys->SaveWorld(AuthorityWorldSaveSlot);
 
     if (GameState) {
         for (APlayerState *PS : GameState->PlayerArray) {
