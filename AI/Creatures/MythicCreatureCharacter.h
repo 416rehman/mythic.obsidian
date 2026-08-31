@@ -16,6 +16,8 @@ public:
 
     virtual void InitializeFromMassEntity(const FMassEntityHandle &InEntityHandle) override;
 
+    virtual void OnReturnedToPool() override;
+
     /** Runtime species id this creature was embodied as (0 until InitializeFromMassEntity runs). */
     UFUNCTION(BlueprintPure, Category = "Mythic Creature")
     uint8 GetSpeciesId() const { return SpeciesId; }
@@ -28,7 +30,17 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic Creature")
     float GetCurrentAggression() const { return CurrentAggression; }
 
+    /** Canonical Creature.Species.* presentation/codex identity; invalid means the species data is not authored. */
+    UFUNCTION(BlueprintPure, Category = "Mythic Creature")
+    FGameplayTag GetSpeciesTag() const { return SpeciesTag; }
+
 protected:
+    virtual void BuildMassPublicIdentity(const FMythicIdentityFragment &Identity,
+                                         FMythicPublicIdentitySnapshot &OutIdentity) const override;
+
+    virtual void BuildDirectPublicIdentity(
+        FMythicPublicIdentitySnapshot &OutIdentity) const override;
+
     /**
      * Fired (server) once the creature has been bound to its entity, carrying its resolved SpeciesId. The mesh-bearing
      * creature Blueprint binds this to swap the skeletal mesh / anim blueprint per species — keeping species→asset
@@ -38,6 +50,8 @@ protected:
     void OnCreatureInitialized(uint8 InSpeciesId, int32 InPackId);
 
     uint8 SpeciesId = 0;
+    FGameplayTag SpeciesTag;
+    FPrimaryAssetId PublicIdentityDefinitionId;
     int32 PackId = 0;
     float CurrentAggression = 0.0f;
 };

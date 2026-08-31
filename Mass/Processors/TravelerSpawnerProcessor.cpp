@@ -225,11 +225,17 @@ void UMythicTravelerSpawnerProcessor::Execute(FMassEntityManager &EntityManager,
         SpawnData.Identity.Faction = Origin.Faction;
         SpawnData.Identity.Cell = Origin.Center;
 
-        const int32 SpawnSerial = PersistentRegistry->AllocateSpawnSerial();
-        SpawnData.Identity.NameHash = FMythicNPCGenerator::GenerateNameHash(
+        const int32 SpawnSerial = PersistentRegistry->AllocateNameSeedSerial();
+        SpawnData.Identity.NameSeed = FMythicNPCGenerator::GenerateNameHash(
             Origin.Faction.Index, Origin.Center, SpawnSerial);
-        SpawnData.Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(SpawnData.Identity.NameHash, 8);
-        SpawnData.Identity.DemographicFlags = FMythicNPCGenerator::GenerateDemographicFlags(SpawnData.Identity.NameHash, true);
+        SpawnData.Identity.EntityId = PersistentRegistry->AllocateEntityIdentity(
+            SpawnData.Identity.NameSeed,
+            EMythicEntityIdentityProvenance::RouteTraveler);
+        if (!SpawnData.Identity.EntityId.IsValid()) {
+            continue;
+        }
+        SpawnData.Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(SpawnData.Identity.NameSeed, 8);
+        SpawnData.Identity.DemographicFlags = FMythicNPCGenerator::GenerateDemographicFlags(SpawnData.Identity.NameSeed, true);
         SpawnData.Identity.RoleTag = bCaravan ? CaravanRole : PatrolRole;
 
         const FMythicCellCoord FirstStep = StepToward(Origin.Center, Dest.Center);

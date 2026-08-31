@@ -12,6 +12,14 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMythicOnLivingWorldProxiesChanged);
 
+/** Outcome of the authority-only logical-entity retirement transaction. */
+enum class EMythicEntityRetirementResult : uint8 {
+    RejectedInvalid,
+    RetainedByDurableReference,
+    Tombstoned,
+    Retired,
+};
+
 class AMythicNPCCharacter;
 class UMythicLivingWorldSettings;
 class UMythicCausalFabric;
@@ -140,13 +148,35 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Living World")
     void TransferSettlement(int32 SettlementId, FMythicFactionId NewFaction);
 
-    void ReportLeaderCandidate(FMythicFactionId FactionId, uint32 EntityId, float Score);
+    void ReportLeaderCandidate(FMythicFactionId FactionId,
+                               const FMythicEntityId &EntityId, float Score);
 
     void ReportNpcDeath(FMythicFactionId FactionId, FGameplayTag RoleTag);
 
     void EnqueuePlayerResourceDelta(FMythicFactionId FactionId, EMythicResourceType Axis, float Delta);
 
-    void HandleNPCDeathSettlements(uint32 NameHash, double WorldTime);
+    void HandlePermanentEntityDeath(const FMythicEntityId &EntityId, double WorldTime);
+
+    /**
+     * Atomically checks all durable LivingWorld owners before retiring a canonical identity record. Tombstoned
+     * identities retain their record but authorize logical Mass destruction; durable live references do not.
+     */
+    EMythicEntityRetirementResult TryRetireEntityIdentity(
+        const FMythicEntityId &EntityId);
+
+    /** Returns true when a retirement result authorizes destruction of the entity's logical Mass embodiment. */
+    static bool AuthorizesLogicalEntityDestruction(
+        EMythicEntityRetirementResult Result) {
+        return Result == EMythicEntityRetirementResult::Retired
+               || Result == EMythicEntityRetirementResult::Tombstoned;
+    }
+
+    /**
+     * Clears durable world roles after a saved logical person exhausts rehydration retries, then retires the identity
+     * when no dossier or tombstone still owns it. The failing subsystem must remove its own durable reference first.
+     */
+    EMythicEntityRetirementResult HandleUnrestorableLogicalEntity(
+        const FMythicEntityId &EntityId);
 
     bool CopySettlementAtCell(const FMythicCellCoord &Cell, FMythicSettlementData &Out);
 
@@ -175,6 +205,10 @@ private:
     void StopSimulation();
 
     void SeedTerritoryFromSettlements();
+
+    void BeginEntityIdentityRestoreBarrier();
+
+    bool CompleteEntityIdentityRestoreBarrier();
 
     void WarmEmbodimentPools();
 

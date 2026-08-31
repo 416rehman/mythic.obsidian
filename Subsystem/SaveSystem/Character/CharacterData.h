@@ -15,6 +15,7 @@
 #include "World/Trading/MythicTradeContractTypes.h"
 #include "World/LivingWorld/Acquaintance/MythicAcquaintanceTypes.h"
 #include "World/LivingWorld/Chronicle/MythicDossierComponent.h"
+#include "World/Entity/MythicEntityViewerKnowledgeTypes.h"
 #include "World/Harvesting/MythicHarvestReceiptTypes.h"
 #include "World/Harvesting/MythicHarvestRewardEscrowTypes.h"
 #include "CharacterData.generated.h"
@@ -40,6 +41,8 @@ enum class EMythicCharacterSaveVersion : uint8 {
     PreSkillModifiers,
     PreHarvestReceiptLedger,
     PreHarvestRewardEscrow,
+    PreEntityViewerKnowledge, // Typed-ID learned dossiers were not present before this version.
+    PrePlayerEntityIdentity,  // Canonical PlayerCharacter-domain identity was not present before this version.
     LatestVersion,
     VersionPlusOne
 };
@@ -58,6 +61,13 @@ struct FSerializedCharacterData {
 
     UPROPERTY(BlueprintReadWrite)
     FString CharacterName;
+
+    /**
+     * Private canonical identity of this player character across respawns and sessions. It is generated once at
+     * character creation, never derived from CharacterID/name/player index, and never replicated to other clients.
+     */
+    UPROPERTY()
+    FMythicEntityId PlayerEntityId;
 
     UPROPERTY(BlueprintReadWrite)
     TArray<FSerializedInventoryData> Inventories;
@@ -164,6 +174,13 @@ struct FSerializedCharacterData {
     // Persists the otherwise session-only UMythicDossierComponent. Same save+restore precedent as NpcRelations.
     UPROPERTY(BlueprintReadWrite)
     TArray<FMythicNpcDossier> NpcDossiers;
+
+    /**
+     * Durable per-player learned entity knowledge keyed by private FMythicEntityId. This native-only payload is the
+     * replacement path for name-hash dossiers and never serializes ephemeral presentation handles.
+     */
+    UPROPERTY()
+    TArray<FMythicEntityLearnedDossier> EntityKnowledgeDossiers;
 
     // Per-player TRADE CONTRACTS (Wave O: accepted, still-active delivery contracts). Persists the otherwise
     // session-only UMythicTradeContractComponent so a relief run survives a reload. Snapshotted from GetContracts()

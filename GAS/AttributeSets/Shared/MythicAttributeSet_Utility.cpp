@@ -2,7 +2,6 @@
 
 #include "MythicAttributeSet_Utility.h"
 
-#include "GameplayEffectExtension.h"
 #include "Settings/MythicCombatSettings.h"
 #include "Net/UnrealNetwork.h"
 #include "World/Harvesting/MythicHarvestSettings.h"
@@ -34,6 +33,19 @@ UMythicAttributeSet_Utility::UMythicAttributeSet_Utility() {
     InitHarvestWorkMultiplier(1.0f);
 }
 
+TConstArrayView<FMythicBoundedAttributePair>
+UMythicAttributeSet_Utility::GetBoundedAttributePairs() const {
+    static const FMythicBoundedAttributePair Pairs[] = {
+        {GetCurrentStaminaAttribute(), GetMaxStaminaAttribute(), 0.0f,
+         0.0f, EMythicAttributeBaseOverflowPolicy::Discard},
+        // Cooldown reduction is an investment stat: over-cap base investment
+        // remains stored so later cap increases can expose it again.
+        {GetCooldownReductionAttribute(), GetMaxCooldownReductionAttribute(),
+         0.0f, 0.0f, EMythicAttributeBaseOverflowPolicy::Preserve}
+    };
+    return Pairs;
+}
+
 bool UMythicAttributeSet_Utility::IsReductionFractionAttribute(const FGameplayAttribute &Attribute) {
     return Attribute == GetStaminaCostReductionAttribute() || Attribute == GetCooldownReductionAttribute();
 }
@@ -41,19 +53,7 @@ bool UMythicAttributeSet_Utility::IsReductionFractionAttribute(const FGameplayAt
 void UMythicAttributeSet_Utility::PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) {
     Super::PreAttributeChange(Attribute, NewValue);
 
-    if (Attribute == GetCurrentStaminaAttribute()) {
-        NewValue = FMath::Clamp(NewValue, 0.0f, GetMaxStamina());
-    }
-    else if (Attribute == GetMaxStaminaAttribute()) {
-        NewValue = FMath::Max(0.0f, NewValue);
-    }
-    else if (Attribute == GetCooldownReductionAttribute()) {
-        NewValue = FMath::Clamp(NewValue, 0.0f, FMath::Max(0.0f, GetMaxCooldownReduction()));
-    }
-    else if (Attribute == GetMaxCooldownReductionAttribute()) {
-        NewValue = FMath::Max(0.0f, NewValue);
-    }
-    else if (Attribute == GetStaminaCostReductionAttribute()) {
+    if (Attribute == GetStaminaCostReductionAttribute()) {
         NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     }
     // A full stop is the crowd-control path's job (Stunned and Frozen disable movement outright), so stacked slows
@@ -69,34 +69,8 @@ void UMythicAttributeSet_Utility::PreAttributeChange(const FGameplayAttribute &A
 void UMythicAttributeSet_Utility::PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const {
     Super::PreAttributeBaseChange(Attribute, NewValue);
 
-    // CooldownReduction's BASE is deliberately left alone. The permanent stat ledger writes a base, reads it back,
-    // and treats any clamp as corruption, so capping here rolls the whole equip back instead of capping cooldowns.
-    // ApplyCooldown clamps the value to the ceiling where it is spent.
-    if (Attribute == GetMaxCooldownReductionAttribute()) {
-        NewValue = FMath::Max(0.0f, NewValue);
-    }
-    else if (Attribute == GetHarvestWorkMultiplierAttribute()) {
+    if (Attribute == GetHarvestWorkMultiplierAttribute()) {
         ClampHarvestWorkAttribute(NewValue);
-    }
-}
-
-void UMythicAttributeSet_Utility::PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) {
-    Super::PostAttributeChange(Attribute, OldValue, NewValue);
-
-    if (Attribute == GetMaxCooldownReductionAttribute()) {
-        if (GetCooldownReduction() > NewValue) {
-            SetCooldownReduction(NewValue);
-        }
-    }
-}
-
-void UMythicAttributeSet_Utility::PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) {
-    Super::PostGameplayEffectExecute(Data);
-
-    if (Data.EvaluatedData.Attribute == GetMaxStaminaAttribute()) {
-        if (GetCurrentStamina() > GetMaxStamina()) {
-            SetCurrentStamina(GetMaxStamina());
-        }
     }
 }
 

@@ -443,6 +443,56 @@ void UMythicUserSettings::SetDamageNumberScale(float Scale) {
     OnInterfaceChanged.Broadcast();
 }
 
+void UMythicUserSettings::SetNameplatePresentationMode(const EMythicNameplatePresentationMode Mode) {
+    if (NameplatePresentationMode == Mode) {
+        return;
+    }
+    NameplatePresentationMode = Mode;
+    OnInterfaceChanged.Broadcast();
+}
+
+void UMythicUserSettings::SetNameplateScale(const float Scale) {
+    const float Clamped = FMath::Clamp(Scale, 0.75f, 1.5f);
+    if (FMath::IsNearlyEqual(NameplateScale, Clamped)) {
+        return;
+    }
+    NameplateScale = Clamped;
+    OnInterfaceChanged.Broadcast();
+}
+
+void UMythicUserSettings::SetShowNameplateHealthPercent(const bool bShow) {
+    if (bShowNameplateHealthPercent == bShow) {
+        return;
+    }
+    bShowNameplateHealthPercent = bShow;
+    OnInterfaceChanged.Broadcast();
+}
+
+void UMythicUserSettings::SetShowNameplateStatusText(const bool bShow) {
+    if (bShowNameplateStatusText == bShow) {
+        return;
+    }
+    bShowNameplateStatusText = bShow;
+    OnInterfaceChanged.Broadcast();
+}
+
+void UMythicUserSettings::SetHighContrastNameplates(
+    const bool bEnabled) {
+    if (bHighContrastNameplates == bEnabled) {
+        return;
+    }
+    bHighContrastNameplates = bEnabled;
+    OnInterfaceChanged.Broadcast();
+}
+
+void UMythicUserSettings::SetReducedNameplateMotion(const bool bReduced) {
+    if (bReducedNameplateMotion == bReduced) {
+        return;
+    }
+    bReducedNameplateMotion = bReduced;
+    OnInterfaceChanged.Broadcast();
+}
+
 int32 UMythicUserSettings::GetQualityPresetLevel() const {
     const Scalability::FQualityLevels &Q = ScalabilityQuality;
     const int32 Level = Q.ViewDistanceQuality;
@@ -525,5 +575,11 @@ void UMythicUserSettings::SetToDefaults() {
     HUDOpacity = 1.0f;
     DamageNumberMode = 1;
     DamageNumberScale = 1.0f;
+    NameplatePresentationMode = EMythicNameplatePresentationMode::Contextual;
+    NameplateScale = 1.0f;
+    bShowNameplateHealthPercent = false;
+    bShowNameplateStatusText = false;
+    bHighContrastNameplates = false;
+    bReducedNameplateMotion = false;
     ScalabilityQuality.ResolutionQuality = 100.0f;
 }

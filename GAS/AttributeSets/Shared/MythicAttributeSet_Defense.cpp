@@ -48,15 +48,20 @@ UMythicAttributeSet_Defense::UMythicAttributeSet_Defense() {
     InitIncomingDamageMultiplier(1.0f);
 }
 
+TConstArrayView<FMythicBoundedAttributePair>
+UMythicAttributeSet_Defense::GetBoundedAttributePairs() const {
+    static const FMythicBoundedAttributePair Pairs[] = {
+        {GetShieldAttribute(), GetMaxShieldAttribute(), 0.0f, 0.0f,
+         EMythicAttributeBaseOverflowPolicy::Discard}
+    };
+    return Pairs;
+}
+
 void UMythicAttributeSet_Defense::PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) {
     Super::PreAttributeChange(Attribute, NewValue);
 
     if (Attribute == GetShieldAttribute()) {
         ShieldBeforeChange = GetShield();
-        NewValue = FMath::Clamp(NewValue, 0.0f, GetMaxShield());
-    }
-    else if (Attribute == GetMaxShieldAttribute()) {
-        NewValue = FMath::Max(0.0f, NewValue);
     }
     else if (Attribute == GetDodgeChanceAttribute()
         || Attribute == GetBurnResistanceAttribute() || Attribute == GetBleedResistanceAttribute()
@@ -83,10 +88,7 @@ void UMythicAttributeSet_Defense::PreAttributeChange(const FGameplayAttribute &A
 void UMythicAttributeSet_Defense::PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) {
     Super::PostGameplayEffectExecute(Data);
 
-    if (Data.EvaluatedData.Attribute == GetMaxShieldAttribute() && GetShield() > GetMaxShield()) {
-        SetShield(GetMaxShield());
-    }
-    else if (Data.EvaluatedData.Attribute == GetShieldAttribute()) {
+    if (Data.EvaluatedData.Attribute == GetShieldAttribute()) {
         const float Absorbed = ShieldBeforeChange - GetShield();
         if (Absorbed > 0.0f) {
             const UAbilitySystemComponent *ASC = GetOwningAbilitySystemComponent();

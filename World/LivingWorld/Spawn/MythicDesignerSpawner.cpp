@@ -12,6 +12,9 @@
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "World/LivingWorld/NPCGeneration/NPCGenerator.h"
+#include "World/Entity/MythicEntityPresentationComponent.h"
+#include "World/Entity/MythicEntityIdentityDefinition.h"
+#include "World/Entity/MythicEntityPresentationTags.h"
 #include "World/EnvironmentController/MythicEnvironmentSubsystem.h"
 #include "World/EnvironmentController/MythicEnvironmentController.h"
 
@@ -76,6 +79,48 @@ void AMythicDesignerSpawner::EndPlay(const EEndPlayReason::Type EndPlayReason) {
     Super::EndPlay(EndPlayReason);
 }
 
+void AMythicDesignerSpawner::BeginLivingWorldRestore() {
+    if (!HasAuthority()) {
+        return;
+    }
+    StopEvaluation();
+    for (const TWeakObjectPtr<AMythicNPCCharacter> &WeakNPC : LiveNPCs) {
+        if (AMythicNPCCharacter *NPC = WeakNPC.Get()) {
+            if (NPC->LifeComponent) {
+                NPC->LifeComponent->OnDeath.RemoveDynamic(
+                    this, &AMythicDesignerSpawner::OnDesignerNPCDeath);
+            }
+            NPC->Destroy();
+        }
+    }
+    LiveNPCs.Reset();
+    LiveEntityIds.Reset();
+    CachedSpawnsEver = 0;
+    bCachedPermaDead = false;
+    CachedLastDeathTime = 0.0;
+}
+
+void AMythicDesignerSpawner::CompleteLivingWorldRestore() {
+    if (!HasAuthority() || DesignerId.IsNone()) {
+        return;
+    }
+    if (UMythicLivingWorldSubsystem *LWS = GetLWS()) {
+        if (UMythicDesignerSpawnerRegistry *Registry =
+                LWS->GetDesignerSpawnerRegistry()) {
+            const FMythicDesignerSpawnerState &State =
+                Registry->FindOrAdd(DesignerId);
+            CachedSpawnsEver = State.SpawnsEver;
+            bCachedPermaDead = State.bPermaDead;
+            CachedLastDeathTime = State.LastDeathTime;
+        }
+    }
+    if (!bCachedPermaDead && CachedSpawnsEver < MaxSpawnsEver) {
+        GetWorldTimerManager().SetTimer(
+            EvalTimerHandle, this, &AMythicDesignerSpawner::TickEvaluate,
+            EvaluationIntervalSeconds, true);
+    }
+}
+
 void AMythicDesignerSpawner::StopEvaluation() {
     if (GetWorld()) {
         GetWorldTimerManager().ClearTimer(EvalTimerHandle);
@@ -93,9 +138,17 @@ int32 AMythicDesignerSpawner::GetLiveCount() const {
 }
 
 void AMythicDesignerSpawner::ReapLiveNPCs() {
+    UMythicLivingWorldSubsystem *LWS = GetLWS();
+    UMythicPersistentNPCRegistry *IdentityRegistry =
+        LWS ? LWS->GetPersistentNPCRegistry() : nullptr;
     for (int32 i = LiveNPCs.Num() - 1; i >= 0; --i) {
         if (!LiveNPCs[i].IsValid()) {
-            LiveNameHashes.Remove(LiveNPCs[i]);
+            if (LWS && IdentityRegistry) {
+                if (const FMythicEntityId *EntityId = LiveEntityIds.Find(LiveNPCs[i])) {
+                    LWS->TryRetireEntityIdentity(*EntityId);
+                }
+            }
+            LiveEntityIds.Remove(LiveNPCs[i]);
             LiveNPCs.RemoveAtSwap(i);
         }
     }
@@ -239,6 +292,16 @@ void AMythicDesignerSpawner::SpawnNPC() {
         return;
     }
 
+    UMythicLivingWorldSubsystem *LWS = GetLWS();
+    UMythicPersistentNPCRegistry *IdentityRegistry =
+        LWS ? LWS->GetPersistentNPCRegistry() : nullptr;
+    if (!IdentityRegistry) {
+        UE_LOG(LogMythLivingWorld, Error,
+               TEXT("DesignerSpawner '%s': canonical identity registry unavailable."),
+               *DesignerId.ToString());
+        return;
+    }
+
     FTransform SpawnTransform;
     if (bUseExactPlacedTransform) {
         SpawnTransform = GetActorTransform();
@@ -267,11 +330,12 @@ void AMythicDesignerSpawner::SpawnNPC() {
                *DesignerId.ToString());
         return;
     }
-    NPC->FinishSpawning(SpawnTransform);
-    NPC->StampCombatLevel(MythicCombat::ResolveCombatLevelAt(World, SpawnTransform.GetLocation()));
+    NPC->SetActorHiddenInGame(true);
+    NPC->SetActorEnableCollision(false);
+    NPC->SetActorTickEnabled(false);
 
     uint8 FactionIndex = 0;
-    if (UMythicLivingWorldSubsystem *LWS = GetLWS()) {
+    if (LWS) {
         if (UMythicFactionDatabase *DB = LWS->GetFactionDatabase()) {
             if (Conditions.GatingFactionTag.IsValid()) {
                 const FMythicFactionId Id = DB->FindFactionId(Conditions.GatingFactionTag);
@@ -283,15 +347,51 @@ void AMythicDesignerSpawner::SpawnNPC() {
     }
 
     FMythicCellCoord Cell;
-    if (UMythicLivingWorldSubsystem *LWS = GetLWS()) {
+    if (LWS) {
         if (UMythicTerritoryGrid *Grid = LWS->GetTerritoryGrid()) {
             Cell = Grid->WorldToCell(SpawnTransform.GetLocation());
         }
     }
 
     const int32 SpawnIndex = static_cast<int32>(
-        GetTypeHash(DesignerId) ^ (static_cast<uint32>(Cell.X) << 8) ^ static_cast<uint32>(Cell.Y));
-    const uint32 NameHash = FMythicNPCGenerator::GenerateNameHash(FactionIndex, Cell, SpawnIndex);
+        GetTypeHash(DesignerId) ^ (static_cast<uint32>(Cell.X) << 8)
+        ^ static_cast<uint32>(Cell.Y) ^ static_cast<uint32>(CachedSpawnsEver));
+    const uint32 NameSeed = FMythicNPCGenerator::GenerateNameHash(
+        FactionIndex, Cell, SpawnIndex);
+    const FMythicEntityId EntityId = IdentityRegistry->AllocateEntityIdentity(
+        NameSeed, EMythicEntityIdentityProvenance::DesignerSpawner);
+    if (!EntityId.IsValid()) {
+        NPC->Destroy();
+        return;
+    }
+
+    NPC->FinishSpawning(SpawnTransform);
+    NPC->StampCombatLevel(MythicCombat::ResolveCombatLevelAt(World, SpawnTransform.GetLocation()));
+
+    UMythicEntityPresentationComponent *Presentation =
+        IMythicPresentableEntity::Execute_GetEntityPresentationComponent(NPC);
+    FMythicPublicIdentitySnapshot SafeIdentity;
+    SafeIdentity.PublicKindTag = MythicEntityPresentationTags::EntityKindHumanoid;
+    SafeIdentity.PublicIdentityDefinitionId =
+        UMythicEntityIdentityDefinition::ResolvePrimaryAssetId(
+            PublicIdentityDefinition);
+    if (!Presentation
+        || !Presentation->AuthorityPrepareEmbodiment(EntityId, SafeIdentity)) {
+        UE_LOG(LogMythLivingWorld, Error,
+               TEXT("DesignerSpawner '%s': failed to prepare entity presentation."),
+               *DesignerId.ToString());
+        NPC->Destroy();
+        LWS->TryRetireEntityIdentity(EntityId);
+        return;
+    }
+    if (!NPC->ActivatePreparedEmbodiment()) {
+        UE_LOG(LogMythLivingWorld, Error,
+               TEXT("DesignerSpawner '%s': failed to activate prepared embodiment."),
+               *DesignerId.ToString());
+        NPC->Destroy();
+        LWS->TryRetireEntityIdentity(EntityId);
+        return;
+    }
 
     if (NPC->LifeComponent) {
         NPC->LifeComponent->OnDeath.AddDynamic(this, &AMythicDesignerSpawner::OnDesignerNPCDeath);
@@ -299,17 +399,19 @@ void AMythicDesignerSpawner::SpawnNPC() {
 
     const TWeakObjectPtr<AMythicNPCCharacter> WeakNPC(NPC);
     LiveNPCs.Add(WeakNPC);
-    LiveNameHashes.Add(WeakNPC, NameHash);
+    LiveEntityIds.Add(WeakNPC, EntityId);
 
-    if (UMythicLivingWorldSubsystem *LWS = GetLWS()) {
+    if (LWS) {
         if (UMythicDesignerSpawnerRegistry *Reg = LWS->GetDesignerSpawnerRegistry()) {
             Reg->RecordSpawn(DesignerId);
         }
     }
     ++CachedSpawnsEver;
 
-    UE_LOG(LogMythLivingWorld, Log, TEXT("DesignerSpawner '%s' spawned NPC #%d (NameHash=%u, Cell=%s)."),
-           *DesignerId.ToString(), CachedSpawnsEver, NameHash, *Cell.ToString());
+    UE_LOG(LogMythLivingWorld, Log,
+           TEXT("DesignerSpawner '%s' spawned NPC #%d (%s, NameSeed=%u, Cell=%s)."),
+           *DesignerId.ToString(), CachedSpawnsEver, *EntityId.ToDebugString(), NameSeed,
+           *Cell.ToString());
 }
 
 void AMythicDesignerSpawner::OnDesignerNPCDeath(AActor *DeadActor) {
@@ -320,15 +422,15 @@ void AMythicDesignerSpawner::OnDesignerNPCDeath(AActor *DeadActor) {
     AMythicNPCCharacter *DeadNPC = Cast<AMythicNPCCharacter>(DeadActor);
     const TWeakObjectPtr<AMythicNPCCharacter> WeakDead(DeadNPC);
 
-    uint32 DeadNameHash = 0;
-    if (const uint32 *Found = LiveNameHashes.Find(WeakDead)) {
-        DeadNameHash = *Found;
+    FMythicEntityId DeadEntityId;
+    if (const FMythicEntityId *Found = LiveEntityIds.Find(WeakDead)) {
+        DeadEntityId = *Found;
     }
 
     LiveNPCs.RemoveAllSwap([&](const TWeakObjectPtr<AMythicNPCCharacter> &Ptr) {
         return Ptr == WeakDead || !Ptr.IsValid();
     });
-    LiveNameHashes.Remove(WeakDead);
+    LiveEntityIds.Remove(WeakDead);
 
     const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
     CachedLastDeathTime = Now;
@@ -346,7 +448,11 @@ void AMythicDesignerSpawner::OnDesignerNPCDeath(AActor *DeadActor) {
         bCachedPermaDead = true;
     }
 
-    if (bPerma && LWS && LWS->IsSystemActive() && DeadNameHash != 0) {
+    bool bCommittedPersonDeath = false;
+    UMythicPersistentNPCRegistry *PersistentRegistry =
+        LWS ? LWS->GetPersistentNPCRegistry() : nullptr;
+    if (LWS && LWS->IsSystemActive() && PersistentRegistry
+        && DeadEntityId.IsValid()) {
         FMythicFactionId Faction;
         FMythicCellCoord Cell;
         if (UMythicFactionDatabase *DB = LWS->GetFactionDatabase()) {
@@ -358,9 +464,19 @@ void AMythicDesignerSpawner::OnDesignerNPCDeath(AActor *DeadActor) {
             const FVector DeathLoc = DeadActor ? DeadActor->GetActorLocation() : GetActorLocation();
             Cell = Grid->WorldToCell(DeathLoc);
         }
-        if (UMythicPersistentNPCRegistry *PReg = LWS->GetPersistentNPCRegistry()) {
-            PReg->RegisterDeath(DeadNameHash, Faction, FGameplayTag(), Cell, Now, LWS);
+        bCommittedPersonDeath = PersistentRegistry->RegisterDeath(
+            DeadEntityId, Faction, FGameplayTag(), Cell, Now, LWS);
+        if (bCommittedPersonDeath) {
+            LWS->ReportNpcDeath(Faction, FGameplayTag());
         }
+    }
+
+    // Spawner terminal state governs whether another distinct person may spawn; the person that just died is always
+    // terminal and keeps a canonical tombstone. If the death transaction could not commit, release only when no
+    // durable owner exists rather than leaving an untracked identity record.
+    if (PersistentRegistry && DeadEntityId.IsValid()
+        && !bCommittedPersonDeath) {
+        LWS->TryRetireEntityIdentity(DeadEntityId);
     }
 
     if (bCachedPermaDead || CachedSpawnsEver >= MaxSpawnsEver) {

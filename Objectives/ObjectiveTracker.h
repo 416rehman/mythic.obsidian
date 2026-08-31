@@ -133,6 +133,14 @@ public:
 
     EObjectiveOfferResult ServerTryAddObjective(UObjectiveDefinition *Definition, FObjectiveProgress &OutProgress);
 
+    /**
+     * Evaluates an offer without mutating objective state. Authority producers use this to decide whether an NPC may
+     * disclose a viewer-private quest opportunity; repeatable cooldowns use current server time.
+     */
+    EObjectiveOfferResult EvaluateObjectiveOffer(
+        const UObjectiveDefinition *Definition,
+        FObjectiveProgress &OutProgress) const;
+
     // True if this player already tracks the given objective (active or completed). Used to gate re-offers.
     /** Returns whether this tracker already contains the objective as active or completed. */
     UFUNCTION(BlueprintPure, Category = "Objectives")
@@ -205,6 +213,14 @@ public:
     static bool CanRepeatObjective(bool bRepeatable, float CompletedTimeSeconds, float NowSeconds, float RepeatCooldownSeconds);
 
     void ServerTurnInDeliveriesTo(const FGameplayTag &NpcTag, class UMythicInventoryComponent *PlayerInventory);
+
+    /**
+     * Returns whether talking to this NPC tag can currently advance a talk objective or consume at least one relevant
+     * delivery item. This read-only authority query never exposes another player's objective state.
+     */
+    bool CanAdvanceNpcInteraction(
+        const FGameplayTag &NpcTag,
+        const class UMythicInventoryComponent *PlayerInventory) const;
 
     void SaveObjectives(TArray<FSerializedObjectiveData> &OutData) const;
 

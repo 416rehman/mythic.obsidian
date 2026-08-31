@@ -22,6 +22,44 @@ enum class EMythicStatusControlOperation : uint8 {
     Bonus,
 };
 
+/** Controls whether an active status may leave the private combat model and enter world presentation. */
+UENUM(BlueprintType)
+enum class EMythicStatusWorldVisibility : uint8 {
+    /** Never expose this status above an entity; it may still appear in owner-only character UI. */
+    Hidden,
+
+    /** Expose the status only on the viewer's stable focus/current-target presentation. */
+    FocusOnly,
+
+    /** Expose the status after the subject has independently earned a contextual plate. */
+    Contextual,
+
+    /** Expose the status on an earned plate and allow it to create a safety context when observed. */
+    SafetyCritical,
+};
+
+/** Semantic bucket used to rank a bounded set of status badges without inspecting GameplayEffect classes. */
+UENUM(BlueprintType)
+enum class EMythicStatusPresentationCategory : uint8 {
+    /** Hard loss of control such as stun, freeze, or knockdown. */
+    HardControl,
+
+    /** Ongoing damaging condition such as burn, bleed, or poison. */
+    Damage,
+
+    /** Soft control or movement restriction such as slow or root. */
+    Control,
+
+    /** Harmful non-control modifier such as weaken or vulnerability. */
+    Debuff,
+
+    /** Beneficial or protective state whose visibility is explicitly authored. */
+    Buff,
+
+    /** Low-priority cosmetic or world-readable condition. */
+    Cosmetic,
+};
+
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicStatusReaction {
     GENERATED_BODY()
@@ -146,4 +184,40 @@ public:
     /** Canonical tint used by badges, periodic damage numbers, and status-aware cue presentation. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Presentation")
     FLinearColor DisplayColor = FLinearColor::White;
+
+    /**
+     * Defines whether this status may be replicated in a subject's bounded public world-status projection. Hidden
+     * never leaves authority/owner UI; other values are still filtered by nameplate tier and viewer policy.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|World Presentation")
+    EMythicStatusWorldVisibility WorldVisibility = EMythicStatusWorldVisibility::Contextual;
+
+    /**
+     * Semantic ranking bucket for overhead badges. The authority projection copies this authored classification;
+     * clients never infer it from an effect class, display string, or tag spelling.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|World Presentation")
+    EMythicStatusPresentationCategory PresentationCategory = EMythicStatusPresentationCategory::Debuff;
+
+    /**
+     * Deterministic tie-break priority within PresentationCategory; larger values win. Values are unitless and are
+     * clamped by consumers to avoid content data creating unbounded scores.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|World Presentation", meta = (ClampMin = "-1000", ClampMax = "1000"))
+    int32 WorldPresentationPriority = 0;
+
+    /**
+     * Allows an observed active status to earn contextual presentation when its visibility is SafetyCritical.
+     * Authority derives the fact from the canonical active status; designers never mirror it into a UI flag.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|World Presentation")
+    bool bPromotesContextWhenObserved = false;
+
+    /** Whether Focus may show a quantized remaining-time label when the authority projection has a known deadline. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|World Presentation")
+    bool bShowRemainingDuration = true;
+
+    /** Whether Focus may show a bounded public stack count; false hides stacks even if gameplay internally stacks. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|World Presentation")
+    bool bShowStackCount = true;
 };

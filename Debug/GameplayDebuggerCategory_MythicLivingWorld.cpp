@@ -164,7 +164,7 @@ const TCHAR *BiomeToString(EMythicBiome B) {
 FString SpeciesIdToName(uint8 SpeciesId) {
     if (SpeciesId != 0) {
         for (const FMythicCreatureSpeciesRow &Row : MythicCreatureDefaults::GetCodeDefaultSpecies()) {
-            if (Row.SpeciesId == SpeciesId && !Row.DisplayName.IsNone()) {
+            if (Row.SpeciesId == SpeciesId && !Row.DisplayName.IsEmpty()) {
                 return Row.DisplayName.ToString();
             }
         }
@@ -1064,8 +1064,10 @@ void FGameplayDebuggerCategory_MythicLivingWorld::CollectData(APlayerController 
             const bool bDeficit = (D.Reserves.Food < 0.0f || D.Reserves.Materials < 0.0f || D.Reserves.Arms < 0.0f || D.Reserves.Wealth < 0.0f);
             Detail += FString::Printf(TEXT("{white}[%d] {green}%s {grey}(%s) {white}[%s]\n"),
                                       Id.Index, *D.DisplayName.ToString(), *D.FactionTag.ToString(), *Flags);
-            Detail += FString::Printf(TEXT("  {white}Pop {yellow}%d{white} Cells {yellow}%d{white} Mil {yellow}%.2f{white} Leader#{grey}%d (sig %.2f)\n"),
-                                      D.Population, D.ControlledCellCount, D.MilitaryStrength, D.LeaderEntityId, D.LeaderSignificanceScore);
+            Detail += FString::Printf(TEXT("  {white}Pop {yellow}%d{white} Cells {yellow}%d{white} Mil {yellow}%.2f{white} Leader {grey}%s (sig %.2f)\n"),
+                                      D.Population, D.ControlledCellCount, D.MilitaryStrength,
+                                      D.LeaderEntityId.IsValid() ? TEXT("assigned") : TEXT("none"),
+                                      D.LeaderSignificanceScore);
             Detail += FString::Printf(TEXT("  Reserves %sF %.1f M %.1f A %.1f W %.1f{white}  Prices F %.2f M %.2f A %.2f W %.2f\n"),
                                       bDeficit ? TEXT("{red}") : TEXT("{green}"),
                                       D.Reserves.Food, D.Reserves.Materials, D.Reserves.Arms, D.Reserves.Wealth,

@@ -124,8 +124,8 @@ bool FMythicEnemyScalingTest::RunTest(const FString &Parameters) {
             TestEqual(TEXT("exactly 2 modifiers"), CDO->Modifiers.Num(), 2);
             if (CDO->Modifiers.Num() == 2) {
                 for (const FGameplayModifierInfo &Mod : CDO->Modifiers) {
-                    TestTrue(TEXT("modifier op is Multiply(Additive)"),
-                             Mod.ModifierOp == EGameplayModOp::MultiplyAdditive);
+                    TestTrue(TEXT("independent scaling uses Multiply(Compound)"),
+                             Mod.ModifierOp == EGameplayModOp::MultiplyCompound);
                     TestTrue(TEXT("modifier magnitude is SetByCaller"),
                              Mod.ModifierMagnitude.GetMagnitudeCalculationType() ==
                                  EGameplayEffectMagnitudeCalculation::SetByCaller);

@@ -1,6 +1,22 @@
 
 #include "World/LivingWorld/CausalFabric/CausalFabric.h"
 
+namespace {
+void SerializeCausalEntityId(FArchive &Ar, FMythicEntityId &EntityId) {
+    uint8 Domain = static_cast<uint8>(EntityId.GetDomain());
+    FGuid Guid = EntityId.GetAuthorityGuid();
+    Ar << Domain;
+    Ar << Guid.A;
+    Ar << Guid.B;
+    Ar << Guid.C;
+    Ar << Guid.D;
+    if (Ar.IsLoading()) {
+        EntityId = FMythicEntityId::FromAuthorityGuid(
+            static_cast<EMythicEntityDomain>(Domain), Guid);
+    }
+}
+}
+
 void UMythicCausalFabric::Initialize(int32 InCapacity) {
     check(InCapacity > 0);
     if (InCapacity <= 0) {
@@ -197,8 +213,13 @@ void UMythicCausalFabric::QueryEventsByFaction(
 }
 
 void UMythicCausalFabric::Serialize(FArchive &Ar) {
-    int32 Version = 1;
+    constexpr int32 CurrentVersion = 2;
+    int32 Version = CurrentVersion;
     Ar << Version;
+    if (Ar.IsLoading() && Version != CurrentVersion) {
+        Ar.SetError();
+        return;
+    }
 
     Ar << Capacity;
 
@@ -243,8 +264,10 @@ void UMythicCausalFabric::Serialize(FArchive &Ar) {
         Ar << Event.PrimaryFaction.Index;
         Ar << Event.SecondaryFaction.Index;
         Ar << Event.EventTag;
-        Ar << Event.PerpEntityId;
-        Ar << Event.VictimEntityId;
+        SerializeCausalEntityId(Ar, Event.PerpEntityId);
+        Ar << Event.PerpNameSeed;
+        SerializeCausalEntityId(Ar, Event.VictimEntityId);
+        Ar << Event.VictimNameSeed;
         Ar << Event.Significance;
         Ar << Event.CategoryFlags;
 

@@ -195,6 +195,12 @@ int32 UMythicSocialGraph::GetEntityCount() const {
     return AdjacencyMap.Num();
 }
 
+void UMythicSocialGraph::ResetForLivingWorldRestore() {
+    FWriteScopeLock Lock(GraphLock);
+    AdjacencyMap.Reset();
+    PruneIteratorIndex = 0;
+}
+
 
 int32 UMythicSocialGraph::PruneStaleEdges(double WorldTime, int32 MaxEntitiesPerCall) {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicSocialGraph_PruneStaleEdges);

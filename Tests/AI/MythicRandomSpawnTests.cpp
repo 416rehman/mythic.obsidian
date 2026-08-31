@@ -4,6 +4,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "AI/NPCs/MythicNPCCharacter.h"
 #include "AI/NPCs/MythicNPCManager.h"
 #include "AI/NPCs/NPCDefinition.h"
 #include "AssetRegistry/AssetRegistryModule.h"

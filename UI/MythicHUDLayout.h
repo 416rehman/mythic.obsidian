@@ -6,11 +6,14 @@
 #include "GameplayTagContainer.h"
 #include "MythicActivatableWidget.h"
 #include "MythicHUDSalience.h"
+#include "World/Entity/MythicEntityPresentationTypes.h"
 #include "MythicHUDLayout.generated.h"
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnHUDRevealChanged, bool);
 
 class UMythicMenuShell;
+class UMythicNameplateDirector;
+class UMythicNameplateLayer;
 class UNamedSlot;
 
 USTRUCT(BlueprintType)
@@ -54,6 +57,7 @@ struct FMythicHUDElementBinding {
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HUD")
     FName WidgetName;
 
+    /** Contextual resting, combat, and activity-hold behavior applied to the named HUD widget. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HUD")
     FMythicHUDElementRule Rule;
 };
@@ -130,6 +134,21 @@ protected:
     UPROPERTY(BlueprintReadOnly, Category = "Menu", meta = (BindWidgetOptional))
     TObjectPtr<UNamedSlot> InventorySlot;
 
+    /**
+     * Optional HUD-owned slot for the one local-player nameplate layer. The Blueprint supplies layout/z-order; C++
+     * creates at most one configured layer after the HUD exists. Null safely disables nameplates for that HUD.
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "World Presentation", meta = (BindWidgetOptional))
+    TObjectPtr<UNamedSlot> WorldOverlaySlot;
+
+    /** Native/Blueprint layer class created once inside WorldOverlaySlot; null leaves the slot intentionally empty. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "World Presentation")
+    TSubclassOf<UMythicNameplateLayer> NameplateLayerClass;
+
+    /** Returns the live local-player layer, or null when the HUD has no slot/class or creation failed. */
+    UFUNCTION(BlueprintPure, Category = "World Presentation")
+    UMythicNameplateLayer *GetNameplateLayer() const { return NameplateLayer; }
+
 public:
     /**
      * Hand the live inventory widget over to a caller (the Character tab).
@@ -185,6 +204,11 @@ public:
 
 protected:
     void HandleInventoryAction();
+    void HandleInspectEntityAction();
+
+    /** Rebuilds the policy-bounded, input-tag-unique LocalPlayer CommonUI bindings from sanitized Focus action rows. */
+    UFUNCTION()
+    void HandleNameplateProjectionsChanged(int32 LocalRevision);
 
     /**
      * "Show me everything" — a toggle, not a hold. A contextual HUD hides things the player may still want to check
@@ -222,6 +246,42 @@ private:
 
     UPROPERTY(Transient)
     TWeakObjectPtr<UMythicMenuShell> ActiveMenuShell;
+
+    /** Runtime layer owned by WorldOverlaySlot; never persisted and never shared across split-screen local players. */
+    UPROPERTY(Transient)
+    TObjectPtr<UMythicNameplateLayer> NameplateLayer;
+
+    struct FContextActionBindingRecord {
+        FUIActionBindingHandle Handle;
+        FMythicEntityPresentationInstance Subject;
+        FGameplayTag ActionTag;
+        FGameplayTag InputActionTag;
+        uint32 OfferRevision = 0;
+        float HoldDurationSeconds = 0.0f;
+
+        bool Matches(const FMythicEntityPresentationInstance &InSubject,
+                     const FGameplayTag InActionTag,
+                     const uint32 InOfferRevision,
+                     const float InHoldDurationSeconds) const {
+            return Subject == InSubject && ActionTag == InActionTag
+                && OfferRevision == InOfferRevision
+                && FMath::IsNearlyEqual(HoldDurationSeconds,
+                                        InHoldDurationSeconds,
+                                        UE_KINDA_SMALL_NUMBER);
+        }
+    };
+
+    /** LocalPlayer CommonUI bindings retained by input tag while their focused action contract remains unchanged. */
+    TMap<FGameplayTag, FContextActionBindingRecord> ContextActionBindings;
+
+    /** Deliberate learned-dossier hold binding owned by this LocalPlayer HUD. */
+    FUIActionBindingHandle InspectActionBinding;
+
+    TWeakObjectPtr<UMythicNameplateDirector> BoundNameplateDirector;
+
+    void RefreshContextActionBindings();
+    void ClearContextActionBindings();
+    void RemoveContextActionBinding(FGameplayTag InputActionTag);
 
     struct FMythicHUDElementState {
         TWeakObjectPtr<UWidget> Widget;

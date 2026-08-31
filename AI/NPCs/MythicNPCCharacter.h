@@ -2,22 +2,27 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AttributeSet.h"
 #include "GameplayTagContainer.h"
 #include "Abilities/GameplayAbilityTypes.h"
 #include "MythicNPCData.h"
 #include "Player/MythicCharacter.h"
 #include "Interaction/IMythicInteractable.h"
+#include "Interaction/ContextActions/MythicContextActionProvider.h"
+#include "World/Entity/IMythicPresentableEntity.h"
 #include "AI/NPCs/MythicSocialVerbs.h"
 #include "World/LivingWorld/Appearance/AppearanceTypes.h"
 #include "AI/MonsterAffixes/MonsterAffixGranter.h"
 #include "MythicNPCCharacter.generated.h"
 
 struct FMythicIdentityFragment;
+struct FMythicPublicIdentitySnapshot;
 
 class UMythicNPCManager;
 class UMythicAttributeSet_Life;
 class UMythicAttributeSet_Defense;
 class UMythicAttributeSet_Offense;
+class UMythicAttributeSet_Utility;
 class UMythicCognitiveBrainComponent;
 class UMythicLifeComponent;
 class UMythicGameplayAbility;
@@ -25,30 +30,61 @@ class UGameplayEffect;
 class UObjectiveDefinition;
 class UItemDefinition;
 class UMonsterAffixPool;
+class UMythicEntityPresentationComponent;
+class UMythicContextActionDefinition;
 struct FMassEntityHandle;
 
 USTRUCT(BlueprintType)
 struct FMythicMerchantOffer {
     GENERATED_BODY()
 
+    /** Item currency consumed when the authority accepts this authored barter offer. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trade")
     TSoftObjectPtr<UItemDefinition> CostItem = nullptr;
 
+    /** Number of cost items consumed per completed barter transaction. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trade", meta = (ClampMin = "1"))
     int32 CostQty = 1;
 
+    /** Item granted to the buyer after the cost has been validated and removed. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trade")
     TSoftObjectPtr<UItemDefinition> RewardItem = nullptr;
 
+    /** Number of reward items granted per completed barter transaction. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Trade", meta = (ClampMin = "1"))
     int32 RewardQty = 1;
 };
 
 UCLASS(Blueprintable, BlueprintType)
-class MYTHIC_API AMythicNPCCharacter : public AMythicCharacter, public IMythicInteractable {
+class MYTHIC_API AMythicNPCCharacter : public AMythicCharacter,
+                                      public IMythicInteractable,
+                                      public IMythicPresentableEntity,
+                                      public IMythicContextActionProvider {
     GENERATED_BODY()
 
 public:
+    /** Returns this NPC body's single replicated domain presentation adapter; it remains valid while the actor is pooled. */
+    virtual UMythicEntityPresentationComponent *GetEntityPresentationComponent_Implementation() const override {
+        return EntityPresentationComponent;
+    }
+
+    /** Gathers only current, viewer-specific talk, quest, and service offers on authority. */
+    virtual void GatherContextActions_Implementation(
+        AController *RequestingController, AActor *Subject,
+        TArray<FMythicContextActionOffer> &OutOffers) const override;
+
+    /** Revalidates the exact NPC action and opaque revision immediately before server execution. */
+    virtual bool CanExecuteContextAction_Implementation(
+        AController *RequestingController, AActor *Subject,
+        FGameplayTag ActionTag, int64 ObservedOfferRevision,
+        FGameplayTag &OutFailureReason) const override;
+
+    /** Executes a revalidated NPC domain action without trusting client labels, quest state, or service state. */
+    virtual bool ExecuteContextAction_Implementation(
+        AController *RequestingController, AActor *Subject,
+        FGameplayTag ActionTag, int64 ObservedOfferRevision,
+        FGameplayTag &OutFailureReason) override;
+
     virtual void OnPrimaryInteract_Implementation(AActor *Interactor) override;
     virtual void OnSecondaryInteract_Implementation(AActor *Interactor) override;
     virtual USceneComponent *GetWidgetAttachmentComponent_Implementation() const override;
@@ -59,6 +95,9 @@ public:
     FText SelectDialogueFor(APlayerController *Interactor) const;
 
     void FireBark(const FText &Line, APlayerController *Interactor);
+
+    /** Opens this merchant's authored local trade surface after an authoritative contextual-action decision. */
+    void OpenTradeForLocalController(APlayerController *Interactor);
 
     FMythicSocialReactionResult ResolveSocialVerb(EMythicSocialVerb Verb, APlayerController *Interactor) const;
 
@@ -81,6 +120,14 @@ public:
     }
 
 protected:
+    /** Builds only globally observable identity for a Mass embodiment; specializations may replace kind/archetype. */
+    virtual void BuildMassPublicIdentity(const FMythicIdentityFragment &Identity,
+                                         FMythicPublicIdentitySnapshot &OutIdentity) const;
+
+    /** Builds public cover identity for an authored-world or unmanaged runtime body without exposing private NPC data. */
+    virtual void BuildDirectPublicIdentity(
+        FMythicPublicIdentitySnapshot &OutIdentity) const;
+
     // Fired (via Multicast_PerformActivity) on every client + the server/listen-host when this NPC begins a new ambient
     // activity, so the Blueprint can play the matching montage/anim/prop (a fishing-rod cast, a hammer swing, a market
     // browse). Editor handoff (mirrors OnNpcBark) — no activity montage invented in C++. If unbound, the activity is
@@ -138,16 +185,17 @@ protected:
     int32 GuardAlertMaxResponders = 8;
 
 protected:
+    /** Runtime NPC identity, affiliation, perception, and combat seed copied from the authoritative definition. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     FMythicNPCData NPCData;
 
+    /** Replicated GAS endpoint that owns this NPC's attributes, effects, tags, and granted abilities. */
     UPROPERTY(Replicated, EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
     UAbilitySystemComponent *AbilitySystemComponent;
 
-    // Replicated mirror of this NPC's current hostile target (set by AMythicAIController on the server; AI controllers
-    // themselves do NOT replicate). Lets clients know who the NPC is fighting — drives the contextual nameplate
-    // visibility so plates appear for ALL players, not just the listen-server host.
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Mythic NPC | Combat")
+    // Authority-only exact combat target. Public presentation replicates only observable Fighting; exact opponent
+    // identity belongs in viewer-entitled owner signals and never broadcasts from this shared actor.
+    UPROPERTY(Transient)
     TObjectPtr<AActor> EngagedTarget;
 
     // The LifeAttributeSet for the NPC
@@ -163,6 +211,13 @@ protected:
     // SOURCE's Offense set, so an NPC needs this to deal non-zero damage. Seeded via NPCDefinition.Proficiencies.
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mythic NPC | Stats")
     UMythicAttributeSet_Offense *OffenseAttributes;
+
+    /**
+     * Canonical Utility set required by generic stat derivation captures such as Resolve. NPC archetypes keep
+     * unused utility stats at neutral values rather than omitting the set and invalidating the entire GAS spec.
+     */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mythic NPC | Stats")
+    UMythicAttributeSet_Utility *UtilityAttributes;
 
     // Designer-assigned attack ability granted to this NPC on spawn (reuse the player's GA_MeleeBase or an NPC
     // variant). Null = this NPC cannot attack. The AIController activates it when in melee range of its target.
@@ -203,9 +258,11 @@ public:
     // No-copy access for hot paths (perception attitude queries read the affiliation map every sense event).
     const FMythicNPCData &GetNPCDataRef() const { return NPCData; }
 
+    /** Returns the authored baseline effects applied once when this NPC initializes its combat state. */
     UFUNCTION(BlueprintPure, Category = "Mythic NPC | Combat")
     const TArray<TSubclassOf<UGameplayEffect>> &GetDefaultGameplayEffects() const { return DefaultGameplayEffects; }
 
+    /** Returns the authored enemy-tier tag used by combat scaling, rewards, and contextual danger assessment. */
     UFUNCTION(BlueprintPure, Category = "Mythic NPC | Combat")
     FGameplayTag GetEnemyTier() const { return EnemyTier; }
 
@@ -232,6 +289,14 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mythic NPC | Identity", meta = (Categories = "AI.Kind"))
     FGameplayTag CreatureKind;
 
+    /**
+     * Stable, editor-baked identity seed for a directly placed world actor. It is generated from Unreal's actor GUID,
+     * retained in cooked content, hidden from Blueprint, and never used as a player-facing or replicated identifier.
+     */
+    UPROPERTY(VisibleInstanceOnly, SaveGame, Category = "Mythic NPC | Identity",
+              meta = (DisplayName = "Authored World Identity"))
+    FGuid AuthoredWorldIdentityGuid;
+
     // OPTIONAL explicit bestiary key. Leave EMPTY for the normal case: the kill hook then derives the key from
     // NPC.Type.X (=> Codex.Bestiary.Humanoid.X) or falls back to the coarse AI.Kind.* generic. Only set this to
     // override that derivation for a specific species entry.
@@ -254,24 +319,39 @@ protected:
     // tier scaling is not here — it comes from UWorldTierAttributes so one curve drives the whole tier ladder.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic NPC | Combat | Scaling", meta = (ClampMin = "0.0"))
     float PerExtraMemberHealth = 0.15f;
+
+    /** Fractional damage multiplier added for every party member beyond the first. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic NPC | Combat | Scaling", meta = (ClampMin = "0.0"))
     float PerExtraMemberDamage = 0.10f;
 
-    void ApplyCombatScaling();
+    void ApplyCombatScaling(bool bPreserveHealthRatio = true);
 
     float BaseXPReward = 0.0f;
     bool bBaseXPRewardCaptured = false;
 
     void GrantAttackAbility();
 
-    void CombatInit();
-
     bool bCombatInitialized = false;
+
+    // Blueprint subclasses can author different initial AttributeSet bases. Capture the actual instance once before
+    // any effect runs, then restore that exact state on every pooled embodiment instead of consulting native CDOs.
+    TMap<FGameplayAttribute, float> PristineAttributeBases;
+    bool bPristineAttributeBasesCaptured = false;
+
+    // Stable logical-entity percentiles keep level-band variation deterministic across live rescale and pool reuse.
+    bool bScalingPercentilesInitialized = false;
+    float HealthLevelPercentile = 0.5f;
+    float DamageLevelPercentile = 0.5f;
+
+    void CapturePristineAttributeBases();
+    void RestorePristineAttributeBases();
+    void ResetCombatRuntimeStateToPristine();
+    bool HasCanonicalCombatAttributeSets() const;
+    bool CommitCombatInitializationForEmbodiment();
+    float ResolveStableScalingPercentile(uint32 Salt) const;
 
     UFUNCTION()
     void HandleNPCDeath(AActor *DeadActor);
-
-    bool bBoundDeath = false;
 
     TWeakObjectPtr<AController> PooledController;
 
@@ -287,8 +367,24 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic NPC | Dialogue")
     TObjectPtr<const UCommonGenericInputActionDataTable> InputActionDataTable;
 
+    /** Row name used by the legacy interaction prompt when contextual actions are unavailable. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic NPC | Dialogue")
     FName PrimaryInteractionName = FName("Talk");
+
+    /** Canonical ordinary conversation action; null keeps legacy interaction but projects no contextual Talk row. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+              Category = "World Presentation|Context Actions")
+    TObjectPtr<UMythicContextActionDefinition> TalkContextActionDefinition;
+
+    /** Canonical viewer-private quest-offer action shown only when this player's objective rules currently allow it. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+              Category = "World Presentation|Context Actions")
+    TObjectPtr<UMythicContextActionDefinition> QuestOfferContextActionDefinition;
+
+    /** Canonical viewer-private quest-progress action shown only when talking or delivery can advance a task. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+              Category = "World Presentation|Context Actions")
+    TObjectPtr<UMythicContextActionDefinition> QuestTurnInContextActionDefinition;
 
     // Fired on the local interacting client with the chosen dialogue line, so the Blueprint can surface it through
     // the existing HUD/bark UI layer (editor handoff, mirrors AMythicStorageContainer::OnContainerOpened — no
@@ -324,12 +420,18 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mythic NPC | Trade")
     float TradeRangeSq = 250000.0f; // 500cm
 
+    /** Canonical merchant/service action; null or an empty offer catalog projects no contextual Service row. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+              Category = "World Presentation|Context Actions")
+    TObjectPtr<UMythicContextActionDefinition> ServiceContextActionDefinition;
+
     // Fired on the interacting client when trade opens, so the vendor WBP can show the offer catalog
     // (GetMerchantOffers). Editor handoff, mirrors OnContainerOpened / OnNpcBark — no vendor widget invented in C++.
     UFUNCTION(BlueprintImplementableEvent, Category = "Mythic NPC | Trade")
     void OnTradeOpened(APlayerController *Interactor);
 
 public:
+    /** True when this NPC has at least one authored barter offer and can project a valid trade service. */
     UFUNCTION(BlueprintPure, Category = "Mythic NPC | Trade")
     bool IsMerchant() const { return MerchantOffers.Num() > 0; }
 
@@ -342,6 +444,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mythic NPC | Party")
     bool bRecruitable = false;
 
+    /** True when authored recruitment rules permit this NPC to enter a player's party. */
     UFUNCTION(BlueprintPure, Category = "Mythic NPC | Party")
     bool IsRecruitable() const { return bRecruitable; }
 
@@ -352,6 +455,13 @@ public:
     // Consumes death/health events, runs regen, and grants kill XP for this NPC.
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UMythicLifeComponent *LifeComponent;
+
+    /**
+     * Shared replicated adapter for safe public identity, executed observable facts, and bounded status presentation.
+     * It contains no viewer-specific relationship, quest, danger, action, or learned-person state.
+     */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UMythicEntityPresentationComponent> EntityPresentationComponent;
 
     // Get NPC Data
     UFUNCTION(BlueprintCallable, Category = "Mythic NPC | Data")
@@ -364,23 +474,39 @@ public:
      */
     void StampCombatLevel(int32 Level);
 
-    // The actor this NPC is currently fighting (replicated mirror of the server AI's hostile target; null = not engaged).
-    // Client-visible, so the contextual nameplate system shows plates for everyone, not just the host.
-    UFUNCTION(BlueprintPure, Category = "Mythic NPC | Combat")
+    // Authority-only combat-domain query. UI consumes public/owner-sanitized DTOs instead of this raw actor pointer.
     AActor *GetEngagedTarget() const { return EngagedTarget; }
 
-    void SetEngagedTarget(AActor *Target) { EngagedTarget = Target; }
+    /** Sets the authoritative combat target and publishes only the already-executed, publicly observable fight state. */
+    void SetEngagedTarget(AActor *Target);
+
+    /** Switches the public behavior slot between visibly fleeing and fighting without exposing the private desire score. */
+    void SetFleeingPresentation(bool bIsFleeing);
+
+    /** Publishes the authoritative revivable down state through the single observable life-state slot. */
+    UFUNCTION()
+    void HandleNPCDowned(AActor *DownedActor);
+
+    /** Clears the observable down state after the authoritative life component completes revival. */
+    UFUNCTION()
+    void HandleNPCRevived(AActor *RevivedActor);
 
     void SeedAttributesFromData();
 
 public:
-    virtual void OnSpawnedFromPool(const struct FMythicNPCData &InNPCData);
+    virtual bool OnSpawnedFromPool(const struct FMythicNPCData &InNPCData);
     virtual void OnReturnedToPool();
 
 
     virtual void SleepToPool();
 
     virtual void WakeFromPool();
+
+    /** Keeps a reused Mass body hidden/unregistered while restoring runtime components for its next logical entity. */
+    void PrepareForEmbodiment();
+
+    /** Activates the fully initialized presentation and reveals/collision-enables the body last; authority only. */
+    bool ActivatePreparedEmbodiment();
 
     // Get the NPC Id
     UFUNCTION(BlueprintCallable, Category = "Mythic NPC | Data")
@@ -401,6 +527,12 @@ public:
 
     virtual void BeginPlay() override;
 
+#if WITH_EDITOR
+    virtual void PostLoad() override;
+    virtual void PostActorCreated() override;
+    virtual void PostEditImport() override;
+#endif
+
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override;
@@ -411,4 +543,25 @@ public:
     virtual void PossessedBy(AController *NewController) override;
 
     friend class UMythicNPCManager;
+    friend struct FMythicDirectEntityPresentationTestAccess;
+
+private:
+    void ConfigureEntityPresentationAnchor();
+    void TryActivateDirectEntityPresentation();
+
+#if WITH_EDITOR
+    void RefreshAuthoredWorldIdentityFromActorGuid();
+#endif
+
+    const UMythicContextActionDefinition *ResolveContextActionDefinition(
+        FGameplayTag ActionTag) const;
+    bool IsContextActionAvailable(
+        AController *RequestingController,
+        const UMythicContextActionDefinition *Definition) const;
+    uint32 BuildContextActionRevision(
+        const UMythicContextActionDefinition *Definition) const;
+    bool ValidateContextAction(
+        AController *RequestingController, AActor *Subject,
+        FGameplayTag ActionTag, int64 ObservedOfferRevision,
+        FGameplayTag &OutFailureReason) const;
 };

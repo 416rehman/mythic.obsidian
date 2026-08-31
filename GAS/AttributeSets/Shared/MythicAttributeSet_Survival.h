@@ -10,38 +10,38 @@ class MYTHIC_API UMythicAttributeSet_Survival : public UMythicAttributeSet {
     GENERATED_BODY()
 
 protected:
-    // Food. 0 = starving, Max = fully fed. Decays slowly over time; restored by eating.
+    /** Food: zero is starving and MaxNourishment is fully fed. */
     UPROPERTY(BlueprintReadOnly, Category = "Survival", ReplicatedUsing = OnRep_Nourishment)
     FGameplayAttributeData Nourishment;
+    /** Maximum nourishment capacity. */
     UPROPERTY(BlueprintReadOnly, Category = "Survival", ReplicatedUsing = OnRep_MaxNourishment)
     FGameplayAttributeData MaxNourishment;
 
-    // Water. 0 = dehydrated, Max = fully hydrated. Decays slightly faster than food; restored by drinking.
+    /** Hydration: zero is dehydrated and MaxHydration is fully hydrated. */
     UPROPERTY(BlueprintReadOnly, Category = "Survival", ReplicatedUsing = OnRep_Hydration)
     FGameplayAttributeData Hydration;
+    /** Maximum hydration capacity. */
     UPROPERTY(BlueprintReadOnly, Category = "Survival", ReplicatedUsing = OnRep_MaxHydration)
     FGameplayAttributeData MaxHydration;
 
-    // Body warmth. 0 = freezing (Cold debuff), Max = hot (Overheated). NEUTRAL ~50 at rest. Warm sources raise it,
-    // cold/wet weather lowers it.
+    /** Body warmth; zero is freezing, roughly 50 is neutral, and MaxWarmth is overheated. */
     UPROPERTY(BlueprintReadOnly, Category = "Survival", ReplicatedUsing = OnRep_Warmth)
     FGameplayAttributeData Warmth;
+    /** Maximum warmth gauge capacity. */
     UPROPERTY(BlueprintReadOnly, Category = "Survival", ReplicatedUsing = OnRep_MaxWarmth)
     FGameplayAttributeData MaxWarmth;
 
-    // Wetness. 0 = dry, Max = soaked. Rises standing in rain/snow (unless sheltered/warm), dries otherwise. High wetness
-    // aggravates cold (see FMythicSurvivalCore::ResolveStatus).
+    /** Wetness: zero is dry and MaxWetness is fully soaked. */
     UPROPERTY(BlueprintReadOnly, Category = "Survival", ReplicatedUsing = OnRep_Wetness)
     FGameplayAttributeData Wetness;
+    /** Maximum wetness gauge capacity. */
     UPROPERTY(BlueprintReadOnly, Category = "Survival", ReplicatedUsing = OnRep_MaxWetness)
     FGameplayAttributeData MaxWetness;
 
+    virtual TConstArrayView<FMythicBoundedAttributePair> GetBoundedAttributePairs() const override;
+
 public:
     UMythicAttributeSet_Survival();
-
-    virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
-    virtual void PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const override;
-    virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) override;
 
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Survival, Nourishment)
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Survival, MaxNourishment)
@@ -70,7 +70,4 @@ public:
     virtual void OnRep_MaxWetness(const FGameplayAttributeData &OldValue);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
-
-private:
-    void ClampAttribute(const FGameplayAttribute &Attribute, float &NewValue) const;
 };

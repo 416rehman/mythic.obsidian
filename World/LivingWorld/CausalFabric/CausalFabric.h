@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "World/LivingWorld/Morality/MoralSignature.h"
+#include "World/Entity/MythicEntityId.h"
 #include "CausalFabric.generated.h"
 
 
@@ -27,9 +28,17 @@ struct MYTHIC_API FMythicWorldEvent {
 
     FMythicMoralAction MoralVector;
 
-    uint32 PerpEntityId = 0;
+    /** Authority/private canonical subject identity; never included in public LivingWorld proxies. */
+    FMythicEntityId PerpEntityId;
 
-    uint32 VictimEntityId = 0;
+    /** Deterministic subject-name input retained separately from canonical identity. */
+    uint32 PerpNameSeed = 0;
+
+    /** Authority/private canonical victim identity; never included in public LivingWorld proxies. */
+    FMythicEntityId VictimEntityId;
+
+    /** Deterministic victim-name input retained separately from canonical identity. */
+    uint32 VictimNameSeed = 0;
 
     float Significance = 0.0f;
 

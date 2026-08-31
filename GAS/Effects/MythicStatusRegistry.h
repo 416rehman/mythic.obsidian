@@ -17,6 +17,7 @@ MYTHIC_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_STATUS_CONTROL_MAGNITU
 
 class UAbilitySystemComponent;
 class UMythicStatusEffectDefinition;
+struct FStreamableHandle;
 enum class EMythicStatusControlOperation : uint8;
 
 UCLASS(BlueprintType)
@@ -34,6 +35,9 @@ class MYTHIC_API UMythicStatusRegistry : public UGameInstanceSubsystem {
     GENERATED_BODY()
 
 public:
+    virtual void Initialize(FSubsystemCollectionBase &Collection) override;
+    virtual void Deinitialize() override;
+
     /** Returns the canonical definition for a Status.Type.* tag, or null when the tag is not authored. */
     UFUNCTION(BlueprintPure, Category = "Status")
     UMythicStatusEffectDefinition *FindStatus(FGameplayTag StatusType) const;
@@ -135,4 +139,7 @@ private:
 
     UPROPERTY(Transient)
     TMap<FGameplayTag, TObjectPtr<UMythicStatusEffectDefinition>> StatusByType;
+
+    /** Bounded game-instance residency handle for the canonical status icon set used by all HUD surfaces. */
+    TSharedPtr<FStreamableHandle> StatusIconResidency;
 };

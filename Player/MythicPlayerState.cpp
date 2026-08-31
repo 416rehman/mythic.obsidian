@@ -26,6 +26,9 @@
 #include "Itemization/Affixes/MythicAffixApplicationComponent.h"
 #include "World/Harvesting/MythicHarvestReceiptLedgerComponent.h"
 #include "World/Harvesting/MythicHarvestRewardEscrowComponent.h"
+#include "Interaction/ContextActions/MythicEntityActionGrantComponent.h"
+#include "GAS/Combat/MythicEntityCombatPresentationComponent.h"
+#include "World/Entity/MythicEntityViewerKnowledgeComponent.h"
 #include "MythicPlayerRegistrySubsystem.h"
 #include "Player/MythicPlayerController.h"
 #include "Engine/World.h"
@@ -89,6 +92,15 @@ AMythicPlayerState::AMythicPlayerState() {
     HarvestRewardEscrow =
         CreateDefaultSubobject<UMythicHarvestRewardEscrowComponent>(
             TEXT("HarvestRewardEscrow"));
+    EntityActionGrants =
+        CreateDefaultSubobject<UMythicEntityActionGrantComponent>(
+            TEXT("EntityActionGrants"));
+    EntityCombatPresentation =
+        CreateDefaultSubobject<UMythicEntityCombatPresentationComponent>(
+            TEXT("EntityCombatPresentation"));
+    EntityViewerKnowledge =
+        CreateDefaultSubobject<UMythicEntityViewerKnowledgeComponent>(
+            TEXT("EntityViewerKnowledge"));
 }
 
 UAbilitySystemComponent *AMythicPlayerState::GetAbilitySystemComponent() const {
@@ -109,7 +121,7 @@ void AMythicPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &O
     DOREPLIFETIME(AMythicPlayerState, UtilityAttributes);
     DOREPLIFETIME(AMythicPlayerState, ProficiencyAttributes);
     DOREPLIFETIME(AMythicPlayerState, SurvivalAttributes);
-    DOREPLIFETIME(AMythicPlayerState, PersistentCharacterId);
+    DOREPLIFETIME_CONDITION(AMythicPlayerState, PersistentCharacterId, COND_OwnerOnly);
 }
 
 void AMythicPlayerState::SetPersistentCharacterId(const FString &InCharacterId) {
@@ -123,6 +135,22 @@ void AMythicPlayerState::SetPersistentCharacterId(const FString &InCharacterId) 
             Registry->RegisterPlayer(GetCanonicalPlayerKey(), this, MythicPC);
         }
     }
+}
+
+bool AMythicPlayerState::AuthoritySetPersistentEntityId(
+    const FMythicEntityId &InEntityId) {
+    if (!HasAuthority() || !InEntityId.IsValid()
+        || InEntityId.GetDomain()
+               != EMythicEntityDomain::PlayerCharacter) {
+        return false;
+    }
+    if (PersistentEntityId.IsValid()) {
+        return PersistentEntityId == InEntityId;
+    }
+
+    PersistentEntityId = InEntityId;
+    PersistentEntityIdentityReady.Broadcast(PersistentEntityId);
+    return true;
 }
 
 FString AMythicPlayerState::ResolveCanonicalPlayerKey(const FString &PersistentId, int32 SessionPlayerId) {

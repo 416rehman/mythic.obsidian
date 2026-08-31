@@ -10,15 +10,22 @@
 #include "Player/Proficiency/ProficiencyComponent.h"
 #include "AI/NPCs/MythicSocialVerbs.h"
 #include "AI/Party/MythicPartyTypes.h"
+#include "GAS/Combat/MythicCombatPresentationProjection.h"
 #include "GAS/Feedback/MythicCombatTextTypes.h"
 #include "UI/HUD/MythicHudNotice.h"
 #include "World/Harvesting/MythicHarvestTypes.h"
+#include "World/Entity/MythicEntityPresentationTypes.h"
 #include "MythicPlayerController.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMythicHudNoticeRaised, const FMythicHudNotice &, Notice);
 
 class UMythicItemInstance;
 class UMythicHarvestFocusComponent;
+class UMythicContextActionDefinition;
+class UMythicContextActionProjectionPolicy;
+class UMythicEntityActionGrantComponent;
+class UMythicEntityAttentionSubsystem;
+class UMythicEntityCombatPresentationComponent;
 class UItemDefinition;
 class AMythicConversionStation;
 class AMythicStorageContainer;
@@ -156,6 +163,20 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Harvest|Focus")
     TObjectPtr<UMythicHarvestFocusComponent> HarvestFocusComponent;
 
+    /**
+     * Server security, cadence, lease, and query-budget policy for owner-only focused-subject action offers. A missing
+     * or invalid policy fails closed; game-mode controller classes should reference one cooked policy directly.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "World Presentation|Context Actions")
+    TObjectPtr<UMythicContextActionProjectionPolicy> ContextActionProjectionPolicy;
+
+    /**
+     * Server range, aim, line-of-sight, cadence, lease, and disclosure rules for the owning viewer's focused combat
+     * assessment. Raw client stats are never accepted; authority samples only the exact registry-resolved subject.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "World Presentation|Combat")
+    FMythicCombatPresentationProjectionPolicy CombatPresentationProjectionPolicy;
+
 public:
     AMythicPlayerController();
 
@@ -176,6 +197,10 @@ public:
     virtual void OnPossess(APawn *InPawn) override;
     virtual void OnUnPossess() override;
     virtual void OnRep_PlayerState() override;
+    virtual void SeamlessTravelTo(APlayerController *NewPC) override;
+    virtual void PreClientTravel(const FString &PendingURL,
+                                 ETravelType TravelType,
+                                 bool bIsSeamlessTravel) override;
 
     /** Blueprint event raised on the owning client after this controller possesses its player pawn. */
     UFUNCTION(BlueprintImplementableEvent, Category = "Mythic")
@@ -317,11 +342,61 @@ public:
     UFUNCTION(Server, Reliable, WithValidation, Category = "Interaction")
     void ServerInteractPrimary(AActor *Interactable);
 
+    /**
+     * Requests one contextual entity action using an opaque embodiment key and exact authority lease nonce shown locally.
+     * Authority resolves the current subject, consumes only the nonce-bound issuing provider entry, and verifies the
+     * focus/range/LOS and provider rules again; stale, pooled, hidden, or ambiguous requests cannot mutate the domain.
+     */
+    UFUNCTION(BlueprintCallable, Server, Reliable, Category = "World Presentation|Context Actions")
+    void ServerExecuteContextAction(FMythicEntityPresentationInstance Subject, FGameplayTag ActionTag,
+                                    int64 ObservedOfferRevision);
+
+    /**
+     * Starts authority timing for one authored hold action after resolving and validating the exact current offer.
+     * This grants no execution right by itself; completion must arrive after the canonical duration and revalidate.
+     */
+    UFUNCTION(Server, Reliable, Category = "World Presentation|Context Actions")
+    void ServerBeginContextActionHold(FMythicEntityPresentationInstance Subject,
+                                      FGameplayTag ActionTag,
+                                      int64 ObservedOfferRevision);
+
+    /** Cancels the matching in-flight authority hold without mutating the action provider or consuming its grant. */
+    UFUNCTION(Server, Reliable, Category = "World Presentation|Context Actions")
+    void ServerCancelContextActionHold(FMythicEntityPresentationInstance Subject,
+                                       FGameplayTag ActionTag,
+                                       int64 ObservedOfferRevision);
+
+    /**
+     * Nominates the owning LocalPlayer attention service's current exact focus for server-owned contextual projections.
+     * The client sends no combat inputs, action tags, text, definitions, or provider pointers; invalid clears all focus
+     * leases immediately.
+     */
+    void RequestContextActionOfferRefresh(FMythicEntityPresentationInstance Subject);
+
+    /**
+     * Receives only an opaque focus instance from this owned controller. Authority independently rate-limits and
+     * validates combat and action projections, resolves the exact registry generation, and rebuilds owner-only leases.
+     */
+    UFUNCTION(Server, Reliable, Category = "World Presentation|Context Actions")
+    void ServerRequestContextActionOfferRefresh(FMythicEntityPresentationInstance Subject);
+
+    /** Delivers a safe Context.Action.Reason.* rejection category to the owning client without private world truth. */
+    UFUNCTION(Client, Reliable, Category = "World Presentation|Context Actions")
+    void ClientNotifyContextActionRejected(FGameplayTag SafeReasonTag);
+
+    /** Presentation hook for a server-rejected contextual action; UI resolves the safe reason tag to localized copy. */
+    UFUNCTION(BlueprintImplementableEvent, Category = "World Presentation|Context Actions")
+    void OnContextActionRejected(FGameplayTag SafeReasonTag);
+
     UFUNCTION(Server, Reliable, WithValidation, Category = "Dialogue")
     void ServerRequestNpcDialogue(AMythicNPCCharacter *NPC);
 
     UFUNCTION(Client, Reliable, Category = "Dialogue")
     void ClientReceiveNpcDialogue(AMythicNPCCharacter *NPC, const FText &Line);
+
+    /** Opens an already-authorized NPC service surface only on this controller's owning client. */
+    UFUNCTION(Client, Reliable, Category = "Trade")
+    void ClientOpenNpcTrade(AMythicNPCCharacter *NPC);
 
     UFUNCTION(Server, Reliable, WithValidation, Category = "Social")
     void ServerPerformSocialVerb(AMythicNPCCharacter *NPC, EMythicSocialVerb Verb);
@@ -474,6 +549,78 @@ public:
     bool IsOverloadedForFastTravel() const;
 
 private:
+    struct FPendingContextActionHold {
+        FMythicEntityPresentationInstance Subject;
+        FGameplayTag ActionTag;
+        uint32 OfferRevision = 0;
+        double AuthorityStartSeconds = -DBL_MAX;
+        float RequiredDurationSeconds = 0.0f;
+
+        bool IsActive() const {
+            return Subject.IsValid() && ActionTag.IsValid()
+                && AuthorityStartSeconds >= 0.0
+                && RequiredDurationSeconds > 0.0f;
+        }
+
+        bool Matches(const FMythicEntityPresentationInstance &InSubject,
+                     const FGameplayTag InActionTag,
+                     const uint32 InOfferRevision) const {
+            return IsActive() && Subject == InSubject
+                && ActionTag == InActionTag
+                && OfferRevision == InOfferRevision;
+        }
+
+        void Reset() { *this = FPendingContextActionHold(); }
+    };
+
+    void BindContextActionAttention();
+    void UnbindContextActionAttention();
+    void HandleContextActionFocusChanged(
+        const FMythicEntityPresentationInstance &PreviousSubject,
+        const FMythicEntityPresentationInstance &NewSubject);
+    void AuthorityRefreshContextActionOffers();
+    void ScheduleContextActionOfferRefresh(float DelaySeconds);
+    UMythicEntityActionGrantComponent *ResolveEntityActionGrantComponent() const;
+    double GetContextActionRequestClockSeconds() const;
+    double GetContextActionLeaseClockSeconds() const;
+    bool ResolveAndValidateContextActionRequest(
+        const FMythicEntityPresentationInstance &Subject,
+        FGameplayTag ActionTag, uint32 ObservedOfferRevision,
+        UMythicEntityActionGrantComponent *&OutGrantComponent,
+        UObject *&OutProvider,
+        UMythicContextActionDefinition *&OutDefinition,
+        AActor *&OutSubjectActor,
+        uint32 &OutProviderSourceRevision,
+        FGameplayTag &OutFailureReason);
+    void ResetPendingContextActionHold();
+    void EnterContextActionAuthorityBarrier();
+    void AuthoritySetCombatPresentationFocus(
+        FMythicEntityPresentationInstance Subject);
+    void AuthorityRefreshFocusedCombatPresentation();
+    void ScheduleCombatPresentationRefresh(float DelaySeconds);
+    void ClearAuthorityCombatPresentationFocus();
+    UMythicEntityCombatPresentationComponent *
+        ResolveEntityCombatPresentationComponent() const;
+    double GetCombatPresentationRequestClockSeconds() const;
+    double GetCombatPresentationLeaseClockSeconds() const;
+
+    /** Local split-screen-safe attention service whose focus edge drives this controller's action and combat leases. */
+    UPROPERTY(Transient)
+    TWeakObjectPtr<UMythicEntityAttentionSubsystem> BoundContextActionAttentionSubsystem;
+
+    FDelegateHandle ContextActionFocusChangedHandle;
+    FTimerHandle ContextActionOfferRefreshTimerHandle;
+    FMythicEntityPresentationInstance AuthorityRequestedContextActionSubject;
+    double LastContextActionProjectionSeconds = -DBL_MAX;
+    bool bContextActionPolicyWarningEmitted = false;
+    FPendingContextActionHold PendingContextActionHold;
+
+    FTimerHandle CombatPresentationRefreshTimerHandle;
+    FMythicEntityPresentationInstance AuthorityRequestedCombatPresentationSubject;
+    double LastCombatPresentationClientRequestSeconds = -DBL_MAX;
+    uint32 CombatPresentationSourceRevision = 0;
+    bool bCombatPresentationPolicyWarningEmitted = false;
+
     /** Highest positive authority feedback sequence already presented by this controller; zero accepts first state. */
     int64 LastPresentedHarvestFeedbackSequence = 0;
 

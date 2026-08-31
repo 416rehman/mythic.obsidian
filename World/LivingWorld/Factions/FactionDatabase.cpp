@@ -1,6 +1,36 @@
 
 #include "World/LivingWorld/Factions/FactionDatabase.h"
 
+namespace {
+bool SerializeFactionEntityId(FArchive &Ar, FMythicEntityId &EntityId) {
+    uint8 Domain = static_cast<uint8>(EntityId.GetDomain());
+    FGuid Guid = EntityId.GetAuthorityGuid();
+    Ar << Domain;
+    Ar << Guid.A;
+    Ar << Guid.B;
+    Ar << Guid.C;
+    Ar << Guid.D;
+    if (Ar.IsLoading()) {
+        const bool bEmpty = Domain == static_cast<uint8>(
+                                EMythicEntityDomain::Invalid)
+                            && !Guid.IsValid();
+        const bool bLivingWorldIdentity =
+            Domain == static_cast<uint8>(EMythicEntityDomain::LivingWorld)
+            && Guid.IsValid();
+        if (!bEmpty && !bLivingWorldIdentity) {
+            EntityId.Reset();
+            return false;
+        }
+        EntityId = bLivingWorldIdentity
+            ? FMythicEntityId::FromAuthorityGuid(
+                  EMythicEntityDomain::LivingWorld, Guid)
+            : FMythicEntityId();
+    }
+    return !EntityId.IsValid()
+           || EntityId.GetDomain() == EMythicEntityDomain::LivingWorld;
+}
+}
+
 void UMythicFactionDatabase::Initialize(const UMythicFactionDatabaseSettings *Settings) {
     check(Settings);
 
@@ -151,7 +181,7 @@ void UMythicFactionDatabase::AnnihilateFaction(FMythicFactionId Id) {
     Faction->Population = 0;
     Faction->MilitaryStrength = 0.0f;
     Faction->ControlledCellCount = 0;
-    Faction->LeaderEntityId = 0;
+    Faction->LeaderEntityId.Reset();
     Faction->Supply = FMythicResourceStock();
     Faction->Demand = FMythicResourceStock();
     Faction->Reserves = FMythicResourceStock();
@@ -287,28 +317,98 @@ void UMythicFactionDatabase::ForEachAliveFaction(TFunctionRef<void(FMythicFactio
     }
 }
 
-void UMythicFactionDatabase::ReportLeaderCandidate(FMythicFactionId FactionId, uint32 EntityId, float Score) {
-    if (!FactionId.IsValid() || FactionId.Index >= RegisteredCount) {
+void UMythicFactionDatabase::ReportLeaderCandidate(
+    FMythicFactionId FactionId, const FMythicEntityId &EntityId, float Score) {
+    if (!FactionId.IsValid() || FactionId.Index >= RegisteredCount
+        || !EntityId.IsValid()
+        || EntityId.GetDomain() != EMythicEntityDomain::LivingWorld) {
         return;
     }
 
     FMythicFactionData &Faction = WriteFactions[FactionId.Index];
 
     if (Score > Faction.LeaderSignificanceScore) {
-        const uint32 PreviousLeader = Faction.LeaderEntityId;
+        const FMythicEntityId PreviousLeader = Faction.LeaderEntityId;
         Faction.LeaderEntityId = EntityId;
         Faction.LeaderSignificanceScore = Score;
 
         if (PreviousLeader != EntityId) {
-            UE_LOG(LogMythFaction, Log, TEXT("Faction '%s': new leader nominated (entity=%d, score=%.2f, prev=%d)"),
-                   *Faction.DisplayName.ToString(), EntityId, Score, PreviousLeader);
+            UE_LOG(LogMythFaction, Log,
+                   TEXT("Faction '%s': new leader nominated (%s, score=%.2f, prev=%s)"),
+                   *Faction.DisplayName.ToString(), *EntityId.ToDebugString(), Score,
+                   *PreviousLeader.ToDebugString());
         }
     }
 }
 
+bool UMythicFactionDatabase::ReferencesEntityIdentity(
+    const FMythicEntityId &EntityId) const {
+    if (!EntityId.IsValid()) {
+        return false;
+    }
+    const int32 Count = FMath::Min(RegisteredCount.load(), WriteFactions.Num());
+    for (int32 Index = 0; Index < Count; ++Index) {
+        const FMythicFactionData &Faction = WriteFactions[Index];
+        if (Faction.bAlive && Faction.LeaderEntityId == EntityId) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool UMythicFactionDatabase::HandlePermanentEntityDeath(
+    const FMythicEntityId &EntityId) {
+    return ClearLeaderReference(EntityId);
+}
+
+bool UMythicFactionDatabase::ClearLeaderReference(
+    const FMythicEntityId &EntityId) {
+    if (!EntityId.IsValid()) {
+        return false;
+    }
+    bool bCleared = false;
+    const int32 Count = FMath::Min(RegisteredCount.load(), WriteFactions.Num());
+    for (int32 Index = 0; Index < Count; ++Index) {
+        FMythicFactionData &Faction = WriteFactions[Index];
+        if (Faction.LeaderEntityId == EntityId) {
+            Faction.LeaderEntityId.Reset();
+            Faction.LeaderSignificanceScore = 0.0f;
+            bCleared = true;
+        }
+    }
+    return bCleared;
+}
+
+int32 UMythicFactionDatabase::ClearUnrestorableLeaderReferences(
+    const TSet<FMythicEntityId> &RestorableEntityIds) {
+    int32 ClearedCount = 0;
+    const int32 Count = FMath::Min(RegisteredCount.load(), WriteFactions.Num());
+    for (int32 Index = 0; Index < Count; ++Index) {
+        FMythicFactionData &Faction = WriteFactions[Index];
+        if (!Faction.LeaderEntityId.IsValid()
+            || RestorableEntityIds.Contains(Faction.LeaderEntityId)) {
+            continue;
+        }
+
+        UE_LOG(LogMythFaction, Warning,
+               TEXT("Faction '%s': cleared unrestorable leader %s during LivingWorld restore; succession may resume."),
+               *Faction.DisplayName.ToString(),
+               *Faction.LeaderEntityId.ToDebugString());
+        Faction.LeaderEntityId.Reset();
+        Faction.LeaderSignificanceScore = 0.0f;
+        ++ClearedCount;
+    }
+    return ClearedCount;
+}
+
 void UMythicFactionDatabase::Serialize(FArchive &Ar) {
-    int32 Version = 4;
+    constexpr int32 CurrentVersion = 5;
+    int32 Version = CurrentVersion;
     Ar << Version;
+    if (Ar.IsLoading() && Version != CurrentVersion) {
+        Ar.SetError();
+        return;
+    }
 
     Ar << MaxFactions;
     int32 RegCountTmp = RegisteredCount.load();
@@ -354,8 +454,14 @@ void UMythicFactionDatabase::Serialize(FArchive &Ar) {
         Ar << F.Population;
         Ar << F.MilitaryStrength;
         Ar << F.ControlledCellCount;
-        Ar << F.LeaderEntityId;
+        if (!SerializeFactionEntityId(Ar, F.LeaderEntityId)) {
+            Ar.SetError();
+            return;
+        }
         Ar << F.LeaderSignificanceScore;
+        if (Ar.IsLoading() && !F.LeaderEntityId.IsValid()) {
+            F.LeaderSignificanceScore = 0.0f;
+        }
 
         Ar << F.Ideology.Violence;
         Ar << F.Ideology.Theft;

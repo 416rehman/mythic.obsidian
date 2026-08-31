@@ -147,6 +147,13 @@ bool UMythicEncounterDirector::ForceCompleteEncounter(uint32 EncounterId) {
     return false;
 }
 
+void UMythicEncounterDirector::ResetForLivingWorldRestore() {
+    check(IsInGameThread());
+    ActiveEncounters.Reset();
+    TemplateCooldowns.Reset();
+    NextEncounterId = 1;
+}
+
 UObjectiveDefinition *UMythicEncounterDirector::GetEncounterClearObjective() const {
     if (!Settings) {
         return nullptr;
@@ -424,7 +431,9 @@ void UMythicEncounterDirector::SpawnEncounter(
     }
 
     UMassEntitySubsystem *MassSubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
-    if (MassSubsystem) {
+    UMythicPersistentNPCRegistry *Registry =
+        LivingWorld ? LivingWorld->GetPersistentNPCRegistry() : nullptr;
+    if (MassSubsystem && Registry) {
         FMassEntityManager &EntityManager = MassSubsystem->GetMutableEntityManager();
 
         const UScriptStruct *Composition[] = {
@@ -439,7 +448,8 @@ void UMythicEncounterDirector::SpawnEncounter(
         TArray<FMassEntityHandle> SpawnedEntities;
         EntityManager.BatchCreateEntities(Archetype, NewEncounter.EntityCount, SpawnedEntities);
 
-        UMythicPersistentNPCRegistry *Registry = LivingWorld ? LivingWorld->GetPersistentNPCRegistry() : nullptr;
+        TArray<FMassEntityHandle> ValidSpawnedEntities;
+        ValidSpawnedEntities.Reserve(SpawnedEntities.Num());
 
         for (int32 i = 0; i < SpawnedEntities.Num(); ++i) {
             FMassEntityHandle Entity = SpawnedEntities[i];
@@ -447,10 +457,16 @@ void UMythicEncounterDirector::SpawnEncounter(
             FMythicIdentityFragment &Identity = EntityManager.GetFragmentDataChecked<FMythicIdentityFragment>(Entity);
             Identity.Faction = Faction;
             Identity.Cell = Cell;
-            Identity.NameHash = Registry
-                ? FMythicNPCGenerator::GenerateNameHash(Faction.Index, Cell, Registry->AllocateSpawnSerial())
-                : (GetTypeHash(Cell) ^ (NewEncounter.EncounterId * 2654435761u) ^ (i * 131071u));
-            Identity.VisualArchetype = static_cast<uint8>(Identity.NameHash % 8);
+            Identity.NameSeed = FMythicNPCGenerator::GenerateNameHash(
+                Faction.Index, Cell, Registry->AllocateNameSeedSerial());
+            Identity.EntityId = Registry->AllocateEntityIdentity(
+                Identity.NameSeed,
+                EMythicEntityIdentityProvenance::Encounter);
+            if (!Identity.EntityId.IsValid()) {
+                EntityManager.DestroyEntity(Entity);
+                continue;
+            }
+            Identity.VisualArchetype = static_cast<uint8>(Identity.NameSeed % 8);
 
             FMythicScheduleFragment &Schedule = EntityManager.GetFragmentDataChecked<FMythicScheduleFragment>(Entity);
             Schedule.Phase = EMythicSchedulePhase::Idle;
@@ -459,9 +475,11 @@ void UMythicEncounterDirector::SpawnEncounter(
 
             FMythicSignificanceFragment &Sig = EntityManager.GetFragmentDataChecked<FMythicSignificanceFragment>(Entity);
             Sig.Tier = EMythicSignificanceTier::Tier0_Ambient;
+            ValidSpawnedEntities.Add(Entity);
         }
 
-        NewEncounter.SpawnedEntities = MoveTemp(SpawnedEntities);
+        NewEncounter.SpawnedEntities = MoveTemp(ValidSpawnedEntities);
+        NewEncounter.EntityCount = NewEncounter.SpawnedEntities.Num();
 
         UE_LOG(LogMythEncounter, Log,
                TEXT("Encounter %d: spawned %d MASS entities at (%d,%d)"),
@@ -513,7 +531,7 @@ void UMythicEncounterDirector::UpdateActiveEncounters() {
                     continue;
                 }
                 const FMythicIdentityFragment *Id = EntityManager.GetFragmentDataPtr<FMythicIdentityFragment>(Entity);
-                if (!Id || !Registry->IsPermaDead(Id->NameHash)) {
+                if (!Id || !Registry->IsPermaDead(Id->EntityId)) {
                     bAllDown = false;
                     break;
                 }
@@ -579,22 +597,53 @@ void UMythicEncounterDirector::CleanupEncounter(int32 Index) {
         UMassEntitySubsystem *MassSubsystem = (World && !World->bIsTearingDown) ? World->GetSubsystem<UMassEntitySubsystem>() : nullptr;
         if (MassSubsystem) {
             FMassEntityManager &EntityManager = MassSubsystem->GetMutableEntityManager();
+            UMythicPersistentNPCRegistry *IdentityRegistry =
+                LivingWorld ? LivingWorld->GetPersistentNPCRegistry() : nullptr;
             int32 DestroyedCount = 0;
+            int32 RetainedCount = 0;
+            TSharedPtr<FMassCommandBuffer> RetainedCommands =
+                MakeShared<FMassCommandBuffer>();
             for (const FMassEntityHandle &Entity : Encounter.SpawnedEntities) {
-                if (LivingWorld) {
-                    if (AMythicNPCCharacter *Actor = LivingWorld->FindEmbodiedActor(Entity)) {
-                        Actor->Destroy();
-                    }
-                    LivingWorld->UnregisterEmbodiedActor(Entity);
-                }
                 if (EntityManager.IsEntityValid(Entity)) {
+                    EMythicEntityRetirementResult Retirement =
+                        EMythicEntityRetirementResult::RejectedInvalid;
+                    if (LivingWorld && IdentityRegistry) {
+                        if (const FMythicIdentityFragment *Identity =
+                                EntityManager.GetFragmentDataPtr<FMythicIdentityFragment>(Entity)) {
+                            Retirement = LivingWorld->TryRetireEntityIdentity(
+                                Identity->EntityId);
+                        }
+                    }
+
+                    if (Retirement
+                        == EMythicEntityRetirementResult::RetainedByDurableReference) {
+                        if (AMythicNPCCharacter *Actor =
+                                LivingWorld->FindEmbodiedActor(Entity)) {
+                            LivingWorld->ReleaseEmbodiedActor(Entity, Actor);
+                        }
+                        RetainedCommands->RemoveTag<FMythicEncounterEntityTag>(Entity);
+                        ++RetainedCount;
+                        continue;
+                    }
+
+                    if (LivingWorld) {
+                        if (AMythicNPCCharacter *Actor =
+                                LivingWorld->FindEmbodiedActor(Entity)) {
+                            Actor->Destroy();
+                        }
+                        LivingWorld->UnregisterEmbodiedActor(Entity);
+                    }
                     EntityManager.DestroyEntity(Entity);
                     ++DestroyedCount;
                 }
             }
+            if (RetainedCount > 0) {
+                EntityManager.FlushCommands(RetainedCommands);
+            }
             UE_LOG(LogMythEncounter, Log,
-                   TEXT("Encounter %d: destroyed %d/%d MASS entities"),
-                   Encounter.EncounterId, DestroyedCount, Encounter.SpawnedEntities.Num());
+                   TEXT("Encounter %d: destroyed %d and retained %d/%d MASS entities"),
+                   Encounter.EncounterId, DestroyedCount, RetainedCount,
+                   Encounter.SpawnedEntities.Num());
         }
     }
 

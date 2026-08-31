@@ -151,7 +151,7 @@ FText UMythicCognitiveBrainComponent::GetDisplayName() const {
         if (UMassEntitySubsystem *Ess = UWorld::GetSubsystem<UMassEntitySubsystem>(GetWorld())) {
             if (Ess->GetEntityManager().IsEntityValid(SourceEntity)) {
                 if (const FMythicIdentityFragment *Id = Ess->GetEntityManager().GetFragmentDataPtr<FMythicIdentityFragment>(SourceEntity)) {
-                    return FText::FromName(FMythicNPCGenerator::ReconstructNameFromHash(Id->NameHash, Faction.Index));
+                    return FText::FromName(FMythicNPCGenerator::ReconstructNameFromHash(Id->NameSeed, Faction.Index));
                 }
             }
         }

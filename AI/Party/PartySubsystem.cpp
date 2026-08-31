@@ -29,6 +29,22 @@
 
 DEFINE_LOG_CATEGORY(LogMythParty);
 
+namespace {
+void SerializePartyEntityId(FArchive &Ar, FMythicEntityId &EntityId) {
+    uint8 Domain = static_cast<uint8>(EntityId.GetDomain());
+    FGuid Guid = EntityId.GetAuthorityGuid();
+    Ar << Domain;
+    Ar << Guid.A;
+    Ar << Guid.B;
+    Ar << Guid.C;
+    Ar << Guid.D;
+    if (Ar.IsLoading()) {
+        EntityId = FMythicEntityId::FromAuthorityGuid(
+            static_cast<EMythicEntityDomain>(Domain), Guid);
+    }
+}
+}
+
 
 bool UMythicPartySubsystem::ShouldCreateSubsystem(UObject *Outer) const {
     if (const UWorld *World = Cast<UWorld>(Outer)) {
@@ -143,13 +159,15 @@ void UMythicPartySubsystem::SerializePartyKey(FArchive &Ar, FString &Key, int32 
     Ar << Key;
 }
 
-bool UMythicPartySubsystem::AnyPartyContainsNameHash(const TMap<FString, TArray<FMythicPartyMember>> &AllParties, uint32 NameHash) {
-    if (NameHash == 0) {
+bool UMythicPartySubsystem::AnyPartyContainsEntityIdentity(
+    const TMap<FString, TArray<FMythicPartyMember>> &AllParties,
+    const FMythicEntityId &EntityId) {
+    if (!EntityId.IsValid()) {
         return false;
     }
     for (const TPair<FString, TArray<FMythicPartyMember>> &Pair : AllParties) {
         for (const FMythicPartyMember &Member : Pair.Value) {
-            if (Member.PersistedNameHash == NameHash) {
+            if (Member.PersistedEntityId == EntityId) {
                 return true;
             }
         }
@@ -171,13 +189,13 @@ bool UMythicPartySubsystem::AddCompanion(const FString &PlayerKey, AMythicNPCCha
         return false;
     }
 
-    uint32 IncomingNameHash = 0;
+    FMythicEntityId IncomingEntityId;
     if (SourceEntity.IsValid()) {
         if (const UMassEntitySubsystem *ES = GetWorld()->GetSubsystem<UMassEntitySubsystem>()) {
             const FMassEntityManager &EM = ES->GetEntityManager();
             if (EM.IsEntityValid(SourceEntity)) {
                 if (const FMythicIdentityFragment *Id = EM.GetFragmentDataPtr<FMythicIdentityFragment>(SourceEntity)) {
-                    IncomingNameHash = Id->NameHash;
+                    IncomingEntityId = Id->EntityId;
                 }
             }
         }
@@ -191,8 +209,14 @@ bool UMythicPartySubsystem::AddCompanion(const FString &PlayerKey, AMythicNPCCha
             }
         }
     }
-    if (AnyPartyContainsNameHash(PlayerParties, IncomingNameHash)) {
-        UE_LOG(LogMythParty, Warning, TEXT("AddCompanion: NPC identity %u already in a party"), IncomingNameHash);
+    if (!IncomingEntityId.IsValid()) {
+        UE_LOG(LogMythParty, Warning,
+               TEXT("AddCompanion: NPC has no canonical LivingWorld identity"));
+        return false;
+    }
+    if (AnyPartyContainsEntityIdentity(PlayerParties, IncomingEntityId)) {
+        UE_LOG(LogMythParty, Warning,
+               TEXT("AddCompanion: canonical NPC identity already belongs to a party"));
         return false;
     }
 
@@ -213,7 +237,8 @@ bool UMythicPartySubsystem::AddCompanion(const FString &PlayerKey, AMythicNPCCha
             const FMassEntityManager &EM = EntitySubsystem->GetEntityManager();
             if (EM.IsEntityValid(SourceEntity)) {
                 if (const FMythicIdentityFragment *Id = EM.GetFragmentDataPtr<FMythicIdentityFragment>(SourceEntity)) {
-                    NewMember.PersistedNameHash = Id->NameHash;
+                    NewMember.PersistedEntityId = Id->EntityId;
+                    NewMember.PersistedNameSeed = Id->NameSeed;
                     NewMember.OriginalFaction = Id->Faction;
                     NewMember.PersistedTrueFaction = Id->TrueFaction;
                     NewMember.PersistedRoleTag = Id->RoleTag;
@@ -863,8 +888,13 @@ void UMythicPartySubsystem::HandleCompanionBetrayal(const FString &PlayerKey, in
 }
 
 void UMythicPartySubsystem::Serialize(FArchive &Ar) {
-    int32 Version = 4;
+    constexpr int32 CurrentPartySaveVersion = 5;
+    int32 Version = CurrentPartySaveVersion;
     Ar << Version;
+    if (Ar.IsLoading() && Version != CurrentPartySaveVersion) {
+        Ar.SetError();
+        return;
+    }
 
     int32 PartyCount = PlayerParties.Num();
     Ar << PartyCount;
@@ -895,7 +925,8 @@ void UMythicPartySubsystem::Serialize(FArchive &Ar) {
                 Ar << Member.bInRestPhase;
                 Ar << Member.CachedDisplayName;
 
-                Ar << Member.PersistedNameHash;
+                SerializePartyEntityId(Ar, Member.PersistedEntityId);
+                Ar << Member.PersistedNameSeed;
                 Ar << Member.PersistedTrueFaction.Index;
                 Ar << Member.PersistedSpawnCell.X;
                 Ar << Member.PersistedSpawnCell.Y;
@@ -916,9 +947,21 @@ void UMythicPartySubsystem::Serialize(FArchive &Ar) {
         }
     }
     else {
+        const UMythicPersistentNPCRegistry *IdentityRegistry = LivingWorld
+            ? LivingWorld->GetPersistentNPCRegistry()
+            : nullptr;
+        TSet<FString> RestoredPlayerKeys;
+        TSet<FMythicEntityId> RestoredEntityIds;
         for (int32 p = 0; p < PartyCount; ++p) {
             FString PlayerKey;
             SerializePartyKey(Ar, PlayerKey, Version);
+
+            if (PlayerKey.IsEmpty() || RestoredPlayerKeys.Contains(PlayerKey)) {
+                PlayerParties.Empty();
+                Ar.SetError();
+                return;
+            }
+            RestoredPlayerKeys.Add(PlayerKey);
 
             int32 MemberCount = 0;
             Ar << MemberCount;
@@ -939,15 +982,24 @@ void UMythicPartySubsystem::Serialize(FArchive &Ar) {
                 Ar << Member.bInRestPhase;
                 Ar << Member.CachedDisplayName;
 
-                if (Version >= 2) {
-                    Ar << Member.PersistedNameHash;
-                    Ar << Member.PersistedTrueFaction.Index;
-                    Ar << Member.PersistedSpawnCell.X;
-                    Ar << Member.PersistedSpawnCell.Y;
-                    Ar << Member.PersistedRoleTag;
-                    if (Member.PersistedNameHash != 0) {
-                        Member.RebuildState = EMythicCompanionRebuildState::NotCreated;
-                    }
+                SerializePartyEntityId(Ar, Member.PersistedEntityId);
+                if (!IdentityRegistry
+                    || !IdentityRegistry->ContainsEntityIdentity(
+                        Member.PersistedEntityId)
+                    || IdentityRegistry->IsPermaDead(Member.PersistedEntityId)
+                    || RestoredEntityIds.Contains(Member.PersistedEntityId)) {
+                    PlayerParties.Empty();
+                    Ar.SetError();
+                    return;
+                }
+                RestoredEntityIds.Add(Member.PersistedEntityId);
+                Ar << Member.PersistedNameSeed;
+                Ar << Member.PersistedTrueFaction.Index;
+                Ar << Member.PersistedSpawnCell.X;
+                Ar << Member.PersistedSpawnCell.Y;
+                Ar << Member.PersistedRoleTag;
+                if (Member.PersistedEntityId.IsValid()) {
+                    Member.RebuildState = EMythicCompanionRebuildState::NotCreated;
                 }
 
                 int32 BeliefCount = 0;
@@ -1027,10 +1079,13 @@ bool UMythicPartySubsystem::TickCompanionRebuild(float) {
                     Member.RebuildState = EMythicCompanionRebuildState::EntityCreated;
                 }
                 else {
-                    Member.RebuildState = EMythicCompanionRebuildState::Bound;
-                    UE_LOG(LogMythParty, Warning,
-                           TEXT("Companion rebuild: entity create skipped/failed for NameHash=%u (perma-dead or no mass) — companion not restored."),
-                           Member.PersistedNameHash);
+                    bAnyPending = true;
+                    if (CompanionRebuildAttempts == 1
+                        || CompanionRebuildAttempts % 120 == 0) {
+                        UE_LOG(LogMythParty, Warning,
+                           TEXT("Companion rebuild: entity create skipped/failed for %s (dead, unregistered, or no Mass) — companion not restored."),
+                               *Member.PersistedEntityId.ToDebugString());
+                    }
                     continue;
                 }
                 bAnyPending = true;
@@ -1053,6 +1108,20 @@ bool UMythicPartySubsystem::TickCompanionRebuild(float) {
     }
 
     if (CompanionRebuildAttempts >= 600) {
+        TArray<FMythicEntityId> UnrestorableEntityIds;
+        for (TPair<FString, TArray<FMythicPartyMember>> &Pair : PlayerParties) {
+            TArray<FMythicPartyMember> &Party = Pair.Value;
+            for (int32 Index = Party.Num() - 1; Index >= 0; --Index) {
+                if (Party[Index].RebuildState
+                    == EMythicCompanionRebuildState::NotCreated) {
+                    UnrestorableEntityIds.Add(Party[Index].PersistedEntityId);
+                    Party.RemoveAt(Index);
+                }
+            }
+        }
+        for (const FMythicEntityId &EntityId : UnrestorableEntityIds) {
+            LWS->HandleUnrestorableLogicalEntity(EntityId);
+        }
         UE_LOG(LogMythParty, Warning,
                TEXT("Companion rebuild: timed out after %d attempts with members still pending embodiment — giving up."),
                CompanionRebuildAttempts);
@@ -1072,10 +1141,10 @@ FMassEntityHandle UMythicPartySubsystem::CreateLoadedCompanionEntity(const FMyth
     UMythicLivingWorldSubsystem *LWS = LivingWorld;
     if (!MassSubsystem || !LWS) { return FMassEntityHandle(); }
 
-    if (UMythicPersistentNPCRegistry *Registry = LWS->GetPersistentNPCRegistry()) {
-        if (Registry->IsPermaDead(Member.PersistedNameHash)) {
-            return FMassEntityHandle();
-        }
+    UMythicPersistentNPCRegistry *Registry = LWS->GetPersistentNPCRegistry();
+    if (!Registry || !Registry->ContainsEntityIdentity(Member.PersistedEntityId)
+        || Registry->IsPermaDead(Member.PersistedEntityId)) {
+        return FMassEntityHandle();
     }
 
     FMassEntityManager &EntityManager = MassSubsystem->GetMutableEntityManager();
@@ -1094,12 +1163,13 @@ FMassEntityHandle UMythicPartySubsystem::CreateLoadedCompanionEntity(const FMyth
     const FMassEntityHandle Entity = Spawned[0];
 
     FMythicIdentityFragment &Identity = EntityManager.GetFragmentDataChecked<FMythicIdentityFragment>(Entity);
-    Identity.NameHash = Member.PersistedNameHash;
+    Identity.EntityId = Member.PersistedEntityId;
+    Identity.NameSeed = Member.PersistedNameSeed;
     Identity.Faction = Member.OriginalFaction;
     Identity.TrueFaction = Member.PersistedTrueFaction;
     Identity.Cell = Member.PersistedSpawnCell;
     Identity.RoleTag = Member.PersistedRoleTag;
-    Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(Member.PersistedNameHash, 8);
+    Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(Member.PersistedNameSeed, 8);
 
     FMythicScheduleFragment &Schedule = EntityManager.GetFragmentDataChecked<FMythicScheduleFragment>(Entity);
     Schedule.Phase = EMythicSchedulePhase::Idle;
@@ -1124,14 +1194,15 @@ FMassEntityHandle UMythicPartySubsystem::CreateLoadedCompanionEntity(const FMyth
         FMythicFactionData FData;
         if (FactionDB->GetFaction(Identity.Faction, FData)) {
             *Personality = FMythicNPCGenerator::GeneratePersonality(
-                Identity.NameHash, FData.Ideology, Identity.RoleTag);
+                Identity.NameSeed, FData.Ideology, Identity.RoleTag);
         }
     }
 
     if (!Personality) {
         UE_LOG(LogMythParty, Error,
-               TEXT("Companion rebuild: Personality fragment missing after hydrate for NameHash=%u — aborting embodiment."),
-               Member.PersistedNameHash);
+               TEXT("Companion rebuild: Personality fragment missing after hydrate for %s — aborting embodiment."),
+               *Member.PersistedEntityId.ToDebugString());
+        EntityManager.DestroyEntity(Entity);
         return FMassEntityHandle();
     }
 
@@ -1140,8 +1211,8 @@ FMassEntityHandle UMythicPartySubsystem::CreateLoadedCompanionEntity(const FMyth
     EntityManager.FlushCommands(SpawnCmd);
 
     UE_LOG(LogMythParty, Log,
-           TEXT("Companion rebuild: re-created entity (NameHash=%u) at cell (%d,%d), Tier2 + spawn-request tagged."),
-           Member.PersistedNameHash, Member.PersistedSpawnCell.X, Member.PersistedSpawnCell.Y);
+           TEXT("Companion rebuild: re-created entity (%s) at cell (%d,%d), Tier2 + spawn-request tagged."),
+           *Member.PersistedEntityId.ToDebugString(), Member.PersistedSpawnCell.X, Member.PersistedSpawnCell.Y);
 
     return Entity;
 }
@@ -1160,6 +1231,6 @@ void UMythicPartySubsystem::RebindLoadedCompanion(const FString &PlayerKey, FMyt
     }
 
     UE_LOG(LogMythParty, Log,
-           TEXT("Companion rebuild: rebound Player %s slot to re-embodied actor (NameHash=%u, Loyalty=%.2f)."),
-           *PlayerKey, Member.PersistedNameHash, Member.LoyaltyScore);
+           TEXT("Companion rebuild: rebound Player %s slot to re-embodied actor (%s, Loyalty=%.2f)."),
+           *PlayerKey, *Member.PersistedEntityId.ToDebugString(), Member.LoyaltyScore);
 }

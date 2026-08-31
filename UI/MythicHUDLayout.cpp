@@ -8,7 +8,9 @@
 #include "Components/NamedSlot.h"
 #include "Components/PanelWidget.h"
 #include "Input/CommonUIInputTypes.h"
+#include "Input/UIActionBinding.h"
 #include "NativeGameplayTags.h"
+#include "Interaction/ContextActions/MythicContextActionProjectionPolicy.h"
 #include "UI/Menu/MythicMenuShell.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
@@ -18,10 +20,52 @@
 #include "GAS/MythicTags_GAS.h"
 #include "TimerManager.h"
 #include "UI/Settings/MythicUserSettings.h"
+#include "UI/Nameplate/MythicNameplateLayer.h"
+#include "UI/Nameplate/MythicNameplateDirector.h"
+#include "UI/Nameplate/MythicNameplatePolicy.h"
+#include "UI/MythicTags_UI.h"
 
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_UI_LAYER_MENU, "UI.Layer.Menu");
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_UI_ACTION_ESCAPE, "UI.Action.Escape");
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_UI_ACTION_INVENTORY, "UI.Action.Inventory");
+
+namespace {
+bool ConfigureAuthoredCommonUIHold(const FUIActionBindingHandle Handle,
+                                   const float HoldDurationSeconds) {
+    if (!FMythicContextActionProjectionRules::IsHoldDurationValid(
+            HoldDurationSeconds)
+        || HoldDurationSeconds <= 0.0f) {
+        return false;
+    }
+
+    const TSharedPtr<FUIActionBinding> Binding =
+        FUIActionBinding::FindBinding(Handle);
+    if (!Binding) {
+        return false;
+    }
+
+    for (FUIActionKeyMapping &Mapping : Binding->HoldMappings) {
+        Mapping.HoldTime = HoldDurationSeconds;
+        Mapping.HoldRollbackTime = 0.0f;
+    }
+    for (const FUIActionKeyMapping &NormalMapping : Binding->NormalMappings) {
+        FUIActionKeyMapping HeldMapping = NormalMapping;
+        HeldMapping.HoldTime = HoldDurationSeconds;
+        HeldMapping.HoldRollbackTime = 0.0f;
+        if (FUIActionKeyMapping *Existing =
+                Binding->HoldMappings.FindByPredicate(
+                    [&HeldMapping](const FUIActionKeyMapping &Candidate) {
+                        return Candidate.Key == HeldMapping.Key;
+                    })) {
+            *Existing = HeldMapping;
+        } else {
+            Binding->HoldMappings.Add(MoveTemp(HeldMapping));
+        }
+    }
+    Binding->NormalMappings.Reset();
+    return !Binding->HoldMappings.IsEmpty();
+}
+}
 
 
 UMythicHUDLayout::UMythicHUDLayout(const FObjectInitializer &ObjectInitializer) : Super(ObjectInitializer) {}
@@ -31,6 +75,14 @@ void UMythicHUDLayout::NativeOnInitialized() {
 
     RegisterUIActionBinding(FBindUIActionArgs(FUIActionTag::ConvertChecked(TAG_UI_ACTION_ESCAPE), false,
                                               FSimpleDelegate::CreateUObject(this, &ThisClass::HandleEscapeAction)));
+    FBindUIActionArgs InspectBindArgs(
+        FUIActionTag::ConvertChecked(UI_ACTION_INSPECT_ENTITY), false,
+        FSimpleDelegate::CreateUObject(
+            this, &ThisClass::HandleInspectEntityAction));
+    InspectBindArgs.bForceHold = true;
+    InspectBindArgs.InputMode = ECommonInputMode::Game;
+    InspectBindArgs.bConsumeInput = true;
+    InspectActionBinding = RegisterUIActionBinding(InspectBindArgs);
 
     if (bRouteInventoryToShell) {
         RegisterUIActionBinding(FBindUIActionArgs(FUIActionTag::ConvertChecked(TAG_UI_ACTION_INVENTORY), false,
@@ -55,6 +107,37 @@ void UMythicHUDLayout::NativeOnInitialized() {
                                                   })));
     }
 
+    if (WorldOverlaySlot && NameplateLayerClass && !NameplateLayer) {
+        NameplateLayer = CreateWidget<UMythicNameplateLayer>(GetOwningPlayer(), NameplateLayerClass);
+        if (NameplateLayer) {
+            WorldOverlaySlot->AddChild(NameplateLayer);
+        }
+    }
+
+    if (ULocalPlayer *LocalPlayer = GetOwningLocalPlayer()) {
+        if (UMythicNameplateDirector *Director =
+                LocalPlayer->GetSubsystem<UMythicNameplateDirector>()) {
+            BoundNameplateDirector = Director;
+            Director->OnNameplateProjectionsChanged.AddDynamic(
+                this, &ThisClass::HandleNameplateProjectionsChanged);
+            RefreshContextActionBindings();
+        }
+    }
+
+    const UMythicNameplatePolicy *NameplatePolicy = NameplateLayer
+        ? NameplateLayer->GetNameplatePolicy() : nullptr;
+    const float InspectHoldSeconds = NameplatePolicy
+        ? NameplatePolicy->Inspect.HoldDurationSeconds : 0.55f;
+    if (InspectActionBinding.IsValid()
+        && !ConfigureAuthoredCommonUIHold(
+            InspectActionBinding, InspectHoldSeconds)) {
+        InspectActionBinding.Unregister();
+        InspectActionBinding = FUIActionBindingHandle();
+        UE_LOG(LogTemp, Error,
+               TEXT("MythicHUDLayout: Inspect requires a %.2fs hold, but CommonUI supplied no usable keyboard/controller mapping."),
+               InspectHoldSeconds);
+    }
+
     if (RevealHUDAction.IsValid()) {
         RegisterUIActionBinding(FBindUIActionArgs(FUIActionTag::ConvertChecked(RevealHUDAction), false,
                                                   FSimpleDelegate::CreateUObject(this, &ThisClass::HandleRevealHUD)));
@@ -73,6 +156,14 @@ void UMythicHUDLayout::HandleAccessibilityChanged() {
 }
 
 void UMythicHUDLayout::NativeDestruct() {
+    ClearContextActionBindings();
+    InspectActionBinding.Unregister();
+    InspectActionBinding = FUIActionBindingHandle();
+    if (UMythicNameplateDirector *Director = BoundNameplateDirector.Get()) {
+        Director->OnNameplateProjectionsChanged.RemoveDynamic(
+            this, &ThisClass::HandleNameplateProjectionsChanged);
+    }
+    BoundNameplateDirector.Reset();
     if (const UWorld *World = GetWorld()) {
         World->GetTimerManager().ClearTimer(SalienceTimer);
         World->GetTimerManager().ClearTimer(CombatBindTimer);
@@ -88,6 +179,7 @@ void UMythicHUDLayout::NativeDestruct() {
             }
         }
     }
+    NameplateLayer = nullptr;
     Super::NativeDestruct();
 }
 
@@ -375,6 +467,152 @@ void UMythicHUDLayout::TickSalience(float DeltaSeconds) {
 
 void UMythicHUDLayout::HandleInventoryAction() {
     OpenMenuOnPage(InventoryPageId);
+}
+
+void UMythicHUDLayout::HandleInspectEntityAction() {
+    if (ULocalPlayer *LocalPlayer = GetOwningLocalPlayer()) {
+        if (UMythicNameplateDirector *Director =
+                LocalPlayer->GetSubsystem<UMythicNameplateDirector>()) {
+            Director->OpenFocusedEntityInspect();
+        }
+    }
+}
+
+void UMythicHUDLayout::HandleNameplateProjectionsChanged(
+    const int32 LocalRevision) {
+    (void)LocalRevision;
+    RefreshContextActionBindings();
+}
+
+void UMythicHUDLayout::ClearContextActionBindings() {
+    TArray<FGameplayTag> InputTags;
+    ContextActionBindings.GenerateKeyArray(InputTags);
+    for (const FGameplayTag InputTag : InputTags) {
+        RemoveContextActionBinding(InputTag);
+    }
+    ContextActionBindings.Reset();
+}
+
+void UMythicHUDLayout::RemoveContextActionBinding(
+    const FGameplayTag InputActionTag) {
+    FContextActionBindingRecord *Record =
+        ContextActionBindings.Find(InputActionTag);
+    if (!Record) {
+        return;
+    }
+    if (Record->HoldDurationSeconds > 0.0f) {
+        if (UMythicNameplateDirector *Director =
+                BoundNameplateDirector.Get()) {
+            Director->CancelFocusedContextActionHold(Record->ActionTag);
+        }
+    }
+    Record->Handle.Unregister();
+    ContextActionBindings.Remove(InputActionTag);
+}
+
+void UMythicHUDLayout::RefreshContextActionBindings() {
+    UMythicNameplateDirector *Director = BoundNameplateDirector.Get();
+    if (!Director) {
+        ClearContextActionBindings();
+        return;
+    }
+
+    FMythicNameplateActionRailProjection Projection;
+    if (!Director->GetFocusedActionRailProjection(Projection)
+        || !Projection.Instance.IsValid()) {
+        ClearContextActionBindings();
+        return;
+    }
+
+    TSet<FGameplayTag> DesiredInputTags;
+    DesiredInputTags.Reserve(Projection.Actions.Num());
+    for (const FMythicNameplateActionProjection &Action : Projection.Actions) {
+        if (!Action.ActionTag.IsValid()
+            || !Action.InputActionTag.IsValid()
+            || DesiredInputTags.Contains(Action.InputActionTag)
+            || !FMythicContextActionProjectionRules::IsHoldDurationValid(
+                Action.HoldDurationSeconds)) {
+            continue;
+        }
+        DesiredInputTags.Add(Action.InputActionTag);
+
+        if (const FContextActionBindingRecord *Existing =
+                ContextActionBindings.Find(Action.InputActionTag);
+            Existing && Existing->Matches(
+                Projection.Instance, Action.ActionTag,
+                Action.OfferRevision, Action.HoldDurationSeconds)) {
+            continue;
+        }
+        RemoveContextActionBinding(Action.InputActionTag);
+
+        const FGameplayTag ContextActionTag = Action.ActionTag;
+        FBindUIActionArgs BindArgs(
+            FUIActionTag::ConvertChecked(Action.InputActionTag), false,
+            FSimpleDelegate::CreateWeakLambda(
+                this, [this, ContextActionTag]() {
+                    if (UMythicNameplateDirector *CurrentDirector =
+                            BoundNameplateDirector.Get()) {
+                        CurrentDirector->ExecuteFocusedContextAction(
+                            ContextActionTag);
+                    }
+                }));
+        BindArgs.OverrideDisplayName = Action.ResolvedLabel;
+        // World-context input belongs only to active gameplay. Consuming it prevents the same F/A press from reaching
+        // attack or another Enhanced Input agent after this LocalPlayer-owned action has accepted it.
+        BindArgs.InputMode = ECommonInputMode::Game;
+        BindArgs.bConsumeInput = true;
+        const bool bRequiresHold = Action.HoldDurationSeconds > 0.0f;
+        if (bRequiresHold) {
+            BindArgs.bForceHold = true;
+            BindArgs.OnHoldActionPressed.BindWeakLambda(
+                this, [this, ContextActionTag]() {
+                    if (UMythicNameplateDirector *CurrentDirector =
+                            BoundNameplateDirector.Get()) {
+                        CurrentDirector->BeginFocusedContextActionHold(
+                            ContextActionTag);
+                    }
+                });
+            BindArgs.OnHoldActionReleased.BindWeakLambda(
+                this, [this, ContextActionTag]() {
+                    if (UMythicNameplateDirector *CurrentDirector =
+                            BoundNameplateDirector.Get()) {
+                        CurrentDirector->CancelFocusedContextActionHold(
+                            ContextActionTag);
+                    }
+                });
+        }
+        FUIActionBindingHandle Handle = RegisterUIActionBinding(BindArgs);
+        if (!Handle.IsValid()) {
+            continue;
+        }
+        if (bRequiresHold
+            && !ConfigureAuthoredCommonUIHold(
+                Handle, Action.HoldDurationSeconds)) {
+            Handle.Unregister();
+            UE_LOG(LogTemp, Error,
+                   TEXT("MythicHUDLayout: context action '%s' requires a %.2fs hold, but CommonUI supplied no usable keyboard/controller mapping."),
+                   *Action.ActionTag.ToString(),
+                   Action.HoldDurationSeconds);
+            continue;
+        }
+
+        FContextActionBindingRecord &Record =
+            ContextActionBindings.Add(Action.InputActionTag);
+        Record.Handle = Handle;
+        Record.Subject = Projection.Instance;
+        Record.ActionTag = Action.ActionTag;
+        Record.InputActionTag = Action.InputActionTag;
+        Record.OfferRevision = Action.OfferRevision;
+        Record.HoldDurationSeconds = Action.HoldDurationSeconds;
+    }
+
+    TArray<FGameplayTag> ExistingInputTags;
+    ContextActionBindings.GenerateKeyArray(ExistingInputTags);
+    for (const FGameplayTag ExistingInputTag : ExistingInputTags) {
+        if (!DesiredInputTags.Contains(ExistingInputTag)) {
+            RemoveContextActionBinding(ExistingInputTag);
+        }
+    }
 }
 
 void UMythicHUDLayout::OpenMenuOnPage(FName PageId) {

@@ -615,6 +615,68 @@ EObjectiveOfferResult UObjectiveTracker::ServerTryAddObjective(UObjectiveDefinit
     return Result;
 }
 
+EObjectiveOfferResult UObjectiveTracker::EvaluateObjectiveOffer(
+    const UObjectiveDefinition *Definition,
+    FObjectiveProgress &OutProgress) const {
+    OutProgress = FObjectiveProgress();
+    if (!GetOwner() || !GetOwner()->HasAuthority()) {
+        return EObjectiveOfferResult::Invalid;
+    }
+
+    const EObjectiveOfferResult Result = ResolveObjectiveOfferResult(
+        ActiveObjectives, Definition, OutProgress, GatherOwnedStoryTags());
+    if (Result != EObjectiveOfferResult::AlreadyCompleted || !Definition
+        || !Definition->bRepeatable) {
+        return Result;
+    }
+
+    const float NowSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    return CanRepeatObjective(true, OutProgress.CompletedTimeSeconds,
+                              NowSeconds, Definition->RepeatCooldownSeconds)
+               ? EObjectiveOfferResult::Assigned
+               : Result;
+}
+
+bool UObjectiveTracker::CanAdvanceNpcInteraction(
+    const FGameplayTag &NpcTag,
+    const UMythicInventoryComponent *PlayerInventory) const {
+    if (!GetOwner() || !GetOwner()->HasAuthority() || !NpcTag.IsValid()) {
+        return false;
+    }
+
+    for (const FObjectiveProgress &Progress : ActiveObjectives) {
+        const UObjectiveDefinition *Definition = Progress.Definition;
+        if (Progress.bCompleted || !Definition
+            || Definition->IsHarvestObjective()) {
+            continue;
+        }
+
+        if (Definition->IsDeliveryObjective()) {
+            if (!PlayerInventory
+                || !NpcTag.MatchesTag(Definition->DeliverToNpcTag)) {
+                continue;
+            }
+            const int32 Available =
+                PlayerInventory->GetItemCount(Definition->DeliverItem);
+            if (ComputeDeliverConsumeCount(Progress.CurrentCount,
+                                           Definition->RequiredCount,
+                                           Available) > 0) {
+                return true;
+            }
+            continue;
+        }
+
+        if (Definition->TriggerEventTag != GAS_EVENT_TALKED_TO_NPC) {
+            continue;
+        }
+        if (!Definition->RequiredPayloadTag.IsValid()
+            || NpcTag.MatchesTag(Definition->RequiredPayloadTag)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void UObjectiveTracker::ServerAbandonObjective_Implementation(UObjectiveDefinition *Def) {
     if (!GetOwner() || !GetOwner()->HasAuthority() || !Def) {
         return;

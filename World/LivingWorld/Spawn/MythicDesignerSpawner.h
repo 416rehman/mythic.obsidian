@@ -3,12 +3,14 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "World/Entity/MythicEntityId.h"
 #include "World/LivingWorld/Spawn/DesignerSpawnerTypes.h"
 #include "MythicDesignerSpawner.generated.h"
 
 class AMythicNPCCharacter;
 class UMythicLivingWorldSubsystem;
 class UMythicDesignerSpawnerRegistry;
+class UMythicEntityIdentityDefinition;
 
 UCLASS(Blueprintable)
 class MYTHIC_API AMythicDesignerSpawner : public AActor {
@@ -21,13 +23,20 @@ public:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 
-    /** Stable, designer-authored identity. Persistence key + perma-death identity seed. MUST be non-None. */
+    /** Stable key for this spawner's counters and conditions; it is never used as the spawned NPC's identity. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Designer Spawner")
     FName DesignerId;
 
     /** The NPC class to spawn. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Designer Spawner")
     TSubclassOf<AMythicNPCCharacter> NPCClass;
+
+    /**
+     * Explicit public cover/role identity for spawned characters. It is independent of private NPC type and spawn
+     * gates; empty intentionally presents a generic stranger.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Designer Spawner|Presentation")
+    TSoftObjectPtr<UMythicEntityIdentityDefinition> PublicIdentityDefinition;
 
     /** The conditions that must all be met to spawn. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Designer Spawner")
@@ -74,6 +83,12 @@ public:
     UFUNCTION(BlueprintPure, Category = "Designer Spawner")
     int32 GetLiveCount() const;
 
+    /** Clears old live NPC handles before an in-place LivingWorld restore replaces canonical identity state. */
+    void BeginLivingWorldRestore();
+
+    /** Reloads persisted counters and resumes evaluation after the LivingWorld restore transaction completes. */
+    void CompleteLivingWorldRestore();
+
 private:
     void TickEvaluate();
 
@@ -97,7 +112,7 @@ private:
 
     TArray<TWeakObjectPtr<AMythicNPCCharacter>> LiveNPCs;
 
-    TMap<TWeakObjectPtr<AMythicNPCCharacter>, uint32> LiveNameHashes;
+    TMap<TWeakObjectPtr<AMythicNPCCharacter>, FMythicEntityId> LiveEntityIds;
 
     FTimerHandle EvalTimerHandle;
 

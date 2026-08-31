@@ -102,6 +102,8 @@ protected:
     UPROPERTY(BlueprintReadOnly, Category = "Overall Xp", ReplicatedUsing = OnRep_OverallXpMax)
     FGameplayAttributeData OverallXpMax;
 
+    virtual TConstArrayView<FMythicBoundedAttributePair> GetBoundedAttributePairs() const override;
+
 public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Proficiencies, CombatProficiency);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Proficiencies, CombatProficiencyMax);
@@ -224,9 +226,6 @@ public:
     virtual void OnRep_OverallXpMax(const FGameplayAttributeData &OldValue);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
-    float GetMaxValueForAttribute(const FGameplayAttribute &Attribute) const;
-
-    virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
     virtual void PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const override;
 

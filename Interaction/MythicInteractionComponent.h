@@ -8,6 +8,8 @@
 #include "Components/ActorComponent.h"
 #include "MythicInteractionComponent.generated.h"
 
+class UWidgetComponent;
+
 struct FMythicInteractCandidate {
     bool bInRange = false;
     float Dot = -1.0f;
@@ -27,8 +29,9 @@ protected:
     void UpdateUILayerRootWidget(ACommonPlayerController *CommonPlayerController);
 
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    // Find actor to focus on for interaction - Repeatedly
+    /** Runs one bounded legacy-interaction nomination pass; presentable entities publish into LocalPlayer attention. */
     UFUNCTION(BlueprintCallable)
     void ScanForInteractableActors();
 
@@ -50,17 +53,23 @@ protected:
     UPROPERTY()
     UMythicInteractionPromptWidget *InteractionPromptWidget;
 
+    /** Legacy prompt component owned by this LocalPlayer interaction instance; never found or destroyed by actor tag. */
+    UPROPERTY(Transient)
+    TObjectPtr<UWidgetComponent> ActiveInteractionWidgetComponent;
+
 public:
-    // The UI Layer responsible for input handling during interaction.
-    // Initialized to the native UI_LAYER_GAME tag in the constructor (a header default-member-initializer
-    // cannot reliably reference a native gameplay tag at static-init time).
+    /**
+     * CommonUI layer that owns legacy interaction bindings. Initialized to UI.Layer.Game in the constructor because
+     * native gameplay tags are not safe to reference from a header default-member initializer during static startup.
+     */
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Interaction")
     FGameplayTag GameUILayerName;
 
-    // The class of the widget to display when interacting with an actor
+    /** Legacy prompt class used only for non-presentable interactables; contextual entities render through the HUD. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Interaction")
     TSubclassOf<UMythicInteractionPromptWidget> InteractionPromptWidgetClass;
 
+    /** Starts or stops the bounded interaction scan and clears current local focus when paused. */
     UFUNCTION(BlueprintCallable)
     void PauseInteractions(bool bPause);
     void InitializeInteraction(AActor *NewFocusedActor);
@@ -68,11 +77,12 @@ public:
 
     void EndStaleInteraction();
 
+    /** Publishes a local focus transition, tears down the old prompt, and initializes the new interaction surface. */
     UFUNCTION(BlueprintCallable, Client, Reliable)
     void OnFocusedActorChanged(AActor *NewFocusedActor, AActor *OldFocusedActor);
     void OnFocusedActorChanged_Implementation(AActor *NewFocusedActor, AActor *OldFocusedActor);
 
-    // Any interactable actors within this range will be considered for interaction.
+    /** Maximum legacy interaction nomination radius in centimeters. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Interaction")
     float InteractionRange = 200.f;
 
@@ -83,7 +93,7 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Interaction", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float InteractionConeMinDot = -1.0f;
 
-    // Rate of scanning for interactable actors
+    /** Seconds between bounded legacy-interaction nomination passes. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Interaction")
     float InteractionScanRate = 0.1f;
 };

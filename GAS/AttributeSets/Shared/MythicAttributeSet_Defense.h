@@ -226,6 +226,9 @@ public:
 
     virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) override;
 
+protected:
+    virtual TConstArrayView<FMythicBoundedAttributePair> GetBoundedAttributePairs() const override;
+
 private:
     float ShieldBeforeChange = 0.0f;
 

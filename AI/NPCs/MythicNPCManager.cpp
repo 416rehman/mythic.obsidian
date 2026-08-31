@@ -9,9 +9,40 @@
 #include "GameModes/GameState/MythicGameState.h"
 #include "Settings/MythicCombatSettings.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h"
+#include "World/LivingWorld/Persistence/PersistentNPCRegistry.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "NPCDefinition.h"
+
+namespace {
+UMythicLivingWorldSubsystem *ResolveLivingWorld(const UWorld *World) {
+    UGameInstance *GameInstance = World ? World->GetGameInstance() : nullptr;
+    UMythicLivingWorldSubsystem *LivingWorld = GameInstance
+        ? GameInstance->GetSubsystem<UMythicLivingWorldSubsystem>()
+        : nullptr;
+    return LivingWorld && LivingWorld->IsSystemActive() ? LivingWorld : nullptr;
+}
+
+UMythicPersistentNPCRegistry *ResolveIdentityRegistry(const UWorld *World) {
+    UMythicLivingWorldSubsystem *LivingWorld = ResolveLivingWorld(World);
+    return LivingWorld ? LivingWorld->GetPersistentNPCRegistry() : nullptr;
+}
+
+bool AllocateManagerIdentity(
+    const UWorld *World,
+    FMythicNPCData &Data,
+    const EMythicEntityIdentityProvenance Provenance) {
+    UMythicPersistentNPCRegistry *Registry = ResolveIdentityRegistry(World);
+    if (!Registry) {
+        UE_LOG(Myth, Error,
+               TEXT("NPCManager rejected a spawn because the LivingWorld identity authority is unavailable."));
+        return false;
+    }
+
+    Data.EntityId = Registry->AllocateEntityIdentity(0u, Provenance);
+    return Data.EntityId.IsValid();
+}
+}
 
 int32 UMythicNPCManager::ResolveCombatLevelAt(const FVector &SpawnLocation) const {
     return MythicCombat::ResolveCombatLevelAt(GetWorld(), SpawnLocation);
@@ -68,6 +99,20 @@ void UMythicNPCManager::RefreshCombatScalingOnActive() {
     }
 }
 
+void UMythicNPCManager::ResetForLivingWorldRestore() {
+    check(IsInGameThread());
+    for (const TPair<FGuid, AMythicNPCCharacter *> &Pair : ActiveNPCs) {
+        if (AMythicNPCCharacter *NPC = Pair.Value; IsValid(NPC)) {
+            NPC->OnReturnedToPool();
+            NPCCharacterPool.FindOrAdd(NPC->GetClass()).NPCs.Add(NPC);
+        }
+    }
+    ActiveNPCs.Reset();
+    CachedNPCs.Reset();
+    ActiveFamilySpecs.Reset();
+    CachedFamilies.Reset();
+}
+
 void UMythicNPCManager::ReturnToPool(AMythicNPCCharacter *NPC, bool bShouldCache) {
     if (!NPC) {
         UE_LOG(Myth, Error, TEXT("UMythicNPCManager::ReturnToPool: Attempted to return a null NPC."));
@@ -75,6 +120,7 @@ void UMythicNPCManager::ReturnToPool(AMythicNPCCharacter *NPC, bool bShouldCache
     }
 
     const FGuid NPCId = NPC->GetNPCId();
+    const FMythicEntityId EntityId = NPC->GetNPCDataRef().EntityId;
 
     if (bShouldCache) {
         auto NPCData = NPC->GetNPCData();
@@ -83,6 +129,11 @@ void UMythicNPCManager::ReturnToPool(AMythicNPCCharacter *NPC, bool bShouldCache
 
     NPC->OnReturnedToPool();
     ActiveNPCs.Remove(NPCId);
+    if (!bShouldCache && EntityId.IsValid()) {
+        if (UMythicLivingWorldSubsystem *LivingWorld = ResolveLivingWorld(GetWorld())) {
+            LivingWorld->TryRetireEntityIdentity(EntityId);
+        }
+    }
     NPCCharacterPool.FindOrAdd(NPC->GetClass()).NPCs.Add(NPC);
 
     UE_LOG(Myth, Verbose, TEXT("NPC returned to pool (ID: %s)"), *NPCId.ToString());
@@ -152,6 +203,19 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDe
         UE_LOG(Myth, Log, TEXT("SpawnPredefinedNPC: NPC ID %s found in cache, redirecting to SpawnCachedNPC."), *NPCDef->NPCId.ToString());
         return SpawnCachedNPC(NPCDef->NPCId, SpawnLocation, SpawnRotation);
     }
+    if (ActiveNPCs.Contains(NPCDef->NPCId)) {
+        UE_LOG(Myth, Error,
+               TEXT("SpawnPredefinedNPC: authored NPC %s is already active; refusing to create a second embodiment."),
+               *NPCDef->NPCId.ToString());
+        return nullptr;
+    }
+
+    FMythicNPCData Data(NPCDef);
+    Data.CombatLevel = ResolveCombatLevelAt(SpawnLocation);
+    if (!AllocateManagerIdentity(GetWorld(), Data,
+                                 EMythicEntityIdentityProvenance::AuthoredNPC)) {
+        return nullptr;
+    }
 
     if (!NPCDef->NPCClass) {
         UE_LOG(Myth, Warning, TEXT("SpawnPredefinedNPC: %s has no NPCClass; the raw base class has no mesh, attack or stats."),
@@ -162,12 +226,20 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnPredefinedNPC(UNPCDefinition *NPCDe
     if (!SpawnedNPC) {
         UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnPredefinedNPC: Failed to spawn new actor for NPC ID %s, Type %s."), *NPCDef->NPCId.ToString(),
                *NPCDef->NPCType.ToString());
+        if (UMythicLivingWorldSubsystem *LivingWorld = ResolveLivingWorld(GetWorld())) {
+            LivingWorld->TryRetireEntityIdentity(Data.EntityId);
+        }
         return nullptr;
     }
 
-    FMythicNPCData Data(NPCDef);
-    Data.CombatLevel = ResolveCombatLevelAt(SpawnLocation);
-    SpawnedNPC->OnSpawnedFromPool(Data);
+    if (!SpawnedNPC->OnSpawnedFromPool(Data)) {
+        SpawnedNPC->OnReturnedToPool();
+        NPCCharacterPool.FindOrAdd(SpawnedNPC->GetClass()).NPCs.Add(SpawnedNPC);
+        if (UMythicLivingWorldSubsystem *LivingWorld = ResolveLivingWorld(GetWorld())) {
+            LivingWorld->TryRetireEntityIdentity(Data.EntityId);
+        }
+        return nullptr;
+    }
 
     ActiveNPCs.Add(NPCDef->NPCId, SpawnedNPC);
     return SpawnedNPC;
@@ -206,18 +278,33 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnRandomNPC(FGameplayTag NPCType, FVe
                *Chosen->GetName());
     }
     UClass *ClassToSpawn = Chosen->NPCClass ? Chosen->NPCClass.Get() : AMythicNPCCharacter::StaticClass();
-    AMythicNPCCharacter *SpawnedNPC = AcquireNPC(ClassToSpawn, SpawnLocation, SpawnRotation);
-    if (!SpawnedNPC) {
-        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnRandomNPC: Failed to spawn new actor for NPCType %s."), *NPCType.ToString());
-        return nullptr;
-    }
 
     // The definition is the template, not the individual: a fresh id per spawn so two bandits from one
     // definition never collide in the active map, and the ambush in Extreme territory fights at its level.
     FMythicNPCData Data(Chosen);
     Data.NPCId = FGuid::NewGuid();
     Data.CombatLevel = ResolveCombatLevelAt(SpawnLocation);
-    SpawnedNPC->OnSpawnedFromPool(Data);
+    if (!AllocateManagerIdentity(GetWorld(), Data,
+                                 EMythicEntityIdentityProvenance::Runtime)) {
+        return nullptr;
+    }
+
+    AMythicNPCCharacter *SpawnedNPC = AcquireNPC(ClassToSpawn, SpawnLocation, SpawnRotation);
+    if (!SpawnedNPC) {
+        UE_LOG(Myth, Error, TEXT("UMythicNPCManager::SpawnRandomNPC: Failed to spawn new actor for NPCType %s."), *NPCType.ToString());
+        if (UMythicLivingWorldSubsystem *LivingWorld = ResolveLivingWorld(GetWorld())) {
+            LivingWorld->TryRetireEntityIdentity(Data.EntityId);
+        }
+        return nullptr;
+    }
+    if (!SpawnedNPC->OnSpawnedFromPool(Data)) {
+        SpawnedNPC->OnReturnedToPool();
+        NPCCharacterPool.FindOrAdd(SpawnedNPC->GetClass()).NPCs.Add(SpawnedNPC);
+        if (UMythicLivingWorldSubsystem *LivingWorld = ResolveLivingWorld(GetWorld())) {
+            LivingWorld->TryRetireEntityIdentity(Data.EntityId);
+        }
+        return nullptr;
+    }
 
     ActiveNPCs.Add(Data.NPCId, SpawnedNPC);
     return SpawnedNPC;
@@ -246,6 +333,15 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnCachedNPC(FGuid NPCId, FVector Spaw
         return nullptr;
     }
 
+    UMythicPersistentNPCRegistry *IdentityRegistry = ResolveIdentityRegistry(GetWorld());
+    if (!IdentityRegistry
+        || !IdentityRegistry->ContainsEntityIdentity(CachedData->NPCData.EntityId)) {
+        UE_LOG(Myth, Error,
+               TEXT("UMythicNPCManager::SpawnCachedNPC: cached NPC %s has no registered canonical identity."),
+               *NPCId.ToString());
+        return nullptr;
+    }
+
     UClass *ClassToSpawn = CachedData->NPCData.NPCClass ? CachedData->NPCData.NPCClass.Get() : AMythicNPCCharacter::StaticClass();
     AMythicNPCCharacter *SpawnedNPC = AcquireNPC(ClassToSpawn, SpawnLocation, SpawnRotation);
     if (!SpawnedNPC) {
@@ -257,7 +353,11 @@ AMythicNPCCharacter *UMythicNPCManager::SpawnCachedNPC(FGuid NPCId, FVector Spaw
     // Level reflects where the NPC stands NOW, not where it was cached.
     FMythicNPCData Data = CachedData->NPCData;
     Data.CombatLevel = ResolveCombatLevelAt(SpawnLocation);
-    SpawnedNPC->OnSpawnedFromPool(Data);
+    if (!SpawnedNPC->OnSpawnedFromPool(Data)) {
+        SpawnedNPC->OnReturnedToPool();
+        NPCCharacterPool.FindOrAdd(SpawnedNPC->GetClass()).NPCs.Add(SpawnedNPC);
+        return nullptr;
+    }
 
     ActiveNPCs.Add(NPCId, SpawnedNPC);
     CachedNPCs.Remove(NPCId);

@@ -19,6 +19,7 @@
 #include "Mythic/GAS/Mounts/MythicMountRosterComponent.h"
 #include "Mythic/World/LivingWorld/Acquaintance/MythicAcquaintanceComponent.h"
 #include "Mythic/World/LivingWorld/Chronicle/MythicDossierComponent.h"
+#include "Mythic/World/Entity/MythicEntityViewerKnowledgeComponent.h"
 #include "Mythic/World/Trading/MythicTradeContractComponent.h"
 #include "Mythic/World/LivingWorld/LivingWorldTypes.h"
 #include "Mythic/Objectives/ObjectiveTracker.h"
@@ -96,6 +97,17 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
     }
 
     if (const AMythicPlayerState *MythPS = Cast<AMythicPlayerState>(PS)) {
+        const FMythicEntityId &PlayerEntityId =
+            MythPS->GetPersistentEntityId();
+        if (!PlayerEntityId.IsValid()
+            || PlayerEntityId.GetDomain()
+                   != EMythicEntityDomain::PlayerCharacter) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SerializedCharacterData::Serialize: canonical player entity identity is not ready"));
+            return false;
+        }
+        OutData.PlayerEntityId = PlayerEntityId;
+
         if (const UMythicFactionStandingComponent *Faction = MythPS->GetFactionStanding()) {
             for (const FMythicFactionStandingEntry &Entry : Faction->GetStandings()) {
                 if (FSerializedFactionStandingHelper::ShouldPersist(Entry.Faction.Index, Entry.Value)) {
@@ -181,6 +193,11 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
         }
         if (const UMythicDossierComponent *DossierComp = MythPS->GetDossierComponent()) {
             OutData.NpcDossiers = DossierComp->GetDossiers();
+        }
+        if (const UMythicEntityViewerKnowledgeComponent *ViewerKnowledge =
+                MythPS->GetEntityViewerKnowledgeComponent()) {
+            OutData.EntityKnowledgeDossiers =
+                ViewerKnowledge->GetLearnedDossiersForSave();
         }
         if (OutData.NpcRelations.Num() > 0 || OutData.NpcDossiers.Num() > 0) {
             UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d NPC relations, %d dossiers"),
@@ -308,6 +325,14 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
     AActor *ProfHost = PC ? static_cast<AActor *>(PC) : TargetActor;
     AActor *InvHost = PC ? static_cast<AActor *>(PC) : TargetActor;
 
+    if (AMythicPlayerState *MythPS = Cast<AMythicPlayerState>(PS)) {
+        if (!MythPS->AuthoritySetPersistentEntityId(InData.PlayerEntityId)) {
+            UE_LOG(MythSaveLoad, Error,
+                   TEXT("SerializedCharacterData::Deserialize: invalid or conflicting canonical player entity identity"));
+            return false;
+        }
+    }
+
     // A save with no name must not blank one the manifest already set. Saves written before a character had a
     // name carry an empty string, and applying it would undo the name every load.
     if (PS && !InData.CharacterName.IsEmpty()) {
@@ -402,6 +427,11 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
         }
         if (UMythicDossierComponent *DossierComp = MythPS->GetDossierComponent()) {
             DossierComp->RestoreDossiers(InData.NpcDossiers);
+        }
+        if (UMythicEntityViewerKnowledgeComponent *ViewerKnowledge =
+                MythPS->GetEntityViewerKnowledgeComponent()) {
+            ViewerKnowledge->AuthorityRestoreLearnedDossiers(
+                InData.EntityKnowledgeDossiers);
         }
         if (InData.NpcRelations.Num() > 0 || InData.NpcDossiers.Num() > 0) {
             UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d NPC relations, %d dossiers"),

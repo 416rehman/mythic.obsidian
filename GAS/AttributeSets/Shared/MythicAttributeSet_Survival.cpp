@@ -1,6 +1,5 @@
 #include "MythicAttributeSet_Survival.h"
 
-#include "GameplayEffectExtension.h"
 #include "Net/UnrealNetwork.h"
 
 UMythicAttributeSet_Survival::UMythicAttributeSet_Survival() {
@@ -14,50 +13,19 @@ UMythicAttributeSet_Survival::UMythicAttributeSet_Survival() {
     InitWetness(0.0f);
 }
 
-void UMythicAttributeSet_Survival::ClampAttribute(const FGameplayAttribute &Attribute, float &NewValue) const {
-    if (Attribute == GetNourishmentAttribute()) {
-        NewValue = FMath::Clamp(NewValue, 0.0f, GetMaxNourishment());
-    }
-    else if (Attribute == GetHydrationAttribute()) {
-        NewValue = FMath::Clamp(NewValue, 0.0f, GetMaxHydration());
-    }
-    else if (Attribute == GetWarmthAttribute()) {
-        NewValue = FMath::Clamp(NewValue, 0.0f, GetMaxWarmth());
-    }
-    else if (Attribute == GetWetnessAttribute()) {
-        NewValue = FMath::Clamp(NewValue, 0.0f, GetMaxWetness());
-    }
-    else if (Attribute == GetMaxNourishmentAttribute() || Attribute == GetMaxHydrationAttribute() ||
-             Attribute == GetMaxWarmthAttribute() || Attribute == GetMaxWetnessAttribute()) {
-        NewValue = FMath::Max(0.0f, NewValue);
-    }
-}
-
-void UMythicAttributeSet_Survival::PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) {
-    Super::PreAttributeChange(Attribute, NewValue);
-    ClampAttribute(Attribute, NewValue);
-}
-
-void UMythicAttributeSet_Survival::PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const {
-    Super::PreAttributeBaseChange(Attribute, NewValue);
-    ClampAttribute(Attribute, NewValue);
-}
-
-void UMythicAttributeSet_Survival::PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) {
-    Super::PostGameplayEffectExecute(Data);
-
-    if (Data.EvaluatedData.Attribute == GetMaxNourishmentAttribute() && GetNourishment() > GetMaxNourishment()) {
-        SetNourishment(GetMaxNourishment());
-    }
-    else if (Data.EvaluatedData.Attribute == GetMaxHydrationAttribute() && GetHydration() > GetMaxHydration()) {
-        SetHydration(GetMaxHydration());
-    }
-    else if (Data.EvaluatedData.Attribute == GetMaxWarmthAttribute() && GetWarmth() > GetMaxWarmth()) {
-        SetWarmth(GetMaxWarmth());
-    }
-    else if (Data.EvaluatedData.Attribute == GetMaxWetnessAttribute() && GetWetness() > GetMaxWetness()) {
-        SetWetness(GetMaxWetness());
-    }
+TConstArrayView<FMythicBoundedAttributePair>
+UMythicAttributeSet_Survival::GetBoundedAttributePairs() const {
+    static const FMythicBoundedAttributePair Pairs[] = {
+        {GetNourishmentAttribute(), GetMaxNourishmentAttribute(), 0.0f,
+         0.0f, EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetHydrationAttribute(), GetMaxHydrationAttribute(), 0.0f, 0.0f,
+         EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetWarmthAttribute(), GetMaxWarmthAttribute(), 0.0f, 0.0f,
+         EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetWetnessAttribute(), GetMaxWetnessAttribute(), 0.0f, 0.0f,
+         EMythicAttributeBaseOverflowPolicy::Discard}
+    };
+    return Pairs;
 }
 
 void UMythicAttributeSet_Survival::OnRep_Nourishment(const FGameplayAttributeData &OldValue) {

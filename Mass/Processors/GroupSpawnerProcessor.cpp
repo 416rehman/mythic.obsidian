@@ -280,7 +280,7 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                     ResolvedMembers[0].bIsLeader = true;
                 }
 
-                const int32 LeaderSerial = PersistentRegistry->AllocateSpawnSerial();
+                const int32 LeaderSerial = PersistentRegistry->AllocateNameSeedSerial();
                 const uint32 GroupId = HashCombine(GetTypeHash(CandidateCell),
                                                    HashCombine(GroupIdSalt, static_cast<uint32>(LeaderSerial)));
 
@@ -292,12 +292,18 @@ void UMythicGroupSpawnerProcessor::Execute(FMassEntityManager &EntityManager, FM
                     D.Identity.Faction = Settlement.GoverningFaction;
                     D.Identity.Cell = CandidateCell;
 
-                    const int32 SpawnSerial = (m == 0) ? LeaderSerial : PersistentRegistry->AllocateSpawnSerial();
-                    D.Identity.NameHash = FMythicNPCGenerator::GenerateNameHash(
+                    const int32 SpawnSerial = (m == 0) ? LeaderSerial : PersistentRegistry->AllocateNameSeedSerial();
+                    D.Identity.NameSeed = FMythicNPCGenerator::GenerateNameHash(
                         Settlement.GoverningFaction.Index, CandidateCell, SpawnSerial);
-                    D.Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(D.Identity.NameHash, 8);
+                    D.Identity.EntityId = PersistentRegistry->AllocateEntityIdentity(
+                        D.Identity.NameSeed,
+                        EMythicEntityIdentityProvenance::DynamicGroup);
+                    if (!D.Identity.EntityId.IsValid()) {
+                        continue;
+                    }
+                    D.Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(D.Identity.NameSeed, 8);
                     D.Identity.DemographicFlags = FMythicNPCGenerator::GenerateDemographicFlags(
-                        D.Identity.NameHash, FactionData.Population > 50);
+                        D.Identity.NameSeed, FactionData.Population > 50);
                     D.Identity.RoleTag = RM.RoleTag;
 
                     D.Schedule.Phase = EMythicSchedulePhase::Social;

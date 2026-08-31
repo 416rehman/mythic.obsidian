@@ -1,6 +1,8 @@
 
 #include "Settings/MythicCombatSettings.h"
 
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/MythicTags_GAS.h"
 #include "GameModes/Attributes/WorldAttributes.h"

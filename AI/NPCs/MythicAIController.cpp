@@ -271,8 +271,14 @@ void AMythicAIController::TryAttackCurrentTarget() {
             }
             MoveToLocation(Goal,50.0f);
             bFleeingMove = true;
+            NPC->SetFleeingPresentation(true);
         }
         return;
+    }
+
+    if (bFleeingMove) {
+        bFleeingMove = false;
+        NPC->SetFleeingPresentation(false);
     }
 
     const float DistSq = FVector::DistSquared(MyPawn->GetActorLocation(), CurrentHostileTarget->GetActorLocation());
@@ -281,7 +287,6 @@ void AMythicAIController::TryAttackCurrentTarget() {
             StopMovement();
             MoveToActor(CurrentHostileTarget, PursueAcceptanceRadius);
             SetFocus(CurrentHostileTarget);
-            bFleeingMove = false;
         }
         return;
     }
@@ -504,7 +509,7 @@ bool AMythicAIController::TickActivityBehavior(UMythicCognitiveBrainComponent *B
         FMassEntityManager &EntityManager = EntitySubsystem->GetMutableEntityManager();
         if (SourceEntity.IsValid() && EntityManager.IsEntityValid(SourceEntity)) {
             if (const FMythicIdentityFragment *Identity = EntityManager.GetFragmentDataPtr<FMythicIdentityFragment>(SourceEntity)) {
-                Ctx.NameHash = Identity->NameHash;
+                Ctx.NameHash = Identity->NameSeed;
             }
         }
     }

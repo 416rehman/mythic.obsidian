@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "GenericTeamAgentInterface.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
+#include "World/Entity/MythicEntityId.h"
 #include <atomic>
 
 #include "Engine/DataAsset.h"
@@ -333,9 +334,8 @@ struct MYTHIC_API FMythicFactionData {
     UPROPERTY(Transient)
     bool bWeaknessActive = false;
 
-    /** Index of the current leader NPC entity (0 = no leader). Set by crystallization (Phase 6). */
-    UPROPERTY(BlueprintReadOnly, Category = "Population")
-    int32 LeaderEntityId = 0;
+    /** Authority/private canonical identity of the current leader; invalid means no leader. */
+    FMythicEntityId LeaderEntityId;
 
     /** Significance score of the current leader. Used for leadership succession on leader death. */
     UPROPERTY(BlueprintReadOnly, Category = "Population")
@@ -443,7 +443,24 @@ public:
 
     void ForEachAliveFaction(TFunctionRef<void(FMythicFactionId, const FMythicFactionData &)> Callback) const;
 
-    void ReportLeaderCandidate(FMythicFactionId FactionId, uint32 EntityId, float Score);
+    void ReportLeaderCandidate(FMythicFactionId FactionId,
+                               const FMythicEntityId &EntityId, float Score);
+
+    /** Returns true when the mutable authority snapshot currently assigns EntityId as any living faction's leader. */
+    bool ReferencesEntityIdentity(const FMythicEntityId &EntityId) const;
+
+    /** Clears leadership owned by a permanently dead entity so normal candidate succession can resume. */
+    bool HandlePermanentEntityDeath(const FMythicEntityId &EntityId);
+
+    /** Clears an exact current leader assignment without implying why that logical reference became invalid. */
+    bool ClearLeaderReference(const FMythicEntityId &EntityId);
+
+    /**
+     * Clears loaded leader assignments whose logical person cannot be rehydrated after an in-place world restore.
+     * The caller must hold the LivingWorld simulation lock and commit the write snapshot before retiring identities.
+     */
+    int32 ClearUnrestorableLeaderReferences(
+        const TSet<FMythicEntityId> &RestorableEntityIds);
 
 
     virtual void Serialize(FArchive &Ar) override;

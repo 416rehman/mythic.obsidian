@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "Engine/DataAsset.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
+#include "World/Entity/MythicEntityId.h"
 #include "MythicSettlement.generated.h"
 
 class USplineComponent;
@@ -27,9 +28,8 @@ struct MYTHIC_API FMythicShopSlot {
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
     FGameplayTag RequiredRole;
 
-    /** Entity ID of the current owner (0 = vacated) */
-    UPROPERTY(BlueprintReadOnly)
-    int32 OwnerEntityId = 0;
+    /** Authority/private canonical identity of the current NPC owner; invalid means vacated. */
+    FMythicEntityId OwnerEntityId;
 
     /** If vacant, when did the previous owner die? (World Time) */
     UPROPERTY(BlueprintReadOnly)

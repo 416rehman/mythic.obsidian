@@ -10,6 +10,7 @@
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
 #include "World/LivingWorld/Settlements/MythicSettlement.h"
 #include "World/LivingWorld/Creatures/CreatureSpeciesTypes.h"
+#include "World/LivingWorld/Persistence/PersistentNPCRegistry.h"
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "World/Death/MythicCorpseHazardSubsystem.h"
 #include "Engine/DataTable.h"
@@ -79,7 +80,8 @@ void UMythicCreatureSpawnerProcessor::Execute(FMassEntityManager &EntityManager,
     TimeSinceLastTick = 0.0f;
 
     UMythicTerritoryGrid *Grid = LWS->GetTerritoryGrid();
-    if (!Grid) {
+    UMythicPersistentNPCRegistry *PersistentRegistry = LWS->GetPersistentNPCRegistry();
+    if (!Grid || !PersistentRegistry) {
         return;
     }
 
@@ -249,7 +251,13 @@ void UMythicCreatureSpawnerProcessor::Execute(FMassEntityManager &EntityManager,
                     Hash = Hash ^ (Hash >> 4u);
                     Hash *= 0x27d4eb2du;
                     Hash = Hash ^ (Hash >> 15u);
-                    Data.Identity.NameHash = Hash;
+                    Data.Identity.NameSeed = Hash;
+                    Data.Identity.EntityId = PersistentRegistry->AllocateEntityIdentity(
+                        Data.Identity.NameSeed,
+                        EMythicEntityIdentityProvenance::CreatureEcology);
+                    if (!Data.Identity.EntityId.IsValid()) {
+                        continue;
+                    }
                     Data.Identity.VisualArchetype = static_cast<uint8>(Hash % 8);
 
                     Data.Creature.SpeciesId = Picked->SpeciesId;
@@ -318,6 +326,12 @@ void UMythicCreatureSpawnerProcessor::Execute(FMassEntityManager &EntityManager,
 
             if (!bNearPlayer) {
                 const FMassEntityHandle DespawnEntity = ChunkContext.GetEntity(i);
+                const EMythicEntityRetirementResult Retirement =
+                    LWS->TryRetireEntityIdentity(IdentityView[i].EntityId);
+                if (!UMythicLivingWorldSubsystem::AuthorizesLogicalEntityDestruction(
+                        Retirement)) {
+                    continue;
+                }
                 if (AMythicNPCCharacter *Actor = LWS->FindEmbodiedActor(DespawnEntity)) {
                     Actor->Destroy();
                 }

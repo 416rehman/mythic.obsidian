@@ -1075,10 +1075,11 @@ void FMythicWorldSimThread::TickCrystallization() {
         }
 
 
-        if (F->LeaderEntityId != 0 && F->LeaderSignificanceScore <= 0.0f) {
-            UE_LOG(LogMythWorldSim, Log, TEXT("Crystallization: Faction '%s' leader vacancy (prev leader %d deceased/irrelevant)"),
-                   *F->DisplayName.ToString(), F->LeaderEntityId);
-            F->LeaderEntityId = 0;
+        if (F->LeaderEntityId.IsValid() && F->LeaderSignificanceScore <= 0.0f) {
+            UE_LOG(LogMythWorldSim, Log,
+                   TEXT("Crystallization: Faction '%s' leader vacancy (prev %s deceased/irrelevant)"),
+                   *F->DisplayName.ToString(), *F->LeaderEntityId.ToDebugString());
+            F->LeaderEntityId.Reset();
             F->LeaderSignificanceScore = 0.0f;
         }
     }

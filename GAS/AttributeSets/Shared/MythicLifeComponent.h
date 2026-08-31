@@ -31,6 +31,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FMythicHealthChanged, float, New, 
                                               Attribute, const FGameplayEffectContextHandle&, ContextHandle);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMythicOnDeath, AActor*, DeadActor);
+DECLARE_MULTICAST_DELEGATE_OneParam(FMythicNativeLifeEvent, AActor *);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class MYTHIC_API UMythicLifeComponent : public UGameFrameworkComponent {
@@ -134,6 +135,12 @@ public:
 
     UPROPERTY(BlueprintAssignable, Category = "Mythic|Health")
     FMythicOnDeath OnRevived;
+
+    // Native lifecycle channels keep authoritative C++ teardown independent
+    // from Blueprint delegate serialization and component reinstancing.
+    FMythicNativeLifeEvent OnDeathNative;
+    FMythicNativeLifeEvent OnDownedNative;
+    FMythicNativeLifeEvent OnRevivedNative;
 
     // Blueprint hook for death cosmetics (ragdoll, montage, VFX). Runs on the server; cosmetics should be driven
     // off the replicated GAS.State.Dead tag on clients.

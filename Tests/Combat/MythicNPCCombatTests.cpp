@@ -1,11 +1,17 @@
 #include "Misc/AutomationTest.h"
 
+#include "AbilitySystemComponent.h"
 #include "AI/MythicTags_AI.h"
 #include "AI/NPCs/MythicNPCCharacter.h"
+#include "Engine/World.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
 #include "GAS/Effects/MythicEnemyScaling.h"
 #include "GameplayEffect.h"
+#include "World/Entity/MythicEntityPresentationComponent.h"
+#include "World/Entity/MythicEntityPresentationTags.h"
 
 namespace {
 const TCHAR *TierPawns[] = {
@@ -23,6 +29,38 @@ const AMythicNPCCharacter *LoadPawn(const TCHAR *Path) {
     const UClass *Loaded = LoadClass<AActor>(nullptr, Path);
     return Loaded ? Cast<AMythicNPCCharacter>(Loaded->GetDefaultObject()) : nullptr;
 }
+
+class FScopedNPCCombatWorld final {
+public:
+    FScopedNPCCombatWorld() {
+        Values = UWorld::InitializationValues()
+                     .CreatePhysicsScene(false)
+                     .ShouldSimulatePhysics(false)
+                     .EnableTraceCollision(false)
+                     .CreateNavigation(false)
+                     .CreateAISystem(false);
+        World = UWorld::CreateWorld(
+            EWorldType::Game, false,
+            MakeUniqueObjectName(nullptr, UWorld::StaticClass(),
+                                 TEXT("NPCCombatInitializationTest")),
+            nullptr, true, ERHIFeatureLevel::Num, &Values, true);
+        if (World) {
+            World->InitWorld(Values);
+        }
+    }
+
+    ~FScopedNPCCombatWorld() {
+        if (World) {
+            World->DestroyWorld(false);
+        }
+    }
+
+    UWorld *Get() const { return World; }
+
+private:
+    UWorld::InitializationValues Values;
+    UWorld *World = nullptr;
+};
 
 /** Highest Override magnitude an effect applies to one attribute, or -1 when it never touches it. */
 float FindOverride(const UGameplayEffect *Effect, const FGameplayAttribute &Attribute) {
@@ -48,8 +86,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMythicNPCsCanFightTest::RunTest(const FString &Parameters) {
     // THE REGRESSION THIS EXISTS FOR: no NPC in the project could deal damage. Every tier pawn had a null
     // AttackAbility, and the only default effect any of them carried set MaxHealth and Health and nothing
-    // else - so DamagePerHit, Power and Armor all sat at the C++ default of 0. The tier multiplier is
-    // MultiplyAdditive, and 0 x 4 for a Boss is still 0. Every defensive stat in the game was therefore
+    // else - so DamagePerHit, Power and Armor all sat at the C++ default of 0. Any tier multiplier still
+    // leaves a zero baseline at zero. Every defensive stat in the game was therefore
     // unmeasurable in play, and it looked like broken AI rather than empty data.
     for (const TCHAR *Path : TierPawns) {
         const AMythicNPCCharacter *Pawn = LoadPawn(Path);
@@ -113,5 +151,104 @@ bool FMythicNPCTierDamageTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("a superior actually hits for something"), SuperiorHit > 0.0f);
     TestTrue(TEXT("a boss hits harder than a superior"), BossHit > SuperiorHit);
 
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicNPCCommittedVitalityTest,
+    "Mythic.Combat.NPCCommittedVitality",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicNPCCommittedVitalityTest::RunTest(const FString &Parameters) {
+    static const TCHAR *DummyPawnPath =
+        TEXT("/Game/Mythic/AI/NPCs/Dummy/Pawn_Dummy.Pawn_Dummy_C");
+
+    FScopedNPCCombatWorld Fixture;
+    UWorld *World = Fixture.Get();
+    UClass *PawnClass = LoadClass<AMythicNPCCharacter>(nullptr, DummyPawnPath);
+    FActorSpawnParameters SpawnParameters;
+    SpawnParameters.SpawnCollisionHandlingOverride =
+        ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    AMythicNPCCharacter *NPC = World && PawnClass
+        ? World->SpawnActor<AMythicNPCCharacter>(
+              PawnClass, FTransform::Identity, SpawnParameters)
+        : nullptr;
+    UAbilitySystemComponent *ASC = NPC ? NPC->GetAbilitySystemComponent() : nullptr;
+    // InitWorld intentionally omits the full map-start lifecycle to keep this fixture small. Production worlds call
+    // InitializeComponent before BeginPlay; reproduce that one lifecycle step so GAS discovers the pawn's four
+    // default-subobject AttributeSets instead of testing an impossible half-constructed actor.
+    if (ASC && !ASC->HasBeenInitialized()) {
+        ASC->InitializeComponent();
+    }
+    if (NPC && !NPC->HasActorBegunPlay()) {
+        NPC->DispatchBeginPlay();
+    }
+    UMythicEntityPresentationComponent *Presentation = NPC
+        ? NPC->GetEntityPresentationComponent_Implementation() : nullptr;
+    if (!World || !PawnClass || !NPC || !ASC || !Presentation) {
+        AddError(TEXT("the authored Pawn_Dummy vitality fixture could not initialize"));
+        return false;
+    }
+
+    FMythicPublicIdentitySnapshot Identity;
+    Identity.PublicKindTag =
+        MythicEntityPresentationTags::EntityKindHumanoid;
+    const FMythicEntityId EntityId =
+        FMythicEntityId::FromAuthorityGuid(
+            EMythicEntityDomain::Runtime,
+            FGuid(0x65065001u, 0x65065002u, 0x65065003u, 0x65065004u));
+    TestTrue(TEXT("the authority prepares an exact logical embodiment"),
+             Presentation->AuthorityPrepareEmbodiment(EntityId, Identity));
+    TestTrue(TEXT("the complete combat transaction activates the NPC"),
+             NPC->ActivatePreparedEmbodiment());
+
+    const float MaximumHealth = ASC->GetNumericAttribute(
+        UMythicAttributeSet_Life::GetMaxHealthAttribute());
+    const float Health = ASC->GetNumericAttribute(
+        UMythicAttributeSet_Life::GetHealthAttribute());
+    const float Armor = ASC->GetNumericAttribute(
+        UMythicAttributeSet_Defense::GetArmorAttribute());
+
+    TestTrue(TEXT("the authored 500 baseline and 10 Strength resolve to 650 MaxHealth"),
+             FMath::IsNearlyEqual(MaximumHealth, 650.0f, 0.01f));
+    TestTrue(TEXT("a new embodiment starts at its resolved maximum"),
+             FMath::IsNearlyEqual(Health, MaximumHealth, 0.01f));
+    TestTrue(TEXT("the same derivation layer resolves 10 Armor to 11.5"),
+             FMath::IsNearlyEqual(Armor, 11.5f, 0.01f));
+    TestFalse(TEXT("a committed NPC is visible instead of being parked by a numeric sentinel"),
+              NPC->IsHidden());
+    TestTrue(TEXT("a committed NPC restores collision"),
+             NPC->GetActorEnableCollision());
+
+    TInlineComponentArray<UMythicLifeComponent *> LifeComponents;
+    NPC->GetComponents(LifeComponents);
+    TestEqual(TEXT("an NPC has exactly one authoritative life component"),
+               LifeComponents.Num(), 1);
+    TestTrue(TEXT("the spawned NPC owns the authoritative death transaction"),
+             NPC->HasAuthority());
+    TestTrue(TEXT("the canonical life component is bound to NPC teardown"),
+             LifeComponents.Num() == 1
+                 && LifeComponents[0]->OnDeathNative.IsBound());
+
+    UGameplayEffect *LethalDamage = NewObject<UGameplayEffect>(
+        GetTransientPackage(), TEXT("Test_NPCLethalDamage"));
+    LethalDamage->DurationPolicy = EGameplayEffectDurationType::Instant;
+    FGameplayModifierInfo DamageModifier;
+    DamageModifier.Attribute =
+        UMythicAttributeSet_Life::GetDamageAttribute();
+    DamageModifier.ModifierOp = EGameplayModOp::Additive;
+    DamageModifier.ModifierMagnitude =
+        FGameplayEffectModifierMagnitude(FScalableFloat(MaximumHealth));
+    LethalDamage->Modifiers.Add(DamageModifier);
+
+    ASC->ApplyGameplayEffectToSelf(
+        LethalDamage, 1.0f, ASC->MakeEffectContext());
+    TestTrue(TEXT("lethal damage publishes the dead state"),
+             ASC->HasMatchingGameplayTag(GAS_STATE_DEAD));
+    TestTrue(TEXT("lethal damage consumes all health"),
+             FMath::IsNearlyZero(ASC->GetNumericAttribute(
+                 UMythicAttributeSet_Life::GetHealthAttribute())));
+    TestFalse(TEXT("death immediately retires the living nameplate identity"),
+               Presentation->GetPresentationInstance().IsValid());
     return true;
 }

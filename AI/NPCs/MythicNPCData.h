@@ -2,16 +2,25 @@
 #include "FamilyDefinition.h"
 #include "GameplayTagContainer.h"
 #include "NPCDefinition.h"
+#include "World/Entity/MythicEntityId.h"
 #include "MythicNPCData.generated.h"
 
+class UMythicEntityIdentityDefinition;
 
 USTRUCT(BlueprintType, Blueprintable)
 struct FMythicNPCData {
     GENERATED_BODY()
 
-    // NPC's Unique ID
+    /**
+     * Legacy actor-cache and authored-family key. This value is never a canonical LivingWorld identity; authority
+     * systems use EntityId, which is deliberately hidden from Blueprint.
+     */
     UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
     FGuid NPCId = FGuid::NewGuid();
+
+    /** Authority-only canonical identity allocated by UMythicPersistentNPCRegistry for this logical person. */
+    UPROPERTY(SaveGame)
+    FMythicEntityId EntityId;
 
     // Name of the NPC
     UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
@@ -20,6 +29,10 @@ struct FMythicNPCData {
     // NPC Type
     UPROPERTY(BlueprintReadOnly, Category = "NPC Data", meta = (Categories = "NPC.Type"))
     FGameplayTag NPCType;
+
+    /** Authored public cover identity; it is independent from private NPCType and may intentionally be empty. */
+    UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
+    TSoftObjectPtr<UMythicEntityIdentityDefinition> PublicIdentityDefinition;
 
     // Actor class to spawn for this NPC (copied from UNPCDefinition::NPCClass). Carried on the runtime
     // struct so cached respawns rebuild the same body.
@@ -69,16 +82,20 @@ struct FMythicNPCData {
     UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
     float SightRadius = 1500.0f;
 
+    /** Distance at which sight perception finally forgets a target that has left the acquisition radius. */
     UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
     float LoseSightRadius = 2000.0f;
 
+    /** Horizontal half-angle of this NPC's authored visual perception cone in degrees. */
     UPROPERTY(BlueprintReadOnly, Category = "NPC Data")
     float PeripheralVisionAngleDegrees = 90.0f;
 
     void ClearAll() {
         NPCId.Invalidate();
+        EntityId.Reset();
         NPCName.Empty();
         NPCType = FGameplayTag();
+        PublicIdentityDefinition.Reset();
         NPCClass = nullptr;
         Faction = FGameplayTag();
         Traits = FGameplayTagContainer();
@@ -86,6 +103,7 @@ struct FMythicNPCData {
         AffiliationOverrides.Empty();
         FlightOrFightOverrides.Empty();
         NPCFamilyId.Invalidate();
+        CombatLevel = 1;
         Proficiencies.Empty();
         SightRadius = 1500.0f;
         LoseSightRadius = 2000.0f;
@@ -100,6 +118,7 @@ struct FMythicNPCData {
         this->NPCId = NPCDef->NPCId;
         this->NPCName = NPCDef->Name;
         this->NPCType = NPCDef->NPCType;
+        this->PublicIdentityDefinition = NPCDef->PublicIdentityDefinition;
         this->NPCClass = NPCDef->NPCClass;
         this->Faction = NPCDef->Faction;
         this->Traits = NPCDef->Traits;

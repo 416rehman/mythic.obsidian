@@ -5,6 +5,7 @@
 #include "Settings/MythicDeveloperSettings.h"
 #include "System/MythicAssetManager.h"
 #include "Itemization/Affixes/MythicAffixApplicationComponent.h"
+#include "GAS/AttributeSets/MythicAttributeSet.h"
 
 namespace {
 bool IsValidActivationGroup(const EMythicAbilityActivationGroup Group) {
@@ -23,6 +24,8 @@ void UMythicAbilitySystemComponent::GetAdditionalActivationTagRequirements(const
 void UMythicAbilitySystemComponent::BeginPlay() {
     Super::BeginPlay();
 
+    ReconcileAllBoundedAttributes();
+
     if (!AbilityTagRelationshipMapping) {
         if (const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>()) {
             UMythicAssetManager::LoadAsync(this, Settings->DefaultAbilityTagRelationshipMapping,
@@ -38,6 +41,8 @@ void UMythicAbilitySystemComponent::BeginPlay() {
 
 void UMythicAbilitySystemComponent::InitAbilityActorInfo(AActor *InOwnerActor, AActor *InAvatarActor) {
     Super::InitAbilityActorInfo(InOwnerActor, InAvatarActor);
+
+    ReconcileAllBoundedAttributes();
 
     if (!InOwnerActor || !InOwnerActor->HasAuthority()) {
         return;
@@ -226,6 +231,14 @@ void UMythicAbilitySystemComponent::ClearAbilityInput() {
 
 const TArray<UMythicAttributeSet *> &UMythicAbilitySystemComponent::GetAttributeSets() const {
     return reinterpret_cast<const TArray<UMythicAttributeSet *> &>(this->GetSpawnedAttributes());
+}
+
+void UMythicAbilitySystemComponent::ReconcileAllBoundedAttributes() {
+    for (UAttributeSet *AttributeSet : GetSpawnedAttributes()) {
+        if (UMythicAttributeSet *MythicSet = Cast<UMythicAttributeSet>(AttributeSet)) {
+            MythicSet->ReconcileAllBoundedAttributes();
+        }
+    }
 }
 
 void UMythicAbilitySystemComponent::ExecuteGameplayCueMulticast(FGameplayTag CueTag, const FGameplayCueParameters &CueParams) {

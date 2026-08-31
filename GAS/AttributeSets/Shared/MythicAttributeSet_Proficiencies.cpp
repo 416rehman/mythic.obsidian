@@ -7,28 +7,49 @@
 #include "GAS/MythicTags_GAS.h"
 #include "GameModes/GameState/MythicGameState.h"
 #include "GameModes/Attributes/WorldAttributes.h"
-#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "MythicAttributeSet_Utility.h"
 #include "Player/MythicPlayerController.h"
 #include "Player/Proficiency/ProficiencyComponent.h"
 #include "Player/Proficiency/ProficiencyDefinition.h"
 #include "GameFramework/PlayerState.h"
-#include "Itemization/Affixes/MythicItemizationDataRegistrySubsystem.h"
-#include "Stats/MythicStatDefinition.h"
 #include "World/Camping/MythicRestedXp.h"
 
-namespace {
-const UMythicStatDefinition *FindRegisteredStatDefinition(
-    const UMythicAttributeSet_Proficiencies &AttributeSet,
-    const FGameplayAttribute &Attribute) {
-    const UWorld *World = AttributeSet.GetWorld();
-    const UGameInstance *GameInstance = World ? World->GetGameInstance() : nullptr;
-    const UMythicItemizationDataRegistrySubsystem *Registry = GameInstance
-        ? GameInstance->GetSubsystem<UMythicItemizationDataRegistrySubsystem>() : nullptr;
-    return Registry && Registry->IsCoreSemanticReady()
-        ? Registry->FindStat(Attribute) : nullptr;
-}
+TConstArrayView<FMythicBoundedAttributePair>
+UMythicAttributeSet_Proficiencies::GetBoundedAttributePairs() const {
+    static const FMythicBoundedAttributePair Pairs[] = {
+        {GetCombatProficiencyAttribute(), GetCombatProficiencyMaxAttribute(),
+         0.0f, 0.0f, EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetWoodcuttingProficiencyAttribute(),
+         GetWoodcuttingProficiencyMaxAttribute(), 0.0f, 0.0f,
+         EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetMiningProficiencyAttribute(), GetMiningProficiencyMaxAttribute(),
+         0.0f, 0.0f, EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetConstructionProficiencyAttribute(),
+         GetConstructionProficiencyMaxAttribute(), 0.0f, 0.0f,
+         EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetTradingProficiencyAttribute(), GetTradingProficiencyMaxAttribute(),
+         0.0f, 0.0f, EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetHuntingProficiencyAttribute(), GetHuntingProficiencyMaxAttribute(),
+         0.0f, 0.0f, EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetFishingProficiencyAttribute(), GetFishingProficiencyMaxAttribute(),
+         0.0f, 0.0f, EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetFarmingProficiencyAttribute(), GetFarmingProficiencyMaxAttribute(),
+         0.0f, 0.0f, EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetHarvestingProficiencyAttribute(),
+         GetHarvestingProficiencyMaxAttribute(), 0.0f, 0.0f,
+         EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetCraftingProficiencyAttribute(),
+         GetCraftingProficiencyMaxAttribute(), 0.0f, 0.0f,
+         EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetAlchemyProficiencyAttribute(), GetAlchemyProficiencyMaxAttribute(),
+         0.0f, 0.0f, EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetCookingProficiencyAttribute(), GetCookingProficiencyMaxAttribute(),
+         0.0f, 0.0f, EMythicAttributeBaseOverflowPolicy::Discard},
+        {GetOverallXpAttribute(), GetOverallXpMaxAttribute(), 0.0f, 0.0f,
+         EMythicAttributeBaseOverflowPolicy::Discard}
+    };
+    return Pairs;
 }
 
 void UMythicAttributeSet_Proficiencies::OnRep_CombatProficiency(const FGameplayAttributeData &OldValue) {
@@ -179,78 +200,46 @@ void UMythicAttributeSet_Proficiencies::GetLifetimeReplicatedProps(TArray<FLifet
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Proficiencies, OverallXpMax, COND_OwnerOnly, REPNOTIFY_Always);
 }
 
-float UMythicAttributeSet_Proficiencies::GetMaxValueForAttribute(
-    const FGameplayAttribute &Attribute) const {
-    const UMythicStatDefinition *Current = FindRegisteredStatDefinition(*this, Attribute);
-    const UMythicStatDefinition *Capacity = Current
-        && Current->PairRole == EMythicStatPairRole::Current
-        ? Current->PairedStat.GetAsset() : nullptr;
-    if (Capacity && Capacity->PairRole == EMythicStatPairRole::Capacity
-        && Capacity->PairedStat.GetAsset() == Current && Capacity->Attribute.IsValid()) {
-        return Capacity->Attribute.GetNumericValue(this);
-    }
-    return -1;
-}
-
-void UMythicAttributeSet_Proficiencies::PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) {
-    Super::PreAttributeChange(Attribute, NewValue);
-
-    const UMythicStatDefinition *Definition = FindRegisteredStatDefinition(*this, Attribute);
-    if (!Definition || Attribute == GetOverallXpAttribute()) {
-        return;
-    }
-
-    if (Definition->PairRole == EMythicStatPairRole::Capacity) {
-        NewValue = FMath::Max(NewValue, 0.0f);
-        return;
-    }
-
-    float MaxValue = GetMaxValueForAttribute(Attribute);
-    if (MaxValue > 0.0f) {
-        NewValue = FMath::Clamp(NewValue, 0.0f, MaxValue);
-    }
-}
-
 void UMythicAttributeSet_Proficiencies::PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const {
-    Super::PreAttributeBaseChange(Attribute, NewValue);
-
-    const UMythicStatDefinition *Definition = FindRegisteredStatDefinition(*this, Attribute);
-    if (!Definition || Definition->PairRole != EMythicStatPairRole::Current
-        || Attribute == GetOverallXpAttribute()) {
-        return;
-    }
-
-    const UAbilitySystemComponent *ASC = GetOwningAbilitySystemComponent();
-    if (ASC) {
-        AMythicPlayerController *MythicPC = nullptr;
-        if (AActor *OwnerActor = ASC->GetOwnerActor()) {
-            if (APawn *Pawn = Cast<APawn>(OwnerActor)) {
-                MythicPC = Cast<AMythicPlayerController>(Pawn->GetController());
+    if (FindBoundedPairByCurrent(Attribute)
+        && Attribute != GetOverallXpAttribute()) {
+        bool bRestoring = false;
+        const UAbilitySystemComponent *ASC = GetOwningAbilitySystemComponent();
+        if (ASC) {
+            AMythicPlayerController *MythicPC = nullptr;
+            if (AActor *OwnerActor = ASC->GetOwnerActor()) {
+                if (APawn *Pawn = Cast<APawn>(OwnerActor)) {
+                    MythicPC = Cast<AMythicPlayerController>(Pawn->GetController());
+                }
+                else if (APlayerState *PS = Cast<APlayerState>(OwnerActor)) {
+                    MythicPC = Cast<AMythicPlayerController>(PS->GetPlayerController());
+                }
             }
-            else if (APlayerState *PS = Cast<APlayerState>(OwnerActor)) {
-                MythicPC = Cast<AMythicPlayerController>(PS->GetPlayerController());
+            if (!MythicPC) {
+                if (APawn *Avatar = Cast<APawn>(ASC->GetAvatarActor())) {
+                    MythicPC = Cast<AMythicPlayerController>(Avatar->GetController());
+                }
             }
-        }
-        if (!MythicPC) {
-            if (APawn *Avatar = Cast<APawn>(ASC->GetAvatarActor())) {
-                MythicPC = Cast<AMythicPlayerController>(Avatar->GetController());
-            }
-        }
-        if (MythicPC) {
-            if (const UProficiencyComponent *ProfComp = MythicPC->GetProficiencyComponent()) {
-                if (ProfComp->IsRestoring()) {
-                    return;
+            if (MythicPC) {
+                if (const UProficiencyComponent *ProfComp = MythicPC->GetProficiencyComponent()) {
+                    bRestoring = ProfComp->IsRestoring();
                 }
             }
         }
+
+        if (!bRestoring) {
+            const float OldValue = Attribute.GetNumericValue(this);
+            const float Delta = NewValue - OldValue;
+
+            const float ScaledDelta = ScaleProficiencyXpGain(
+                Delta, GetOwningAbilitySystemComponent());
+            NewValue = OldValue + ScaledDelta;
+        }
     }
 
-    const float OldValue = Attribute.GetNumericValue(this);
-    const float Delta = NewValue - OldValue;
-
-    auto ScaledDelta= ScaleProficiencyXpGain(Delta, GetOwningAbilitySystemComponent());
-
-    NewValue = OldValue + ScaledDelta;
+    // XP scaling is a value transform; the base invariant must run last so
+    // no multiplier can recreate an over-cap progression value.
+    Super::PreAttributeBaseChange(Attribute, NewValue);
 }
 
 float UMythicAttributeSet_Proficiencies::ComposeXpMultipliers(float ProficiencyXpBonus, float EnlightenBonus, float RestedMultiplier) {
@@ -306,18 +295,13 @@ float UMythicAttributeSet_Proficiencies::ApplyWorldTierXpMultiplier(float Scaled
 void UMythicAttributeSet_Proficiencies::PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) {
     Super::PostAttributeChange(Attribute, OldValue, NewValue);
 
-    const UMythicStatDefinition *Definition = FindRegisteredStatDefinition(*this, Attribute);
-    if (!Definition) {
-        return;
-    }
-    if (Definition->PairRole == EMythicStatPairRole::Capacity
+    if (FindBoundedPairByMaximum(Attribute)
         && Attribute != GetOverallXpMaxAttribute()) {
         SetOverallXpMax(CalculateOverallXpMax());
     }
-    else if (Definition->PairRole == EMythicStatPairRole::Current
+    else if (FindBoundedPairByCurrent(Attribute)
              && Attribute != GetOverallXpAttribute()) {
-        auto OverallLevel = CalculateOverallXp();
-        SetOverallXp(OverallLevel);
+        SetOverallXp(CalculateOverallXp());
     }
 }
 

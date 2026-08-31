@@ -86,6 +86,39 @@ void UMythicLifeComponent::InitializeWithAbilitySystem(UAbilitySystemComponent *
     AActor *Owner = GetOwner();
     check(Owner);
 
+    TInlineComponentArray<UMythicLifeComponent *> OwnerLifeComponents;
+    Owner->GetComponents(OwnerLifeComponents);
+    if (OwnerLifeComponents.Num() > 1) {
+        UMythicLifeComponent *CanonicalComponent = nullptr;
+        for (UMythicLifeComponent *Candidate : OwnerLifeComponents) {
+            if (Candidate
+                && Candidate->CreationMethod
+                       == EComponentCreationMethod::Native) {
+                CanonicalComponent = Candidate;
+                break;
+            }
+        }
+        if (!CanonicalComponent) {
+            for (UMythicLifeComponent *Candidate : OwnerLifeComponents) {
+                if (Candidate && Candidate->IsInitialized()) {
+                    CanonicalComponent = Candidate;
+                    break;
+                }
+            }
+        }
+        if (!CanonicalComponent) {
+            CanonicalComponent = OwnerLifeComponents[0];
+        }
+        if (CanonicalComponent != this) {
+            UE_LOG(
+                Myth, Error,
+                TEXT("MythicHealthComponent: rejected duplicate life component [%s] on owner [%s]; canonical component is [%s]."),
+                *GetNameSafe(this), *GetNameSafe(Owner),
+                *GetNameSafe(CanonicalComponent));
+            return;
+        }
+    }
+
     if (AbilitySystemComponent) {
         UE_LOG(Myth, Error, TEXT("MythicHealthComponent: Health component for owner [%s] has already been initialized with an ability system."),
                *GetNameSafe(Owner));
@@ -320,6 +353,7 @@ void UMythicLifeComponent::EnterDownedState(AActor *Killer) {
     }
 
     UE_LOG(Myth, Log, TEXT("LifeComponent: %s is DOWNED (co-op)."), *GetNameSafe(Owner));
+    OnDownedNative.Broadcast(Owner);
     OnDowned.Broadcast(Owner);
 
     const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
@@ -413,6 +447,7 @@ void UMythicLifeComponent::ServerReviveFromDowned() {
         }
     }
 
+    OnRevivedNative.Broadcast(GetOwner());
     OnRevived.Broadcast(GetOwner());
 }
 
@@ -687,6 +722,7 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
     UE_LOG(Myth, Log, TEXT("LifeComponent: %s died."), *GetNameSafe(Owner));
 
     BP_OnDeath();
+    OnDeathNative.Broadcast(Owner);
     OnDeath.Broadcast(Owner);
 
     NotifyDeathMemorySystems(Owner, AbilitySystemComponent, Killer);

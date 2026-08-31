@@ -5,7 +5,12 @@
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GameFramework/PlayerState.h"
 #include "Itemization/InventoryProviderInterface.h"
+#include "World/Entity/MythicEntityId.h"
 #include "MythicPlayerState.generated.h"
+
+/** Native authority edge fired once a save-backed PlayerCharacter-domain identity is ready for pawn presentation. */
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnMythicPlayerEntityIdentityReady,
+                                    const FMythicEntityId &);
 
 class UMythicAttributeSet_Life;
 class UMythicAttributeSet_Offense;
@@ -33,6 +38,9 @@ class UMythicTradeContractComponent;
 class UMythicAffixApplicationComponent;
 class UMythicHarvestReceiptLedgerComponent;
 class UMythicHarvestRewardEscrowComponent;
+class UMythicEntityActionGrantComponent;
+class UMythicEntityCombatPresentationComponent;
+class UMythicEntityViewerKnowledgeComponent; // Owner-private presentation knowledge boundary.
 UCLASS()
 class MYTHIC_API AMythicPlayerState : public APlayerState, public IAbilitySystemInterface, public IInventoryProviderInterface {
     GENERATED_BODY()
@@ -193,11 +201,35 @@ protected:
     TObjectPtr<UMythicHarvestRewardEscrowComponent> HarvestRewardEscrow;
 
     /**
-     * Canonical save-slot CharacterID loaded for this player. Authority owns it, Blueprint may read the replicated
-     * stable cross-session key, and empty means persistent character loading/registry agreement is not ready.
+     * Owner-only contextual entity action grants projected from authoritative dialogue, quest, service, rescue, and
+     * LivingWorld rules. Subjects never replicate viewer-private opportunities globally.
+     */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "World Presentation|Context Actions")
+    TObjectPtr<UMythicEntityActionGrantComponent> EntityActionGrants;
+
+    /**
+     * Ephemeral owner-only combat reads classified by authority for exact presentation embodiments. This contains only
+     * viewer-safe threat bands and separately permissioned combat metadata; it is never written to character saves.
+     */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "World Presentation|Combat")
+    TObjectPtr<UMythicEntityCombatPresentationComponent> EntityCombatPresentation;
+
+    /**
+     * Owner-only recognition and learned entity knowledge. Durable dossiers use private typed identities while
+     * Blueprint receives only immutable, viewer-safe snapshots for exact presentation embodiments.
+     */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "World Presentation|Entity Knowledge")
+    TObjectPtr<UMythicEntityViewerKnowledgeComponent> EntityViewerKnowledge;
+
+    /**
+     * Canonical save-slot CharacterID loaded for this player. It replicates only to its owning connection; unrelated
+     * clients must never receive a stable cross-session correlation key. Empty means persistence is not ready.
      */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Identity")
     FString PersistentCharacterId;
+
+    /** Private save-backed typed identity; no reflection or replication may expose it to clients or Blueprint. */
+    FMythicEntityId PersistentEntityId;
 
     AMythicPlayerState();
 
@@ -295,12 +327,44 @@ public:
         return HarvestRewardEscrow;
     }
 
+    /** Returns the owner-only contextual action grant transport used by the local nameplate and interaction surfaces. */
+    UFUNCTION(BlueprintPure, Category = "World Presentation|Context Actions")
+    UMythicEntityActionGrantComponent *GetEntityActionGrantComponent() const { return EntityActionGrants; }
+
+    /** Returns the ephemeral owner-private combat presentation channel used by the local contextual nameplate. */
+    UFUNCTION(BlueprintPure, Category = "World Presentation|Combat")
+    UMythicEntityCombatPresentationComponent *GetEntityCombatPresentationComponent() const {
+        return EntityCombatPresentation;
+    }
+
+    /** Returns the owner-only recognition and learned-knowledge boundary used by contextual nameplates and Inspect. */
+    UFUNCTION(BlueprintPure, Category = "World Presentation|Entity Knowledge")
+    UMythicEntityViewerKnowledgeComponent *GetEntityViewerKnowledgeComponent() const {
+        return EntityViewerKnowledge;
+    }
+
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     void SetPersistentCharacterId(const FString &InCharacterId);
+
+    /**
+     * Installs the save-backed canonical PlayerCharacter identity on authority. Conflicting replacements fail closed;
+     * the value is never derived from CharacterID, player index, display name, or an actor/object name.
+     */
+    bool AuthoritySetPersistentEntityId(const FMythicEntityId &InEntityId);
+
+    /** Returns the private typed player identity to native authority systems; invalid means character load is pending. */
+    const FMythicEntityId &GetPersistentEntityId() const {
+        return PersistentEntityId;
+    }
+
+    /** Native readiness edge used by the possessed pawn to prepare one fresh public presentation embodiment. */
+    FOnMythicPlayerEntityIdentityReady &OnPersistentEntityIdentityReady() {
+        return PersistentEntityIdentityReady;
+    }
 
     /** Returns the stable character identifier used by persistence; empty until character data has been assigned. */
     UFUNCTION(BlueprintPure, Category = "Identity")
@@ -318,4 +382,7 @@ public:
     virtual TArray<UMythicInventoryComponent *> GetAllInventoryComponents() const override;
     virtual UAbilitySystemComponent *GetSchematicsASC() const override;
     virtual UMythicInventoryComponent *GetInventoryForItemType(const FGameplayTag &ItemType) const override;
+
+private:
+    FOnMythicPlayerEntityIdentityReady PersistentEntityIdentityReady;
 };

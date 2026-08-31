@@ -9,6 +9,7 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
 #include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
 #include "GAS/Abilities/MythicGameplayAbility.h"
 #include "GAS/Effects/MythicEnemyScaling.h"
@@ -44,9 +45,15 @@
 #include "Player/MythicPlayerController.h"
 #include "Player/MythicPlayerState.h"
 #include "Player/MythicFactionStandingComponent.h"
+#include "Interaction/ContextActions/MythicContextActionDefinition.h"
+#include "Interaction/ContextActions/MythicTags_ContextActions.h"
+#include "Objectives/ObjectiveTracker.h"
 #include "AI/NPCs/MythicAIController.h"
 #include "AI/NPCs/MythicSocialVerbs.h"
 #include "World/LivingWorld/MythicTags_LivingWorld.h"
+#include "World/Entity/MythicEntityPresentationComponent.h"
+#include "World/Entity/MythicEntityIdentityDefinition.h"
+#include "World/Entity/MythicEntityPresentationTags.h"
 #include "EngineUtils.h"
 
 
@@ -54,17 +61,56 @@ const FMythicNPCData AMythicNPCCharacter::GetNPCData() const {
     return this->NPCData;
 }
 
-void AMythicNPCCharacter::OnSpawnedFromPool(const struct FMythicNPCData &InNPCData) {
-    if (!this->HasAuthority()) {
+void AMythicNPCCharacter::SetEngagedTarget(AActor *Target) {
+    if (!HasAuthority()) {
         return;
     }
-    this->NPCData = InNPCData;
 
-    // Waking from the pool: visible and solid again before anything else runs.
-    SetActorHiddenInGame(false);
-    SetActorEnableCollision(true);
-    SetActorTickEnabled(PrimaryActorTick.bCanEverTick);
-    RestoreMovementFromPool();
+    EngagedTarget = IsValid(Target) ? Target : nullptr;
+    if (!EntityPresentationComponent) {
+        return;
+    }
+
+    if (!EngagedTarget) {
+        EntityPresentationComponent->ClearObservableFact(
+            MythicEntityPresentationTags::ObservableSlotBehavior);
+        return;
+    }
+
+    EntityPresentationComponent->SetObservableFact(
+        MythicEntityPresentationTags::ObservableSlotBehavior,
+        MythicEntityPresentationTags::ObservableBehaviorFighting,
+        FMythicPresentationHandle());
+}
+
+void AMythicNPCCharacter::SetFleeingPresentation(const bool bIsFleeing) {
+    if (!HasAuthority() || !EntityPresentationComponent) {
+        return;
+    }
+    if (!EngagedTarget) {
+        EntityPresentationComponent->ClearObservableFact(
+            MythicEntityPresentationTags::ObservableSlotBehavior);
+        return;
+    }
+
+    EntityPresentationComponent->SetObservableFact(
+        MythicEntityPresentationTags::ObservableSlotBehavior,
+        bIsFleeing
+            ? MythicEntityPresentationTags::ObservableBehaviorFleeing
+            : MythicEntityPresentationTags::ObservableBehaviorFighting,
+        FMythicPresentationHandle());
+}
+
+bool AMythicNPCCharacter::OnSpawnedFromPool(const struct FMythicNPCData &InNPCData) {
+    if (!this->HasAuthority()) {
+        return false;
+    }
+    // The body remains invisible and unregistered until every field for its next logical person is complete.
+    SetActorHiddenInGame(true);
+    SetActorEnableCollision(false);
+    SetActorTickEnabled(false);
+    this->NPCData = InNPCData;
+    ParkMovementForPool();
 
     // A recycled actor was unpossessed on pool return; a fresh SpawnActor already auto-possessed.
     if (!GetController()) {
@@ -79,31 +125,26 @@ void AMythicNPCCharacter::OnSpawnedFromPool(const struct FMythicNPCData &InNPCDa
 
     this->InitializeASC();
 
-    SeedAttributesFromData();
-
-    // Possession inside SpawnActor already ran CombatInit with a default-constructed NPCData, so the
-    // scaling GE holds level-1 multipliers. Now that the stamped data is in, apply the real ones.
-    ApplyCombatScaling();
-
-    // Same reason: NPCType is the one identity tag read off the stamped data, so publishing it during that
-    // first CombatInit published nothing and every cold-pool kill credited the generic bestiary page.
-    PublishIdentityTags();
-
-    GrantAttackAbility();
-
-    if (AbilitySystemComponent && !NPCData.Traits.IsEmpty()) {
-        AbilitySystemComponent->AddLooseGameplayTags(NPCData.Traits);
-    }
-
     InitializeBrainFromNPCData();
 
-    if (LifeAttributes) {
-        LifeAttributes->ResetForRespawn();
+    if (EntityPresentationComponent) {
+        FMythicPublicIdentitySnapshot SafeIdentity;
+        SafeIdentity.PublicKindTag =
+            MythicEntityPresentationTags::EntityKindHumanoid;
+        SafeIdentity.PublicIdentityDefinitionId =
+            UMythicEntityIdentityDefinition::ResolvePrimaryAssetId(
+                NPCData.PublicIdentityDefinition);
+        EntityPresentationComponent->AuthorityPrepareEmbodiment(
+            NPCData.EntityId, SafeIdentity);
     }
 
-    if (LifeComponent) {
-        LifeComponent->RestoreAfterDeath();
+    const bool bActivated = ActivatePreparedEmbodiment();
+    if (!bActivated) {
+        UE_LOG(Myth, Error,
+               TEXT("AMythicNPCCharacter::OnSpawnedFromPool left %s parked because its authoritative combat commit failed."),
+               *GetNameSafe(this));
     }
+    return bActivated;
 }
 
 void AMythicNPCCharacter::ParkMovementForPool() {
@@ -158,7 +199,6 @@ void AMythicNPCCharacter::InitializeBrainFromNPCData() {
     }
 
     CognitiveBrain->InitializeBrain(FactionId, HomeCell, Personality, FMassEntityHandle());
-    CognitiveBrain->StartThinking();
 }
 
 void AMythicNPCCharacter::GrantAttackAbility() {
@@ -172,60 +212,248 @@ void AMythicNPCCharacter::GrantAttackAbility() {
         FGameplayAbilitySpec(AttackAbility.GetDefaultObject(), 1, INDEX_NONE, this));
 }
 
-void AMythicNPCCharacter::CombatInit() {
+void AMythicNPCCharacter::CapturePristineAttributeBases() {
+    if (!HasAuthority() || !AbilitySystemComponent
+        || bPristineAttributeBasesCaptured) {
+        return;
+    }
+
+    TArray<FGameplayAttribute> Attributes;
+    AbilitySystemComponent->GetAllAttributes(Attributes);
+    PristineAttributeBases.Empty(Attributes.Num());
+    for (const FGameplayAttribute &Attribute : Attributes) {
+        if (!Attribute.IsValid()
+            || !AbilitySystemComponent->HasAttributeSetForAttribute(Attribute)) {
+            continue;
+        }
+        const float Base =
+            AbilitySystemComponent->GetNumericAttributeBase(Attribute);
+        if (FMath::IsFinite(Base)) {
+            PristineAttributeBases.Add(Attribute, Base);
+        }
+    }
+    bPristineAttributeBasesCaptured = !PristineAttributeBases.IsEmpty();
+    if (!bPristineAttributeBasesCaptured) {
+        UE_LOG(Myth, Error,
+               TEXT("AMythicNPCCharacter::CapturePristineAttributeBases found no GAS attributes on %s."),
+               *GetNameSafe(this));
+    }
+}
+
+void AMythicNPCCharacter::RestorePristineAttributeBases() {
+    if (!HasAuthority() || !AbilitySystemComponent
+        || !bPristineAttributeBasesCaptured) {
+        return;
+    }
+    for (const TPair<FGameplayAttribute, float> &Pair :
+         PristineAttributeBases) {
+        if (Pair.Key.IsValid()
+            && AbilitySystemComponent->HasAttributeSetForAttribute(Pair.Key)
+            && FMath::IsFinite(Pair.Value)) {
+            AbilitySystemComponent->SetNumericAttributeBase(Pair.Key,
+                                                            Pair.Value);
+        }
+    }
+}
+
+void AMythicNPCCharacter::ResetCombatRuntimeStateToPristine() {
     if (!HasAuthority() || !AbilitySystemComponent) {
         return;
     }
 
-    GrantAttackAbility();
+    AbilitySystemComponent->CancelAllAbilities();
+    FMonsterAffixGranter::RemoveMonsterAffixes(AbilitySystemComponent,
+                                               MonsterAffixHandles);
+    AbilitySystemComponent->RemoveActiveEffects(FGameplayEffectQuery());
+    AbilitySystemComponent->ClearAllAbilities();
+    AbilitySystemComponent->RemoveAllGameplayCues();
 
-    if (bCombatInitialized) {
-        return;
+    FGameplayTagContainer OwnedTags;
+    AbilitySystemComponent->GetOwnedGameplayTags(OwnedTags);
+    for (const FGameplayTag &Tag : OwnedTags) {
+        AbilitySystemComponent->SetLooseGameplayTagCount(Tag, 0);
     }
-    for (const TSubclassOf<UGameplayEffect> &Effect : DefaultGameplayEffects) {
+
+    DefaultEffectHandles.Reset();
+    CombatScalingHandle.Invalidate();
+    MonsterAffixHandles.Reset();
+    AttackAbilityHandle = FGameplayAbilitySpecHandle();
+    RestorePristineAttributeBases();
+    bCombatInitialized = false;
+}
+
+bool AMythicNPCCharacter::HasCanonicalCombatAttributeSets() const {
+    return AbilitySystemComponent
+        && AbilitySystemComponent->GetSet<UMythicAttributeSet_Life>()
+        && AbilitySystemComponent->GetSet<UMythicAttributeSet_Offense>()
+        && AbilitySystemComponent->GetSet<UMythicAttributeSet_Defense>()
+        && AbilitySystemComponent->GetSet<UMythicAttributeSet_Utility>();
+}
+
+bool AMythicNPCCharacter::CommitCombatInitializationForEmbodiment() {
+    if (!HasAuthority() || !AbilitySystemComponent) {
+        return false;
+    }
+    if (bCombatInitialized) {
+        return true;
+    }
+
+    InitializeASC();
+    if (!bPristineAttributeBasesCaptured || !HasCanonicalCombatAttributeSets()) {
+        UE_LOG(Myth, Error,
+               TEXT("Combat commit rejected %s: every combat entity requires canonical Life, Offense, Defense, and Utility AttributeSets."),
+               *GetNameSafe(this));
+        return false;
+    }
+
+    ResetCombatRuntimeStateToPristine();
+
+    auto RollBackCommit = [this]() -> bool {
+        ResetCombatRuntimeStateToPristine();
+        SetActorHiddenInGame(true);
+        SetActorEnableCollision(false);
+        SetActorTickEnabled(false);
+        ParkMovementForPool();
+        return false;
+    };
+
+    auto ApplyAuthoredEffect = [this](
+                                   const TSubclassOf<UGameplayEffect> &Effect,
+                                   const bool bExpectActiveHandle) -> bool {
         if (!Effect) {
+            UE_LOG(Myth, Error,
+                   TEXT("Combat commit rejected %s: DefaultGameplayEffects contains a null entry."),
+                   *GetNameSafe(this));
+            return false;
+        }
+        FGameplayEffectContextHandle Context =
+            AbilitySystemComponent->MakeEffectContext();
+        Context.AddSourceObject(this);
+        const FGameplayEffectSpecHandle Spec =
+            AbilitySystemComponent->MakeOutgoingSpec(Effect, 1.0f, Context);
+        if (!Spec.IsValid()) {
+            UE_LOG(Myth, Error,
+                   TEXT("Combat commit rejected %s: could not construct %s."),
+                   *GetNameSafe(this), *GetNameSafe(Effect.Get()));
+            return false;
+        }
+        const FActiveGameplayEffectHandle Applied =
+            AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(
+                *Spec.Data.Get());
+        if (bExpectActiveHandle && !Applied.IsValid()) {
+            UE_LOG(Myth, Error,
+                   TEXT("Combat commit rejected %s: persistent effect %s did not produce an active handle."),
+                   *GetNameSafe(this), *GetNameSafe(Effect.Get()));
+            return false;
+        }
+        if (Applied.IsValid()) {
+            DefaultEffectHandles.Add(Applied);
+        }
+        return true;
+    };
+
+    // Authoritative order is binding: base values first, rolled proficiencies second, then all derived layers.
+    for (const TSubclassOf<UGameplayEffect> &Effect :
+         DefaultGameplayEffects) {
+        const UGameplayEffect *EffectCDO = Effect.GetDefaultObject();
+        if (!EffectCDO
+            || EffectCDO->DurationPolicy
+                   != EGameplayEffectDurationType::Instant) {
             continue;
         }
-        FGameplayEffectContextHandle Ctx = AbilitySystemComponent->MakeEffectContext();
-        Ctx.AddSourceObject(this);
-        const FGameplayEffectSpecHandle Spec = AbilitySystemComponent->MakeOutgoingSpec(Effect, 1.0f, Ctx);
-        if (Spec.IsValid()) {
-            const FActiveGameplayEffectHandle Applied = AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
-            if (Applied.IsValid()) {
-                DefaultEffectHandles.Add(Applied);
-            }
+        if (!ApplyAuthoredEffect(Effect, false)) {
+            return RollBackCommit();
         }
     }
 
-    if (DefaultGameplayEffects.Num() > 0) {
-        for (const FRolledAttributeSpec &Roll : NPCData.Proficiencies) {
-            if (!Roll.Attribute.IsValid() || !AbilitySystemComponent->HasAttributeSetForAttribute(Roll.Attribute)) {
-                continue;
-            }
-            const UClass *SetClass = Roll.Attribute.GetAttributeSetClass();
-            if (!SetClass) {
-                continue;
-            }
-            const UAttributeSet *CDO = SetClass->GetDefaultObject<UAttributeSet>();
-            const float CdoDefault = Roll.Attribute.GetNumericValue(CDO);
-            const float CurrentBase = AbilitySystemComponent->GetNumericAttributeBase(Roll.Attribute);
-            if (!FMath::IsNearlyEqual(CurrentBase, CdoDefault)) {
+    for (const FRolledAttributeSpec &Roll : NPCData.Proficiencies) {
+        if (!Roll.Attribute.IsValid()
+            || !AbilitySystemComponent->HasAttributeSetForAttribute(
+                Roll.Attribute)) {
+            continue;
+        }
+        if (const float *Pristine =
+                PristineAttributeBases.Find(Roll.Attribute)) {
+            const float Baseline =
+                AbilitySystemComponent->GetNumericAttributeBase(
+                    Roll.Attribute);
+            if (!FMath::IsNearlyEqual(Baseline, *Pristine)) {
                 UE_LOG(Myth, Warning,
-                       TEXT("AMythicNPCCharacter::CombatInit: %s attribute %s is set by BOTH a DefaultGameplayEffect ")
-                       TEXT("(base=%.2f) and an NPCData.Proficiency; the proficiency's CDO reset in SeedAttributesFromData ")
-                       TEXT("will discard the DefaultGE baseline. Keep the two layers on disjoint attributes."),
-                       *GetNameSafe(this), *Roll.Attribute.GetName(), CurrentBase);
+                       TEXT("%s composes both an authored instant baseline (%.2f) and an NPC proficiency on %s; verify that this explicit composition is intended."),
+                       *GetNameSafe(this), Baseline,
+                       *Roll.Attribute.GetName());
             }
         }
     }
+    SeedAttributesFromData();
 
-    ApplyCombatScaling();
+    for (const TSubclassOf<UGameplayEffect> &Effect :
+         DefaultGameplayEffects) {
+        const UGameplayEffect *EffectCDO = Effect.GetDefaultObject();
+        if (!EffectCDO) {
+            return RollBackCommit();
+        }
+        if (EffectCDO->DurationPolicy
+            == EGameplayEffectDurationType::Instant) {
+            continue;
+        }
+        if (!ApplyAuthoredEffect(Effect, true)) {
+            return RollBackCommit();
+        }
+    }
+
+    GrantAttackAbility();
+    ApplyCombatScaling(false);
+    if (!CombatScalingHandle.IsValid()) {
+        UE_LOG(Myth, Error,
+               TEXT("Combat commit rejected %s: canonical combat scaling failed to apply."),
+               *GetNameSafe(this));
+        return RollBackCommit();
+    }
 
     PublishIdentityTags();
-
+    if (!NPCData.Traits.IsEmpty()) {
+        AbilitySystemComponent->AddLooseGameplayTags(NPCData.Traits);
+    }
     ApplyMonsterAffixes();
 
+    const FGameplayAttribute MaxHealthAttribute =
+        UMythicAttributeSet_Life::GetMaxHealthAttribute();
+    const FGameplayAttribute HealthAttribute =
+        UMythicAttributeSet_Life::GetHealthAttribute();
+    const float MaximumHealth =
+        AbilitySystemComponent->GetNumericAttribute(MaxHealthAttribute);
+    // MaxHealth is assigned by the authored baseline, derivation and scaling layers above. The AttributeSet's
+    // one-point corruption floor is not an NPC lifecycle sentinel: rejecting an actor because evaluation reached
+    // that floor only hides the calculation defect and repeatedly re-runs it on the next pool attempt.
+    if (!FMath::IsFinite(MaximumHealth) || MaximumHealth <= 0.0f) {
+        UE_LOG(Myth, Error,
+               TEXT("Combat commit rejected %s: the completed authored vitality pipeline produced non-positive or non-finite MaxHealth %.3f."),
+               *GetNameSafe(this), MaximumHealth);
+        return RollBackCommit();
+    }
+
+    if (LifeAttributes) {
+        LifeAttributes->ResetForRespawn();
+    }
+    AbilitySystemComponent->SetNumericAttributeBase(HealthAttribute,
+                                                    MaximumHealth);
+    if (LifeComponent) {
+        LifeComponent->RestoreAfterDeath();
+    }
+
+    const float FinalHealth =
+        AbilitySystemComponent->GetNumericAttribute(HealthAttribute);
+    if (!FMath::IsFinite(FinalHealth) || FinalHealth <= 0.0f
+        || !FMath::IsNearlyEqual(FinalHealth, MaximumHealth, 0.01f)) {
+        UE_LOG(Myth, Error,
+               TEXT("Combat commit rejected %s: final vitality is %.3f / %.3f."),
+               *GetNameSafe(this), FinalHealth, MaximumHealth);
+        return RollBackCommit();
+    }
+
     bCombatInitialized = true;
+    return true;
 }
 
 void AMythicNPCCharacter::ApplyMonsterAffixes() {
@@ -296,9 +524,51 @@ void AMythicNPCCharacter::PublishIdentityTags() {
     PublishOnce(CodexBestiaryKey);
 }
 
-void AMythicNPCCharacter::ApplyCombatScaling() {
+float AMythicNPCCharacter::ResolveStableScalingPercentile(
+    const uint32 Salt) const {
+    FMythicEntityId StableEntityId = NPCData.EntityId;
+    if (!StableEntityId.IsValid() && EntityPresentationComponent) {
+        StableEntityId =
+            EntityPresentationComponent->GetAuthorityEntityId();
+    }
+    if (!StableEntityId.IsValid()) {
+        UE_LOG(Myth, Error,
+               TEXT("%s has no typed logical entity identity for deterministic combat scaling; using the neutral percentile."),
+               *GetNameSafe(this));
+        return 0.5f;
+    }
+
+    const uint32 Seed =
+        HashCombineFast(GetTypeHash(StableEntityId), Salt);
+    FRandomStream Stream(static_cast<int32>(Seed));
+    return Stream.FRand();
+}
+
+void AMythicNPCCharacter::ApplyCombatScaling(
+    const bool bPreserveHealthRatio) {
     if (!HasAuthority() || !AbilitySystemComponent) {
         return;
+    }
+
+    const FGameplayAttribute HealthAttribute =
+        UMythicAttributeSet_Life::GetHealthAttribute();
+    const FGameplayAttribute MaxHealthAttribute =
+        UMythicAttributeSet_Life::GetMaxHealthAttribute();
+    const float PreviousHealth =
+        AbilitySystemComponent->GetNumericAttribute(HealthAttribute);
+    const float PreviousMaximumHealth =
+        AbilitySystemComponent->GetNumericAttribute(MaxHealthAttribute);
+    const bool bRestoreHealthRatio = bPreserveHealthRatio
+        && bCombatInitialized && FMath::IsFinite(PreviousHealth)
+        && FMath::IsFinite(PreviousMaximumHealth)
+        && PreviousMaximumHealth > UE_SMALL_NUMBER;
+    const bool bWasDead = bRestoreHealthRatio && PreviousHealth <= 0.0f;
+    const float PreviousHealthRatio = bRestoreHealthRatio
+        ? FMath::Clamp(PreviousHealth / PreviousMaximumHealth, 0.0f, 1.0f)
+        : 1.0f;
+
+    if (EntityPresentationComponent) {
+        EntityPresentationComponent->AuthorityBeginAbilitySystemProjectionBatch();
     }
 
     int32 PartySize = 1;
@@ -318,8 +588,8 @@ void AMythicNPCCharacter::ApplyCombatScaling() {
         PartySize, PerExtraMemberHealth, PerExtraMemberDamage, WorldHealthMult, WorldDamageMult);
     const FMythicTierScaling Tier = FMythicEnemyScaling::GetTierScaling(EnemyTier);
 
-    // The level half: the GameState's min/max curves sampled at this NPC's combat level, rolled once per spawn so
-    // two same-level wolves are not clones. Unauthored curves read 1.0 and the level term vanishes.
+    // The level half: sample a stable percentile of the GameState's min/max curves. The percentile belongs to the
+    // typed logical entity, so a live tier/party update or a different pooled body never rerolls that NPC.
     //
     // Combatants only. A living world spawns merchants, farmers and wanderers from these same pools, and their
     // disposition is flee-or-talk, not fight - an authored attack ability is what marks an entity as combat-trained, so a
@@ -329,19 +599,50 @@ void AMythicNPCCharacter::ApplyCombatScaling() {
     float LevelDamageMult = 1.0f;
     if (const UWorld *World = AttackAbility ? GetWorld() : nullptr) {
         if (const AMythicGameState *GS = World->GetGameState<AMythicGameState>()) {
+            if (!bScalingPercentilesInitialized) {
+                HealthLevelPercentile =
+                    ResolveStableScalingPercentile(0x48EA17u);
+                DamageLevelPercentile =
+                    ResolveStableScalingPercentile(0xD4A6E3u);
+                bScalingPercentilesInitialized = true;
+            }
             const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
             const float Level = static_cast<float>(FMath::Max(1, NPCData.CombatLevel));
-            const float HealthLow = MythicCombat::SampleOpenEnded(GS->HealthMinCurveRowHandle, Level, Settings->CombatantHealthTailGrowth);
-            const float HealthHigh = MythicCombat::SampleOpenEnded(GS->HealthMaxCurveRowHandle, Level, Settings->CombatantHealthTailGrowth);
-            const float DamageLow = MythicCombat::SampleOpenEnded(GS->DamageMinCurveRowHandle, Level, Settings->CombatantDamageTailGrowth);
-            const float DamageHigh = MythicCombat::SampleOpenEnded(GS->DamageMaxCurveRowHandle, Level, Settings->CombatantDamageTailGrowth);
-            LevelHealthMult = FMath::FRandRange(FMath::Min(HealthLow, HealthHigh), FMath::Max(HealthLow, HealthHigh));
-            LevelDamageMult = FMath::FRandRange(FMath::Min(DamageLow, DamageHigh), FMath::Max(DamageLow, DamageHigh));
+            const float HealthTailGrowth =
+                Settings ? Settings->CombatantHealthTailGrowth : 0.0f;
+            const float DamageTailGrowth =
+                Settings ? Settings->CombatantDamageTailGrowth : 0.0f;
+            const float HealthLow = MythicCombat::SampleOpenEnded(GS->HealthMinCurveRowHandle, Level, HealthTailGrowth);
+            const float HealthHigh = MythicCombat::SampleOpenEnded(GS->HealthMaxCurveRowHandle, Level, HealthTailGrowth);
+            const float DamageLow = MythicCombat::SampleOpenEnded(GS->DamageMinCurveRowHandle, Level, DamageTailGrowth);
+            const float DamageHigh = MythicCombat::SampleOpenEnded(GS->DamageMaxCurveRowHandle, Level, DamageTailGrowth);
+            LevelHealthMult = FMath::Lerp(
+                FMath::Min(HealthLow, HealthHigh),
+                FMath::Max(HealthLow, HealthHigh),
+                HealthLevelPercentile);
+            LevelDamageMult = FMath::Lerp(
+                FMath::Min(DamageLow, DamageHigh),
+                FMath::Max(DamageLow, DamageHigh),
+                DamageLevelPercentile);
         }
     }
 
-    const float HealthMult = static_cast<float>(PartyWorldMult.X) * Tier.HealthMult * LevelHealthMult;
-    const float DamageMult = static_cast<float>(PartyWorldMult.Y) * Tier.DamageMult * LevelDamageMult;
+    const float UnvalidatedHealthMult =
+        static_cast<float>(PartyWorldMult.X) * Tier.HealthMult
+        * LevelHealthMult;
+    const float UnvalidatedDamageMult =
+        static_cast<float>(PartyWorldMult.Y) * Tier.DamageMult
+        * LevelDamageMult;
+    const float HealthMult =
+        FMath::IsFinite(UnvalidatedHealthMult)
+            && UnvalidatedHealthMult > 0.0f
+        ? UnvalidatedHealthMult
+        : 1.0f;
+    const float DamageMult =
+        FMath::IsFinite(UnvalidatedDamageMult)
+            && UnvalidatedDamageMult > 0.0f
+        ? UnvalidatedDamageMult
+        : 1.0f;
 
     if (CombatScalingHandle.IsValid()) {
         AbilitySystemComponent->RemoveActiveGameplayEffect(CombatScalingHandle);
@@ -357,12 +658,27 @@ void AMythicNPCCharacter::ApplyCombatScaling() {
         CombatScalingHandle = AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
     }
 
+    if (bRestoreHealthRatio && CombatScalingHandle.IsValid()) {
+        const float NewMaximumHealth =
+            AbilitySystemComponent->GetNumericAttribute(MaxHealthAttribute);
+        if (FMath::IsFinite(NewMaximumHealth)
+            && NewMaximumHealth > UE_SMALL_NUMBER) {
+            AbilitySystemComponent->SetNumericAttributeBase(
+                HealthAttribute,
+                bWasDead ? 0.0f : NewMaximumHealth * PreviousHealthRatio);
+        }
+    }
+
     if (LifeComponent) {
         if (!bBaseXPRewardCaptured) {
             BaseXPReward = LifeComponent->XPReward;
             bBaseXPRewardCaptured = true;
         }
         LifeComponent->XPReward = BaseXPReward * Tier.XpMult;
+    }
+
+    if (EntityPresentationComponent) {
+        EntityPresentationComponent->AuthorityEndAbilitySystemProjectionBatch();
     }
 }
 
@@ -391,11 +707,6 @@ void AMythicNPCCharacter::SeedAttributesFromData() {
             continue;
         }
 
-        if (UClass *SetClass = Roll.Attribute.GetAttributeSetClass()) {
-            const UAttributeSet *CDO = SetClass->GetDefaultObject<UAttributeSet>();
-            AbilitySystemComponent->SetNumericAttributeBase(Roll.Attribute, Roll.Attribute.GetNumericValue(CDO));
-        }
-
         AbilitySystemComponent->ApplyModToAttribute(Roll.Attribute, Roll.Definition.Modifier, Roll.Value);
     }
 }
@@ -405,40 +716,18 @@ void AMythicNPCCharacter::OnReturnedToPool() {
         return;
     }
 
-    if (AbilitySystemComponent) {
-        AbilitySystemComponent->CancelAllAbilities();
+    // Revoke presentation first while the old handle still resolves for owner-grant cleanup.
+    if (EntityPresentationComponent) {
+        EntityPresentationComponent->AuthorityDeactivateEmbodiment();
     }
-
-    if (AbilitySystemComponent) {
-        FGameplayTagContainer AllTags;
-        AbilitySystemComponent->GetOwnedGameplayTags(AllTags);
-        AbilitySystemComponent->RemoveActiveEffectsWithGrantedTags(AllTags);
-
-        AbilitySystemComponent->RemoveActiveEffectsWithGrantedTags(FGameplayTagContainer(GAS_STATE_COMBATSCALING));
-
-        // Tag-less baseline GEs are invisible to the owned-tags sweep above; without the explicit removal
-        // the next CombatInit stacks a second baseline on top.
-        for (const FActiveGameplayEffectHandle &Handle : DefaultEffectHandles) {
-            if (Handle.IsValid()) {
-                AbilitySystemComponent->RemoveActiveGameplayEffect(Handle);
-            }
-        }
-        DefaultEffectHandles.Reset();
-
-        FMonsterAffixGranter::RemoveMonsterAffixes(AbilitySystemComponent, MonsterAffixHandles);
-    }
-
-    if (AbilitySystemComponent) {
-        FGameplayTagContainer TempTags;
-        AbilitySystemComponent->GetOwnedGameplayTags(TempTags);
-        for (const FGameplayTag &Tag : TempTags) {
-            AbilitySystemComponent->RemoveLooseGameplayTag(Tag);
-        }
-    }
+    EngagedTarget = nullptr;
+    CurrentActivityTag = FGameplayTag();
+    Appearance = FMythicAppearance();
 
     if (LifeComponent) {
         LifeComponent->UninitializeFromAbilitySystem();
     }
+    ResetCombatRuntimeStateToPristine();
 
     if (UWorld *World = GetWorld()) {
         World->GetTimerManager().ClearAllTimersForObject(this);
@@ -462,13 +751,10 @@ void AMythicNPCCharacter::OnReturnedToPool() {
     SetActorTickEnabled(false);
     ParkMovementForPool();
 
-    bCombatInitialized = false;
-    if (AbilitySystemComponent && AttackAbilityHandle.IsValid()) {
-        // CancelAllAbilities stops the activation; only ClearAbility releases the spec. Without this every
-        // pooled reuse re-granted on top of the old grant and the spec list grew for the actor's lifetime.
-        AbilitySystemComponent->ClearAbility(AttackAbilityHandle);
-    }
-    AttackAbilityHandle = FGameplayAbilitySpecHandle();
+    bScalingPercentilesInitialized = false;
+    HealthLevelPercentile = 0.5f;
+    DamageLevelPercentile = 0.5f;
+    NPCData.ClearAll();
 }
 
 void AMythicNPCCharacter::SleepToPool() {
@@ -484,8 +770,6 @@ void AMythicNPCCharacter::WakeFromPool() {
         return;
     }
 
-    RestoreMovementFromPool();
-
     InitializeASC();
 
     if (!GetController()) {
@@ -498,19 +782,53 @@ void AMythicNPCCharacter::WakeFromPool() {
     }
     PooledController = nullptr;
 
-    if (LifeAttributes) {
-        LifeAttributes->ResetForRespawn();
+    ParkMovementForPool();
+}
+
+void AMythicNPCCharacter::PrepareForEmbodiment() {
+    if (!HasAuthority()) {
+        return;
+    }
+    SetActorHiddenInGame(true);
+    SetActorEnableCollision(false);
+    SetActorTickEnabled(false);
+    if (EntityPresentationComponent) {
+        EntityPresentationComponent->AuthorityDeactivateEmbodiment();
+    }
+    EngagedTarget = nullptr;
+    CurrentActivityTag = FGameplayTag();
+    Appearance = FMythicAppearance();
+    WakeFromPool();
+    SetActorHiddenInGame(true);
+    SetActorEnableCollision(false);
+    SetActorTickEnabled(false);
+}
+
+bool AMythicNPCCharacter::ActivatePreparedEmbodiment() {
+    if (!HasAuthority() || !EntityPresentationComponent
+        || !EntityPresentationComponent->GetAuthorityEntityId().IsValid()) {
+        return false;
+    }
+    if (!CommitCombatInitializationForEmbodiment()) {
+        return false;
     }
 
-    if (LifeComponent) {
-        LifeComponent->RestoreAfterDeath();
+    // Bind only after final attributes exist. The presentation component then publishes one coherent initial
+    // vitality/status snapshot when the prepared embodiment becomes active.
+    EntityPresentationComponent->AuthorityBindAbilitySystem(
+        AbilitySystemComponent);
+    if (!EntityPresentationComponent->AuthorityActivateEmbodiment()) {
+        return false;
     }
-
-    SetActorTickEnabled(PrimaryActorTick.bCanEverTick);
-
     if (CognitiveBrain) {
         CognitiveBrain->StartThinking();
     }
+    RestoreMovementFromPool();
+    SetActorTickEnabled(PrimaryActorTick.bCanEverTick);
+    SetActorEnableCollision(true);
+    SetActorHiddenInGame(false);
+    ForceNetUpdate();
+    return true;
 }
 
 const FGuid &AMythicNPCCharacter::GetNPCId() const {
@@ -531,6 +849,7 @@ AMythicNPCCharacter::AMythicNPCCharacter() {
     LifeAttributes = CreateDefaultSubobject<UMythicAttributeSet_Life>("LifeAttributes");
     DefenseAttributes = CreateDefaultSubobject<UMythicAttributeSet_Defense>("DefenseAttributes");
     OffenseAttributes = CreateDefaultSubobject<UMythicAttributeSet_Offense>("OffenseAttributes");
+    UtilityAttributes = CreateDefaultSubobject<UMythicAttributeSet_Utility>("UtilityAttributes");
 
     EnemyTier = AI_TIER_NORMAL;
 
@@ -539,6 +858,10 @@ AMythicNPCCharacter::AMythicNPCCharacter() {
     CognitiveBrain = CreateDefaultSubobject<UMythicCognitiveBrainComponent>("CognitiveBrain");
 
     LifeComponent = CreateDefaultSubobject<UMythicLifeComponent>("LifeComponent");
+
+    EntityPresentationComponent =
+        CreateDefaultSubobject<UMythicEntityPresentationComponent>(
+            TEXT("EntityPresentationComponent"));
 
     AIControllerClass = AMythicNPCAIController::StaticClass();
     AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
@@ -580,6 +903,175 @@ FText AMythicNPCCharacter::SelectDialogueFor(APlayerController *Interactor) cons
 
 void AMythicNPCCharacter::FireBark(const FText &Line, APlayerController *Interactor) {
     OnNpcBark(Line, Interactor);
+}
+
+void AMythicNPCCharacter::OpenTradeForLocalController(
+    APlayerController *Interactor) {
+    if (IsMerchant() && Interactor && Interactor->IsLocalController()) {
+        OnTradeOpened(Interactor);
+    }
+}
+
+const UMythicContextActionDefinition *
+AMythicNPCCharacter::ResolveContextActionDefinition(
+    const FGameplayTag ActionTag) const {
+    if (!ActionTag.IsValid()) {
+        return nullptr;
+    }
+    const UMythicContextActionDefinition *Definitions[] = {
+        QuestTurnInContextActionDefinition,
+        QuestOfferContextActionDefinition,
+        ServiceContextActionDefinition,
+        TalkContextActionDefinition,
+    };
+    for (const UMythicContextActionDefinition *Definition : Definitions) {
+        if (IsValid(Definition) && Definition->ActionTag == ActionTag) {
+            return Definition;
+        }
+    }
+    return nullptr;
+}
+
+bool AMythicNPCCharacter::IsContextActionAvailable(
+    AController *RequestingController,
+    const UMythicContextActionDefinition *Definition) const {
+    const AMythicPlayerController *PlayerController =
+        Cast<AMythicPlayerController>(RequestingController);
+    if (!HasAuthority() || !PlayerController || !PlayerController->GetPawn()
+        || !IsValid(Definition) || !Definition->ActionTag.IsValid()
+        || (LifeComponent
+            && (LifeComponent->IsDead() || LifeComponent->IsDowned()))
+        || IsValid(EngagedTarget)) {
+        return false;
+    }
+
+    if (Definition == TalkContextActionDefinition) {
+        return CognitiveBrain != nullptr;
+    }
+    if (Definition == ServiceContextActionDefinition) {
+        return IsMerchant();
+    }
+
+    const UObjectiveTracker *Tracker =
+        PlayerController->GetObjectiveTracker();
+    if (!Tracker) {
+        return false;
+    }
+    if (Definition == QuestOfferContextActionDefinition) {
+        FObjectiveProgress Progress;
+        return QuestOffer
+            && Tracker->EvaluateObjectiveOffer(QuestOffer, Progress)
+                   == EObjectiveOfferResult::Assigned;
+    }
+    if (Definition == QuestTurnInContextActionDefinition) {
+        return Tracker->CanAdvanceNpcInteraction(
+            QuestNpcTag, PlayerController->GetInventoryComponent());
+    }
+    return false;
+}
+
+uint32 AMythicNPCCharacter::BuildContextActionRevision(
+    const UMythicContextActionDefinition *Definition) const {
+    uint32 Revision = Definition
+        ? GetTypeHash(Definition->ActionTag) : 0;
+    if (EntityPresentationComponent) {
+        Revision = HashCombineFast(
+            Revision,
+            GetTypeHash(EntityPresentationComponent->GetPresentationInstance()));
+    }
+    return Revision == 0 ? 1 : Revision;
+}
+
+bool AMythicNPCCharacter::ValidateContextAction(
+    AController *RequestingController, AActor *Subject,
+    const FGameplayTag ActionTag, const int64 ObservedOfferRevision,
+    FGameplayTag &OutFailureReason) const {
+    OutFailureReason = FGameplayTag();
+    const UMythicContextActionDefinition *Definition =
+        ResolveContextActionDefinition(ActionTag);
+    if (!HasAuthority() || Subject != this || !Definition
+        || !RequestingController
+        || RequestingController->GetWorld() != GetWorld()) {
+        OutFailureReason = CONTEXT_ACTION_REASON_INVALID_TARGET;
+        return false;
+    }
+    if (ObservedOfferRevision < 0
+        || ObservedOfferRevision > static_cast<int64>(MAX_uint32)
+        || static_cast<uint32>(ObservedOfferRevision)
+               != BuildContextActionRevision(Definition)) {
+        OutFailureReason = CONTEXT_ACTION_REASON_STALE;
+        return false;
+    }
+    if (!IsContextActionAvailable(RequestingController, Definition)) {
+        OutFailureReason = CONTEXT_ACTION_REASON_UNAVAILABLE;
+        return false;
+    }
+    return true;
+}
+
+void AMythicNPCCharacter::GatherContextActions_Implementation(
+    AController *RequestingController, AActor *Subject,
+    TArray<FMythicContextActionOffer> &OutOffers) const {
+    if (!HasAuthority() || Subject != this || !RequestingController) {
+        return;
+    }
+
+    const UMythicContextActionDefinition *Definitions[] = {
+        QuestTurnInContextActionDefinition,
+        QuestOfferContextActionDefinition,
+        ServiceContextActionDefinition,
+        TalkContextActionDefinition,
+    };
+    TArray<FGameplayTag, TInlineAllocator<4>> AddedActions;
+    for (const UMythicContextActionDefinition *Definition : Definitions) {
+        if (!IsContextActionAvailable(RequestingController, Definition)
+            || AddedActions.Contains(Definition->ActionTag)) {
+            continue;
+        }
+        FMythicContextActionOffer Offer;
+        Offer.Definition = const_cast<UMythicContextActionDefinition *>(
+            Definition);
+        Offer.Availability = EMythicContextActionAvailability::Available;
+        Offer.SourceRevision = static_cast<int64>(
+            BuildContextActionRevision(Definition));
+        OutOffers.Add(MoveTemp(Offer));
+        AddedActions.Add(Definition->ActionTag);
+    }
+}
+
+bool AMythicNPCCharacter::CanExecuteContextAction_Implementation(
+    AController *RequestingController, AActor *Subject,
+    const FGameplayTag ActionTag, const int64 ObservedOfferRevision,
+    FGameplayTag &OutFailureReason) const {
+    return ValidateContextAction(RequestingController, Subject, ActionTag,
+                                 ObservedOfferRevision, OutFailureReason);
+}
+
+bool AMythicNPCCharacter::ExecuteContextAction_Implementation(
+    AController *RequestingController, AActor *Subject,
+    const FGameplayTag ActionTag, const int64 ObservedOfferRevision,
+    FGameplayTag &OutFailureReason) {
+    if (!ValidateContextAction(RequestingController, Subject, ActionTag,
+                               ObservedOfferRevision, OutFailureReason)) {
+        return false;
+    }
+
+    AMythicPlayerController *PlayerController =
+        Cast<AMythicPlayerController>(RequestingController);
+    const UMythicContextActionDefinition *Definition =
+        ResolveContextActionDefinition(ActionTag);
+    if (!PlayerController || !Definition) {
+        OutFailureReason = CONTEXT_ACTION_REASON_INVALID_TARGET;
+        return false;
+    }
+
+    if (Definition == ServiceContextActionDefinition) {
+        PlayerController->ClientOpenNpcTrade(this);
+    } else {
+        PlayerController->ServerRequestNpcDialogue(this);
+    }
+    OutFailureReason = FGameplayTag();
+    return true;
 }
 
 
@@ -686,6 +1178,17 @@ void AMythicNPCCharacter::ServerSetActivity(FGameplayTag ActivityTag) {
         return;
     }
     CurrentActivityTag = ActivityTag;
+    if (EntityPresentationComponent) {
+        if (ActivityTag.IsValid()) {
+            EntityPresentationComponent->SetObservableFact(
+                MythicEntityPresentationTags::ObservableSlotActivity,
+                ActivityTag, FMythicPresentationHandle());
+        }
+        else {
+            EntityPresentationComponent->ClearObservableFact(
+                MythicEntityPresentationTags::ObservableSlotActivity);
+        }
+    }
     Multicast_PerformActivity(ActivityTag);
 }
 
@@ -744,17 +1247,44 @@ UAbilitySystemComponent *AMythicNPCCharacter::GetAbilitySystemComponent() const 
 
 void AMythicNPCCharacter::InitializeASC() {
     AbilitySystemComponent->InitAbilityActorInfo(this, this);
-
-    CombatInit();
+    CapturePristineAttributeBases();
 
     if (LifeComponent && !LifeComponent->IsInitialized()) {
         LifeComponent->InitializeWithAbilitySystem(AbilitySystemComponent);
     }
 
-    if (HasAuthority() && LifeComponent && !bBoundDeath) {
-        LifeComponent->OnDeath.AddDynamic(this, &AMythicNPCCharacter::HandleNPCDeath);
-        bBoundDeath = true;
+    if (HasAuthority() && LifeComponent) {
+        // Authoritative teardown uses native delegates. Blueprint lifecycle
+        // events remain presentation hooks, but cannot strand a live actor if
+        // their serialized invocation list is reset or reinstanced.
+        LifeComponent->OnDeathNative.RemoveAll(this);
+        LifeComponent->OnDownedNative.RemoveAll(this);
+        LifeComponent->OnRevivedNative.RemoveAll(this);
+        LifeComponent->OnDeathNative.AddUObject(
+            this, &AMythicNPCCharacter::HandleNPCDeath);
+        LifeComponent->OnDownedNative.AddUObject(
+            this, &AMythicNPCCharacter::HandleNPCDowned);
+        LifeComponent->OnRevivedNative.AddUObject(
+            this, &AMythicNPCCharacter::HandleNPCRevived);
     }
+}
+
+void AMythicNPCCharacter::HandleNPCDowned(AActor *DownedActor) {
+    if (!HasAuthority() || DownedActor != this || !EntityPresentationComponent) {
+        return;
+    }
+    EntityPresentationComponent->SetObservableFact(
+        MythicEntityPresentationTags::ObservableSlotLifeState,
+        MythicEntityPresentationTags::ObservableLifeDowned,
+        FMythicPresentationHandle());
+}
+
+void AMythicNPCCharacter::HandleNPCRevived(AActor *RevivedActor) {
+    if (!HasAuthority() || RevivedActor != this || !EntityPresentationComponent) {
+        return;
+    }
+    EntityPresentationComponent->ClearObservableFact(
+        MythicEntityPresentationTags::ObservableSlotLifeState);
 }
 
 void AMythicNPCCharacter::HandleNPCDeath(AActor *DeadActor) {
@@ -770,25 +1300,70 @@ void AMythicNPCCharacter::HandleNPCDeath(AActor *DeadActor) {
         Party->RemoveCompanionFromAnyParty(this, false);
     }
 
-    // Only Mass-embodied NPCs report into the persistent registry; the corpse timer below runs for every
-    // authority death, or manager-owned NPCs would stand as ticking corpses forever.
+    // Resolve the canonical person from its Mass fragment or, for manager-owned authored/runtime actors, the private
+    // NPC data stamped by the authority allocator. Every actual person death receives a tombstone before its body is
+    // recycled; otherwise a learned dossier could retain a live-looking identity whose only embodiment was erased.
     const FMassEntityHandle Entity = CognitiveBrain ? CognitiveBrain->GetSourceEntity() : FMassEntityHandle();
     UMassEntitySubsystem *EntitySubsystem = UWorld::GetSubsystem<UMassEntitySubsystem>(GetWorld());
+    FMythicEntityId DeadEntityId;
+    FMythicFactionId DeadFaction;
+    FGameplayTag DeadRole;
+    FMythicCellCoord DeadCell;
     if (EntitySubsystem && Entity.IsSet() && EntitySubsystem->GetEntityManager().IsEntityValid(Entity)) {
         if (const FMythicIdentityFragment *Id =
             EntitySubsystem->GetEntityManager().GetFragmentDataPtr<FMythicIdentityFragment>(Entity)) {
-            if (UGameInstance *GI = GetWorld()->GetGameInstance()) {
-                if (UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
-                    if (LWS->IsSystemActive()) {
-                        if (UMythicPersistentNPCRegistry *Reg = LWS->GetPersistentNPCRegistry()) {
-                            Reg->RegisterDeath(Id->NameHash, Id->Faction, Id->RoleTag, Id->Cell,
-                                               GetWorld()->GetTimeSeconds(), LWS);
-                        }
-                        LWS->ReportNpcDeath(Id->Faction, Id->RoleTag);
-                    }
+            DeadEntityId = Id->EntityId;
+            DeadFaction = Id->Faction;
+            DeadRole = Id->RoleTag;
+            DeadCell = Id->Cell;
+        }
+    }
+    if (!DeadEntityId.IsValid() && NPCData.EntityId.IsValid()) {
+        DeadEntityId = NPCData.EntityId;
+        if (CognitiveBrain) {
+            DeadFaction = CognitiveBrain->GetFaction();
+            DeadRole = CognitiveBrain->GetRole();
+            DeadCell = CognitiveBrain->GetHomeCell();
+        }
+    }
+    if (!DeadEntityId.IsValid() && EntityPresentationComponent
+        && EntityPresentationComponent->GetAuthorityEntityId().GetDomain()
+               == EMythicEntityDomain::LivingWorld) {
+        DeadEntityId = EntityPresentationComponent->GetAuthorityEntityId();
+    }
+    if (DeadEntityId.IsValid() && CognitiveBrain) {
+        if (!DeadFaction.IsValid()) {
+            DeadFaction = CognitiveBrain->GetFaction();
+        }
+        if (!DeadRole.IsValid()) {
+            DeadRole = CognitiveBrain->GetRole();
+        }
+        DeadCell = CognitiveBrain->GetHomeCell();
+    }
+
+    if (DeadEntityId.IsValid()) {
+        if (UGameInstance *GI = GetWorld()->GetGameInstance()) {
+            if (UMythicLivingWorldSubsystem *LWS =
+                    GI->GetSubsystem<UMythicLivingWorldSubsystem>();
+                LWS && LWS->IsSystemActive()) {
+                if (UMythicTerritoryGrid *Grid = LWS->GetTerritoryGrid()) {
+                    DeadCell = Grid->WorldToCell(GetActorLocation());
+                }
+                if (UMythicPersistentNPCRegistry *Reg =
+                        LWS->GetPersistentNPCRegistry();
+                    Reg && Reg->RegisterDeath(
+                               DeadEntityId, DeadFaction, DeadRole, DeadCell,
+                               GetWorld()->GetTimeSeconds(), LWS)) {
+                    LWS->ReportNpcDeath(DeadFaction, DeadRole);
                 }
             }
         }
+    }
+
+    // A corpse is not the live combatant's nameplate with a skull appended. Retire the live presentation now; any
+    // loot, revive, harvest, or inspect affordance must project from its own actionable corpse context.
+    if (EntityPresentationComponent) {
+        EntityPresentationComponent->AuthorityDeactivateEmbodiment();
     }
 
     if (UWorld *World = GetWorld()) {
@@ -826,7 +1401,6 @@ void AMythicNPCCharacter::GetLifetimeReplicatedProps(TArray<class FLifetimePrope
 
     DOREPLIFETIME(AMythicNPCCharacter, AbilitySystemComponent);
     DOREPLIFETIME(AMythicNPCCharacter, Appearance);
-    DOREPLIFETIME(AMythicNPCCharacter, EngagedTarget);
 }
 
 void AMythicNPCCharacter::PossessedBy(AController *NewController) {
@@ -838,7 +1412,114 @@ void AMythicNPCCharacter::BeginPlay() {
     Super::BeginPlay();
 
     InitializeASC();
+    ConfigureEntityPresentationAnchor();
+
+    // Manager, Mass, and designer spawners stamp their canonical identity synchronously after spawning. Defer the
+    // fallback one tick so those richer paths always win; only a genuinely direct actor reaches the typed fallback.
+    if (HasAuthority()) {
+        SetActorHiddenInGame(true);
+        SetActorEnableCollision(false);
+        SetActorTickEnabled(false);
+        ParkMovementForPool();
+        GetWorldTimerManager().SetTimerForNextTick(
+            this, &ThisClass::TryActivateDirectEntityPresentation);
+    }
 }
+
+void AMythicNPCCharacter::ConfigureEntityPresentationAnchor() {
+    if (!EntityPresentationComponent) {
+        return;
+    }
+
+    UCapsuleComponent *Capsule = GetCapsuleComponent();
+    const float HeadClearance = Capsule
+        ? Capsule->GetUnscaledCapsuleHalfHeight() + 28.0f : 120.0f;
+    EntityPresentationComponent->SetPresentationAnchor(
+        Capsule ? Cast<USceneComponent>(Capsule) : GetRootComponent(),
+        FVector(0.0f, 0.0f, HeadClearance));
+}
+
+void AMythicNPCCharacter::BuildDirectPublicIdentity(
+    FMythicPublicIdentitySnapshot &OutIdentity) const {
+    OutIdentity.Reset();
+    OutIdentity.PublicKindTag =
+        MythicEntityPresentationTags::EntityKindHumanoid;
+    OutIdentity.PublicIdentityDefinitionId =
+        UMythicEntityIdentityDefinition::ResolvePrimaryAssetId(
+            NPCData.PublicIdentityDefinition);
+}
+
+void AMythicNPCCharacter::TryActivateDirectEntityPresentation() {
+    if (!HasAuthority() || !EntityPresentationComponent
+        || EntityPresentationComponent->GetAuthorityEntityId().IsValid()
+        || EntityPresentationComponent->GetPublicIdentitySnapshot().IsActive()) {
+        return;
+    }
+
+    const bool bAuthoredWorldActor = AuthoredWorldIdentityGuid.IsValid();
+    const FGuid IdentityGuid = bAuthoredWorldActor
+        ? AuthoredWorldIdentityGuid : FGuid::NewGuid();
+    const FMythicEntityId EntityId = FMythicEntityId::FromAuthorityGuid(
+        bAuthoredWorldActor ? EMythicEntityDomain::AuthoredWorld
+                            : EMythicEntityDomain::Runtime,
+        IdentityGuid);
+    if (!EntityId.IsValid()) {
+        return;
+    }
+    NPCData.EntityId = EntityId;
+
+    FMythicPublicIdentitySnapshot SafeIdentity;
+    BuildDirectPublicIdentity(SafeIdentity);
+    if (!EntityPresentationComponent->AuthorityPrepareEmbodiment(
+            EntityId, SafeIdentity)) {
+        UE_LOG(Myth, Warning,
+               TEXT("Direct entity presentation could not prepare %s."),
+               *GetNameSafe(this));
+        return;
+    }
+
+    if (!ActivatePreparedEmbodiment()) {
+        EntityPresentationComponent->AuthorityDeactivateEmbodiment();
+        UE_LOG(Myth, Warning,
+               TEXT("Direct entity presentation could not activate %s."),
+               *GetNameSafe(this));
+    }
+}
+
+#if WITH_EDITOR
+void AMythicNPCCharacter::RefreshAuthoredWorldIdentityFromActorGuid() {
+    if (HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject)
+        || IsRunningCommandlet()) {
+        return;
+    }
+    const UWorld *World = GetWorld();
+    if (!GIsEditor || !World || World->IsGameWorld()
+        || !GetActorGuid().IsValid()
+        || AuthoredWorldIdentityGuid == GetActorGuid()) {
+        return;
+    }
+
+    AuthoredWorldIdentityGuid = GetActorGuid();
+    MarkPackageDirty();
+}
+
+void AMythicNPCCharacter::PostLoad() {
+    Super::PostLoad();
+    RefreshAuthoredWorldIdentityFromActorGuid();
+}
+
+void AMythicNPCCharacter::PostActorCreated() {
+    Super::PostActorCreated();
+    RefreshAuthoredWorldIdentityFromActorGuid();
+}
+
+void AMythicNPCCharacter::PostEditImport() {
+    Super::PostEditImport();
+    // The editor assigns a fresh ActorGuid to copies; mirror it so duplicate world actors can never alias identity.
+    AuthoredWorldIdentityGuid.Invalidate();
+    RefreshAuthoredWorldIdentityFromActorGuid();
+}
+#endif
 
 void AMythicNPCCharacter::InitializeFromMassEntity(const FMassEntityHandle &InEntityHandle) {
     if (!HasAuthority()) {
@@ -868,7 +1549,15 @@ void AMythicNPCCharacter::InitializeFromMassEntity(const FMassEntityHandle &InEn
     }
 
     if (IdentityFrag) {
+        NPCData.EntityId = IdentityFrag->EntityId;
         ApplyAppearanceFromIdentity(*IdentityFrag);
+
+        if (EntityPresentationComponent) {
+            FMythicPublicIdentitySnapshot SafeIdentity;
+            BuildMassPublicIdentity(*IdentityFrag, SafeIdentity);
+            EntityPresentationComponent->AuthorityPrepareEmbodiment(
+                IdentityFrag->EntityId, SafeIdentity);
+        }
     }
 
     // Mass embodiment never passes through the NPC manager, so the level stamp happens here: the territory
@@ -876,12 +1565,24 @@ void AMythicNPCCharacter::InitializeFromMassEntity(const FMassEntityHandle &InEn
     StampCombatLevel(MythicCombat::ResolveCombatLevelAt(GetWorld(), GetActorLocation()));
 }
 
+void AMythicNPCCharacter::BuildMassPublicIdentity(
+    const FMythicIdentityFragment & /*Identity*/,
+    FMythicPublicIdentitySnapshot &OutIdentity) const {
+    OutIdentity.Reset();
+    OutIdentity.PublicKindTag =
+        MythicEntityPresentationTags::EntityKindHumanoid;
+    // Mass role/faction are private simulation truth. A future cover fragment may explicitly opt safe values in;
+    // absent that authoring, recognition grants are the only path to learned role and faction.
+}
+
 void AMythicNPCCharacter::StampCombatLevel(const int32 Level) {
     if (!HasAuthority()) {
         return;
     }
     NPCData.CombatLevel = FMath::Max(1, Level);
-    ApplyCombatScaling();
+    if (bCombatInitialized) {
+        ApplyCombatScaling(true);
+    }
 }
 
 void AMythicNPCCharacter::OnRep_Appearance() {
@@ -938,9 +1639,9 @@ void AMythicNPCCharacter::ApplyAppearanceFromIdentity(const FMythicIdentityFragm
         }
     }
 
-    const uint8 WealthTier = FMythicAppearanceResolver::WealthTierFromHash(Id.NameHash);
+    const uint8 WealthTier = FMythicAppearanceResolver::WealthTierFromHash(Id.NameSeed);
     const FMythicAppearance Resolved = FMythicAppearanceResolver::Resolve(
-        Id.NameHash,
+        Id.NameSeed,
         Id.DemographicFlags,
         Id.RoleTag,
         FactionIndex,

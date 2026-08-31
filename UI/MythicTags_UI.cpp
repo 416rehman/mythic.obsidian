@@ -2,3 +2,4 @@
 #include "MythicTags_UI.h"
 
 UE_DEFINE_GAMEPLAY_TAG(UI_LAYER_GAME, "UI.Layer.Game");
+UE_DEFINE_GAMEPLAY_TAG(UI_ACTION_INSPECT_ENTITY, "UI.Action.InspectEntity");

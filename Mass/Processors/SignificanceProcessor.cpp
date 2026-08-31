@@ -285,7 +285,7 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
             if (Sig.Tier >= EMythicSignificanceTier::Tier1_Reactive) {
                 const FMythicIdentityFragment &DeadId = ChunkContext.GetFragmentView<FMythicIdentityFragment>()[i];
                 UMythicPersistentNPCRegistry *DeadReg = LWS->GetPersistentNPCRegistry();
-                if (DeadReg && DeadReg->IsPermaDead(DeadId.NameHash)) {
+                if (DeadReg && DeadReg->IsPermaDead(DeadId.EntityId)) {
                     const FMassEntityHandle Entity = ChunkContext.GetEntity(i);
                     if (Sig.Tier == EMythicSignificanceTier::Tier2_Cognitive) {
                         Context.Defer().AddTag<FMythicActorDespawnRequestTag>(Entity);
@@ -319,7 +319,7 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
                 const FMythicIdentityFragment &Identity = ChunkContext.GetFragmentView<FMythicIdentityFragment>()[i];
 
                 UMythicPersistentNPCRegistry *Registry = LWS->GetPersistentNPCRegistry();
-                if (Registry && Registry->IsPermaDead(Identity.NameHash)) {
+                if (Registry && Registry->IsPermaDead(Identity.EntityId)) {
                     Sig.Score = 0.0f;
                     continue;
                 }
@@ -340,7 +340,7 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
                         FMythicFactionData FData;
                         if (FactionDB->GetFaction(Identity.Faction, FData)) {
                             FMythicPersonalityFragment GenPersonality = FMythicNPCGenerator::GeneratePersonality(
-                                Identity.NameHash, FData.Ideology, Identity.RoleTag);
+                                Identity.NameSeed, FData.Ideology, Identity.RoleTag);
 
                             Context.Defer().PushCommand<FMassDeferredChangeCompositionCommand>(
                                 [Entity, GenPersonality](FMassEntityManager &Manager) {
@@ -357,7 +357,7 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
                     if (FactionDB && Identity.Faction.IsValid()) {
                         LWS->ReportLeaderCandidate(
                             Identity.Faction,
-                            Entity.Index,
+                            Identity.EntityId,
                             Sig.Score);
                     }
                 }
@@ -371,7 +371,7 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
                     Context.Defer().AddTag<FMythicActorSpawnRequestTag>(Entity);
 
                     UE_LOG(LogMythLivingWorld, Log, TEXT("Significance: Promoted entity DIRECT to Tier2_Cognitive (score=%.2f, NameHash=%u, embodied=%d/%d)"),
-                           Sig.Score, Identity.NameHash, EmbodiedActorCount, MaxEmbodiedActors);
+                           Sig.Score, Identity.NameSeed, EmbodiedActorCount, MaxEmbodiedActors);
                 }
                 else {
                     Sig.Tier = EMythicSignificanceTier::Tier1_Reactive;
@@ -388,7 +388,7 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
                 const FMythicIdentityFragment &Identity = ChunkContext.GetFragmentView<FMythicIdentityFragment>()[i];
 
                 UMythicPersistentNPCRegistry *Registry = LWS->GetPersistentNPCRegistry();
-                if (Registry && Registry->IsPermaDead(Identity.NameHash)) {
+                if (Registry && Registry->IsPermaDead(Identity.EntityId)) {
                     Sig.Score = 0.0f;
                     continue;
                 }
@@ -401,7 +401,7 @@ void UMythicSignificanceProcessor::Execute(FMassEntityManager &EntityManager, FM
                 Context.Defer().AddTag<FMythicActorSpawnRequestTag>(Entity);
 
                 UE_LOG(LogMythLivingWorld, Log, TEXT("Significance: Promoted entity to Tier2_Cognitive (score=%.2f, NameHash=%u, embodied=%d/%d)"),
-                       Sig.Score, Identity.NameHash, EmbodiedActorCount, MaxEmbodiedActors);
+                       Sig.Score, Identity.NameSeed, EmbodiedActorCount, MaxEmbodiedActors);
             }
             else if (DemotionBudget > 0
                 && Sig.Tier == EMythicSignificanceTier::Tier1_Reactive

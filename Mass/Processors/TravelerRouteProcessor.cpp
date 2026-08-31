@@ -10,6 +10,7 @@
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "World/LivingWorld/Territory/TerritoryGrid.h"
+#include "World/LivingWorld/Persistence/PersistentNPCRegistry.h"
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "Engine/World.h"
 
@@ -56,7 +57,9 @@ void UMythicTravelerRouteProcessor::Execute(FMassEntityManager &EntityManager, F
     }
 
     UMythicTerritoryGrid *Grid = LWS->GetTerritoryGrid();
-    if (!Grid) {
+    UMythicPersistentNPCRegistry *PersistentRegistry =
+        LWS->GetPersistentNPCRegistry();
+    if (!Grid || !PersistentRegistry) {
         return;
     }
 
@@ -84,6 +87,24 @@ void UMythicTravelerRouteProcessor::Execute(FMassEntityManager &EntityManager, F
 
             const bool bArrived = (Identity.Cell == Traveler.DestinationCell);
             if (bArrived || Traveler.StepsRemaining == 0) {
+                const EMythicEntityRetirementResult Retirement =
+                    LWS->TryRetireEntityIdentity(Identity.EntityId);
+                if (Retirement
+                    == EMythicEntityRetirementResult::RetainedByDurableReference) {
+                    // A known traveler becomes a resident logical person at the destination instead of being
+                    // destroyed and silently replaced with a different identity.
+                    Schedule.Phase = EMythicSchedulePhase::Idle;
+                    Schedule.HomeCell = Identity.Cell;
+                    Schedule.WorkCell = Identity.Cell;
+                    SignificanceView[i].bDirty = true;
+                    Context.Defer().RemoveTag<FMythicTravelerTag>(Entity);
+                    Context.Defer().RemoveFragment<FMythicTravelerFragment>(Entity);
+                    continue;
+                }
+                if (!UMythicLivingWorldSubsystem::AuthorizesLogicalEntityDestruction(
+                        Retirement)) {
+                    continue;
+                }
                 if (AMythicNPCCharacter *Actor = LWS->FindEmbodiedActor(Entity)) {
                     Actor->Destroy();
                 }

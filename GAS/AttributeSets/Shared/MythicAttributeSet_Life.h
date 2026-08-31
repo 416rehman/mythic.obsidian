@@ -43,6 +43,8 @@ protected:
 
     bool bInDeathPreHook = false;
 
+    virtual TConstArrayView<FMythicBoundedAttributePair> GetBoundedAttributePairs() const override;
+
 public:
     UMythicAttributeSet_Life();
 
@@ -60,8 +62,6 @@ public:
     mutable FMythicAttributeEvent OnMaxHealthChanged;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 
-    virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
-
     virtual bool PreGameplayEffectExecute(FGameplayEffectModCallbackData &Data) override;
     // Tags describing the hit itself, beyond the source's own. Read from the Mythic effect context, which is
     // where the damage execution records what the hit turned out to be.
@@ -73,8 +73,6 @@ public:
     void SendEventToOwner(const FGameplayEffectModCallbackData &Data, UAbilitySystemComponent *OwnerASC, AActor *Instigator, FGameplayTag EventTag,
                           float Magnitude);
     virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) override;
-
-    virtual void ClampAttributes(const FGameplayAttribute &Attribute, float &NewValue);
 
     static bool ComputeOutOfHealthLatch(float NewHealth);
 

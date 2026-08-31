@@ -6,6 +6,8 @@
 #include "Mythic.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
+#include "Engine/AssetManager.h"
+#include "Engine/StreamableManager.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameplayEffect.h"
@@ -58,7 +60,30 @@ const FActiveGameplayEffect *FindActiveStatusStack(const UAbilitySystemComponent
 }
 }
 
+void UMythicStatusRegistry::Initialize(
+    FSubsystemCollectionBase &Collection) {
+    Super::Initialize(Collection);
+    BuildIndex();
+}
+
+void UMythicStatusRegistry::Deinitialize() {
+    if (StatusIconResidency.IsValid()) {
+        StatusIconResidency->CancelHandle();
+        StatusIconResidency.Reset();
+    }
+    StatusByType.Reset();
+    Library = nullptr;
+    bIndexed = false;
+    Super::Deinitialize();
+}
+
 void UMythicStatusRegistry::BuildIndex() {
+    if (bIndexed) {
+        return;
+    }
+    bIndexed = true;
+    StatusByType.Reset();
+
     const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
     if (!Settings || Settings->StatusEffectLibrary.IsNull()) {
         UE_LOG(Myth, Warning, TEXT("StatusRegistry: no StatusEffectLibrary configured — no status effect can be applied."));
@@ -74,8 +99,8 @@ void UMythicStatusRegistry::BuildIndex() {
         return;
     }
 
-    bIndexed = true;
-
+    TArray<FSoftObjectPath> IconPaths;
+    IconPaths.Reserve(Library->Statuses.Num());
     for (UMythicStatusEffectDefinition *Definition : Library->Statuses) {
         if (!Definition) {
             continue;
@@ -90,6 +115,18 @@ void UMythicStatusRegistry::BuildIndex() {
             continue;
         }
         StatusByType.Add(Definition->StatusType, Definition);
+        const FSoftObjectPath IconPath = Definition->Icon.ToSoftObjectPath();
+        if (IconPath.IsValid()) {
+            IconPaths.AddUnique(IconPath);
+        }
+    }
+
+    if (!IconPaths.IsEmpty()) {
+        StatusIconResidency =
+            UAssetManager::GetStreamableManager().RequestAsyncLoad(
+                MoveTemp(IconPaths), FStreamableDelegateWithHandle(),
+                FStreamableManager::DefaultAsyncLoadPriority, false, false,
+                TEXT("Mythic canonical status UI icons"));
     }
 }
 

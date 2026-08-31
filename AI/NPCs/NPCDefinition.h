@@ -9,6 +9,7 @@
 
 class UFamilyDefinition;
 class AMythicNPCCharacter;
+class UMythicEntityIdentityDefinition;
 UCLASS(Blueprintable, BlueprintType)
 class MYTHIC_API UNPCDefinition : public UDataAsset {
     GENERATED_BODY()
@@ -25,6 +26,13 @@ public:
     // NPC Type
     UPROPERTY(EditAnywhere, Category = "Basic", meta=(Categories = "NPC.Type"))
     FGameplayTag NPCType;
+
+    /**
+     * Explicit public cover/role identity used by contextual presentation. This is independent of NPCType and true
+     * simulation role; leaving it empty intentionally presents the character as a generic stranger.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Presentation")
+    TSoftObjectPtr<UMythicEntityIdentityDefinition> PublicIdentityDefinition;
 
     // The actor class the manager spawns for this definition. The Blueprint class carries the mesh,
     // attack ability and default effects; the raw C++ base has none of them, so an unset class means an

@@ -9,6 +9,7 @@
 #include "GAS/Feedback/MythicTags_FeedbackCues.h"
 #include "GAS/Effects/MythicStatusEffectDefinition.h"
 #include "Engine/World.h"
+#include "GameFramework/GameStateBase.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/MythicPlayerController.h"
 #include "Itemization/InventoryProviderInterface.h"
@@ -70,6 +71,15 @@ UMythicAttributeSet_Life::UMythicAttributeSet_Life()
       , HealthBeforeAttributeChange(0.0f)
       , MaxHealthBeforeAttributeChange(0.0f) {}
 
+TConstArrayView<FMythicBoundedAttributePair>
+UMythicAttributeSet_Life::GetBoundedAttributePairs() const {
+    static const FMythicBoundedAttributePair Pairs[] = {
+        {GetHealthAttribute(), GetMaxHealthAttribute(), 0.0f, 1.0f,
+         EMythicAttributeBaseOverflowPolicy::Discard}
+    };
+    return Pairs;
+}
+
 void UMythicAttributeSet_Life::OnRep_MaxHealth(const FGameplayAttributeData &OldMaxHealth) {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Life, MaxHealth, OldMaxHealth);
 }
@@ -83,11 +93,6 @@ void UMythicAttributeSet_Life::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Life, MaxHealth, COND_None, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Life, Health, COND_None, REPNOTIFY_Always);
-}
-
-void UMythicAttributeSet_Life::PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) {
-    Super::PreAttributeChange(Attribute, NewValue);
-    ClampAttributes(Attribute, NewValue);
 }
 
 bool UMythicAttributeSet_Life::PreGameplayEffectExecute(FGameplayEffectModCallbackData &Data) {
@@ -311,11 +316,6 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
             bOutOfHealth = false;
         }
     }
-    else if (Data.EvaluatedData.Attribute == GetMaxHealthAttribute()) {
-        if (GetHealth() > GetMaxHealth()) {
-            SetHealth(GetMaxHealth());
-        }
-    }
 }
 
 
@@ -389,13 +389,4 @@ EMythicLethalOutcome UMythicAttributeSet_Life::ResolveLethalOutcome(const bool b
         return EMythicLethalOutcome::Die;
     }
     return EMythicLethalOutcome::EnterDownState;
-}
-
-void UMythicAttributeSet_Life::ClampAttributes(const FGameplayAttribute &Attribute, float &NewValue) {
-    if (Attribute == GetHealthAttribute()) {
-        NewValue = FMath::Clamp(NewValue, 0.0f, GetMaxHealth());
-    }
-    else if (Attribute == GetMaxHealthAttribute()) {
-        NewValue = FMath::Max(NewValue, 1.0f);
-    }
 }

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AttributeSet.h"
 #include "MVVMViewModelBase.h"
 #include "GameplayTagContainer.h"
 #include "MythicPlayerStatusViewModel.generated.h"

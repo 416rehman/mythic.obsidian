@@ -196,12 +196,18 @@ void UMythicTerritoryPatrolSpawnerProcessor::Execute(FMassEntityManager &EntityM
                     Data.Identity.Faction = TC.DominantFaction;
                     Data.Identity.Cell = CandidateCell;
 
-                    const int32 SpawnSerial = PersistentRegistry->AllocateSpawnSerial();
-                    Data.Identity.NameHash = FMythicNPCGenerator::GenerateNameHash(
+                    const int32 SpawnSerial = PersistentRegistry->AllocateNameSeedSerial();
+                    Data.Identity.NameSeed = FMythicNPCGenerator::GenerateNameHash(
                         TC.DominantFaction.Index, CandidateCell, SpawnSerial);
-                    Data.Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(Data.Identity.NameHash, 8);
+                    Data.Identity.EntityId = PersistentRegistry->AllocateEntityIdentity(
+                        Data.Identity.NameSeed,
+                        EMythicEntityIdentityProvenance::TerritoryPatrol);
+                    if (!Data.Identity.EntityId.IsValid()) {
+                        continue;
+                    }
+                    Data.Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(Data.Identity.NameSeed, 8);
                     Data.Identity.DemographicFlags = FMythicNPCGenerator::GenerateDemographicFlags(
-                        Data.Identity.NameHash, FactionData.Population > 50);
+                        Data.Identity.NameSeed, FactionData.Population > 50);
 
                     Data.Identity.RoleTag = Settings->SoldierRoleTag.IsValid() ? Settings->SoldierRoleTag : TAG_NPC_ROLE_SOLDIER;
 
@@ -228,12 +234,18 @@ void UMythicTerritoryPatrolSpawnerProcessor::Execute(FMassEntityManager &EntityM
                         Data.Identity.Faction = TC.DominantFaction;
                         Data.Identity.Cell = CandidateCell;
 
-                        const int32 SpawnSerial = PersistentRegistry->AllocateSpawnSerial();
-                        Data.Identity.NameHash = FMythicNPCGenerator::GenerateNameHash(
+                        const int32 SpawnSerial = PersistentRegistry->AllocateNameSeedSerial();
+                        Data.Identity.NameSeed = FMythicNPCGenerator::GenerateNameHash(
                             TC.DominantFaction.Index, CandidateCell, SpawnSerial);
-                        Data.Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(Data.Identity.NameHash, 8);
+                        Data.Identity.EntityId = PersistentRegistry->AllocateEntityIdentity(
+                            Data.Identity.NameSeed,
+                            EMythicEntityIdentityProvenance::TerritoryTraveler);
+                        if (!Data.Identity.EntityId.IsValid()) {
+                            continue;
+                        }
+                        Data.Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(Data.Identity.NameSeed, 8);
                         Data.Identity.DemographicFlags = FMythicNPCGenerator::GenerateDemographicFlags(
-                            Data.Identity.NameHash, FactionData.Population > 50);
+                            Data.Identity.NameSeed, FactionData.Population > 50);
                         Data.Identity.RoleTag = Settings->TravelerRoleTag.IsValid() ? Settings->TravelerRoleTag : TAG_NPC_ROLE_TRAVELER;
 
                         Data.Schedule.Phase = EMythicSchedulePhase::Travel;

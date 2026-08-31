@@ -3,9 +3,11 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataTable.h"
+#include "GameplayTagContainer.h"
 #include "World/LivingWorld/Territory/MythicBiome.h"
 #include "CreatureSpeciesTypes.generated.h"
 
+class UMythicEntityIdentityDefinition;
 
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicCreatureSpeciesRow : public FTableRowBase {
@@ -15,9 +17,23 @@ struct MYTHIC_API FMythicCreatureSpeciesRow : public FTableRowBase {
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Creature")
     uint8 SpeciesId = 0;
 
-    /** Human-readable species name (debug/UI). */
+    /**
+     * Canonical Creature.Species.* identity used by codex, presentation, ecology, and authored rules. It is never an
+     * array index or localized string, and must be unique across the species table.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Creature", meta = (Categories = "Creature.Species"))
+    FGameplayTag SpeciesTag;
+
+    /** Player-facing localized species name used when the viewer has not learned an individual creature's name. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Creature")
-    FName DisplayName;
+    FText DisplayName;
+
+    /**
+     * Explicit public species/cover identity used by contextual presentation. SpeciesTag remains canonical ecology
+     * truth; leaving this empty presents a generic creature until the viewer learns more.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Creature|Presentation")
+    TSoftObjectPtr<UMythicEntityIdentityDefinition> PublicIdentityDefinition;
 
     /** Biome this species inhabits. The spawner only considers species whose Biome matches the cell's biome. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Creature")

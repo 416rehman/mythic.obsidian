@@ -144,8 +144,10 @@ FText UMythicWorldChronicleSubsystem::FormatEvent(const FMythicWorldEvent &Event
     const FString EventName = EventTagToReadable(Event.EventTag);
 
     FString SubjectName;
-    if ((Event.CategoryFlags & EMythicEventCategory::Death) != 0 && Event.PerpEntityId != 0) {
-        SubjectName = FMythicNPCGenerator::ReconstructNameFromHash(Event.PerpEntityId, Event.PrimaryFaction.Index).ToString();
+    if ((Event.CategoryFlags & EMythicEventCategory::Death) != 0
+        && Event.PerpEntityId.IsValid()) {
+        SubjectName = FMythicNPCGenerator::ReconstructNameFromHash(
+            Event.PerpNameSeed, Event.PrimaryFaction.Index).ToString();
     }
 
     auto FactionName = [LWS](const FMythicFactionId &Id) -> FString {

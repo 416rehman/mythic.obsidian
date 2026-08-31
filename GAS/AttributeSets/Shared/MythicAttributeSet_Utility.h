@@ -60,16 +60,14 @@ protected:
     UPROPERTY(BlueprintReadOnly, Category = "Utility", ReplicatedUsing = OnRep_HarvestWorkMultiplier)
     FGameplayAttributeData HarvestWorkMultiplier;
 
+    virtual TConstArrayView<FMythicBoundedAttributePair> GetBoundedAttributePairs() const override;
+
 public:
     UMythicAttributeSet_Utility();
 
     virtual void PreAttributeChange(const FGameplayAttribute &Attribute, float &NewValue) override;
 
     virtual void PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const override;
-
-    virtual void PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) override;
-
-    virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) override;
 
     static bool IsReductionFractionAttribute(const FGameplayAttribute &Attribute);
 

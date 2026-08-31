@@ -373,20 +373,36 @@ bool FLivingWorldPersistentNPCRegistryTest::RunTest(const FString &Parameters) {
 
     const FMythicFactionId F0 = LivingWorldTestHelpers::MakeFactionId(0);
     const FGameplayTag NoRole = FGameplayTag::EmptyTag;
-    Registry->RegisterDeath(1001u, F0, NoRole, FMythicCellCoord(3, 4), 100.0, nullptr);
-    Registry->RegisterDeath(1002u, F0, NoRole, FMythicCellCoord(5, 6), 200.0, nullptr);
+    const FMythicEntityId EntityA = Registry->AllocateEntityIdentity(
+        1001u, EMythicEntityIdentityProvenance::SettlementPopulation);
+    const FMythicEntityId EntityB = Registry->AllocateEntityIdentity(
+        1001u, EMythicEntityIdentityProvenance::SettlementPopulation);
+    TestTrue(TEXT("allocated identities are valid"), EntityA.IsValid() && EntityB.IsValid());
+    TestTrue(TEXT("equal name seeds do not alias identity"), EntityA != EntityB);
+    TestEqual(TEXT("identity count == 2"), Registry->GetIdentityCount(), 2);
+    TestFalse(TEXT("invalid provenance fails closed"),
+              Registry->AllocateEntityIdentity(
+                  9999u, EMythicEntityIdentityProvenance::Invalid).IsValid());
+    TestFalse(TEXT("invalid identity death is rejected"),
+              Registry->RegisterDeath(FMythicEntityId(), F0, NoRole,
+                                      FMythicCellCoord(0, 0), 1.0, nullptr));
 
-    TestTrue(TEXT("1001 is perma-dead"), Registry->IsPermaDead(1001u));
-    TestTrue(TEXT("1002 is perma-dead"), Registry->IsPermaDead(1002u));
-    TestFalse(TEXT("9999 is not perma-dead"), Registry->IsPermaDead(9999u));
-    TestEqual(TEXT("death count == 2"), Registry->GetDeathCount(), 2);
+    TestTrue(TEXT("first canonical death is committed"),
+             Registry->RegisterDeath(EntityA, F0, NoRole,
+                                     FMythicCellCoord(3, 4), 100.0, nullptr));
+    TestTrue(TEXT("EntityA is perma-dead"), Registry->IsPermaDead(EntityA));
+    TestFalse(TEXT("same-seed EntityB remains alive"), Registry->IsPermaDead(EntityB));
+    TestFalse(TEXT("invalid identity is not perma-dead"), Registry->IsPermaDead(FMythicEntityId()));
+    TestEqual(TEXT("death count == 1"), Registry->GetDeathCount(), 1);
 
-    Registry->RegisterDeath(1001u, F0, NoRole, FMythicCellCoord(3, 4), 150.0, nullptr);
-    TestEqual(TEXT("duplicate register is a no-op"), Registry->GetDeathCount(), 2);
+    TestFalse(TEXT("duplicate death is idempotent"),
+              Registry->RegisterDeath(EntityA, F0, NoRole,
+                                      FMythicCellCoord(3, 4), 150.0, nullptr));
+    TestEqual(TEXT("duplicate register remains one tombstone"), Registry->GetDeathCount(), 1);
 
-    const int32 Serial0 = Registry->AllocateSpawnSerial();
-    const int32 Serial1 = Registry->AllocateSpawnSerial();
-    const int32 Serial2 = Registry->AllocateSpawnSerial();
+    const int32 Serial0 = Registry->AllocateNameSeedSerial();
+    const int32 Serial1 = Registry->AllocateNameSeedSerial();
+    const int32 Serial2 = Registry->AllocateNameSeedSerial();
     TestEqual(TEXT("spawn serial increments (1)"), Serial1, Serial0 + 1);
     TestEqual(TEXT("spawn serial increments (2)"), Serial2, Serial1 + 1);
 
@@ -399,25 +415,29 @@ bool FLivingWorldPersistentNPCRegistryTest::RunTest(const FString &Parameters) {
     {
         FMemoryReader Reader(Bytes);
         Loaded->Serialize(Reader);
+        TestFalse(TEXT("round-trip archive has no error"), Reader.IsError());
     }
 
-    TestTrue(TEXT("loaded: 1001 perma-dead"), Loaded->IsPermaDead(1001u));
-    TestTrue(TEXT("loaded: 1002 perma-dead"), Loaded->IsPermaDead(1002u));
-    TestFalse(TEXT("loaded: 9999 not perma-dead"), Loaded->IsPermaDead(9999u));
-    TestEqual(TEXT("loaded: death count == 2"), Loaded->GetDeathCount(), 2);
-    TestEqual(TEXT("loaded: 2 death records"), Loaded->GetDeathRecords().Num(), 2);
+    TestTrue(TEXT("loaded: EntityA registered"), Loaded->ContainsEntityIdentity(EntityA));
+    TestTrue(TEXT("loaded: EntityB registered"), Loaded->ContainsEntityIdentity(EntityB));
+    TestTrue(TEXT("loaded: EntityA perma-dead"), Loaded->IsPermaDead(EntityA));
+    TestFalse(TEXT("loaded: same-seed EntityB alive"), Loaded->IsPermaDead(EntityB));
+    TestEqual(TEXT("loaded: identity count == 2"), Loaded->GetIdentityCount(), 2);
+    TestEqual(TEXT("loaded: death count == 1"), Loaded->GetDeathCount(), 1);
+    TestEqual(TEXT("loaded: 1 death record"), Loaded->GetDeathRecords().Num(), 1);
 
-    TestEqual(TEXT("loaded: spawn serial persisted (not reset to 0)"), Loaded->AllocateSpawnSerial(), Serial2 + 1);
+    TestEqual(TEXT("loaded: name-seed serial persisted"),
+              Loaded->AllocateNameSeedSerial(), Serial2 + 1);
 
     const TArray<FMythicPersistentDeathRecord> &Records = Loaded->GetDeathRecords();
-    const FMythicPersistentDeathRecord *Rec1001 = Records.FindByPredicate(
-        [](const FMythicPersistentDeathRecord &R) { return R.NameHash == 1001u; });
-    TestNotNull(TEXT("loaded: 1001 record exists"), Rec1001);
-    if (Rec1001) {
-        TestEqual(TEXT("loaded: 1001 cell.X"), Rec1001->DeathCell.X, 3);
-        TestEqual(TEXT("loaded: 1001 cell.Y"), Rec1001->DeathCell.Y, 4);
-        TestEqual(TEXT("loaded: 1001 faction index"), static_cast<int32>(Rec1001->Faction.Index), 0);
-        TestEqual(TEXT("loaded: 1001 death time"), Rec1001->DeathTime, 100.0);
+    const FMythicPersistentDeathRecord *EntityADeath = Records.FindByPredicate(
+        [&EntityA](const FMythicPersistentDeathRecord &R) { return R.EntityId == EntityA; });
+    TestNotNull(TEXT("loaded: EntityA death record exists"), EntityADeath);
+    if (EntityADeath) {
+        TestEqual(TEXT("loaded: EntityA cell.X"), EntityADeath->DeathCell.X, 3);
+        TestEqual(TEXT("loaded: EntityA cell.Y"), EntityADeath->DeathCell.Y, 4);
+        TestEqual(TEXT("loaded: EntityA faction index"), static_cast<int32>(EntityADeath->Faction.Index), 0);
+        TestEqual(TEXT("loaded: EntityA death time"), EntityADeath->DeathTime, 100.0);
     }
 
     return true;
@@ -575,7 +595,7 @@ bool FLivingWorldFactionDatabaseSerializeGuardTest::RunTest(const FString &Param
     TArray<uint8> BadBytes;
     {
         FMemoryWriter Writer(BadBytes);
-        int32 Version = 3;
+        int32 Version = 5;
         int32 GarbageMaxFactions = 100000;
         int32 RegCount = 0;
         Writer << Version;
@@ -1568,21 +1588,29 @@ bool FMythicPartyCrossPartyDuplicateTest::RunTest(const FString &Parameters) {
     using P = UMythicPartySubsystem;
     TMap<FString, TArray<FMythicPartyMember>> Parties;
 
-    TestFalse(TEXT("empty parties → no match"), P::AnyPartyContainsNameHash(Parties, 12345u));
+    const FMythicEntityId EntityA = FMythicEntityId::FromAuthorityGuid(
+        EMythicEntityDomain::LivingWorld, FGuid::NewGuid());
+    const FMythicEntityId EntityB = FMythicEntityId::FromAuthorityGuid(
+        EMythicEntityDomain::LivingWorld, FGuid::NewGuid());
+    TestFalse(TEXT("empty parties → no match"),
+              P::AnyPartyContainsEntityIdentity(Parties, EntityA));
 
     FMythicPartyMember M1;
-    M1.PersistedNameHash = 100;
+    M1.PersistedEntityId = EntityA;
     Parties.Add(TEXT("char-p1"), {M1});
 
-    TestTrue(TEXT("hash 100 in P1 → match (re-recruit blocked)"), P::AnyPartyContainsNameHash(Parties, 100u));
-    TestFalse(TEXT("hash 200 absent → no match"), P::AnyPartyContainsNameHash(Parties, 200u));
-    TestFalse(TEXT("hash 0 → never matches"), P::AnyPartyContainsNameHash(Parties, 0u));
+    TestTrue(TEXT("EntityA in P1 → match (re-recruit blocked)"),
+             P::AnyPartyContainsEntityIdentity(Parties, EntityA));
+    TestFalse(TEXT("EntityB absent → no match"),
+              P::AnyPartyContainsEntityIdentity(Parties, EntityB));
+    TestFalse(TEXT("invalid identity → never matches"),
+              P::AnyPartyContainsEntityIdentity(Parties, FMythicEntityId()));
 
     FMythicPartyMember M2;
-    M2.PersistedNameHash = 200;
+    M2.PersistedEntityId = EntityB;
     Parties.Add(TEXT("char-p2"), {M2});
-    TestTrue(TEXT("hash 200 now in P2 → cross-party match (co-op double-recruit blocked)"),
-             P::AnyPartyContainsNameHash(Parties, 200u));
+    TestTrue(TEXT("EntityB now in P2 → cross-party match (co-op double-recruit blocked)"),
+             P::AnyPartyContainsEntityIdentity(Parties, EntityB));
 
     return true;
 }
@@ -2252,7 +2280,7 @@ bool FMythicShopClaimEligibilityTest::RunTest(const FString &Parameters) {
     auto MakeShop = [](const FGameplayTag &Required) {
         FMythicShopSlot S;
         S.RequiredRole = Required;
-        S.OwnerEntityId = 0;
+        S.OwnerEntityId.Reset();
         S.VacatedTime = 0.0;
         S.bPlayerOwned = false;
         return S;
@@ -2263,7 +2291,8 @@ bool FMythicShopClaimEligibilityTest::RunTest(const FString &Parameters) {
     TestFalse(TEXT("non-matching role cannot claim"), Reg::CanClaimShop(MakeShop(RoleA), RoleB));
     {
         FMythicShopSlot S = MakeShop(RoleA);
-        S.OwnerEntityId = 42;
+        S.OwnerEntityId = FMythicEntityId::FromAuthorityGuid(
+            EMythicEntityDomain::LivingWorld, FGuid::NewGuid());
         TestFalse(TEXT("owned slot not claimable"), Reg::CanClaimShop(S, RoleA));
     }
     {

@@ -207,7 +207,9 @@ void UMythicActorSpawnProcessor::Execute(FMassEntityManager &EntityManager, FMas
             }
         }
 
-        if (Registry && Registry->IsPermaDead(Identity.NameHash)) {
+        if (!Registry
+            || !Registry->ContainsEntityIdentity(Identity.EntityId)
+            || Registry->IsPermaDead(Identity.EntityId)) {
             Context.Defer().RemoveTag<FMythicActorSpawnRequestTag>(Entity);
             SpawnDeferUntil.Remove(Entity);
             continue;
@@ -254,6 +256,14 @@ false, SpawnTM)) {
 
         NPC->InitializeFromMassEntity(Entity);
 
+        if (!NPC->ActivatePreparedEmbodiment()) {
+            LWS->ReleaseEmbodiedActor(Entity, NPC);
+            Context.Defer().AddTag<FMythicActorSpawnRequestTag>(Entity);
+            SpawnDeferUntil.Add(Entity, Now + static_cast<double>(Settings->SpawnDeferCooldownSeconds));
+            continue;
+        }
+
+        // The Mass lookup becomes resolvable only after the body has atomically committed GAS and presentation.
         LWS->RegisterEmbodiedActor(Entity, NPC);
 
         Context.Defer().AddTag<FMythicCognitiveTag>(Entity);
@@ -286,6 +296,14 @@ false, SpawnTM)) {
             }
         }
 
+        if (!Registry
+            || !Registry->ContainsEntityIdentity(Identity.EntityId)
+            || Registry->IsPermaDead(Identity.EntityId)) {
+            Context.Defer().RemoveTag<FMythicActorSpawnRequestTag>(Entity);
+            SpawnDeferUntil.Remove(Entity);
+            continue;
+        }
+
         if (LWS->FindEmbodiedActor(Entity)) {
             Context.Defer().RemoveTag<FMythicActorSpawnRequestTag>(Entity);
             SpawnDeferUntil.Remove(Entity);
@@ -313,6 +331,15 @@ false, SpawnTM)) {
 
         Creature->InitializeFromMassEntity(Entity);
 
+        if (!Creature->ActivatePreparedEmbodiment()) {
+            LWS->ReleaseEmbodiedActor(Entity, Creature);
+            Context.Defer().AddTag<FMythicActorSpawnRequestTag>(Entity);
+            SpawnDeferUntil.Add(Entity, Now + static_cast<double>(Settings->SpawnDeferCooldownSeconds));
+            continue;
+        }
+
+
+        // Never publish a prepared/failed creature body as the Mass entity's active embodiment.
         LWS->RegisterEmbodiedActor(Entity, Creature);
 
         Context.Defer().AddTag<FMythicCognitiveTag>(Entity);

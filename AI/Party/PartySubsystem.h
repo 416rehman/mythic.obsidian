@@ -33,7 +33,14 @@ public:
 
     bool AddCompanion(const FString &PlayerKey, AMythicNPCCharacter *NPC, FMassEntityHandle SourceEntity);
 
-    static bool AnyPartyContainsNameHash(const TMap<FString, TArray<FMythicPartyMember>> &AllParties, uint32 NameHash);
+    static bool AnyPartyContainsEntityIdentity(
+        const TMap<FString, TArray<FMythicPartyMember>> &AllParties,
+        const FMythicEntityId &EntityId);
+
+    /** Returns true when any live or save-restored party slot durably owns this canonical person. */
+    bool ReferencesEntityIdentity(const FMythicEntityId &EntityId) const {
+        return AnyPartyContainsEntityIdentity(PlayerParties, EntityId);
+    }
 
     static FString MakeLegacyPartyKey(int32 LegacyPlayerId);
 

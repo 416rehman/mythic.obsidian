@@ -76,6 +76,9 @@ public:
 
     int32 GetEntityCount() const;
 
+    /** Clears every Mass-handle edge during an in-place world restore before old entity handles are destroyed. */
+    void ResetForLivingWorldRestore();
+
 
     int32 PruneStaleEdges(double WorldTime, int32 MaxEntitiesPerCall = 10);
 

@@ -10,6 +10,7 @@
 #include "GameModes/GameState/MythicGameState.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/MythicTags_GAS.h"
+#include "GAS/Combat/MythicEntityCombatPresentationComponent.h"
 #include "Interfaces/OnlineIdentityInterface.h"
 
 #include "EngineUtils.h"
@@ -53,9 +54,19 @@
 #include "Itemization/Inventory/Fragments/Passive/PlaceableFragment.h"
 #include "Engine/AssetManager.h"
 #include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/StreamableManager.h"
+#include "GameFramework/GameStateBase.h"
 #include "Interaction/IMythicInteractable.h"
 #include "Interaction/MythicInteractionComponent.h"
+#include "Interaction/Attention/MythicEntityAttentionSubsystem.h"
+#include "Interaction/ContextActions/MythicContextActionDefinition.h"
+#include "Interaction/ContextActions/MythicContextActionProjectionPolicy.h"
+#include "Interaction/ContextActions/MythicContextActionProvider.h"
+#include "Interaction/ContextActions/MythicEntityActionGrantComponent.h"
+#include "Interaction/ContextActions/MythicTags_ContextActions.h"
+#include "World/Entity/MythicEntityPresentationComponent.h"
+#include "World/Entity/MythicEntityPresentationRegistry.h"
 #include "World/EnvironmentController/MythicEnvironmentHazardComponent.h"
 #include "World/LivingWorld/Chronicle/MythicChronicleRelayComponent.h"
 #include "World/LivingWorld/LivingWorldSubsystem.h"
@@ -100,6 +111,242 @@ void MythicStampItemIdentity(FGameplayEventData &Payload, const UItemDefinition 
             Payload.TargetTags.AddTag(QT);
         }
     }
+}
+
+FGameplayTag MythicSanitizeContextActionFailure(const FGameplayTag Candidate) {
+    return Candidate.IsValid()
+               && Candidate.MatchesTag(CONTEXT_ACTION_REASON_ROOT)
+               && !Candidate.MatchesTagExact(CONTEXT_ACTION_REASON_ROOT)
+           ? Candidate
+           : CONTEXT_ACTION_REASON_UNAVAILABLE;
+}
+
+bool MythicDoesContextActionProviderBelongToSubject(UObject *Provider,
+                                                    AActor *Subject) {
+    if (!IsValid(Provider) || !IsValid(Subject)) {
+        return false;
+    }
+    if (const AActor *ProviderActor = Cast<AActor>(Provider)) {
+        return ProviderActor == Subject;
+    }
+    if (const UActorComponent *ProviderComponent =
+            Cast<UActorComponent>(Provider)) {
+        return ProviderComponent->GetOwner() == Subject;
+    }
+    return false;
+}
+
+bool MythicValidateContextActionSpatialRules(AMythicPlayerController *Controller,
+                                             AActor *Subject,
+                                             const FVector SubjectLocation,
+                                             const UMythicContextActionDefinition &Definition,
+                                             const FMythicContextActionProjectionRuntimePolicy &Policy,
+                                             FGameplayTag &OutFailureReason) {
+    APawn *ViewerPawn = Controller ? Controller->GetPawn() : nullptr;
+    UWorld *World = Controller ? Controller->GetWorld() : nullptr;
+    if (!Controller || !ViewerPawn || !World || !IsValid(Subject) || !Policy.bValid
+        || SubjectLocation.ContainsNaN()) {
+        OutFailureReason = CONTEXT_ACTION_REASON_INVALID_TARGET;
+        return false;
+    }
+
+    FVector ViewLocation;
+    FRotator ViewRotation;
+    Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+    if (Definition.FocusPolicy == EMythicContextActionFocusPolicy::LockedSubject) {
+        // A remote client's local lock state is never trusted; wire a server-owned combat lock before enabling this policy.
+        OutFailureReason = CONTEXT_ACTION_REASON_NOT_FOCUSED;
+        return false;
+    }
+    if (Definition.FocusPolicy == EMythicContextActionFocusPolicy::FocusedSubject
+        || Definition.FocusPolicy == EMythicContextActionFocusPolicy::FocusedOrLockedSubject) {
+        const FVector DirectionToSubject = (SubjectLocation - ViewLocation).GetSafeNormal();
+        const float MinimumFocusDot =
+            FMath::Cos(FMath::DegreesToRadians(Definition.MaximumFocusAngleDegrees));
+        if (DirectionToSubject.IsNearlyZero()
+            || FVector::DotProduct(ViewRotation.Vector(), DirectionToSubject) < MinimumFocusDot) {
+            OutFailureReason = CONTEXT_ACTION_REASON_NOT_FOCUSED;
+            return false;
+        }
+    }
+
+    if (Definition.RangePolicy == EMythicContextActionRangePolicy::DefinitionRange) {
+        if (!FMath::IsFinite(Definition.MaximumRangeCentimeters)
+            || Definition.MaximumRangeCentimeters <= 0.0f
+            || FVector::DistSquared(ViewerPawn->GetActorLocation(), SubjectLocation)
+                   > FMath::Square(Definition.MaximumRangeCentimeters)) {
+            OutFailureReason = CONTEXT_ACTION_REASON_OUT_OF_RANGE;
+            return false;
+        }
+    }
+
+    if (Definition.LineOfSightPolicy != EMythicContextActionLineOfSightPolicy::NotRequired) {
+        FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MythicContextActionLineOfSight),
+                                          Policy.bTraceComplex, ViewerPawn);
+        QueryParams.AddIgnoredActor(ViewerPawn);
+        QueryParams.AddIgnoredActor(Controller);
+        QueryParams.AddIgnoredActor(Subject);
+        const FVector TraceStart =
+            Definition.LineOfSightPolicy
+                    == EMythicContextActionLineOfSightPolicy::ViewerPawnToSubject
+                ? ViewerPawn->GetActorLocation()
+                : ViewLocation;
+        if (World->LineTraceTestByChannel(
+                TraceStart, SubjectLocation,
+                Policy.DiscoveryTraceChannel, QueryParams)) {
+            OutFailureReason = CONTEXT_ACTION_REASON_OBSTRUCTED;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool MythicValidateContextActionDiscovery(
+    AMythicPlayerController *Controller, AActor *Subject,
+    const FVector SubjectLocation,
+    const FMythicContextActionProjectionRuntimePolicy &Policy,
+    FVector &OutViewLocation, FVector &OutViewForward,
+    float &OutDistanceSquared, FGameplayTag &OutFailureReason) {
+    OutViewLocation = FVector::ZeroVector;
+    OutViewForward = FVector::ForwardVector;
+    OutDistanceSquared = 0.0f;
+    OutFailureReason = CONTEXT_ACTION_REASON_INVALID_TARGET;
+
+    APawn *ViewerPawn = Controller ? Controller->GetPawn() : nullptr;
+    UWorld *World = Controller ? Controller->GetWorld() : nullptr;
+    if (!Controller || !ViewerPawn || !World || !IsValid(Subject) || !Policy.bValid
+        || Subject->GetWorld() != World || SubjectLocation.ContainsNaN()) {
+        return false;
+    }
+
+    OutDistanceSquared = FVector::DistSquared(
+        ViewerPawn->GetActorLocation(), SubjectLocation);
+    if (OutDistanceSquared
+        > FMath::Square(Policy.MaximumDiscoveryRangeCentimeters)) {
+        OutFailureReason = CONTEXT_ACTION_REASON_OUT_OF_RANGE;
+        return false;
+    }
+
+    FRotator ViewRotation;
+    Controller->GetPlayerViewPoint(OutViewLocation, ViewRotation);
+    if (OutViewLocation.ContainsNaN() || ViewRotation.ContainsNaN()) {
+        return false;
+    }
+    OutViewForward = ViewRotation.Vector();
+
+    FCollisionQueryParams QueryParams(
+        SCENE_QUERY_STAT(MythicContextActionDiscoveryLineOfSight),
+        Policy.bTraceComplex, ViewerPawn);
+    QueryParams.AddIgnoredActor(ViewerPawn);
+    QueryParams.AddIgnoredActor(Controller);
+    QueryParams.AddIgnoredActor(Subject);
+    if (World->LineTraceTestByChannel(
+            OutViewLocation, SubjectLocation,
+            Policy.DiscoveryTraceChannel, QueryParams)) {
+        OutFailureReason = CONTEXT_ACTION_REASON_OBSTRUCTED;
+        return false;
+    }
+    OutFailureReason = FGameplayTag();
+    return true;
+}
+
+bool MythicPrepareProjectedContextActionOffer(
+    const FMythicContextActionOffer &SourceOffer,
+    const FVector ViewerLocation, const FVector ViewForward,
+    const FVector SubjectLocation, const float SubjectDistanceSquared,
+    FMythicContextActionOffer &OutOffer) {
+    OutOffer = SourceOffer;
+    const UMythicContextActionDefinition *Definition = SourceOffer.Definition;
+    if (!IsValid(Definition)) {
+        return false;
+    }
+
+    if (Definition->FocusPolicy == EMythicContextActionFocusPolicy::LockedSubject) {
+        // Server-owned combat lock integration is required before LockedSubject definitions may project.
+        return false;
+    }
+    if (Definition->FocusPolicy == EMythicContextActionFocusPolicy::FocusedSubject
+        || Definition->FocusPolicy == EMythicContextActionFocusPolicy::FocusedOrLockedSubject) {
+        if (!FMath::IsFinite(Definition->MaximumFocusAngleDegrees)
+            || Definition->MaximumFocusAngleDegrees <= 0.0f
+            || Definition->MaximumFocusAngleDegrees > 90.0f) {
+            return false;
+        }
+        const FVector DirectionToSubject =
+            (SubjectLocation - ViewerLocation).GetSafeNormal();
+        const float MinimumFocusDot = FMath::Cos(FMath::DegreesToRadians(
+            Definition->MaximumFocusAngleDegrees));
+        if (DirectionToSubject.IsNearlyZero()
+            || FVector::DotProduct(ViewForward, DirectionToSubject)
+                   < MinimumFocusDot) {
+            return false;
+        }
+    }
+
+    if (Definition->RangePolicy == EMythicContextActionRangePolicy::DefinitionRange
+        && (!FMath::IsFinite(Definition->MaximumRangeCentimeters)
+            || Definition->MaximumRangeCentimeters <= 0.0f
+            || SubjectDistanceSquared
+                   > FMath::Square(Definition->MaximumRangeCentimeters))) {
+        if (!Definition->bExplainWhenUnavailable) {
+            return false;
+        }
+        OutOffer.Availability =
+            EMythicContextActionAvailability::UnavailableWithReason;
+        OutOffer.UnavailableReasonTag = CONTEXT_ACTION_REASON_OUT_OF_RANGE;
+    }
+    return true;
+}
+
+bool MythicValidateFocusedCombatPresentation(
+    AMythicPlayerController *Controller, AActor *Subject,
+    const FVector SubjectAnchor,
+    const FMythicCombatPresentationProjectionPolicy &Policy) {
+    APawn *ViewerPawn = Controller ? Controller->GetPawn() : nullptr;
+    UWorld *World = Controller ? Controller->GetWorld() : nullptr;
+    if (!Controller || !ViewerPawn || !World || !IsValid(Subject)
+        || Subject == ViewerPawn || Subject->GetWorld() != World
+        || SubjectAnchor.ContainsNaN() || !Policy.IsValid()) {
+        return false;
+    }
+
+    FVector ViewLocation;
+    FRotator ViewRotation;
+    Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+    if (ViewLocation.ContainsNaN() || ViewRotation.ContainsNaN()) {
+        return false;
+    }
+    const FVector ToSubject = SubjectAnchor - ViewLocation;
+    const FVector DirectionToSubject = ToSubject.GetSafeNormal();
+    const float ViewDot = DirectionToSubject.IsNearlyZero()
+        ? 1.0f : FVector::DotProduct(ViewRotation.Vector(), DirectionToSubject);
+    const float DistanceSquared = FVector::DistSquared(
+        ViewerPawn->GetActorLocation(), SubjectAnchor);
+
+    FCollisionQueryParams QueryParams(
+        SCENE_QUERY_STAT(MythicFocusedCombatPresentationLineOfSight),
+        Policy.bTraceComplex, ViewerPawn);
+    QueryParams.AddIgnoredActor(ViewerPawn);
+    QueryParams.AddIgnoredActor(Controller);
+    QueryParams.AddIgnoredActor(Subject);
+    const bool bAnchorVisible = !World->LineTraceTestByChannel(
+        ViewLocation, SubjectAnchor, Policy.LineOfSightTraceChannel,
+        QueryParams);
+    FVector SubjectBoundsOrigin = SubjectAnchor;
+    FVector SubjectBoundsExtent = FVector::ZeroVector;
+    Subject->GetActorBounds(false, SubjectBoundsOrigin, SubjectBoundsExtent);
+    const FVector SubjectTorso = SubjectBoundsOrigin
+        + FVector(0.0, 0.0, SubjectBoundsExtent.Z * 0.20);
+    const bool bTorsoSampleValid = !SubjectTorso.ContainsNaN();
+    const bool bTorsoVisible = bTorsoSampleValid
+        && !World->LineTraceTestByChannel(
+            ViewLocation, SubjectTorso,
+            Policy.LineOfSightTraceChannel, QueryParams);
+    const bool bHasLineOfSight = bAnchorVisible || bTorsoVisible;
+    return FMythicCombatPresentationProjectionRules::IsSpatiallyEligible(
+        DistanceSquared, ViewDot, bHasLineOfSight, Policy);
 }
 }
 
@@ -150,6 +397,7 @@ UMythicInventoryComponent *AMythicPlayerController::GetInventoryForItemType(cons
 void AMythicPlayerController::OnPossess(APawn *InPawn) {
     Super::OnPossess(InPawn);
     LastPresentedHarvestFeedbackSequence = 0;
+    BindContextActionAttention();
 
     if (AMythicPlayerState *PS = GetPlayerState<AMythicPlayerState>()) {
         if (UMythicPlayerRegistrySubsystem *Registry = GetWorld() ? GetWorld()->GetSubsystem<UMythicPlayerRegistrySubsystem>() : nullptr) {
@@ -170,21 +418,49 @@ void AMythicPlayerController::OnUnPossess() {
         Registry->UnregisterObject(this);
     }
 
+    if (HasAuthority()) {
+        EnterContextActionAuthorityBarrier();
+        ClearAuthorityCombatPresentationFocus();
+    }
+    else if (IsLocalController()) {
+        RequestContextActionOfferRefresh(
+            FMythicEntityPresentationInstance());
+    }
+
     Super::OnUnPossess();
     if (HarvestFocusComponent) {
         HarvestFocusComponent->RefreshLocalFocus();
     }
 }
 
+void AMythicPlayerController::SeamlessTravelTo(APlayerController *NewPC) {
+    if (HasAuthority()) {
+        EnterContextActionAuthorityBarrier();
+    }
+    Super::SeamlessTravelTo(NewPC);
+}
+
+void AMythicPlayerController::PreClientTravel(
+    const FString &PendingURL, const ETravelType TravelType,
+    const bool bIsSeamlessTravel) {
+    if (HasAuthority()) {
+        EnterContextActionAuthorityBarrier();
+    }
+    Super::PreClientTravel(PendingURL, TravelType, bIsSeamlessTravel);
+}
+
 void AMythicPlayerController::OnRep_PlayerState() {
     Super::OnRep_PlayerState();
 
     LastPresentedHarvestFeedbackSequence = 0;
+    BindContextActionAttention();
     OnPossessedOnClient();
 }
 
 void AMythicPlayerController::BeginPlay() {
     Super::BeginPlay();
+
+    BindContextActionAttention();
 
     if (HasAuthority() && GetWorld() && ZoneCheckInterval > 0.0f) {
         GetWorld()->GetTimerManager().SetTimer(ZoneCheckTimerHandle, this, &AMythicPlayerController::CheckZoneEntry,
@@ -195,6 +471,577 @@ void AMythicPlayerController::BeginPlay() {
         auto LocalIndex = LocalPlayer->GetLocalPlayerIndex();
         this->Login(LocalIndex);
     }
+}
+
+void AMythicPlayerController::BindContextActionAttention() {
+    ULocalPlayer *LocalPlayer = GetLocalPlayer();
+    UMythicEntityAttentionSubsystem *Attention =
+        LocalPlayer
+            ? LocalPlayer->GetSubsystem<UMythicEntityAttentionSubsystem>()
+            : nullptr;
+    if (!Attention || BoundContextActionAttentionSubsystem.Get() == Attention) {
+        return;
+    }
+
+    UnbindContextActionAttention();
+    BoundContextActionAttentionSubsystem = Attention;
+    ContextActionFocusChangedHandle =
+        Attention->OnFocusedEntityChanged.AddUObject(
+            this, &AMythicPlayerController::HandleContextActionFocusChanged);
+    RequestContextActionOfferRefresh(Attention->GetFocusedInstance());
+}
+
+void AMythicPlayerController::UnbindContextActionAttention() {
+    if (UMythicEntityAttentionSubsystem *Attention =
+            BoundContextActionAttentionSubsystem.Get();
+        Attention && ContextActionFocusChangedHandle.IsValid()) {
+        Attention->OnFocusedEntityChanged.Remove(
+            ContextActionFocusChangedHandle);
+    }
+    ContextActionFocusChangedHandle.Reset();
+    BoundContextActionAttentionSubsystem.Reset();
+}
+
+void AMythicPlayerController::HandleContextActionFocusChanged(
+    const FMythicEntityPresentationInstance &PreviousSubject,
+    const FMythicEntityPresentationInstance &NewSubject) {
+    (void)PreviousSubject;
+    RequestContextActionOfferRefresh(NewSubject);
+}
+
+void AMythicPlayerController::RequestContextActionOfferRefresh(
+    const FMythicEntityPresentationInstance Subject) {
+    if (!IsLocalController()) {
+        return;
+    }
+    ServerRequestContextActionOfferRefresh(Subject);
+}
+
+UMythicEntityCombatPresentationComponent *
+AMythicPlayerController::ResolveEntityCombatPresentationComponent() const {
+    const AMythicPlayerState *MythicPS = GetPlayerState<AMythicPlayerState>();
+    return MythicPS ? MythicPS->GetEntityCombatPresentationComponent()
+                    : nullptr;
+}
+
+double AMythicPlayerController::GetCombatPresentationRequestClockSeconds() const {
+    return GetWorld() ? FPlatformTime::Seconds() : 0.0;
+}
+
+double AMythicPlayerController::GetCombatPresentationLeaseClockSeconds() const {
+    const UWorld *World = GetWorld();
+    if (!World) {
+        return 0.0;
+    }
+    if (const AGameStateBase *GameState = World->GetGameState()) {
+        return static_cast<double>(GameState->GetServerWorldTimeSeconds());
+    }
+    return HasAuthority() ? static_cast<double>(World->GetTimeSeconds()) : 0.0;
+}
+
+void AMythicPlayerController::ScheduleCombatPresentationRefresh(
+    const float DelaySeconds) {
+    UWorld *World = GetWorld();
+    if (!HasAuthority() || !World
+        || !AuthorityRequestedCombatPresentationSubject.IsValid()
+        || !FMath::IsFinite(DelaySeconds)) {
+        return;
+    }
+    World->GetTimerManager().SetTimer(
+        CombatPresentationRefreshTimerHandle, this,
+        &ThisClass::AuthorityRefreshFocusedCombatPresentation,
+        FMath::Max(0.01f, DelaySeconds), false);
+}
+
+void AMythicPlayerController::ClearAuthorityCombatPresentationFocus() {
+    if (!HasAuthority()) {
+        return;
+    }
+    if (UMythicEntityCombatPresentationComponent *CombatPresentation =
+            ResolveEntityCombatPresentationComponent()) {
+        CombatPresentation->AuthorityRevokeAllCombatPresentations();
+    }
+    AuthorityRequestedCombatPresentationSubject.Reset();
+    if (UWorld *World = GetWorld()) {
+        World->GetTimerManager().ClearTimer(
+            CombatPresentationRefreshTimerHandle);
+    }
+}
+
+void AMythicPlayerController::AuthoritySetCombatPresentationFocus(
+    const FMythicEntityPresentationInstance Subject) {
+    if (!HasAuthority()) {
+        return;
+    }
+
+    UWorld *World = GetWorld();
+    UMythicEntityCombatPresentationComponent *CombatPresentation =
+        ResolveEntityCombatPresentationComponent();
+    const FMythicEntityPresentationInstance PreviousSubject =
+        AuthorityRequestedCombatPresentationSubject;
+    if (CombatPresentation && PreviousSubject.IsValid()
+        && PreviousSubject != Subject) {
+        CombatPresentation->AuthorityRevokeCombatPresentation(
+            PreviousSubject);
+    }
+
+    AuthorityRequestedCombatPresentationSubject = Subject;
+    if (!Subject.IsValid() || !World) {
+        ClearAuthorityCombatPresentationFocus();
+        return;
+    }
+    if (!CombatPresentationProjectionPolicy.IsValid()) {
+        ClearAuthorityCombatPresentationFocus();
+        if (!bCombatPresentationPolicyWarningEmitted) {
+            bCombatPresentationPolicyWarningEmitted = true;
+            UE_LOG(Myth, Error,
+                   TEXT("%s cannot project focused combat reads because its Combat Presentation Projection Policy is invalid."),
+                   *GetNameSafe(this));
+        }
+        return;
+    }
+
+    const double Now = GetCombatPresentationRequestClockSeconds();
+    const double Delay =
+        FMythicCombatPresentationProjectionRules::GetRequestThrottleDelaySeconds(
+            Now, LastCombatPresentationClientRequestSeconds,
+            CombatPresentationProjectionPolicy.MinimumClientRequestIntervalSeconds);
+    if (!FMath::IsFinite(Delay)) {
+        ClearAuthorityCombatPresentationFocus();
+        return;
+    }
+    if (Delay > 0.0) {
+        ScheduleCombatPresentationRefresh(static_cast<float>(Delay));
+        return;
+    }
+    LastCombatPresentationClientRequestSeconds = Now;
+    AuthorityRefreshFocusedCombatPresentation();
+}
+
+void AMythicPlayerController::AuthorityRefreshFocusedCombatPresentation() {
+    if (!HasAuthority()) {
+        return;
+    }
+
+    const FMythicEntityPresentationInstance Subject =
+        AuthorityRequestedCombatPresentationSubject;
+    UWorld *World = GetWorld();
+    UMythicEntityCombatPresentationComponent *CombatPresentation =
+        ResolveEntityCombatPresentationComponent();
+    if (!World || !Subject.IsValid()
+        || !CombatPresentationProjectionPolicy.IsValid()) {
+        ClearAuthorityCombatPresentationFocus();
+        return;
+    }
+    if (!CombatPresentation) {
+        ScheduleCombatPresentationRefresh(
+            CombatPresentationProjectionPolicy.AuthorityRefreshIntervalSeconds);
+        return;
+    }
+
+    UMythicEntityPresentationRegistry *Registry =
+        World->GetSubsystem<UMythicEntityPresentationRegistry>();
+    UMythicEntityPresentationComponent *Presentation =
+        Registry ? Registry->ResolvePresentationComponent(Subject) : nullptr;
+    AActor *SubjectActor = Presentation ? Presentation->GetOwner() : nullptr;
+    if (!Presentation || !IsValid(SubjectActor)
+        || Presentation->GetPresentationInstance() != Subject) {
+        CombatPresentation->AuthorityRevokeCombatPresentation(Subject);
+        AuthorityRequestedCombatPresentationSubject.Reset();
+        World->GetTimerManager().ClearTimer(
+            CombatPresentationRefreshTimerHandle);
+        return;
+    }
+
+    if (!MythicValidateFocusedCombatPresentation(
+            this, SubjectActor,
+            Presentation->GetPresentationAnchorWorldLocation(),
+            CombatPresentationProjectionPolicy)) {
+        CombatPresentation->AuthorityRevokeCombatPresentation(Subject);
+        ScheduleCombatPresentationRefresh(
+            CombatPresentationProjectionPolicy.AuthorityRefreshIntervalSeconds);
+        return;
+    }
+
+    UAbilitySystemComponent *ViewerAbilitySystem = GetAbilitySystemComponent();
+    UAbilitySystemComponent *SubjectAbilitySystem =
+        FMythicCombatPresentationProjectionRules::ResolveAbilitySystem(
+            SubjectActor);
+    const APawn *ViewerPawn = GetPawn();
+    const bool bPublicCombatCommitment =
+        FMythicCombatPresentationProjectionRules::HasPublicCombatCommitment(
+            SubjectActor, SubjectAbilitySystem, ViewerPawn);
+    FMythicCombatPressureSnapshot ViewerSnapshot;
+    FMythicCombatPressureSnapshot SubjectSnapshot;
+    if (bPublicCombatCommitment) {
+        ViewerSnapshot = FMythicCombatPresentationProjectionRules::
+            BuildAuthorityPressureSnapshot(
+                this, GetPawn(), ViewerAbilitySystem);
+        SubjectSnapshot = FMythicCombatPresentationProjectionRules::
+            BuildAuthorityPressureSnapshot(
+                SubjectActor, SubjectActor, SubjectAbilitySystem);
+    }
+    const EMythicPresentedCombatRank CanonicalPresentedRank =
+        FMythicCombatPresentationProjectionRules::
+            ResolveAuthorityNpcPresentedCombatRank(
+                Cast<AMythicNPCCharacter>(SubjectActor));
+
+    FMythicEntityCombatPresentationAuthorityRequest Request;
+    Request.Subject = Subject;
+    Request.AssessmentInputs.bAssessmentPermitted =
+        bPublicCombatCommitment;
+    Request.AssessmentInputs.bCombatCapable =
+        SubjectSnapshot.bCombatCapable;
+    Request.AssessmentInputs.ViewerEffectivePressure =
+        FMythicCombatPresentationProjectionRules::ComputeEffectivePressure(
+            ViewerSnapshot);
+    Request.AssessmentInputs.SubjectEffectivePressure =
+        FMythicCombatPresentationProjectionRules::ComputeEffectivePressure(
+            SubjectSnapshot);
+    Request.PresentedCombatRank = CanonicalPresentedRank;
+    Request.bRankPresentationPermitted = bPublicCombatCommitment
+        && CanonicalPresentedRank != EMythicPresentedCombatRank::Unknown;
+    Request.SubjectCombatLevel =
+        FMythicCombatPresentationProjectionRules::
+            ResolveAuthorityCombatLevel(
+                SubjectActor, SubjectAbilitySystem);
+    Request.bExactCombatLevelPermitted = bPublicCombatCommitment
+        && SubjectSnapshot.bCombatCapable
+        && Request.SubjectCombatLevel > 0
+        && CombatPresentationProjectionPolicy.bPermitExactCombatLevelForFocus;
+    CombatPresentationSourceRevision =
+        FMythicCombatPresentationProjectionRules::AdvanceNonzeroRevision(
+            CombatPresentationSourceRevision);
+    Request.SourceRevision = CombatPresentationSourceRevision;
+    Request.ExpiryServerTimeSeconds = GetCombatPresentationLeaseClockSeconds()
+        + static_cast<double>(CombatPresentationProjectionPolicy.PresentationLeaseDurationSeconds);
+
+    if (!CombatPresentation->AuthoritySetCombatPresentation(Request)) {
+        CombatPresentation->AuthorityRevokeCombatPresentation(Subject);
+        AuthorityRequestedCombatPresentationSubject.Reset();
+        World->GetTimerManager().ClearTimer(
+            CombatPresentationRefreshTimerHandle);
+        return;
+    }
+    ScheduleCombatPresentationRefresh(
+        CombatPresentationProjectionPolicy.AuthorityRefreshIntervalSeconds);
+}
+
+UMythicEntityActionGrantComponent *
+AMythicPlayerController::ResolveEntityActionGrantComponent() const {
+    const AMythicPlayerState *MythicPlayerState =
+        GetPlayerState<AMythicPlayerState>();
+    return MythicPlayerState
+               ? MythicPlayerState->GetEntityActionGrantComponent()
+               : nullptr;
+}
+
+double AMythicPlayerController::GetContextActionRequestClockSeconds() const {
+    return GetWorld() ? FPlatformTime::Seconds() : 0.0;
+}
+
+double AMythicPlayerController::GetContextActionLeaseClockSeconds() const {
+    const UWorld *World = GetWorld();
+    if (!World) {
+        return 0.0;
+    }
+    if (const AGameStateBase *GameState = World->GetGameState()) {
+        return static_cast<double>(GameState->GetServerWorldTimeSeconds());
+    }
+    return HasAuthority() ? static_cast<double>(World->GetTimeSeconds()) : 0.0;
+}
+
+void AMythicPlayerController::ScheduleContextActionOfferRefresh(
+    const float DelaySeconds) {
+    UWorld *World = GetWorld();
+    if (!HasAuthority() || !World
+        || !AuthorityRequestedContextActionSubject.IsValid()
+        || !FMath::IsFinite(DelaySeconds)) {
+        return;
+    }
+    World->GetTimerManager().SetTimer(
+        ContextActionOfferRefreshTimerHandle, this,
+        &AMythicPlayerController::AuthorityRefreshContextActionOffers,
+        FMath::Max(DelaySeconds, 0.01f), false);
+}
+
+void AMythicPlayerController::ServerRequestContextActionOfferRefresh_Implementation(
+    const FMythicEntityPresentationInstance Subject) {
+    if (!HasAuthority()) {
+        return;
+    }
+
+    // One opaque focus edge drives both independent server projections. Combat never consumes context-action policy,
+    // provider output, client attributes, or UI state; sharing only the nomination avoids a second spoofable RPC path.
+    AuthoritySetCombatPresentationFocus(Subject);
+
+    UMythicEntityActionGrantComponent *Grants =
+        ResolveEntityActionGrantComponent();
+    const FMythicEntityPresentationInstance PreviousSubject =
+        AuthorityRequestedContextActionSubject;
+    if (PendingContextActionHold.IsActive()
+        && PendingContextActionHold.Subject != Subject) {
+        ResetPendingContextActionHold();
+    }
+    if (Grants && PreviousSubject.IsValid() && PreviousSubject != Subject) {
+        Grants->AuthorityRevokeSubjectGrants(PreviousSubject);
+    }
+
+    AuthorityRequestedContextActionSubject = Subject;
+    UWorld *World = GetWorld();
+    if (!Subject.IsValid() || !World) {
+        AuthorityRequestedContextActionSubject.Reset();
+        if (World) {
+            World->GetTimerManager().ClearTimer(
+                ContextActionOfferRefreshTimerHandle);
+        }
+        return;
+    }
+
+    const FMythicContextActionProjectionRuntimePolicy Policy =
+        FMythicContextActionProjectionRules::BuildRuntimePolicy(
+            ContextActionProjectionPolicy);
+    if (!Policy.bValid) {
+        ResetPendingContextActionHold();
+        if (Grants) {
+            Grants->AuthorityRevokeSubjectGrants(Subject);
+        }
+        AuthorityRequestedContextActionSubject.Reset();
+        World->GetTimerManager().ClearTimer(
+            ContextActionOfferRefreshTimerHandle);
+        if (!bContextActionPolicyWarningEmitted) {
+            bContextActionPolicyWarningEmitted = true;
+            UE_LOG(Myth, Error,
+                   TEXT("%s cannot project context actions because its Context Action Projection Policy is missing or invalid."),
+                   *GetNameSafe(this));
+        }
+        return;
+    }
+
+    const double Delay =
+        FMythicContextActionProjectionRules::GetRequestThrottleDelaySeconds(
+            GetContextActionRequestClockSeconds(),
+            LastContextActionProjectionSeconds,
+            Policy.MinimumClientRequestIntervalSeconds);
+    if (!FMath::IsFinite(Delay)) {
+        ResetPendingContextActionHold();
+        if (Grants) {
+            Grants->AuthorityRevokeSubjectGrants(Subject);
+        }
+        AuthorityRequestedContextActionSubject.Reset();
+        World->GetTimerManager().ClearTimer(
+            ContextActionOfferRefreshTimerHandle);
+        return;
+    }
+    if (Delay > 0.0) {
+        ScheduleContextActionOfferRefresh(static_cast<float>(Delay));
+        return;
+    }
+    AuthorityRefreshContextActionOffers();
+}
+
+void AMythicPlayerController::AuthorityRefreshContextActionOffers() {
+    if (!HasAuthority()) {
+        return;
+    }
+
+    const FMythicContextActionProjectionRuntimePolicy Policy =
+        FMythicContextActionProjectionRules::BuildRuntimePolicy(
+            ContextActionProjectionPolicy);
+    UMythicEntityActionGrantComponent *Grants =
+        ResolveEntityActionGrantComponent();
+    const FMythicEntityPresentationInstance Subject =
+        AuthorityRequestedContextActionSubject;
+    UWorld *World = GetWorld();
+    if (Policy.bValid && Subject.IsValid() && World) {
+        // Consuming the budget precedes all fallible dependencies, so a not-yet-ready PlayerState cannot bypass it.
+        LastContextActionProjectionSeconds =
+            GetContextActionRequestClockSeconds();
+    }
+    if (!Policy.bValid || !Grants || !Subject.IsValid() || !World) {
+        if (PendingContextActionHold.IsActive()
+            && PendingContextActionHold.Subject == Subject) {
+            ResetPendingContextActionHold();
+        }
+        if (Grants && Subject.IsValid()) {
+            Grants->AuthorityRevokeSubjectGrants(Subject);
+        }
+        if (!Policy.bValid || !Subject.IsValid() || !World) {
+            AuthorityRequestedContextActionSubject.Reset();
+        }
+        else {
+            ScheduleContextActionOfferRefresh(
+                Policy.AuthorityRefreshIntervalSeconds);
+        }
+        return;
+    }
+
+    UMythicEntityPresentationRegistry *Registry =
+        World->GetSubsystem<UMythicEntityPresentationRegistry>();
+    UMythicEntityPresentationComponent *Presentation =
+        Registry ? Registry->ResolvePresentationComponent(Subject) : nullptr;
+    AActor *SubjectActor = Presentation ? Presentation->GetOwner() : nullptr;
+    if (!Presentation || !IsValid(SubjectActor)
+        || !FMythicContextActionProjectionRules::IsExactResolvedSubject(
+            Subject, Presentation->GetPresentationInstance())) {
+        if (PendingContextActionHold.Subject == Subject) {
+            ResetPendingContextActionHold();
+        }
+        Grants->AuthorityRevokeSubjectGrants(Subject);
+        AuthorityRequestedContextActionSubject.Reset();
+        World->GetTimerManager().ClearTimer(
+            ContextActionOfferRefreshTimerHandle);
+        return;
+    }
+
+    const FVector SubjectLocation =
+        Presentation->GetPresentationAnchorWorldLocation();
+    FVector ViewLocation;
+    FVector ViewForward;
+    float SubjectDistanceSquared = 0.0f;
+    FGameplayTag DiscoveryFailureReason;
+    if (!MythicValidateContextActionDiscovery(
+            this, SubjectActor, SubjectLocation, Policy, ViewLocation,
+            ViewForward, SubjectDistanceSquared,
+            DiscoveryFailureReason)) {
+        if (PendingContextActionHold.Subject == Subject) {
+            ResetPendingContextActionHold();
+        }
+        const TArray<FMythicAuthorityContextActionOffer> NoOffers;
+        Grants->AuthorityReplaceBoundContextActionOffers(
+            Subject, SubjectActor, NoOffers, Policy.MaximumProjectedOffers,
+            GetContextActionLeaseClockSeconds()
+                + static_cast<double>(Policy.OfferLeaseDurationSeconds));
+        ScheduleContextActionOfferRefresh(
+            Policy.AuthorityRefreshIntervalSeconds);
+        return;
+    }
+
+    TArray<FMythicAuthorityContextActionOffer> ProjectedOffers;
+    ProjectedOffers.Reserve(
+        (Policy.MaximumProviderComponents + 1)
+        * Policy.MaximumOffersPerProvider);
+    TArray<FMythicContextActionOffer> ProviderOffers;
+    ProviderOffers.Reserve(
+        FMath::Min(Policy.MaximumOffersPerProvider, 8));
+
+    const auto GatherProvider =
+        [this, SubjectActor, SubjectLocation, ViewLocation, ViewForward,
+         SubjectDistanceSquared, &Policy, &ProjectedOffers,
+         &ProviderOffers](UObject *Provider) {
+            if (!IsValid(Provider)
+                || !Provider->GetClass()->ImplementsInterface(
+                    UMythicContextActionProvider::StaticClass())) {
+                return;
+            }
+            ProviderOffers.Reset();
+            IMythicContextActionProvider::Execute_GatherContextActions(
+                Provider, this, SubjectActor, ProviderOffers);
+            const int32 OfferCount = FMath::Min(
+                ProviderOffers.Num(), Policy.MaximumOffersPerProvider);
+            for (int32 Index = 0; Index < OfferCount; ++Index) {
+                FMythicContextActionOffer PreparedOffer;
+                if (MythicPrepareProjectedContextActionOffer(
+                        ProviderOffers[Index], ViewLocation, ViewForward,
+                        SubjectLocation, SubjectDistanceSquared,
+                        PreparedOffer)) {
+                    ProjectedOffers.Emplace(Provider, PreparedOffer);
+                }
+            }
+        };
+
+    GatherProvider(SubjectActor);
+    TInlineComponentArray<UActorComponent *> Components;
+    if (IsValid(SubjectActor)) {
+        SubjectActor->GetComponents(Components);
+    }
+    int32 ProviderComponentCount = 0;
+    for (UActorComponent *Component : Components) {
+        if (!IsValid(Component)
+            || !Component->GetClass()->ImplementsInterface(
+                UMythicContextActionProvider::StaticClass())) {
+            continue;
+        }
+        if (ProviderComponentCount++ >= Policy.MaximumProviderComponents) {
+            break;
+        }
+        GatherProvider(Component);
+    }
+
+    // Provider code is a domain boundary: prove the same embodiment, geometry, bound, and LOS again before writing.
+    Presentation = Registry->ResolvePresentationComponent(Subject);
+    SubjectActor = Presentation ? Presentation->GetOwner() : nullptr;
+    FVector RevalidatedViewLocation;
+    FVector RevalidatedViewForward;
+    float RevalidatedDistanceSquared = 0.0f;
+    DiscoveryFailureReason = FGameplayTag();
+    if (!Presentation || !IsValid(SubjectActor)
+        || !FMythicContextActionProjectionRules::IsExactResolvedSubject(
+            Subject, Presentation->GetPresentationInstance())
+        || !MythicValidateContextActionDiscovery(
+            this, SubjectActor,
+            Presentation->GetPresentationAnchorWorldLocation(), Policy,
+            RevalidatedViewLocation, RevalidatedViewForward,
+             RevalidatedDistanceSquared, DiscoveryFailureReason)) {
+        if (PendingContextActionHold.Subject == Subject) {
+            ResetPendingContextActionHold();
+        }
+        Grants->AuthorityRevokeSubjectGrants(Subject);
+        if (!Presentation || !IsValid(SubjectActor)) {
+            AuthorityRequestedContextActionSubject.Reset();
+            World->GetTimerManager().ClearTimer(
+                ContextActionOfferRefreshTimerHandle);
+            return;
+        }
+        ScheduleContextActionOfferRefresh(
+            Policy.AuthorityRefreshIntervalSeconds);
+        return;
+    }
+
+    TArray<FMythicAuthorityContextActionOffer> RevalidatedOffers;
+    RevalidatedOffers.Reserve(ProjectedOffers.Num());
+    const FVector RevalidatedSubjectLocation =
+        Presentation->GetPresentationAnchorWorldLocation();
+    for (const FMythicAuthorityContextActionOffer &BoundOffer :
+         ProjectedOffers) {
+        FMythicContextActionOffer PreparedOffer;
+        if (MythicPrepareProjectedContextActionOffer(
+                BoundOffer.Offer, RevalidatedViewLocation,
+                RevalidatedViewForward,
+                RevalidatedSubjectLocation, RevalidatedDistanceSquared,
+                PreparedOffer)) {
+            RevalidatedOffers.Emplace(BoundOffer.Provider.Get(),
+                                      PreparedOffer);
+        }
+    }
+
+    Grants->AuthorityReplaceBoundContextActionOffers(
+        Subject, SubjectActor, RevalidatedOffers,
+        Policy.MaximumProjectedOffers,
+        GetContextActionLeaseClockSeconds()
+            + static_cast<double>(Policy.OfferLeaseDurationSeconds));
+    if (PendingContextActionHold.IsActive()
+        && PendingContextActionHold.Subject == Subject) {
+        UObject *BoundProvider = nullptr;
+        UMythicContextActionDefinition *BoundDefinition = nullptr;
+        uint32 ProviderSourceRevision = 0;
+        const bool bHoldStillOffered =
+            Grants->AuthorityResolveActionGrantBinding(
+                Subject, PendingContextActionHold.ActionTag,
+                PendingContextActionHold.OfferRevision, BoundProvider,
+                BoundDefinition, ProviderSourceRevision)
+            && IsValid(BoundProvider) && IsValid(BoundDefinition)
+            && FMath::IsNearlyEqual(
+                BoundDefinition->HoldDurationSeconds,
+                PendingContextActionHold.RequiredDurationSeconds,
+                UE_KINDA_SMALL_NUMBER);
+        (void)ProviderSourceRevision;
+        if (!bHoldStillOffered) {
+            ResetPendingContextActionHold();
+        }
+    }
+    ScheduleContextActionOfferRefresh(
+        Policy.AuthorityRefreshIntervalSeconds);
 }
 
 void AMythicPlayerController::Login(int32 LocalUserNum) {
@@ -989,6 +1836,363 @@ void AMythicPlayerController::ServerInteractPrimary_Implementation(AActor *Inter
     IMythicInteractable::Execute_OnPrimaryInteract(Interactable, this);
 }
 
+void AMythicPlayerController::ResetPendingContextActionHold() {
+    PendingContextActionHold.Reset();
+}
+
+void AMythicPlayerController::EnterContextActionAuthorityBarrier() {
+    if (!HasAuthority()) {
+        return;
+    }
+    ResetPendingContextActionHold();
+    if (UWorld *World = GetWorld()) {
+        World->GetTimerManager().ClearTimer(
+            ContextActionOfferRefreshTimerHandle);
+    }
+    if (UMythicEntityActionGrantComponent *Grants =
+            ResolveEntityActionGrantComponent()) {
+        Grants->AuthorityRevokeAllActionGrants();
+    }
+    AuthorityRequestedContextActionSubject.Reset();
+}
+
+bool AMythicPlayerController::ResolveAndValidateContextActionRequest(
+    const FMythicEntityPresentationInstance &Subject,
+    const FGameplayTag ActionTag, const uint32 ObservedOfferRevision,
+    UMythicEntityActionGrantComponent *&OutGrantComponent,
+    UObject *&OutProvider,
+    UMythicContextActionDefinition *&OutDefinition,
+    AActor *&OutSubjectActor,
+    uint32 &OutProviderSourceRevision,
+    FGameplayTag &OutFailureReason) {
+    OutGrantComponent = nullptr;
+    OutProvider = nullptr;
+    OutDefinition = nullptr;
+    OutSubjectActor = nullptr;
+    OutProviderSourceRevision = 0;
+    OutFailureReason = CONTEXT_ACTION_REASON_INVALID_TARGET;
+
+    if (!HasAuthority() || !Subject.IsValid() || !ActionTag.IsValid()
+        || !ActionTag.MatchesTag(CONTEXT_ACTION_ROOT)
+        || ActionTag.MatchesTag(CONTEXT_ACTION_REASON_ROOT)
+        || AuthorityRequestedContextActionSubject != Subject) {
+        return false;
+    }
+
+    const FMythicContextActionProjectionRuntimePolicy Policy =
+        FMythicContextActionProjectionRules::BuildRuntimePolicy(
+            ContextActionProjectionPolicy);
+    if (!Policy.bValid) {
+        OutFailureReason = CONTEXT_ACTION_REASON_UNAVAILABLE;
+        return false;
+    }
+
+    UWorld *World = GetWorld();
+    UMythicEntityPresentationRegistry *Registry =
+        World ? World->GetSubsystem<UMythicEntityPresentationRegistry>()
+              : nullptr;
+    UMythicEntityPresentationComponent *Presentation = Registry
+        ? Registry->ResolvePresentationComponent(Subject) : nullptr;
+    AActor *SubjectActor = Presentation ? Presentation->GetOwner() : nullptr;
+    if (!Presentation || !IsValid(SubjectActor)
+        || SubjectActor->GetWorld() != World
+        || !FMythicContextActionProjectionRules::IsExactResolvedSubject(
+            Subject, Presentation->GetPresentationInstance())) {
+        return false;
+    }
+
+    const FVector SubjectLocation =
+        Presentation->GetPresentationAnchorWorldLocation();
+    FVector ViewLocation;
+    FVector ViewForward;
+    float SubjectDistanceSquared = 0.0f;
+    if (!MythicValidateContextActionDiscovery(
+            this, SubjectActor, SubjectLocation, Policy, ViewLocation,
+            ViewForward, SubjectDistanceSquared, OutFailureReason)) {
+        return false;
+    }
+
+    UMythicEntityActionGrantComponent *GrantComponent =
+        ResolveEntityActionGrantComponent();
+    FMythicReplicatedContextActionGrant CurrentGrant;
+    if (!GrantComponent
+        || !GrantComponent->FindActionGrant(Subject, ActionTag, CurrentGrant)
+        || CurrentGrant.State != EMythicContextActionGrantState::Available
+        || CurrentGrant.OfferRevision != ObservedOfferRevision) {
+        OutFailureReason = CONTEXT_ACTION_REASON_STALE;
+        return false;
+    }
+
+    UObject *BoundProvider = nullptr;
+    UMythicContextActionDefinition *BoundDefinition = nullptr;
+    uint32 ProviderSourceRevision = 0;
+    if (!GrantComponent->AuthorityResolveActionGrantBinding(
+            Subject, ActionTag, ObservedOfferRevision, BoundProvider,
+            BoundDefinition, ProviderSourceRevision)
+        || !IsValid(BoundProvider) || !IsValid(BoundDefinition)) {
+        GrantComponent->AuthorityRevokeActionGrant(Subject, ActionTag);
+        OutFailureReason = CONTEXT_ACTION_REASON_STALE;
+        return false;
+    }
+
+    OutFailureReason = FGameplayTag();
+    if (!MythicValidateContextActionSpatialRules(
+            this, SubjectActor, SubjectLocation, *BoundDefinition,
+            Policy, OutFailureReason)) {
+        return false;
+    }
+
+    OutGrantComponent = GrantComponent;
+    OutProvider = BoundProvider;
+    OutDefinition = BoundDefinition;
+    OutSubjectActor = SubjectActor;
+    OutProviderSourceRevision = ProviderSourceRevision;
+    return true;
+}
+
+void AMythicPlayerController::ServerBeginContextActionHold_Implementation(
+    const FMythicEntityPresentationInstance Subject,
+    const FGameplayTag ActionTag, const int64 ObservedOfferRevision) {
+    auto Reject = [this](const FGameplayTag Reason) {
+        ClientNotifyContextActionRejected(
+            MythicSanitizeContextActionFailure(Reason));
+    };
+    ResetPendingContextActionHold();
+    if (ObservedOfferRevision <= 0
+        || ObservedOfferRevision > static_cast<int64>(MAX_uint32)) {
+        Reject(CONTEXT_ACTION_REASON_INVALID_TARGET);
+        return;
+    }
+
+    UMythicEntityActionGrantComponent *GrantComponent = nullptr;
+    UObject *Provider = nullptr;
+    UMythicContextActionDefinition *Definition = nullptr;
+    AActor *SubjectActor = nullptr;
+    uint32 ProviderSourceRevision = 0;
+    FGameplayTag FailureReason;
+    const uint32 CompactRevision =
+        static_cast<uint32>(ObservedOfferRevision);
+    if (!ResolveAndValidateContextActionRequest(
+            Subject, ActionTag, CompactRevision, GrantComponent, Provider,
+            Definition, SubjectActor, ProviderSourceRevision, FailureReason)
+        || !Definition
+        || !FMythicContextActionProjectionRules::IsHoldDurationValid(
+            Definition->HoldDurationSeconds)
+        || Definition->HoldDurationSeconds <= 0.0f) {
+        if (GrantComponent && Definition
+            && !FMythicContextActionProjectionRules::IsHoldDurationValid(
+                Definition->HoldDurationSeconds)) {
+            GrantComponent->AuthorityRevokeActionGrant(Subject, ActionTag);
+        }
+        Reject(FailureReason.IsValid()
+                   ? FailureReason : CONTEXT_ACTION_REASON_UNAVAILABLE);
+        return;
+    }
+
+    FailureReason = FGameplayTag();
+    if (!IMythicContextActionProvider::Execute_CanExecuteContextAction(
+            Provider, this, SubjectActor, ActionTag,
+            static_cast<int64>(ProviderSourceRevision), FailureReason)) {
+        GrantComponent->AuthorityRevokeActionGrant(Subject, ActionTag);
+        Reject(FailureReason);
+        return;
+    }
+    UObject *RevalidatedProvider = nullptr;
+    UMythicContextActionDefinition *RevalidatedDefinition = nullptr;
+    uint32 RevalidatedSourceRevision = 0;
+    if (!GrantComponent->AuthorityResolveActionGrantBinding(
+            Subject, ActionTag, CompactRevision, RevalidatedProvider,
+            RevalidatedDefinition, RevalidatedSourceRevision)
+        || RevalidatedProvider != Provider
+        || RevalidatedDefinition != Definition
+        || RevalidatedSourceRevision != ProviderSourceRevision) {
+        Reject(CONTEXT_ACTION_REASON_STALE);
+        return;
+    }
+
+    PendingContextActionHold.Subject = Subject;
+    PendingContextActionHold.ActionTag = ActionTag;
+    PendingContextActionHold.OfferRevision = CompactRevision;
+    PendingContextActionHold.AuthorityStartSeconds =
+        GetContextActionRequestClockSeconds();
+    PendingContextActionHold.RequiredDurationSeconds =
+        Definition->HoldDurationSeconds;
+}
+
+void AMythicPlayerController::ServerCancelContextActionHold_Implementation(
+    const FMythicEntityPresentationInstance Subject,
+    const FGameplayTag ActionTag, const int64 ObservedOfferRevision) {
+    if (!HasAuthority() || ObservedOfferRevision <= 0
+        || ObservedOfferRevision > static_cast<int64>(MAX_uint32)) {
+        return;
+    }
+    if (PendingContextActionHold.Matches(
+            Subject, ActionTag,
+            static_cast<uint32>(ObservedOfferRevision))) {
+        ResetPendingContextActionHold();
+    }
+}
+
+void AMythicPlayerController::ServerExecuteContextAction_Implementation(
+    const FMythicEntityPresentationInstance Subject,
+    const FGameplayTag ActionTag, const int64 ObservedOfferRevision) {
+    auto Reject = [this](const FGameplayTag Reason) {
+        ClientNotifyContextActionRejected(
+            MythicSanitizeContextActionFailure(Reason));
+    };
+    if (ObservedOfferRevision <= 0
+        || ObservedOfferRevision > static_cast<int64>(MAX_uint32)) {
+        Reject(CONTEXT_ACTION_REASON_INVALID_TARGET);
+        return;
+    }
+
+    const uint32 CompactRevision =
+        static_cast<uint32>(ObservedOfferRevision);
+    const bool bTargetsPendingHold = PendingContextActionHold.Matches(
+        Subject, ActionTag, CompactRevision);
+    UMythicEntityActionGrantComponent *GrantComponent = nullptr;
+    UObject *Provider = nullptr;
+    UMythicContextActionDefinition *Definition = nullptr;
+    AActor *SubjectActor = nullptr;
+    uint32 ResolvedProviderSourceRevision = 0;
+    FGameplayTag FailureReason;
+    if (!ResolveAndValidateContextActionRequest(
+            Subject, ActionTag, CompactRevision, GrantComponent, Provider,
+            Definition, SubjectActor, ResolvedProviderSourceRevision,
+            FailureReason)
+        || !GrantComponent || !IsValid(Provider) || !IsValid(Definition)
+        || !IsValid(SubjectActor)) {
+        if (bTargetsPendingHold) {
+            ResetPendingContextActionHold();
+        }
+        Reject(FailureReason);
+        return;
+    }
+
+    const FMythicAuthorityContextActionDefinitionSignature
+        ValidatedDefinitionSignature =
+            FMythicAuthorityContextActionDefinitionSignature::Capture(
+                *Definition);
+    const FMythicContextActionProjectionRuntimePolicy ValidatedPolicy =
+        FMythicContextActionProjectionRules::BuildRuntimePolicy(
+            ContextActionProjectionPolicy);
+    if (!ValidatedPolicy.bValid) {
+        GrantComponent->AuthorityRevokeActionGrant(Subject, ActionTag);
+        ResetPendingContextActionHold();
+        Reject(CONTEXT_ACTION_REASON_UNAVAILABLE);
+        return;
+    }
+
+    if (!FMythicContextActionProjectionRules::IsHoldDurationValid(
+            Definition->HoldDurationSeconds)) {
+        GrantComponent->AuthorityRevokeActionGrant(Subject, ActionTag);
+        ResetPendingContextActionHold();
+        Reject(CONTEXT_ACTION_REASON_UNAVAILABLE);
+        return;
+    }
+
+    if (Definition->HoldDurationSeconds > 0.0f) {
+        const bool bMatchingHold = PendingContextActionHold.Matches(
+            Subject, ActionTag, CompactRevision);
+        const bool bUnchangedDuration = bMatchingHold
+            && FMath::IsNearlyEqual(
+                PendingContextActionHold.RequiredDurationSeconds,
+                Definition->HoldDurationSeconds, UE_KINDA_SMALL_NUMBER);
+        const bool bTimingValid = bUnchangedDuration
+            && FMythicContextActionProjectionRules::
+                IsHoldCompletionTimingValid(
+                    PendingContextActionHold.AuthorityStartSeconds,
+                    GetContextActionRequestClockSeconds(),
+                    Definition->HoldDurationSeconds);
+        // A completion attempt consumes the timed handshake whether it was early, stale, or valid.
+        ResetPendingContextActionHold();
+        if (!bTimingValid) {
+            Reject(CONTEXT_ACTION_REASON_STALE);
+            return;
+        }
+    } else {
+        // Tap actions remain immediate and cannot leave an unrelated timed authorization resident.
+        ResetPendingContextActionHold();
+    }
+
+    UObject *ConsumedProvider = nullptr;
+    UMythicContextActionDefinition *ConsumedDefinition = nullptr;
+    uint32 ConsumedProviderSourceRevision = 0;
+    if (!GrantComponent->AuthorityConsumeActionGrantBinding(
+            Subject, ActionTag, CompactRevision, ConsumedProvider,
+            ConsumedDefinition, ConsumedProviderSourceRevision)
+        || !IsValid(ConsumedProvider) || !IsValid(ConsumedDefinition)
+        || !IsValid(SubjectActor)
+        || ConsumedProvider != Provider
+        || ConsumedDefinition != Definition
+        || ConsumedProviderSourceRevision
+               != ResolvedProviderSourceRevision) {
+        ResetPendingContextActionHold();
+        Reject(CONTEXT_ACTION_REASON_STALE);
+        return;
+    }
+
+    // The exact lease is gone before provider code runs, so Blueprint/native re-entry cannot replay the same issuance.
+    FailureReason = FGameplayTag();
+    if (!IMythicContextActionProvider::Execute_CanExecuteContextAction(
+            ConsumedProvider, this, SubjectActor, ActionTag,
+            static_cast<int64>(ConsumedProviderSourceRevision),
+            FailureReason)) {
+        Reject(FailureReason);
+        return;
+    }
+
+    // CanExecute is a Blueprint/native domain callback. Prove its retained issuer and exact embodiment are still live
+    // before crossing the mutating callback, even though the one-shot lease has already been consumed.
+    UWorld *World = GetWorld();
+    UMythicEntityPresentationRegistry *Registry = World
+        ? World->GetSubsystem<UMythicEntityPresentationRegistry>() : nullptr;
+    UMythicEntityPresentationComponent *CurrentPresentation = Registry
+        ? Registry->ResolvePresentationComponent(Subject) : nullptr;
+    if (!IsValid(ConsumedProvider) || !IsValid(ConsumedDefinition)
+        || !IsValid(SubjectActor) || !CurrentPresentation
+        || CurrentPresentation->GetOwner() != SubjectActor
+        || AuthorityRequestedContextActionSubject != Subject
+        || !ValidatedDefinitionSignature.Matches(*ConsumedDefinition)
+        || !ConsumedProvider->GetClass()->ImplementsInterface(
+            UMythicContextActionProvider::StaticClass())
+        || !MythicDoesContextActionProviderBelongToSubject(
+            ConsumedProvider, SubjectActor)) {
+        Reject(CONTEXT_ACTION_REASON_STALE);
+        return;
+    }
+
+    const FVector CurrentSubjectLocation =
+        CurrentPresentation->GetPresentationAnchorWorldLocation();
+    FVector CurrentViewLocation;
+    FVector CurrentViewForward;
+    float CurrentSubjectDistanceSquared = 0.0f;
+    FailureReason = FGameplayTag();
+    if (!MythicValidateContextActionDiscovery(
+            this, SubjectActor, CurrentSubjectLocation, ValidatedPolicy,
+            CurrentViewLocation, CurrentViewForward,
+            CurrentSubjectDistanceSquared, FailureReason)
+        || !MythicValidateContextActionSpatialRules(
+            this, SubjectActor, CurrentSubjectLocation,
+            *ConsumedDefinition, ValidatedPolicy, FailureReason)) {
+        Reject(FailureReason);
+        return;
+    }
+    FailureReason = FGameplayTag();
+    if (!IMythicContextActionProvider::Execute_ExecuteContextAction(
+            ConsumedProvider, this, SubjectActor, ActionTag,
+            static_cast<int64>(ConsumedProviderSourceRevision),
+            FailureReason)) {
+        Reject(FailureReason);
+        return;
+    }
+}
+
+void AMythicPlayerController::ClientNotifyContextActionRejected_Implementation(
+    const FGameplayTag SafeReasonTag) {
+    OnContextActionRejected(MythicSanitizeContextActionFailure(SafeReasonTag));
+}
+
 bool AMythicPlayerController::ServerRequestNpcDialogue_Validate(AMythicNPCCharacter *NPC) {
     return NPC != nullptr;
 }
@@ -1043,6 +2247,13 @@ void AMythicPlayerController::ServerRequestNpcDialogue_Implementation(AMythicNPC
 void AMythicPlayerController::ClientReceiveNpcDialogue_Implementation(AMythicNPCCharacter *NPC, const FText &Line) {
     if (IsValid(NPC)) {
         NPC->FireBark(Line, this);
+    }
+}
+
+void AMythicPlayerController::ClientOpenNpcTrade_Implementation(
+    AMythicNPCCharacter *NPC) {
+    if (IsValid(NPC)) {
+        NPC->OpenTradeForLocalController(this);
     }
 }
 
@@ -1461,9 +2672,30 @@ void AMythicPlayerController::FlushResolvedCombatTextQueue() {
 void AMythicPlayerController::ClientReceiveResolvedCombatTextBatch_Implementation(
     const TArray<FMythicResolvedCombatTextEvent> &Events) {
     if (UWorld *World = GetWorld()) {
-        if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
-            for (const FMythicResolvedCombatTextEvent &Event : Events) {
+        UMythicEntityAttentionSubsystem *Attention = GetLocalPlayer()
+            ? GetLocalPlayer()->GetSubsystem<
+                  UMythicEntityAttentionSubsystem>()
+            : nullptr;
+        UMythicDamageNumberSubsystem *DamageNumbers =
+            World->GetSubsystem<UMythicDamageNumberSubsystem>();
+        for (const FMythicResolvedCombatTextEvent &Event : Events) {
+            if (DamageNumbers) {
                 DamageNumbers->AddResolvedCombatText(Event);
+            }
+            AActor *RelevantSubject = Event.bOutgoingForViewer
+                ? Event.TargetActor.Get() : Event.SourceActor.Get();
+            const UMythicEntityPresentationComponent *Presentation =
+                IsValid(RelevantSubject)
+                ? RelevantSubject->FindComponentByClass<
+                      UMythicEntityPresentationComponent>()
+                : nullptr;
+            if (Attention && Presentation) {
+                Attention->NotifyAttentionSignal(
+                    Presentation->GetPresentationInstance(),
+                    Event.bOutgoingForViewer
+                        ? EMythicEntityAttentionSignalKind::Combat
+                        : EMythicEntityAttentionSignalKind::CombatFromSubjectToViewer,
+                    3.0f, Event.bCritical ? 1.0f : 0.75f);
             }
         }
     }
@@ -1595,6 +2827,7 @@ void AMythicPlayerController::ServerFastTravel_Implementation(int32 SettlementId
     }
 
     Anchor.Z += 100.0f;
+    EnterContextActionAuthorityBarrier();
     AvatarPawn->TeleportTo(Anchor, AvatarPawn->GetActorRotation());
 }
 
@@ -1650,6 +2883,7 @@ void AMythicPlayerController::ServerFastTravelToPOI_Implementation(int32 POIId) 
         return;
     }
 
+    EnterContextActionAuthorityBarrier();
     POI->ServerFastTravelToPOI(AvatarPawn, POIId);
 }
 
@@ -1676,8 +2910,17 @@ void AMythicPlayerController::ClientNotifyStatusLearned_Implementation(const FTe
 }
 
 void AMythicPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason) {
+    UnbindContextActionAttention();
     if (GetWorld()) {
         GetWorld()->GetTimerManager().ClearTimer(ZoneCheckTimerHandle);
+        GetWorld()->GetTimerManager().ClearTimer(
+            ContextActionOfferRefreshTimerHandle);
+        GetWorld()->GetTimerManager().ClearTimer(
+            CombatPresentationRefreshTimerHandle);
+    }
+    if (HasAuthority()) {
+        EnterContextActionAuthorityBarrier();
+        ClearAuthorityCombatPresentationFocus();
     }
     Super::EndPlay(EndPlayReason);
 }

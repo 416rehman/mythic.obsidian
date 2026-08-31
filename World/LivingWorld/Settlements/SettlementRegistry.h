@@ -34,11 +34,25 @@ public:
     void GetAllSettlementIds(TArray<int32> &OutIds) const;
 
 
-    void HandleNPCDeath(uint32 DeadEntityId, double DeathTime);
+    void HandleNPCDeath(const FMythicEntityId &DeadEntityId, double DeathTime);
 
     void TickShopSuccession(double CurrentWorldTime, double SuccessionDelay);
 
-    int32 ClaimVacantShop(int32 SettlementId, int32 ClaimantEntityId, const FGameplayTag &ClaimantRole);
+    int32 ClaimVacantShop(int32 SettlementId, const FMythicEntityId &ClaimantEntityId,
+                         const FGameplayTag &ClaimantRole);
+
+    /** Returns true when any durable NPC shop-ownership slot still refers to the exact canonical entity. */
+    bool ReferencesEntityIdentity(const FMythicEntityId &EntityId) const;
+
+    /**
+     * Clears NPC shop-owner assignments whose logical person cannot be reconstructed after a LivingWorld restore.
+     * Cleared shops become immediately eligible for ordinary role-gated succession.
+     */
+    int32 ClearUnrestorableShopOwners(
+        const TSet<FMythicEntityId> &RestorableEntityIds);
+
+    /** Clears one failed-to-rehydrate NPC shop owner without misreporting a death event. */
+    bool ClearUnrestorableShopOwner(const FMythicEntityId &EntityId);
 
     static bool CanClaimShop(const FMythicShopSlot &Shop, const FGameplayTag &ClaimantRole);
 

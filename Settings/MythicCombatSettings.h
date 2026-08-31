@@ -11,6 +11,7 @@
 #include "GAS/MythicStatDiminishing.h"
 #include "GAS/MythicWeatherCombatRules.h"
 #include "GAS/Effects/MythicCrowdControl.h"
+#include "GAS/Combat/MythicCombatThreatAssessment.h"
 #include "MythicCombatSettings.generated.h"
 
 /**
@@ -48,6 +49,22 @@ public:
     // Increased-vs-More damage bucket configuration. Empty buckets (default) = the compose layer is inert.
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Damage Compose")
     FMythicDamageComposeConfig DamageCompose;
+
+    /**
+     * Canonical subject-to-viewer combat-pressure boundaries used by every authority nameplate assessment. Keeping
+     * these global combat balance values here prevents PlayerState classes and UI assets from drifting by viewer.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combat Presentation",
+              meta = (ShowOnlyInnerProperties))
+    FMythicCombatThreatThresholds CombatPresentationThreatThresholds;
+
+    /**
+     * Authored basic attacks per second used only when a combatant has no exact live weapon montage cycle to rate.
+     * It is a fail-closed baseline for NPC/native attacks, not a UI approximation or a client-provided value.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Combat Presentation",
+              meta = (ClampMin = "0.01", ClampMax = "20.0", Units = "Hz"))
+    float CombatRatingFallbackAttacksPerSecond = 1.0f;
 
     /**
      * Upper endpoint of the uniform basic-weapon damage roll, expressed as a multiplier of DamagePerHit. The shared

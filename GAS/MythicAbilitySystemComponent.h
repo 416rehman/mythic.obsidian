@@ -34,6 +34,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = MythicAbilitySystemComponent)
     const TArray<UMythicAttributeSet *> &GetAttributeSets() const;
 
+    /** Reconciles native Current/Maximum contracts after actor-info setup or bulk attribute initialization. */
+    void ReconcileAllBoundedAttributes();
+
     /** Active ability count for each activation group on this local authority or predicting client ASC. */
     int32 ActivationGroupCounts[static_cast<uint8>(EMythicAbilityActivationGroup::MAX)] = {};
 

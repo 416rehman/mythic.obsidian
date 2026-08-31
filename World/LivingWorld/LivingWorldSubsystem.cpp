@@ -1,6 +1,7 @@
 
 #include "World/LivingWorld/LivingWorldSubsystem.h"
 #include "AI/NPCs/MythicNPCCharacter.h"
+#include "AI/NPCs/MythicNPCManager.h"
 #include "AI/Creatures/MythicCreatureCharacter.h"
 #include "World/LivingWorld/LivingWorldSettings.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
@@ -15,12 +16,24 @@
 #include "World/LivingWorld/Simulation/SchemeEngine.h"
 #include "World/LivingWorld/Persistence/PersistentNPCRegistry.h"
 #include "World/LivingWorld/Spawn/DesignerSpawnerRegistry.h"
+#include "World/LivingWorld/Spawn/MythicDesignerSpawner.h"
+#include "World/LivingWorld/Encounters/EncounterDirector.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "AI/Party/PartySubsystem.h"
+#include "Player/MythicPlayerState.h"
+#include "World/Entity/MythicEntityViewerKnowledgeComponent.h"
 #include "World/LivingWorld/LivingWorldReplication.h"
+#include "World/Entity/MythicEntityPresentationComponent.h"
+#include "World/Entity/MythicEntityPresentationRegistry.h"
+#include "Mass/Fragments/MythicMassFragments.h"
+#include "MassEntitySubsystem.h"
+#include "MassEntityQuery.h"
+#include "MassExecutionContext.h"
 #include "Async/Async.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/PlayerController.h"
 
 bool UMythicLivingWorldSubsystem::ShouldCreateSubsystem(UObject *Outer) const {
     return true;
@@ -146,9 +159,7 @@ AMythicNPCCharacter *UMythicLivingWorldSubsystem::AcquireEmbodiedActor(UClass *A
                     continue;
                 }
                 Reused->SetActorLocationAndRotation(Loc, Rot,false, nullptr, ETeleportType::TeleportPhysics);
-                Reused->SetActorHiddenInGame(false);
-                Reused->SetActorEnableCollision(true);
-                Reused->WakeFromPool();
+                Reused->PrepareForEmbodiment();
                 return Reused;
             }
         }
@@ -156,13 +167,17 @@ AMythicNPCCharacter *UMythicLivingWorldSubsystem::AcquireEmbodiedActor(UClass *A
 
     FActorSpawnParameters SpawnInfo;
     SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    return World->SpawnActor<AMythicNPCCharacter>(ActorClass, Loc, Rot, SpawnInfo);
+    AMythicNPCCharacter *Spawned =
+        World->SpawnActor<AMythicNPCCharacter>(ActorClass, Loc, Rot, SpawnInfo);
+    if (Spawned) {
+        Spawned->PrepareForEmbodiment();
+    }
+    return Spawned;
 }
 
 void UMythicLivingWorldSubsystem::ReleaseEmbodiedActor(FMassEntityHandle Entity, AMythicNPCCharacter *Actor) {
-    UnregisterEmbodiedActor(Entity);
-
     if (!IsValid(Actor)) {
+        UnregisterEmbodiedActor(Entity);
         return;
     }
 
@@ -171,11 +186,14 @@ void UMythicLivingWorldSubsystem::ReleaseEmbodiedActor(FMassEntityHandle Entity,
         TArray<TWeakObjectPtr<AMythicNPCCharacter>> &Bucket = EmbodimentPool.FindOrAdd(Actor->GetClass());
         if (Bucket.Num() < Settings->EmbodimentPoolMaxPerClass) {
             Actor->SleepToPool();
+            UnregisterEmbodiedActor(Entity);
             Bucket.Add(Actor);
             return;
         }
     }
 
+    Actor->OnReturnedToPool();
+    UnregisterEmbodiedActor(Entity);
     Actor->Destroy();
 }
 
@@ -251,8 +269,12 @@ void UMythicLivingWorldSubsystem::TransferSettlement(int32 SettlementId, FMythic
     SettlementRegistry->TransferSettlement(SettlementId, NewFaction, TerritoryGrid, FactionDB, CausalFabric);
 }
 
-void UMythicLivingWorldSubsystem::ReportLeaderCandidate(FMythicFactionId FactionId, uint32 EntityId, float Score) {
-    if (!FactionDB) {
+void UMythicLivingWorldSubsystem::ReportLeaderCandidate(
+    FMythicFactionId FactionId, const FMythicEntityId &EntityId, float Score) {
+    if (!FactionDB || !PersistentNPCRegistry
+        || !PersistentNPCRegistry->ContainsEntityIdentity(EntityId)) {
+        UE_LOG(LogMythLivingWorld, Warning,
+               TEXT("Rejected faction leadership candidate without a registered LivingWorld identity."));
         return;
     }
     FScopeLock Lock(&SimulationLock);
@@ -357,12 +379,95 @@ void UMythicLivingWorldSubsystem::DrainPlayerResourceDeltas() {
     }
 }
 
-void UMythicLivingWorldSubsystem::HandleNPCDeathSettlements(uint32 NameHash, double WorldTime) {
-    if (!SettlementRegistry) {
+void UMythicLivingWorldSubsystem::HandlePermanentEntityDeath(
+    const FMythicEntityId &EntityId, double WorldTime) {
+    if (!SettlementRegistry && !FactionDB) {
         return;
     }
     FScopeLock Lock(&SimulationLock);
-    SettlementRegistry->HandleNPCDeath(NameHash, WorldTime);
+    if (SettlementRegistry) {
+        SettlementRegistry->HandleNPCDeath(EntityId, WorldTime);
+    }
+    if (FactionDB) {
+        if (FactionDB->HandlePermanentEntityDeath(EntityId)) {
+            FactionDB->CommitWrites();
+        }
+    }
+}
+
+EMythicEntityRetirementResult
+UMythicLivingWorldSubsystem::TryRetireEntityIdentity(
+    const FMythicEntityId &EntityId) {
+    check(IsInGameThread());
+    if (!PersistentNPCRegistry
+        || !PersistentNPCRegistry->ContainsEntityIdentity(EntityId)) {
+        UE_LOG(LogMythLivingWorld, Error,
+               TEXT("Rejected retirement for an invalid or unregistered canonical entity."));
+        return EMythicEntityRetirementResult::RejectedInvalid;
+    }
+
+    if (PersistentNPCRegistry->IsPermaDead(EntityId)) {
+        return EMythicEntityRetirementResult::Tombstoned;
+    }
+
+    // World subsystems and player components mutate on the game thread, so these checks remain stable for the rest
+    // of this transaction. The simulation-owned references are checked while its lock is held below.
+    if (UWorld *World = GetWorld()) {
+        if (const UMythicPartySubsystem *Party =
+                World->GetSubsystem<UMythicPartySubsystem>();
+            Party && Party->ReferencesEntityIdentity(EntityId)) {
+            return EMythicEntityRetirementResult::RetainedByDurableReference;
+        }
+
+        for (FConstPlayerControllerIterator It =
+                 World->GetPlayerControllerIterator();
+             It; ++It) {
+            const APlayerController *Controller = It->Get();
+            const AMythicPlayerState *PlayerState = Controller
+                ? Controller->GetPlayerState<AMythicPlayerState>()
+                : nullptr;
+            const UMythicEntityViewerKnowledgeComponent *Knowledge =
+                PlayerState
+                    ? PlayerState->GetEntityViewerKnowledgeComponent()
+                    : nullptr;
+            if (Knowledge && Knowledge->HasLearnedDossierForEntity(EntityId)) {
+                return EMythicEntityRetirementResult::RetainedByDurableReference;
+            }
+        }
+    }
+
+    FScopeLock Lock(&SimulationLock);
+    if (PersistentNPCRegistry->IsRetainedByLearnedDossier(EntityId)
+        || (FactionDB && FactionDB->ReferencesEntityIdentity(EntityId))
+        || (SettlementRegistry
+            && SettlementRegistry->ReferencesEntityIdentity(EntityId))) {
+        return EMythicEntityRetirementResult::RetainedByDurableReference;
+    }
+
+    return PersistentNPCRegistry->ReleaseUnreferencedEntityIdentity(EntityId)
+               ? EMythicEntityRetirementResult::Retired
+               : EMythicEntityRetirementResult::RejectedInvalid;
+}
+
+EMythicEntityRetirementResult
+UMythicLivingWorldSubsystem::HandleUnrestorableLogicalEntity(
+    const FMythicEntityId &EntityId) {
+    check(IsInGameThread());
+    if (!PersistentNPCRegistry
+        || !PersistentNPCRegistry->ContainsEntityIdentity(EntityId)) {
+        return EMythicEntityRetirementResult::RejectedInvalid;
+    }
+
+    {
+        FScopeLock Lock(&SimulationLock);
+        if (FactionDB && FactionDB->ClearLeaderReference(EntityId)) {
+            FactionDB->CommitWrites();
+        }
+        if (SettlementRegistry) {
+            SettlementRegistry->ClearUnrestorableShopOwner(EntityId);
+        }
+    }
+    return TryRetireEntityIdentity(EntityId);
 }
 
 bool UMythicLivingWorldSubsystem::CopySettlementAtCell(const FMythicCellCoord &Cell, FMythicSettlementData &Out) {
@@ -636,10 +741,196 @@ void UMythicLivingWorldSubsystem::SeedTerritoryFromSettlements() {
     UE_LOG(LogMythLivingWorld, Log, TEXT("Territory seeding complete."));
 }
 
+void UMythicLivingWorldSubsystem::BeginEntityIdentityRestoreBarrier() {
+    check(IsInGameThread());
+    UWorld *World = GetWorld();
+    if (!World || World->GetNetMode() == NM_Client) {
+        return;
+    }
+
+    // Recognition is embodiment-scoped and must be revoked before any canonical mapping changes underneath it.
+    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator();
+         It; ++It) {
+        APlayerController *Controller = It->Get();
+        AMythicPlayerState *PlayerState = Controller
+            ? Controller->GetPlayerState<AMythicPlayerState>()
+            : nullptr;
+        if (UMythicEntityViewerKnowledgeComponent *Knowledge = PlayerState
+                ? PlayerState->GetEntityViewerKnowledgeComponent()
+                : nullptr) {
+            Knowledge->AuthorityClearRecognitionBindings();
+        }
+    }
+
+    for (TActorIterator<AMythicDesignerSpawner> It(World); It; ++It) {
+        It->BeginLivingWorldRestore();
+    }
+    if (UMythicNPCManager *NPCManager =
+            GetGameInstance()->GetSubsystem<UMythicNPCManager>()) {
+        NPCManager->ResetForLivingWorldRestore();
+    }
+
+    TArray<TPair<FMassEntityHandle, TWeakObjectPtr<AMythicNPCCharacter>>>
+        EmbodiedSnapshot;
+    EmbodiedSnapshot.Reserve(EmbodiedActors.Num());
+    for (const TPair<FMassEntityHandle,
+                     TWeakObjectPtr<AMythicNPCCharacter>> &Pair :
+         EmbodiedActors) {
+        EmbodiedSnapshot.Add(Pair);
+    }
+    for (const TPair<FMassEntityHandle,
+                     TWeakObjectPtr<AMythicNPCCharacter>> &Pair :
+         EmbodiedSnapshot) {
+        ReleaseEmbodiedActor(Pair.Key, Pair.Value.Get());
+    }
+    EmbodiedActors.Reset();
+
+    if (UMythicEntityPresentationRegistry *PresentationRegistry =
+            World->GetSubsystem<UMythicEntityPresentationRegistry>()) {
+        TArray<UMythicEntityPresentationComponent *> Presentations;
+        PresentationRegistry->GetRegisteredComponents(Presentations);
+        for (UMythicEntityPresentationComponent *Presentation : Presentations) {
+            if (Presentation
+                && Presentation->GetAuthorityEntityId().GetDomain()
+                       == EMythicEntityDomain::LivingWorld) {
+                Presentation->AuthorityDeactivateEmbodiment();
+            }
+        }
+        PresentationRegistry->ResetAuthorityDomain(
+            EMythicEntityDomain::LivingWorld);
+    }
+
+    if (UMassEntitySubsystem *MassSubsystem =
+            World->GetSubsystem<UMassEntitySubsystem>()) {
+        FMassEntityManager &EntityManager =
+            MassSubsystem->GetMutableEntityManager();
+        TSharedPtr<FMassEntityManager> EntityManagerView(
+            &EntityManager, [](FMassEntityManager *) {});
+        FMassEntityQuery IdentityQuery(EntityManagerView);
+        IdentityQuery.AddRequirement<FMythicIdentityFragment>(
+            EMassFragmentAccess::ReadOnly);
+
+        TArray<FMassEntityHandle> OldLogicalEntities;
+        FMassExecutionContext Context(EntityManager);
+        IdentityQuery.ForEachEntityChunk(
+            Context, [&OldLogicalEntities](FMassExecutionContext &Chunk) {
+                const TConstArrayView<FMythicIdentityFragment> Identities =
+                    Chunk.GetFragmentView<FMythicIdentityFragment>();
+                for (int32 Index = 0; Index < Chunk.GetNumEntities(); ++Index) {
+                    if (Identities[Index].EntityId.GetDomain()
+                        == EMythicEntityDomain::LivingWorld) {
+                        OldLogicalEntities.Add(Chunk.GetEntity(Index));
+                    }
+                }
+            });
+        for (const FMassEntityHandle Entity : OldLogicalEntities) {
+            if (EntityManager.IsEntityValid(Entity)) {
+                EntityManager.DestroyEntity(Entity);
+            }
+        }
+    }
+
+    if (SocialGraph) {
+        SocialGraph->ResetForLivingWorldRestore();
+    }
+    if (UMythicEncounterDirector *EncounterDirector =
+            World->GetSubsystem<UMythicEncounterDirector>()) {
+        EncounterDirector->ResetForLivingWorldRestore();
+    }
+}
+
+bool UMythicLivingWorldSubsystem::CompleteEntityIdentityRestoreBarrier() {
+    check(IsInGameThread());
+    UWorld *World = GetWorld();
+    if (!World || World->GetNetMode() == NM_Client) {
+        return true;
+    }
+
+    // Character persistence may have restored dossiers before the LivingWorld blob. Reassert sticky ownership now
+    // that the replacement identity registry is installed.
+    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator();
+         It; ++It) {
+        APlayerController *Controller = It->Get();
+        AMythicPlayerState *PlayerState = Controller
+            ? Controller->GetPlayerState<AMythicPlayerState>()
+            : nullptr;
+        const UMythicEntityViewerKnowledgeComponent *Knowledge = PlayerState
+            ? PlayerState->GetEntityViewerKnowledgeComponent()
+            : nullptr;
+        if (!Knowledge) {
+            continue;
+        }
+        for (const FMythicEntityLearnedDossier &Dossier :
+             Knowledge->GetLearnedDossiersForSave()) {
+            if (Dossier.EntityId.GetDomain()
+                    == EMythicEntityDomain::LivingWorld
+                && (!PersistentNPCRegistry
+                    || !PersistentNPCRegistry->MarkRetainedByLearnedDossier(
+                        Dossier.EntityId))) {
+                UE_LOG(LogMythLivingWorld, Error,
+                       TEXT("LivingWorld restore rejected a learned dossier whose canonical entity is absent from the matching world snapshot."));
+                return false;
+            }
+        }
+    }
+
+    // The current save format can rebuild party people, but it does not yet serialize arbitrary significant Mass
+    // state. Keeping a faction leader reference without a reconstructible logical person would create a dangling
+    // authority identity, so clear that assignment atomically and let ordinary candidate succession resume.
+    TSet<FMythicEntityId> RestorableLogicalIdentities;
+    const UMythicPartySubsystem *Party =
+        World->GetSubsystem<UMythicPartySubsystem>();
+    if (PersistentNPCRegistry && Party) {
+        RestorableLogicalIdentities.Reserve(
+            PersistentNPCRegistry->GetIdentityCount());
+        for (const FMythicPersistentEntityIdentityRecord &Record :
+             PersistentNPCRegistry->GetIdentityRecords()) {
+            if (Party->ReferencesEntityIdentity(Record.EntityId)) {
+                RestorableLogicalIdentities.Add(Record.EntityId);
+            }
+        }
+    }
+    if (FactionDB) {
+        FScopeLock Lock(&SimulationLock);
+        FactionDB->ClearUnrestorableLeaderReferences(
+            RestorableLogicalIdentities);
+        if (SettlementRegistry) {
+            SettlementRegistry->ClearUnrestorableShopOwners(
+                RestorableLogicalIdentities);
+        }
+        FactionDB->CommitWrites();
+    }
+    else if (SettlementRegistry) {
+        FScopeLock Lock(&SimulationLock);
+        SettlementRegistry->ClearUnrestorableShopOwners(
+            RestorableLogicalIdentities);
+    }
+
+    // Logical Mass state is intentionally rebuilt, so discard loaded ambient records that have no durable owner.
+    // Tombstones, restorable parties, shop owners, and learned dossiers remain registered.
+    if (PersistentNPCRegistry) {
+        TArray<FMythicEntityId> LoadedIdentities;
+        LoadedIdentities.Reserve(PersistentNPCRegistry->GetIdentityCount());
+        for (const FMythicPersistentEntityIdentityRecord &Record :
+             PersistentNPCRegistry->GetIdentityRecords()) {
+            LoadedIdentities.Add(Record.EntityId);
+        }
+        for (const FMythicEntityId &EntityId : LoadedIdentities) {
+            TryRetireEntityIdentity(EntityId);
+        }
+    }
+
+    for (TActorIterator<AMythicDesignerSpawner> It(World); It; ++It) {
+        It->CompleteLivingWorldRestore();
+    }
+    return true;
+}
+
 void UMythicLivingWorldSubsystem::SaveLivingWorld(FArchive &Ar) {
     TRACE_CPUPROFILER_EVENT_SCOPE(MythicLivingWorld_Save);
 
-    int32 MasterVersion = 3;
+    constexpr int32 CurrentLivingWorldSaveVersion = 5;
+    int32 MasterVersion = CurrentLivingWorldSaveVersion;
     Ar << MasterVersion;
 
     UMythicPartySubsystem *PartySubsystemForSave = nullptr;
@@ -704,8 +995,10 @@ void UMythicLivingWorldSubsystem::LoadLivingWorld(FArchive &Ar) {
     int32 MasterVersion = 0;
     Ar << MasterVersion;
 
-    if (MasterVersion != 1 && MasterVersion != 2 && MasterVersion != 3) {
+    constexpr int32 CurrentLivingWorldSaveVersion = 5;
+    if (MasterVersion != CurrentLivingWorldSaveVersion) {
         UE_LOG(LogMythLivingWorld, Error, TEXT("Unsupported Living World save version: %d"), MasterVersion);
+        Ar.SetError();
         return;
     }
 
@@ -731,49 +1024,71 @@ void UMythicLivingWorldSubsystem::LoadLivingWorld(FArchive &Ar) {
             UE_LOG(LogMythLivingWorld, Error,
                    TEXT("Living World load aborted: saved section set (0x%X) differs from live (0x%X) — cannot align the unframed save stream."),
                    SectionMask, LiveMask);
+            Ar.SetError();
             return;
         }
     }
 
-    FScopeLock Lock(&SimulationLock);
+    const bool bRestartSimulation = SimThread.IsValid() && SimThread->IsRunning();
+    StopSimulation();
+    BeginEntityIdentityRestoreBarrier();
 
-    UE_LOG(LogMythLivingWorld, Log, TEXT("Loading Living World state..."));
+    {
+        FScopeLock Lock(&SimulationLock);
 
-    if (CausalFabric) {
-        CausalFabric->Serialize(Ar);
-    }
+        UE_LOG(LogMythLivingWorld, Log, TEXT("Loading Living World state..."));
 
-    if (FactionDB) {
-        FactionDB->Serialize(Ar);
-    }
+        if (CausalFabric) {
+            CausalFabric->Serialize(Ar);
+        }
 
-    if (TerritoryGrid) {
-        TerritoryGrid->Serialize(Ar);
-    }
+        if (!Ar.IsError() && FactionDB) {
+            FactionDB->Serialize(Ar);
+        }
 
-    if (SchemeEngine) {
-        SchemeEngine->Serialize(Ar);
-    }
+        if (!Ar.IsError() && TerritoryGrid) {
+            TerritoryGrid->Serialize(Ar);
+        }
 
-    if (PersistentNPCRegistry) {
-        PersistentNPCRegistry->Serialize(Ar);
-    }
+        if (!Ar.IsError() && SchemeEngine) {
+            SchemeEngine->Serialize(Ar);
+        }
 
-    if (SettlementRegistry) {
-        SettlementRegistry->Serialize(Ar);
-    }
+        if (!Ar.IsError() && PersistentNPCRegistry) {
+            PersistentNPCRegistry->Serialize(Ar);
+        }
 
-    if (UWorld *World = GetGameInstance()->GetWorld()) {
-        if (UMythicPartySubsystem *Party = World->GetSubsystem<UMythicPartySubsystem>()) {
-            Party->Serialize(Ar);
+        if (!Ar.IsError() && SettlementRegistry) {
+            SettlementRegistry->Serialize(Ar);
+        }
+
+        if (!Ar.IsError()) {
+            if (UWorld *World = GetGameInstance()->GetWorld()) {
+                if (UMythicPartySubsystem *Party =
+                        World->GetSubsystem<UMythicPartySubsystem>()) {
+                    Party->Serialize(Ar);
+                }
+            }
+        }
+
+        if (!Ar.IsError() && DesignerSpawnerRegistry) {
+            DesignerSpawnerRegistry->Serialize(Ar);
         }
     }
 
-    if (MasterVersion >= 3 && DesignerSpawnerRegistry) {
-        DesignerSpawnerRegistry->Serialize(Ar);
+    if (!Ar.IsError() && CompleteEntityIdentityRestoreBarrier()) {
+        UE_LOG(LogMythLivingWorld, Log,
+               TEXT("Living World state loaded successfully."));
+    }
+    else {
+        Ar.SetError();
+        UE_LOG(LogMythLivingWorld, Error,
+               TEXT("Living World restore failed after entering the identity barrier; stale public mappings remain revoked."));
     }
 
-    UE_LOG(LogMythLivingWorld, Log, TEXT("Living World state loaded successfully."));
+    if (bRestartSimulation && !Ar.IsError()) {
+        StartSimulation();
+    }
 }
 
 bool UMythicLivingWorldSubsystem::IsAnyFactionInFamine() const {

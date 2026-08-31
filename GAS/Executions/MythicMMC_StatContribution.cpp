@@ -5,6 +5,7 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
 #include "GAS/MythicStatContribution.h"
+#include "Mythic.h"
 #include "Settings/MythicCombatSettings.h"
 
 UMythicMMC_StatContribution::UMythicMMC_StatContribution() {
@@ -23,13 +24,25 @@ UMythicMMC_StatContribution::UMythicMMC_StatContribution() {
     RelevantAttributesToCapture.Add(ResolveDef);
 }
 
+float UMythicMMC_StatContribution::MakeMultiplicativeFactor(
+    const float Contribution) {
+    const float Factor = 1.0f + Contribution;
+    return FMath::IsFinite(Factor) && Factor > 0.0f ? Factor : 1.0f;
+}
+
 float UMythicMMC_StatContribution::CalculateBaseMagnitude_Implementation(const FGameplayEffectSpec &Spec) const {
     if (!TargetAttribute.IsValid()) {
-        return 0.0f;
+        UE_LOG(Myth, Error,
+               TEXT("Stat contribution MMC %s has no TargetAttribute; using neutral factor 1.0."),
+               *GetNameSafe(this));
+        return 1.0f;
     }
     const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
     if (!Settings) {
-        return 0.0f;
+        UE_LOG(Myth, Error,
+               TEXT("Stat contribution MMC %s cannot resolve combat settings; using neutral factor 1.0."),
+               *GetNameSafe(this));
+        return 1.0f;
     }
 
     FAggregatorEvaluateParameters Params;
@@ -43,7 +56,7 @@ float UMythicMMC_StatContribution::CalculateBaseMagnitude_Implementation(const F
     GetCapturedAttributeMagnitude(StrengthDef, Spec, Params, Strength);
     GetCapturedAttributeMagnitude(ResolveDef, Spec, Params, Resolve);
 
-    return FMythicStatContributionRules::ResolveTarget(
+    const float Contribution = FMythicStatContributionRules::ResolveTarget(
         Settings->StatContributions.Contributions, TargetAttribute,
         [Power, Strength, Resolve](const FGameplayAttribute &Attr) -> float {
             if (Attr == UMythicAttributeSet_Offense::GetPowerAttribute()) {
@@ -59,4 +72,15 @@ float UMythicMMC_StatContribution::CalculateBaseMagnitude_Implementation(const F
             // reading as a confident zero, so adding a source later is a capture change and not a silent bug.
             return 0.0f;
         });
+    const float Factor = MakeMultiplicativeFactor(Contribution);
+    if (Factor == 1.0f
+        && (!FMath::IsFinite(Contribution)
+            || !FMath::IsFinite(1.0f + Contribution)
+            || Contribution <= -1.0f)) {
+        UE_LOG(Myth, Error,
+               TEXT("Stat contribution MMC %s produced invalid factor %.6f for %s; using neutral factor 1.0."),
+               *GetNameSafe(this), Factor, *TargetAttribute.GetName());
+        return 1.0f;
+    }
+    return Factor;
 }

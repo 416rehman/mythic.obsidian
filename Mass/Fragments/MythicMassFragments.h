@@ -4,12 +4,16 @@
 #include "CoreMinimal.h"
 #include "MassEntityTypes.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
+#include "World/Entity/MythicEntityId.h"
 #include "MythicMassFragments.generated.h"
 
 
 USTRUCT()
 struct MYTHIC_API FMythicIdentityFragment : public FMassFragment {
     GENERATED_BODY()
+
+    /** Private persistent identity allocated once by the authority LivingWorld identity registry. */
+    FMythicEntityId EntityId;
 
     FMythicFactionId Faction;
 
@@ -19,7 +23,8 @@ struct MYTHIC_API FMythicIdentityFragment : public FMassFragment {
 
     FGameplayTag RoleTag;
 
-    uint32 NameHash = 0;
+    /** Deterministic input for generated name, appearance, schedule, and demographic rolls; never a person key. */
+    uint32 NameSeed = 0;
 
     uint8 VisualArchetype = 0;
 

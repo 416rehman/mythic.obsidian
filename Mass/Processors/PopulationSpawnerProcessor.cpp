@@ -260,16 +260,22 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
                     SpawnData.Identity.Faction = Settlement.GoverningFaction;
                     SpawnData.Identity.Cell = CandidateCell;
 
-                    const int32 SpawnSerial = PersistentRegistry->AllocateSpawnSerial();
+                    const int32 SpawnSerial = PersistentRegistry->AllocateNameSeedSerial();
 
-                    SpawnData.Identity.NameHash = FMythicNPCGenerator::GenerateNameHash(
+                    SpawnData.Identity.NameSeed = FMythicNPCGenerator::GenerateNameHash(
                         Settlement.GoverningFaction.Index, CandidateCell, SpawnSerial);
+                    SpawnData.Identity.EntityId = PersistentRegistry->AllocateEntityIdentity(
+                        SpawnData.Identity.NameSeed,
+                        EMythicEntityIdentityProvenance::SettlementPopulation);
+                    if (!SpawnData.Identity.EntityId.IsValid()) {
+                        continue;
+                    }
 
                     SpawnData.Identity.VisualArchetype = FMythicNPCGenerator::GenerateVisualArchetype(
-                        SpawnData.Identity.NameHash, 8);
+                        SpawnData.Identity.NameSeed, 8);
 
                     SpawnData.Identity.DemographicFlags = FMythicNPCGenerator::GenerateDemographicFlags(
-                        SpawnData.Identity.NameHash, FactionData.Population > 50);
+                        SpawnData.Identity.NameSeed, FactionData.Population > 50);
 
                     FMythicArchetypeContext ArchCtx;
                     ArchCtx.WealthNorm = FMath::Clamp(FactionData.Reserves.Wealth / MaxReserve, 0.0f, 1.0f);
@@ -282,14 +288,14 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
 
                     const FMythicArchetypeRow *ChosenRow = nullptr;
                     const FGameplayTag DerivedRole =
-                        DeriveArchetype(ArchetypeCatalog, ArchCtx, SpawnData.Identity.NameHash, ChosenRow);
+                        DeriveArchetype(ArchetypeCatalog, ArchCtx, SpawnData.Identity.NameSeed, ChosenRow);
                     SpawnData.Identity.RoleTag = Settlement.bIsHostileCamp
                         ? HostileRoleTag
                         : ApplyFactionGate(RoleDB, DerivedRole, FactionData.FactionTag);
 
                     if (const FMythicSpawnPoint *Point = PickPointForCell(
                             Settlement, CandidateCell, PurposeForRole(SpawnData.Identity.RoleTag),
-                            SpawnData.Identity.NameHash)) {
+                            SpawnData.Identity.NameSeed)) {
                         SpawnData.Identity.SpawnOverridePos = Point->WorldLocation;
                         SpawnData.Identity.bHasSpawnOverride = true;
                     }
@@ -297,8 +303,8 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
                     SpawnData.Schedule.Phase = EMythicSchedulePhase::Idle;
                     SpawnData.Schedule.HomeCell = CandidateCell;
                     SpawnData.Schedule.WorkCell = FMythicCellCoord(
-                        CandidateCell.X + static_cast<int32>((SpawnData.Identity.NameHash >> 4) % 3) - 1,
-                        CandidateCell.Y + static_cast<int32>((SpawnData.Identity.NameHash >> 8) % 3) - 1);
+                        CandidateCell.X + static_cast<int32>((SpawnData.Identity.NameSeed >> 4) % 3) - 1,
+                        CandidateCell.Y + static_cast<int32>((SpawnData.Identity.NameSeed >> 8) % 3) - 1);
 
                     SpawnData.Significance.Tier = EMythicSignificanceTier::Tier0_Ambient;
 
@@ -370,6 +376,12 @@ void UMythicPopulationSpawnerProcessor::Execute(FMassEntityManager &EntityManage
             if (!bNearPlayer) {
                 const FMassEntityHandle DespawnEntity = ChunkContext.GetEntity(i);
                 if (PartySubsystem && PartySubsystem->IsCompanionEntity(DespawnEntity)) {
+                    continue;
+                }
+                const EMythicEntityRetirementResult Retirement =
+                    LWS->TryRetireEntityIdentity(IdentityView[i].EntityId);
+                if (!UMythicLivingWorldSubsystem::AuthorizesLogicalEntityDestruction(
+                        Retirement)) {
                     continue;
                 }
                 if (AMythicNPCCharacter *Actor = LWS->FindEmbodiedActor(DespawnEntity)) {

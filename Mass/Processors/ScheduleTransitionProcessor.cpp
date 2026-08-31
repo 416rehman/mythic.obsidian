@@ -123,7 +123,7 @@ void UMythicScheduleTransitionProcessor::Execute(FMassEntityManager &EntityManag
                 continue;
             }
 
-            const float StaggeredHour = ComputeStaggeredHour(GameHour, IdentityView[i].NameHash, StaggerHours);
+            const float StaggeredHour = ComputeStaggeredHour(GameHour, IdentityView[i].NameSeed, StaggerHours);
             const EMythicSchedulePhase TargetPhase = GetPhaseForHour(StaggeredHour, Settings);
 
             FMythicScheduleFragment &Schedule = ScheduleView[i];

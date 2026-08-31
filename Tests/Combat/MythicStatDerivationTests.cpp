@@ -3,6 +3,7 @@
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
+#include "GAS/Executions/MythicMMC_StatContribution.h"
 #include "GAS/MythicStatContribution.h"
 #include "GameplayEffect.h"
 #include "Settings/MythicCombatSettings.h"
@@ -85,11 +86,22 @@ bool FMythicDerivedValuesMoveTest::RunTest(const FString &Parameters) {
     const FGameplayAttribute Health = UMythicAttributeSet_Life::GetMaxHealthAttribute();
     const FGameplayAttribute Armor = UMythicAttributeSet_Defense::GetArmorAttribute();
 
-    TestTrue(TEXT("Strength raises max health above the flat baseline"),
-             WithStrength(Health, 500.0f, 10.0f) > 500.0f);
+    TestTrue(TEXT("10 Strength resolves the authored 500 health baseline to 650"),
+             FMath::IsNearlyEqual(
+                 WithStrength(Health, 500.0f, 10.0f), 650.0f, 0.01f));
     TestTrue(TEXT("more Strength means more health"),
              WithStrength(Health, 500.0f, 50.0f) > WithStrength(Health, 500.0f, 10.0f));
-    TestTrue(TEXT("Strength raises armor too"), WithStrength(Armor, 10.0f, 10.0f) > 10.0f);
+    TestTrue(TEXT("10 Strength resolves the authored 10 armor baseline to 11.5"),
+             FMath::IsNearlyEqual(
+                 WithStrength(Armor, 10.0f, 10.0f), 11.5f, 0.001f));
+
+    TestTrue(TEXT("MMC sends GAS the complete 1 + contribution factor"),
+             FMath::IsNearlyEqual(
+                 UMythicMMC_StatContribution::MakeMultiplicativeFactor(0.30f),
+                 1.30f));
+    TestEqual(TEXT("zero contribution is the neutral GAS multiplier"),
+              UMythicMMC_StatContribution::MakeMultiplicativeFactor(0.0f),
+              1.0f);
 
     // MaxHealth is deliberately uncapped (CeilingBonus 0) because health must keep pace with level forever,
     // while Armor bends. Assert the two really are configured differently, or the "independent scaling"

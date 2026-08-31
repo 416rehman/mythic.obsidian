@@ -348,7 +348,7 @@ void UMythicSchemeEngine::ApplySchemeEffects(const FMythicScheme &Scheme) {
         break;
     }
     case EMythicSchemeType::Assassination: {
-        Target->LeaderEntityId = 0;
+        Target->LeaderEntityId.Reset();
         Target->LeaderSignificanceScore = 0.0f;
         Target->Population = FMath::Max(0, Target->Population - Settings->SchemeAssassinationPopulationLoss);
         break;

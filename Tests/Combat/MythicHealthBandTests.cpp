@@ -249,3 +249,59 @@ bool FMythicHealthBandGatesModifierTest::RunTest(const FString &Parameters) {
 
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicDuplicateLifeComponentInitializationTest,
+    "Mythic.Combat.LifeComponent.RejectsDuplicateInitialization",
+    EAutomationTestFlags_ApplicationContextMask
+        | EAutomationTestFlags::ProductFilter)
+
+bool FMythicDuplicateLifeComponentInitializationTest::RunTest(
+    const FString &Parameters) {
+    if (!TestNotNull(TEXT("engine is available"), GEngine)) {
+        return false;
+    }
+
+    UGameInstance *GameInstance = NewObject<UGameInstance>(GEngine);
+    GameInstance->InitializeStandalone();
+    UWorld *World = GameInstance->GetWorld();
+    if (!TestNotNull(TEXT("standalone world exists"), World)) {
+        return false;
+    }
+    ON_SCOPE_EXIT {
+        GameInstance->Shutdown();
+    };
+
+    AActor *Actor = World->SpawnActor<AActor>();
+    UMythicAbilitySystemComponent *ASC =
+        NewObject<UMythicAbilitySystemComponent>(Actor);
+    ASC->RegisterComponent();
+    ASC->InitAbilityActorInfo(Actor, Actor);
+    ASC->AddAttributeSetSubobject(NewObject<UMythicAttributeSet_Life>(Actor));
+    ASC->AddAttributeSetSubobject(
+        NewObject<UMythicAttributeSet_Defense>(Actor));
+
+    UMythicLifeComponent *Canonical =
+        NewObject<UMythicLifeComponent>(Actor, TEXT("CanonicalLife"));
+    Canonical->CreationMethod = EComponentCreationMethod::Native;
+    Canonical->RegisterComponent();
+
+    UMythicLifeComponent *Duplicate =
+        NewObject<UMythicLifeComponent>(Actor, TEXT("BlueprintDuplicateLife"));
+    Duplicate->CreationMethod =
+        EComponentCreationMethod::SimpleConstructionScript;
+    Duplicate->RegisterComponent();
+
+    AddExpectedError(TEXT("rejected duplicate life component"),
+                     EAutomationExpectedErrorFlags::Contains, 1);
+    Duplicate->InitializeWithAbilitySystem(ASC);
+    TestFalse(TEXT("a Blueprint duplicate cannot bind the ASC"),
+              Duplicate->IsInitialized());
+
+    Canonical->InitializeWithAbilitySystem(ASC);
+    TestTrue(TEXT("the native canonical component owns the ASC"),
+             Canonical->IsInitialized());
+    Canonical->UninitializeFromAbilitySystem();
+
+    return true;
+}

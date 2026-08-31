@@ -40,6 +40,9 @@ public:
 
     UObjectiveDefinition *GetEncounterClearObjective() const;
 
+    /** Clears runtime encounter handles and cooldowns after the LivingWorld restore barrier destroys old Mass state. */
+    void ResetForLivingWorldRestore();
+
 private:
 
     void EvaluationTick();

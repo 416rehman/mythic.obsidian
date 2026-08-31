@@ -8,8 +8,12 @@
 #include "TimerManager.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/WidgetComponent.h"
+#include "Engine/LocalPlayer.h"
 #include "GameFramework/Pawn.h"
+#include "Interaction/Attention/MythicEntityAttentionSubsystem.h"
+#include "Interaction/ContextActions/MythicContextActionProvider.h"
 #include "UI/MythicTags_UI.h"
+#include "World/Entity/MythicEntityPresentationComponent.h"
 
 
 UMythicInteractionComponent::UMythicInteractionComponent() : UI_LayerRootWidget(nullptr) {
@@ -55,7 +59,8 @@ void UMythicInteractionComponent::BeginPlay() {
     }
 
     if (InteractionPromptWidgetClass) {
-        this->InteractionPromptWidget = CreateWidget<UMythicInteractionPromptWidget>(GetWorld(), InteractionPromptWidgetClass);
+        this->InteractionPromptWidget = CreateWidget<UMythicInteractionPromptWidget>(
+            this->OwningController, InteractionPromptWidgetClass);
         if (!this->InteractionPromptWidget) {
             UE_LOG(Myth, Error, TEXT("Failed to create InteractionPromptWidget"));
             return;
@@ -68,6 +73,12 @@ void UMythicInteractionComponent::BeginPlay() {
     UpdateUILayerRootWidget(this->OwningController);
 
     this->PauseInteractions(false);
+}
+
+void UMythicInteractionComponent::EndPlay(
+    const EEndPlayReason::Type EndPlayReason) {
+    PauseInteractions(true);
+    Super::EndPlay(EndPlayReason);
 }
 
 int32 UMythicInteractionComponent::SelectFocusedInteractable(TConstArrayView<FMythicInteractCandidate> Candidates, float MinDot) {
@@ -170,7 +181,17 @@ void UMythicInteractionComponent::ScanForInteractableActors() {
 
 void UMythicInteractionComponent::PauseInteractions(bool bPause) {
     if (bPause) {
-        this->InteractionScanTimerHandle.Invalidate();
+        if (UWorld *World = GetWorld()) {
+            World->GetTimerManager().ClearTimer(InteractionScanTimerHandle);
+        } else {
+            InteractionScanTimerHandle.Invalidate();
+        }
+        if (CurrentFocusedActor) {
+            OnFocusedActorChanged_Implementation(nullptr, CurrentFocusedActor);
+            CurrentFocusedActor = nullptr;
+        } else if (IsCurrentActorReadyForInteraction) {
+            EndStaleInteraction();
+        }
         UE_LOG(Myth, Warning, TEXT("Paused Interaction Scans"));
         return;
     }
@@ -183,6 +204,31 @@ void UMythicInteractionComponent::PauseInteractions(bool bPause) {
 }
 
 void UMythicInteractionComponent::InitializeInteraction(AActor *NewFocusedActor) {
+    if (!IsValid(NewFocusedActor)) {
+        return;
+    }
+
+    // Presentable context-action providers render and bind through the LocalPlayer HUD. They must never attach a
+    // WidgetComponent to a shared world actor, which is ambiguous and destructive under split-screen.
+    if (NewFocusedActor->GetClass()->ImplementsInterface(
+            UMythicContextActionProvider::StaticClass())) {
+        if (const UMythicEntityPresentationComponent *Presentation =
+                NewFocusedActor->FindComponentByClass<
+                    UMythicEntityPresentationComponent>()) {
+            // Registration may arrive after the actor under replication. Never fall back to the legacy shared-world
+            // prompt during that window: retry on the next scan and let the LocalPlayer projection become authoritative.
+            IsCurrentActorReadyForInteraction =
+                Presentation->GetPresentationInstance().IsValid();
+            if (IsCurrentActorReadyForInteraction) {
+                IMythicInteractable::Execute_OnFocused(NewFocusedActor,
+                                                       OwningController);
+            }
+        }
+        // Providers fail closed even when misconfigured: binding the legacy actor-owned prompt would bypass the grant,
+        // revision, privacy, and LocalPlayer ownership contract that this interface promises.
+        return;
+    }
+
     if (auto RootComp = IMythicInteractable::Execute_GetWidgetAttachmentComponent(NewFocusedActor)) {
         FMythicInteractionData InteractionData;
         this->IsCurrentActorReadyForInteraction = IMythicInteractable::Execute_GetInteractionData(NewFocusedActor, this->OwningController, InteractionData);
@@ -207,7 +253,10 @@ void UMythicInteractionComponent::InitializeInteraction(AActor *NewFocusedActor)
 
         if (!this->InteractionPromptWidget) {
             if (this->InteractionPromptWidgetClass) {
-                this->InteractionPromptWidget = CreateWidget<UMythicInteractionPromptWidget>(GetWorld(), InteractionPromptWidgetClass);
+                this->InteractionPromptWidget =
+                    CreateWidget<UMythicInteractionPromptWidget>(
+                        this->OwningController,
+                        InteractionPromptWidgetClass);
             }
             else {
                 UE_LOG(Myth, Error, TEXT("Interaction Error: InteractionPromptWidget and InteractionPromptWidgetClass are nullptr"));
@@ -217,19 +266,27 @@ void UMythicInteractionComponent::InitializeInteraction(AActor *NewFocusedActor)
 
         this->InteractionPromptWidget->SetInteractionData(InteractionData, NewFocusedActor, this->OwningController, this->UI_LayerRootWidget);
 
-        UWidgetComponent *newWidgetComponent = NewObject<UWidgetComponent>(NewFocusedActor, UWidgetComponent::StaticClass());
+        if (ActiveInteractionWidgetComponent) {
+            ActiveInteractionWidgetComponent->DestroyComponent();
+            ActiveInteractionWidgetComponent = nullptr;
+        }
+        UWidgetComponent *newWidgetComponent = NewObject<UWidgetComponent>(
+            NewFocusedActor, UWidgetComponent::StaticClass());
         // A compact pill, not a draw-at-desired-size widget: the prompt's desired width resolved to ~600px
         // and rendered as a grey bar across the top of the screen. A fixed screen-space draw size keeps it a
         // tidy "press E" callout; the plate and content fill it.
         newWidgetComponent->SetDrawAtDesiredSize(false);
         newWidgetComponent->SetDrawSize(FVector2D(240.0f, 60.0f));
         newWidgetComponent->SetWidget(this->InteractionPromptWidget);
+        newWidgetComponent->SetOwnerPlayer(
+            this->OwningController->GetLocalPlayer());
         newWidgetComponent->SetVisibility(true);
         newWidgetComponent->RegisterComponent();
         newWidgetComponent->AttachToComponent(RootComp, FAttachmentTransformRules::KeepRelativeTransform);
         newWidgetComponent->ComponentTags.Add(FName("InteractionWidget"));
 
         newWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+        ActiveInteractionWidgetComponent = newWidgetComponent;
 
         IMythicInteractable::Execute_OnFocused(NewFocusedActor, this->OwningController);
     }
@@ -239,13 +296,18 @@ void UMythicInteractionComponent::InitializeInteraction(AActor *NewFocusedActor)
 }
 
 void UMythicInteractionComponent::EndInteraction(AActor *OldFocusedActor) {
-    UE_LOG(Myth, Warning, TEXT("Ending Interaction with %s"), *OldFocusedActor->GetName());
+    UE_LOG(Myth, Warning, TEXT("Ending Interaction with %s"),
+           *GetNameSafe(OldFocusedActor));
 
-    if (auto UIWidget = OldFocusedActor->FindComponentByTag(UWidgetComponent::StaticClass(), FName("InteractionWidget"))) {
-        UIWidget->DestroyComponent();
+    if (ActiveInteractionWidgetComponent) {
+        ActiveInteractionWidgetComponent->DestroyComponent();
+        ActiveInteractionWidgetComponent = nullptr;
     }
 
-    IMythicInteractable::Execute_OnUnfocused(OldFocusedActor, this->OwningController);
+    if (IsValid(OldFocusedActor)) {
+        IMythicInteractable::Execute_OnUnfocused(OldFocusedActor,
+                                                 this->OwningController);
+    }
 
     this->IsCurrentActorReadyForInteraction = false;
 
@@ -259,12 +321,37 @@ void UMythicInteractionComponent::EndStaleInteraction() {
 
     this->IsCurrentActorReadyForInteraction = false;
 
+    if (ActiveInteractionWidgetComponent) {
+        ActiveInteractionWidgetComponent->DestroyComponent();
+        ActiveInteractionWidgetComponent = nullptr;
+    }
+
     if (this->InteractionPromptWidget) {
         this->InteractionPromptWidget->Clear();
     }
 }
 
 void UMythicInteractionComponent::OnFocusedActorChanged_Implementation(AActor *NewFocusedActor, AActor *OldFocusedActor) {
+    // Transitional bridge: legacy interaction retains its proven sweep/UI path while publishing the selected public
+    // embodiment into the shared LocalPlayer attention service. Once interaction consumes that service directly this
+    // bridge disappears without changing attention, targeting, or nameplate contracts.
+    if (OwningController && OwningController->IsLocalController()) {
+        if (ULocalPlayer *LocalPlayer = OwningController->GetLocalPlayer()) {
+            if (UMythicEntityAttentionSubsystem *Attention =
+                    LocalPlayer->GetSubsystem<UMythicEntityAttentionSubsystem>()) {
+                FMythicEntityPresentationInstance InteractionInstance;
+                if (UMythicEntityPresentationComponent *Presentation =
+                        NewFocusedActor
+                            ? NewFocusedActor->FindComponentByClass<
+                                  UMythicEntityPresentationComponent>()
+                            : nullptr) {
+                    InteractionInstance = Presentation->GetPresentationInstance();
+                }
+                Attention->SetInteractionTarget(InteractionInstance);
+            }
+        }
+    }
+
     if (OldFocusedActor) {
         EndInteraction(OldFocusedActor);
     }

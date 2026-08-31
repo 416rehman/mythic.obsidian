@@ -54,7 +54,9 @@ UMythicGE_CombatScaling::UMythicGE_CombatScaling() {
     {
         FGameplayModifierInfo HealthMod;
         HealthMod.Attribute = UMythicAttributeSet_Life::GetMaxHealthAttribute();
-        HealthMod.ModifierOp = EGameplayModOp::MultiplyAdditive;
+        // Encounter/world/tier scaling is independent from primary-stat derivation, so it compounds with the
+        // derived factor instead of joining GAS's additive multiplier bucket.
+        HealthMod.ModifierOp = EGameplayModOp::MultiplyCompound;
         FSetByCallerFloat HealthSBC;
         HealthSBC.DataTag = GAS_SETBYCALLER_SCALING_HEALTH;
         HealthMod.ModifierMagnitude = FGameplayEffectModifierMagnitude(HealthSBC);
@@ -64,7 +66,7 @@ UMythicGE_CombatScaling::UMythicGE_CombatScaling() {
     {
         FGameplayModifierInfo DamageMod;
         DamageMod.Attribute = UMythicAttributeSet_Offense::GetDamagePerHitAttribute();
-        DamageMod.ModifierOp = EGameplayModOp::MultiplyAdditive;
+        DamageMod.ModifierOp = EGameplayModOp::MultiplyCompound;
         FSetByCallerFloat DamageSBC;
         DamageSBC.DataTag = GAS_SETBYCALLER_SCALING_DAMAGE;
         DamageMod.ModifierMagnitude = FGameplayEffectModifierMagnitude(DamageSBC);

@@ -452,6 +452,12 @@ bool UMythicSaveGameSubsystem::ValidateCharacterData(const FSerializedCharacterD
                                    InData.DataVersion, static_cast<int32>(CurrentCharacterSaveVersion));
         return false;
     }
+    if (!InData.PlayerEntityId.IsValid()
+        || InData.PlayerEntityId.GetDomain()
+               != EMythicEntityDomain::PlayerCharacter) {
+        OutError = TEXT("Missing or invalid canonical PlayerCharacter identity");
+        return false;
+    }
 
     FName ReceiptDiagnostic;
     const UMythicHarvestSettings *HarvestSettings =
@@ -908,6 +914,12 @@ FString UMythicSaveGameSubsystem::CreateNewCharacter(const FString &DisplayName,
         NewSave->CharacterData.CharacterID = NewSlotName;
         NewSave->CharacterData.CharacterName = DisplayName;
         NewSave->CharacterData.DataVersion = static_cast<int32>(CurrentCharacterSaveVersion);
+        do {
+            NewSave->CharacterData.PlayerEntityId =
+                FMythicEntityId::FromAuthorityGuid(
+                    EMythicEntityDomain::PlayerCharacter,
+                    FGuid::NewGuid());
+        } while (!NewSave->CharacterData.PlayerEntityId.IsValid());
         do {
             NewSave->CharacterData.HarvestReceiptLedger.LedgerEpoch =
                 FGuid::NewGuid();

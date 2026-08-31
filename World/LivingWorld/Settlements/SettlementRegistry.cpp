@@ -121,8 +121,9 @@ void UMythicSettlementRegistry::GetAllSettlementIds(TArray<int32> &OutIds) const
     Settlements.GetKeys(OutIds);
 }
 
-void UMythicSettlementRegistry::HandleNPCDeath(uint32 DeadEntityId, double DeathTime) {
-    if (DeadEntityId == 0) {
+void UMythicSettlementRegistry::HandleNPCDeath(
+    const FMythicEntityId &DeadEntityId, double DeathTime) {
+    if (!DeadEntityId.IsValid()) {
         return;
     }
 
@@ -131,11 +132,13 @@ void UMythicSettlementRegistry::HandleNPCDeath(uint32 DeadEntityId, double Death
 
         for (FMythicShopSlot &Shop : Data.Shops) {
             if (Shop.OwnerEntityId == DeadEntityId && !Shop.bPlayerOwned) {
-                Shop.OwnerEntityId = 0;
+                Shop.OwnerEntityId.Reset();
                 Shop.VacatedTime = DeathTime;
 
-                UE_LOG(LogMythSettlement, Log, TEXT("Shop '%s' in '%s' vacated due to NPC %u death."),
-                       *Shop.ShopName, *Data.DisplayName.ToString(), DeadEntityId);
+                UE_LOG(LogMythSettlement, Log,
+                       TEXT("Shop '%s' in '%s' vacated due to %s death."),
+                       *Shop.ShopName, *Data.DisplayName.ToString(),
+                       *DeadEntityId.ToDebugString());
             }
         }
     }
@@ -146,7 +149,7 @@ void UMythicSettlementRegistry::TickShopSuccession(double CurrentWorldTime, doub
         FMythicSettlementData &Data = Pair.Value;
 
         for (FMythicShopSlot &Shop : Data.Shops) {
-            if (Shop.OwnerEntityId == 0 && !Shop.bPlayerOwned && Shop.VacatedTime > 0.0) {
+            if (!Shop.OwnerEntityId.IsValid() && !Shop.bPlayerOwned && Shop.VacatedTime > 0.0) {
                 if (CurrentWorldTime - Shop.VacatedTime >= SuccessionDelay) {
                     Shop.VacatedTime = 0.0;
 
@@ -159,14 +162,18 @@ void UMythicSettlementRegistry::TickShopSuccession(double CurrentWorldTime, doub
 }
 
 bool UMythicSettlementRegistry::CanClaimShop(const FMythicShopSlot &Shop, const FGameplayTag &ClaimantRole) {
-    if (Shop.OwnerEntityId != 0 || Shop.bPlayerOwned || Shop.VacatedTime != 0.0) {
+    if (Shop.OwnerEntityId.IsValid() || Shop.bPlayerOwned || Shop.VacatedTime != 0.0) {
         return false;
     }
     return Shop.RequiredRole.IsValid() && ClaimantRole.IsValid() && ClaimantRole.MatchesTag(Shop.RequiredRole);
 }
 
-int32 UMythicSettlementRegistry::ClaimVacantShop(int32 SettlementId, int32 ClaimantEntityId, const FGameplayTag &ClaimantRole) {
-    if (ClaimantEntityId == 0) {
+int32 UMythicSettlementRegistry::ClaimVacantShop(
+    int32 SettlementId, const FMythicEntityId &ClaimantEntityId,
+    const FGameplayTag &ClaimantRole) {
+    if (!ClaimantEntityId.IsValid()
+        || ClaimantEntityId.GetDomain()
+               != EMythicEntityDomain::LivingWorld) {
         return INDEX_NONE;
     }
     FMythicSettlementData *Data = Settlements.Find(SettlementId);
@@ -177,12 +184,76 @@ int32 UMythicSettlementRegistry::ClaimVacantShop(int32 SettlementId, int32 Claim
         FMythicShopSlot &Shop = Data->Shops[i];
         if (CanClaimShop(Shop, ClaimantRole)) {
             Shop.OwnerEntityId = ClaimantEntityId;
-            UE_LOG(LogMythSettlement, Log, TEXT("Shop '%s' in '%s' claimed by NPC %d (role %s)."),
-                   *Shop.ShopName, *Data->DisplayName.ToString(), ClaimantEntityId, *ClaimantRole.ToString());
+            UE_LOG(LogMythSettlement, Log,
+                   TEXT("Shop '%s' in '%s' claimed by %s (role %s)."),
+                   *Shop.ShopName, *Data->DisplayName.ToString(),
+                   *ClaimantEntityId.ToDebugString(), *ClaimantRole.ToString());
             return i;
         }
     }
     return INDEX_NONE;
+}
+
+bool UMythicSettlementRegistry::ReferencesEntityIdentity(
+    const FMythicEntityId &EntityId) const {
+    if (!EntityId.IsValid()) {
+        return false;
+    }
+    for (const TPair<int32, FMythicSettlementData> &Pair : Settlements) {
+        for (const FMythicShopSlot &Shop : Pair.Value.Shops) {
+            if (!Shop.bPlayerOwned && Shop.OwnerEntityId == EntityId) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+int32 UMythicSettlementRegistry::ClearUnrestorableShopOwners(
+    const TSet<FMythicEntityId> &RestorableEntityIds) {
+    int32 ClearedCount = 0;
+    for (TPair<int32, FMythicSettlementData> &Pair : Settlements) {
+        FMythicSettlementData &Settlement = Pair.Value;
+        for (FMythicShopSlot &Shop : Settlement.Shops) {
+            if (Shop.bPlayerOwned || !Shop.OwnerEntityId.IsValid()
+                || RestorableEntityIds.Contains(Shop.OwnerEntityId)) {
+                continue;
+            }
+
+            UE_LOG(LogMythSettlement, Warning,
+                   TEXT("Shop '%s' in '%s': cleared unrestorable owner %s during LivingWorld restore."),
+                   *Shop.ShopName, *Settlement.DisplayName.ToString(),
+                   *Shop.OwnerEntityId.ToDebugString());
+            Shop.OwnerEntityId.Reset();
+            Shop.VacatedTime = 0.0;
+            ++ClearedCount;
+        }
+    }
+    return ClearedCount;
+}
+
+bool UMythicSettlementRegistry::ClearUnrestorableShopOwner(
+    const FMythicEntityId &EntityId) {
+    if (!EntityId.IsValid()) {
+        return false;
+    }
+
+    bool bCleared = false;
+    for (TPair<int32, FMythicSettlementData> &Pair : Settlements) {
+        FMythicSettlementData &Settlement = Pair.Value;
+        for (FMythicShopSlot &Shop : Settlement.Shops) {
+            if (!Shop.bPlayerOwned && Shop.OwnerEntityId == EntityId) {
+                UE_LOG(LogMythSettlement, Warning,
+                       TEXT("Shop '%s' in '%s': cleared owner %s after logical rehydration failed."),
+                       *Shop.ShopName, *Settlement.DisplayName.ToString(),
+                       *EntityId.ToDebugString());
+                Shop.OwnerEntityId.Reset();
+                Shop.VacatedTime = 0.0;
+                bCleared = true;
+            }
+        }
+    }
+    return bCleared;
 }
 
 void UMythicSettlementRegistry::TransferSettlement(

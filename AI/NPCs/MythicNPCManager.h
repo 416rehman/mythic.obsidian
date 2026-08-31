@@ -93,12 +93,15 @@ protected:
     void BuildDefinitionIndex();
 
 public:
+    /** Spawns one authored NPC definition through the canonical pooled preparation and combat-commit path. */
     UFUNCTION(BlueprintCallable, Category = "NPC Manager|Spawning")
     AMythicNPCCharacter *SpawnPredefinedNPC(UNPCDefinition *NPCDef, FVector SpawnLocation, FRotator SpawnRotation);
 
+    /** Selects an authored definition under NPCType, then spawns it through the canonical pooled runtime path. */
     UFUNCTION(BlueprintCallable, Category = "NPC Manager|Spawning")
     AMythicNPCCharacter *SpawnRandomNPC(FGameplayTag NPCType, FVector SpawnLocation, FRotator SpawnRotation);
 
+    /** Re-embodies one cached logical NPC by stable ID, preserving its persisted identity and authored state. */
     UFUNCTION(BlueprintCallable, Category = "NPC Manager|Spawning")
     AMythicNPCCharacter *SpawnCachedNPC(FGuid NPCId, FVector SpawnLocation, FRotator SpawnRotation);
 
@@ -126,9 +129,14 @@ public:
      */
     void RefreshCombatScalingOnActive();
 
-    UFUNCTION(BlueprintCallable, Category= "NPC Manager")
-    bool GetCachedNPCData(FGuid NPCType, FMythicNPCData &NPCData);
+    /** Invalidates manager-owned logical NPCs whose canonical identities are about to be replaced by world restore. */
+    void ResetForLivingWorldRestore();
 
+    /** Copies cached logical NPC data for NPCId without spawning or mutating the cached record. */
+    UFUNCTION(BlueprintCallable, Category= "NPC Manager")
+    bool GetCachedNPCData(FGuid NPCId, FMythicNPCData &NPCData);
+
+    /** Copies the cached family specification for FamilyId without mutating the authoritative cache. */
     UFUNCTION(BlueprintCallable, Category = "NPC Manager")
     bool GetCachedFamily(FGuid FamilyId, FFamilySpec &FamilySpec);
 

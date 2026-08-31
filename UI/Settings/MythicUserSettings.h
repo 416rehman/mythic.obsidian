@@ -6,6 +6,19 @@
 #include "GameFramework/GameUserSettings.h"
 #include "MythicUserSettings.generated.h"
 
+/** Player-selected ceiling for contextual entity presentation; gameplay safety and information entitlement still win. */
+UENUM(BlueprintType)
+enum class EMythicNameplatePresentationMode : uint8 {
+    /** Hide optional awareness/context plates while retaining mandatory safety and current-target presentation. */
+    Minimal,
+
+    /** Use progressive Silent, Whisper, Context, Focus, and Inspect disclosure. */
+    Contextual,
+
+    /** Permit additional already-entitled context without exposing secret or off-screen information. */
+    Expanded,
+};
+
 UCLASS(Config = GameUserSettings, ConfigDoNotCheckDefaults)
 class MYTHIC_API UMythicUserSettings : public UGameUserSettings {
     GENERATED_BODY()
@@ -343,6 +356,54 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetDamageNumberScale(float Scale);
 
+    /** Returns the player's contextual entity-presentation ceiling; it never grants knowledge or reveals secret state. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Nameplates")
+    EMythicNameplatePresentationMode GetNameplatePresentationMode() const { return NameplatePresentationMode; }
+
+    /** Sets the entity-presentation ceiling and immediately revises every local-player director projection. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings|Nameplates")
+    void SetNameplatePresentationMode(EMythicNameplatePresentationMode Mode);
+
+    /** Returns the accessibility scale applied to overhead plates and the contextual action rail. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Nameplates")
+    float GetNameplateScale() const { return NameplateScale; }
+
+    /** Sets nameplate scale, clamps it to 0.75..1.5, and immediately refreshes local presentation. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings|Nameplates")
+    void SetNameplateScale(float Scale);
+
+    /** Returns whether Focus/current-target health may include a rounded percentage; exact health integers remain hidden. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Nameplates")
+    bool GetShowNameplateHealthPercent() const { return bShowNameplateHealthPercent; }
+
+    /** Enables or disables the rounded Focus/current-target health percentage without changing health-bar entitlement. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings|Nameplates")
+    void SetShowNameplateHealthPercent(bool bShow);
+
+    /** Returns whether visible status badges should include short localized text in addition to icon/shape. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Nameplates")
+    bool GetShowNameplateStatusText() const { return bShowNameplateStatusText; }
+
+    /** Enables or disables status text while retaining icon, shape, and safety-critical semantics. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings|Nameplates")
+    void SetShowNameplateStatusText(bool bShow);
+
+    /** Returns whether nameplate content uses the stronger localized accessibility scrim. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Nameplates")
+    bool GetHighContrastNameplates() const { return bHighContrastNameplates; }
+
+    /** Enables or disables high-contrast nameplate rendering without changing information disclosure. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings|Nameplates")
+    void SetHighContrastNameplates(bool bEnabled);
+
+    /** Returns whether plate transitions use reduced motion; state timing remains identical. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Nameplates")
+    bool GetReducedNameplateMotion() const { return bReducedNameplateMotion; }
+
+    /** Enables or disables reduced-motion nameplate fades and movement, then refreshes local presentation. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings|Nameplates")
+    void SetReducedNameplateMotion(bool bReduced);
+
     /**
      * The quality preset the eleven scalability groups agree on, or -1 for Custom.
      *
@@ -493,6 +554,30 @@ private:
 
     UPROPERTY(Config)
     float DamageNumberScale = 1.0f;
+
+    /** Saved presentation ceiling; private config is read through documented Blueprint getters. */
+    UPROPERTY(Config)
+    EMythicNameplatePresentationMode NameplatePresentationMode = EMythicNameplatePresentationMode::Contextual;
+
+    /** Saved overhead/action-rail scale in the inclusive 0.75..1.5 accessibility range. */
+    UPROPERTY(Config)
+    float NameplateScale = 1.0f;
+
+    /** Saved opt-in for rounded health percentage on an already-entitled Focus/current target. */
+    UPROPERTY(Config)
+    bool bShowNameplateHealthPercent = false;
+
+    /** Saved opt-in for localized text accompanying visible status badge shapes/icons. */
+    UPROPERTY(Config)
+    bool bShowNameplateStatusText = false;
+
+    /** Saved opt-in for the stronger content-local nameplate accessibility scrim. */
+    UPROPERTY(Config)
+    bool bHighContrastNameplates = false;
+
+    /** Saved reduced-motion preference for plate transitions and anchor interpolation. */
+    UPROPERTY(Config)
+    bool bReducedNameplateMotion = false;
 
     void ApplyInterfaceSettings() const;
 

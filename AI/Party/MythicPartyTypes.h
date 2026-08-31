@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "Mass/EntityHandle.h"
 #include "AI/Cognition/CognitiveTypes.h"
+#include "World/Entity/MythicEntityId.h"
 #include "World/LivingWorld/LivingWorldTypes.h"
 #include "MythicPartyTypes.generated.h"
 
@@ -41,7 +42,8 @@ struct FMythicPartyMember {
 
     FText CachedDisplayName;
 
-    uint32 PersistedNameHash = 0;
+    FMythicEntityId PersistedEntityId;
+    uint32 PersistedNameSeed = 0;
     FMythicFactionId PersistedTrueFaction;
     FMythicCellCoord PersistedSpawnCell;
     FGameplayTag PersistedRoleTag;
