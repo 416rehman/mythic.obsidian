@@ -8,7 +8,11 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
+#include "GAS/MythicStatSummary.h"
 #include "Progression/MythicAchievementDefinition.h"
+#include "Progression/MythicStatCounterTypes.h"
+#include "Stats/MythicStatCategoryDefinition.h"
+#include "Stats/MythicStatDefinition.h"
 #include "World/LivingWorld/LivingWorldSettings.h"
 
 namespace MythicTest {
@@ -87,6 +91,37 @@ static void GatherDataDrivenCounters(TSet<FString> &Out) {
 
 static bool IsCounterProduced(const FString &Source, const FGameplayTag &Counter, const TSet<FString> &DataDriven) {
     return HasRecorderFor(Source, Counter) || DataDriven.Contains(Counter.ToString());
+}
+
+template <typename TDefinition, typename TGetTag>
+static void GatherIdentityClaims(IAssetRegistry &Registry, TSet<FString> &Out, TGetTag GetTag) {
+    TArray<FAssetData> Assets;
+    Registry.GetAssetsByClass(TDefinition::StaticClass()->GetClassPathName(), Assets, true);
+    for (const FAssetData &Asset : Assets) {
+        if (const TDefinition *Definition = Cast<TDefinition>(Asset.GetAsset())) {
+            const FGameplayTag Tag = GetTag(Definition);
+            if (Tag.IsValid()) {
+                Out.Add(Tag.ToString());
+            }
+        }
+    }
+}
+
+// Stat.Attribute.*, Stat.Category.* and Stat.Summary.* share the Stat. root with the ledger's counters but are the
+// stat sheet's identities, each one owned by a definition asset. Collecting those claims lets the audit PROVE a tag
+// is an identity instead of trusting its prefix, so a tag parked under one of those branches that nothing owns is
+// still reported rather than quietly excused.
+static void GatherStatSheetIdentities(TSet<FString> &Out) {
+    FAssetRegistryModule &AssetModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry &Registry = AssetModule.Get();
+    Registry.SearchAllAssets(true);
+
+    GatherIdentityClaims<UMythicStatDefinition>(
+        Registry, Out, [](const UMythicStatDefinition *Definition) { return Definition->StatTag; });
+    GatherIdentityClaims<UMythicStatCategoryDefinition>(
+        Registry, Out, [](const UMythicStatCategoryDefinition *Definition) { return Definition->CategoryTag; });
+    GatherIdentityClaims<UMythicStatSummaryDefinition>(
+        Registry, Out, [](const UMythicStatSummaryDefinition *Definition) { return Definition->SummaryId; });
 }
 }
 
@@ -183,6 +218,16 @@ bool FMythicStatCounterReachabilityTest::RunTest(const FString &Parameters) {
     // instead of joining a silent graveyard. Drop an entry the moment it earns a producer.
     const TSet<FString> KnownUnproduced;
 
+    // Stat sheet identities that exist only as native fixtures declared by Tests/Stats/MythicStatRegistryTests.cpp.
+    // That test builds its definitions as transient objects, so no asset ever claims these five.
+    const TSet<FString> FixtureIdentities = {
+        TEXT("Stat.Attribute.RegistryTestArmor"),
+        TEXT("Stat.Attribute.RegistryTestCapacity"),
+        TEXT("Stat.Attribute.RegistryTestCurrent"),
+        TEXT("Stat.Attribute.RegistryTestDuplicate"),
+        TEXT("Stat.Category.RegistryTest"),
+    };
+
     // A counter can be produced from AUTHORED DATA rather than a RecordStat call site, and a scan over source
     // cannot see that - the deed counters are written by a row on the living world settings, matched by tag, so
     // no symbol for them appears anywhere. Gathering them here keeps the source scan from reporting a live
@@ -190,21 +235,21 @@ bool FMythicStatCounterReachabilityTest::RunTest(const FString &Parameters) {
     TSet<FString> DataDrivenCounters;
     MythicTest::GatherDataDrivenCounters(DataDrivenCounters);
 
-    AddInfo(FString::Printf(TEXT("%d counters produced from authored rows"), DataDrivenCounters.Num()));
+    TSet<FString> ClaimedIdentities;
+    MythicTest::GatherStatSheetIdentities(ClaimedIdentities);
+    if (!TestTrue(TEXT("the project has stat sheet identities to check"), ClaimedIdentities.Num() > 0)) {
+        return false;
+    }
 
     const UGameplayTagsManager &Tags = UGameplayTagsManager::Get();
     FGameplayTagContainer AllTags;
     Tags.RequestAllGameplayTags(AllTags, false);
 
+    TSet<FString> WalkedIdentities;
     int32 Checked = 0;
     for (const FGameplayTag &Tag : AllTags) {
         const FString Name = Tag.ToString();
         if (!Name.StartsWith(TEXT("Stat."))) {
-            continue;
-        }
-        // Stat.Summary.* are the stat sheet's headline-card identities, computed on read - not ledger
-        // counters, so nothing should ever RecordStat them.
-        if (Name.StartsWith(TEXT("Stat.Summary."))) {
             continue;
         }
         // A counter is a leaf. Stat.Trade is a category over Stat.Trade.Profit and friends, not a recorded number.
@@ -213,6 +258,18 @@ bool FMythicStatCounterReachabilityTest::RunTest(const FString &Parameters) {
         }
 
         const bool bRecorded = MythicTest::IsCounterProduced(Source, Tag, DataDrivenCounters);
+
+        if (!FMythicStatCounterTag::IsLedgerCounter(Tag)) {
+            WalkedIdentities.Add(Name);
+            // The prefix alone excuses nothing: a tag parked under a stat sheet branch that no definition asset owns
+            // is neither an identity nor a counter, and this is the only place it would ever be looked at.
+            TestTrue(*FString::Printf(TEXT("stat sheet identity %s is claimed by a definition asset"), *Name),
+                     ClaimedIdentities.Contains(Name) || FixtureIdentities.Contains(Name));
+            // These are computed on read. Recording one writes a ledger row that shadows the live value forever.
+            TestFalse(*FString::Printf(TEXT("stat sheet identity %s is not written by RecordStat"), *Name), bRecorded);
+            continue;
+        }
+
         if (KnownUnproduced.Contains(Name)) {
             // Keep the exclusion honest: if one of these quietly gains a recorder, this fails so the list is trimmed.
             TestFalse(*FString::Printf(TEXT("known-unproduced %s is still unrecorded (remove it from the list once it has a producer)"), *Name),
@@ -227,11 +284,32 @@ bool FMythicStatCounterReachabilityTest::RunTest(const FString &Parameters) {
                  bRecorded);
     }
 
+    AddInfo(FString::Printf(
+        TEXT("%d ledger counters checked; %d counters produced from authored rows; %d stat sheet identities walked against %d asset claims"),
+        Checked, DataDrivenCounters.Num(), WalkedIdentities.Num(), ClaimedIdentities.Num()));
+
     // Guard the exclusion list itself against rot: a stale entry naming a counter that no longer exists would mask
     // a future real counter of the same name.
     for (const FString &Name : KnownUnproduced) {
-        TestTrue(*FString::Printf(TEXT("known-unproduced entry %s names a registered counter"), *Name),
-                 Tags.RequestGameplayTag(FName(*Name), false).IsValid());
+        const FGameplayTag Excluded = Tags.RequestGameplayTag(FName(*Name), false);
+        TestTrue(*FString::Printf(TEXT("known-unproduced entry %s names a registered counter"), *Name), Excluded.IsValid());
+        TestTrue(*FString::Printf(TEXT("known-unproduced entry %s names a ledger counter, not a stat sheet identity"), *Name),
+                 FMythicStatCounterTag::IsLedgerCounter(Excluded));
+    }
+
+    // Same rot guard for the fixture list. Silent in a build without the automation fixtures, where the tag is not
+    // registered at all.
+    for (const FString &Name : FixtureIdentities) {
+        if (Tags.RequestGameplayTag(FName(*Name), false).IsValid()) {
+            TestFalse(*FString::Printf(TEXT("fixture identity %s is still unclaimed (remove it from the list once an asset claims it)"), *Name),
+                      ClaimedIdentities.Contains(Name));
+        }
+    }
+
+    // An asset claiming a tag nobody registered leaves a stat sheet row that can never resolve.
+    for (const FString &Claimed : ClaimedIdentities) {
+        TestTrue(*FString::Printf(TEXT("stat sheet identity %s claimed by an asset is a registered leaf tag"), *Claimed),
+                 WalkedIdentities.Contains(Claimed));
     }
 
     TestTrue(TEXT("the walk actually found live counters to check"), Checked >= 10);

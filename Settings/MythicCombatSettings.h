@@ -13,6 +13,29 @@
 #include "GAS/Effects/MythicCrowdControl.h"
 #include "MythicCombatSettings.generated.h"
 
+/**
+ * The whole Resolve to MaxStamina derivation, as three numbers instead of three literals buried in an attribute
+ * callback. MaxStamina = Base + BonusCeiling * Resolve / (Resolve + HalfPoint): a hyperbola that pays half the
+ * ceiling at HalfPoint Resolve and approaches but never reaches Base + BonusCeiling, so stacking Resolve always
+ * buys something and never buys an unbounded pool.
+ */
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicResolveStaminaConfig {
+    GENERATED_BODY()
+
+    /** Stamina a character carries at zero Resolve, in stamina points. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stamina", meta = (ClampMin = "0.0"))
+    float BaseMaxStamina = 100.0f;
+
+    /** Stamina the Resolve curve asymptotically approaches on top of the base, in stamina points. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stamina", meta = (ClampMin = "0.0"))
+    float ResolveBonusCeiling = 150.0f;
+
+    /** Resolve at which half the bonus ceiling is paid; larger values push the whole curve later. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stamina", meta = (ClampMin = "0.01"))
+    float ResolveHalfPoint = 40.0f;
+};
+
 UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic Combat"))
 class MYTHIC_API UMythicCombatSettings : public UDeveloperSettings {
     GENERATED_BODY()
@@ -92,6 +115,13 @@ public:
     float StatusDurationScale = 1.0f;
 
     /**
+     * Buildup a single landed proc contributes, before the source's StatusBuildupMultiplier. Against the
+     * threshold below this decides how many procs an unmodified attacker needs to land a status.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0"))
+    float StatusBuildupPerProc;
+
+    /**
      * Buildup a target must accumulate before a status lands. Resistance deliberately does not move this: it
      * already gates every proc through 1 - Resist, so at full resistance no buildup accrues at all, and bending
      * the threshold as well would pay the same stat twice.
@@ -105,6 +135,14 @@ public:
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0", ClampMax = "0.95"))
     float MaxStatusThresholdReduction = 0.6f;
+
+    /**
+     * Ceiling on any one status resistance, as a [0,1] fraction. Every status proc is gated through 1 - Resist,
+     * so at 1.0 a stacked resistance build is permanently and totally immune to that status with no counterplay.
+     * Below 1.0 resistance stays a strong defence that a determined attacker can still beat.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Status Baseline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaxStatusResistance;
 
     /**
      * How hard each enemy tier resists repeat hard crowd control. One row per AI tier (1..5); a tier with no row
@@ -166,6 +204,80 @@ public:
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.01", ClampMax = "1.0"))
     float MinSpeedScale = 0.1f;
+
+    /**
+     * Post-mitigation floor under any hit that was not negated outright, in damage points. It is what stops a
+     * fully-armoured target reading as invulnerable to a weak attacker: the swing always says something.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0.0"))
+    float MinChipDamage;
+
+    /** Pre-mitigation damage the Rage buff adds, as an additive fraction of the hit. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0.0"))
+    float RageDamageBonus;
+
+    /** Pre-mitigation damage the Weakened debuff removes from its victim's hits, as an additive fraction. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WeakenedDamagePenalty;
+
+    /** Extra pre-mitigation damage a Terrified target takes, as an additive fraction of the hit. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0.0"))
+    float TerrifiedDamageBonus;
+
+    /** Pre-mitigation damage the Fortify buff removes from incoming hits, as an additive fraction. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FortifyDamageReduction;
+
+    /**
+     * Slowest an attack montage may play, as a unitless rate multiplier. Below this an attack stops reading as a
+     * swing and starts reading as a hitch, however far a build sinks its attack speed.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Attack Speed", meta = (ClampMin = "0.01"))
+    float MinAttackSpeedPlayRate;
+
+    /**
+     * Fastest an attack montage may play, as a unitless rate multiplier. This is also the reachable ceiling item
+     * validation projects attack-speed affix rolls against, so raising it widens what a weapon roll can be worth.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Attack Speed", meta = (ClampMin = "1.0"))
+    float MaxAttackSpeedPlayRate;
+
+    /**
+     * Ceiling on dodge chance, however much an entity stacks. At 1.0 a build reaching 100% dodge is literally
+     * invulnerable, so this must stay below 1 for stacked dodge to remain a trade rather than an exploit.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Probability", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaxDodgeChance;
+
+    /**
+     * Where on-hit chances stop being worth their face value, as a [0,1] probability. Below this a chance is
+     * exactly what it says; above it each further point buys less than the last, approaching certainty without
+     * reaching it. Raise it to let gear carry more before the curve bites; lower it to make specialising bite sooner.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Probability", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ProbabilitySoftCap;
+
+    /**
+     * Most of a cooldown that stacked cooldown reduction may remove, as a [0,1] fraction. It is the safety ceiling
+     * that keeps a deep reduction build off a degenerate zero-duration cooldown.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Cooldown", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaxCooldownReduction;
+
+    /**
+     * Most of a stamina cost that stacked stamina-cost reduction may remove, as a [0,1] fraction. At 1.0 a
+     * specialised build acts for free and stamina stops being a resource, so this is the knob that keeps it one.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Stamina", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MaxStaminaCostReduction;
+
+    /** How Resolve buys MaxStamina; see the struct for the curve it describes. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Stamina")
+    FMythicResolveStaminaConfig ResolveStamina;
+
+    /** Extra proficiency XP the Enlighten buff grants, as an additive fraction of the award. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Progression", meta = (ClampMin = "0.0"))
+    float EnlightenProficiencyBonus;
 };
 
 namespace MythicCombat {
@@ -185,6 +297,12 @@ MYTHIC_API int32 ResolveCombatLevelAt(const UWorld *World, const FVector &Locati
 
 /** The authored floor under any speed value. */
 MYTHIC_API float GetMinSpeedScale();
+
+/**
+ * The MaxStamina a given Resolve is worth under the authored curve. Negative or non-finite Resolve reads as zero,
+ * so a bad attribute value falls back to the base pool rather than producing a NaN one.
+ */
+MYTHIC_API float ResolveMaxStamina(float Resolve);
 
 /**
  * The walk-speed scale a character should be moving at: its one speed attribute, the authored sprint multiplier

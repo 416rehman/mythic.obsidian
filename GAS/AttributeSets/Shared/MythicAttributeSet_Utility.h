@@ -9,7 +9,7 @@ class MYTHIC_API UMythicAttributeSet_Utility : public UMythicAttributeSet {
     GENERATED_BODY()
 
 protected:
-    /** Resolve scales with player level and increases maximum stamina. */
+    /** Resolve scales with player level and is the primary stat MaxStamina derives from. */
     UPROPERTY(BlueprintReadOnly, Category="Utility", ReplicatedUsing=OnRep_Resolve)
     FGameplayAttributeData Resolve;
 
@@ -112,7 +112,4 @@ public:
     virtual void OnRep_HarvestWorkMultiplier(const FGameplayAttributeData &OldValue);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
-
-private:
-    mutable bool bIsUpdatingMaxStamina = false;
 };

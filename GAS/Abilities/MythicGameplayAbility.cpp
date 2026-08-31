@@ -24,7 +24,6 @@
 #include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
-#include "GameModes/GameState/MythicGameState.h"
 #include "GameplayEffect.h"
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
@@ -33,6 +32,7 @@
 #include "GAS/Feedback/MythicTags_FeedbackCues.h"
 #include "Player/MythicPlayerState.h"
 #include "Player/Proficiency/ProficiencyComponent.h"
+#include "Settings/MythicCombatSettings.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/GameStateBase.h"
@@ -527,12 +527,7 @@ namespace {
         if (!Util) {
             return 1.0f;
         }
-        float MaxCDR = 0.8f;
-        if (const UWorld *World = ASC->GetWorld()) {
-            if (const AMythicGameState *GS = World->GetGameState<AMythicGameState>()) {
-                MaxCDR = FMath::Clamp(GS->MaxCooldownReduction, 0.0f, 1.0f);
-            }
-        }
+        const float MaxCDR = FMath::Clamp(GetDefault<UMythicCombatSettings>()->MaxCooldownReduction, 0.0f, 1.0f);
         const float CDR = FMath::Clamp(Util->GetCooldownReduction(), 0.0f, MaxCDR);
         return 1.0f - CDR;
     }
@@ -714,22 +709,15 @@ AMythicPlayerController *UMythicGameplayAbility::GetMythicPlayerControllerFromAc
 float UMythicGameplayAbility::GetClampedAttackSpeedPlayRate() const {
     // AttackSpeed is a bonus fraction that defaults to zero, so the play rate is one plus the bonus.
     float PlayRate = 1.0f;
-    float MinRate = 0.8f;
-    float MaxRate = 1.4f;
 
     if (UAbilitySystemComponent *ASC = GetAbilitySystemComponentFromActorInfo()) {
         if (const UMythicAttributeSet_Offense *Offense = ASC->GetSet<UMythicAttributeSet_Offense>()) {
             PlayRate = 1.0f + Offense->GetAttackSpeed();
         }
-        if (const UWorld *World = ASC->GetWorld()) {
-            if (const AMythicGameState *GS = World->GetGameState<AMythicGameState>()) {
-                MinRate = GS->MinAttackSpeedPlayRate;
-                MaxRate = GS->MaxAttackSpeedPlayRate;
-            }
-        }
     }
 
-    return ComputeAttackSpeedPlayRate(PlayRate - 1.0f, MinRate, MaxRate);
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    return ComputeAttackSpeedPlayRate(PlayRate - 1.0f, Settings->MinAttackSpeedPlayRate, Settings->MaxAttackSpeedPlayRate);
 }
 
 FName UMythicGameplayAbility::SelectAttackMontageSection(

@@ -258,6 +258,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
 
     const UWorld *World = TargetASC ? TargetASC->GetWorld() : nullptr;
     const AMythicGameState *GS = World ? World->GetGameState<AMythicGameState>() : nullptr;
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
 
     float Power = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().Power, EvaluateParameters, Power);
@@ -337,10 +338,8 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     // Every damage-affecting fraction below is a stacked 0.0-based bonus, so each rides its authored diminishing
     // curve before it multiplies. A stat with no curve passes through unchanged, so this is a no-op until one is
     // authored - the curves in UMythicCombatSettings::StatDiminishing are the brake, not this call.
-    const UMythicCombatSettings *CurveSettings = GetDefault<UMythicCombatSettings>();
-    auto CurveBonus = [CurveSettings](const FGameplayAttribute &Attribute, float RawBonus) {
-        return CurveSettings ? FMythicStatDiminishingRules::ApplyToBonus(CurveSettings->StatDiminishing, Attribute, RawBonus)
-                             : 1.0f + FMath::Max(0.0f, RawBonus);
+    auto CurveBonus = [Settings](const FGameplayAttribute &Attribute, float RawBonus) {
+        return FMythicStatDiminishingRules::ApplyToBonus(Settings->StatDiminishing, Attribute, RawBonus);
     };
 
     if (MythicContext->IsCriticalHit()) {
@@ -350,15 +349,15 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
 
     FinalDamage = FMath::Max(0.0f, FinalDamage * OutgoingDamageMultiplier * IncomingDamageMultiplier);
 
-    if (GS) {
+    {
         float StatusMult = 1.0f;
         if (SourceTags) {
-            if (SourceTags->HasTag(GAS_BUFF_RAGE)) { StatusMult *= (1.0f + GS->RageDamageBonus); }
-            if (SourceTags->HasTag(GAS_DEBUFF_WEAKENED)) { StatusMult *= UMythicStatusRegistry::GetControlReductionMultiplier(SourceASC, GAS_DEBUFF_WEAKENED, GS->WeakenedDamagePenalty); }
+            if (SourceTags->HasTag(GAS_BUFF_RAGE)) { StatusMult *= (1.0f + Settings->RageDamageBonus); }
+            if (SourceTags->HasTag(GAS_DEBUFF_WEAKENED)) { StatusMult *= UMythicStatusRegistry::GetControlReductionMultiplier(SourceASC, GAS_DEBUFF_WEAKENED, Settings->WeakenedDamagePenalty); }
         }
         if (TargetTags) {
-            if (TargetTags->HasTag(GAS_DEBUFF_TERRIFIED)) { StatusMult *= UMythicStatusRegistry::GetControlBonusMultiplier(TargetASC, GAS_DEBUFF_TERRIFIED, GS->TerrifiedDamageBonus); }
-            if (TargetTags->HasTag(GAS_BUFF_FORTIFY)) { StatusMult *= FMath::Max(0.0f, 1.0f - GS->FortifyDamageReduction); }
+            if (TargetTags->HasTag(GAS_DEBUFF_TERRIFIED)) { StatusMult *= UMythicStatusRegistry::GetControlBonusMultiplier(TargetASC, GAS_DEBUFF_TERRIFIED, Settings->TerrifiedDamageBonus); }
+            if (TargetTags->HasTag(GAS_BUFF_FORTIFY)) { StatusMult *= FMath::Max(0.0f, 1.0f - Settings->FortifyDamageReduction); }
         }
         FinalDamage = FMath::Max(0.0f, FinalDamage * StatusMult);
     }
@@ -501,7 +500,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
 
     float DodgeChance = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.DodgeChance, EvaluateParameters, DodgeChance);
-    DodgeChance = MythicCombat::ClampProbability(DodgeChance, GS ? GS->MaxDodgeChance : 0.75f);
+    DodgeChance = MythicCombat::ClampProbability(DodgeChance, Settings->MaxDodgeChance);
     if (MythicCombat::RollSucceeds(DodgeChance, FMath::FRand())) {
         MythicContext->SetDodged(true);
         MarkDamageExecutionAborted(OutExecutionOutput);
@@ -539,6 +538,9 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         }
         float Resist = 0.0f;
         ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(ResistDef, EvaluateParameters, Resist);
+        // Total resistance would make the status structurally impossible - no proc lands and no buildup accrues -
+        // so the authored ceiling keeps a stacked resist build very strong rather than absolutely immune.
+        Resist = MythicCombat::ClampProbability(Resist, Settings->MaxStatusResistance);
         const float SurviveChance = FMath::Clamp(1.0f - Resist, 0.0f, 1.0f);
         const bool bSurvived = MythicCombat::RollSucceeds(SurviveChance, FMath::FRand());
         if (!bSurvived) {
@@ -576,9 +578,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         }
     }
     FinalDamage *= (1.0f - MitigationFraction);
-    if (GS) {
-        FinalDamage = ApplyChipFloor(FinalDamage, GS->MinChipDamage);
-    }
+    FinalDamage = ApplyChipFloor(FinalDamage, Settings->MinChipDamage);
 
     float Shield = 0.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.Shield, EvaluateParameters, Shield);
@@ -603,7 +603,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
 
     float BuildupMultiplier = 1.0f;
     ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.StatusBuildupMultiplier, EvaluateParameters, BuildupMultiplier);
-    const float StatusBuildupPerProc = ComputeBuildupPerProc(GS ? GS->StatusBuildupPerProc : 25.0f, BuildupMultiplier);
+    const float StatusBuildupPerProc = ComputeBuildupPerProc(Settings->StatusBuildupPerProc, BuildupMultiplier);
     auto AddBuildup = [&](bool bProcSurvived, const FGameplayAttribute &BuildupAttr) {
         if (bProcSurvived) {
             OutExecutionOutput.AddOutputModifier(FGameplayModifierEvaluatedData(

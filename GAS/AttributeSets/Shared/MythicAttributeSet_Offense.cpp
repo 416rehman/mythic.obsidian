@@ -58,11 +58,11 @@ void UMythicAttributeSet_Offense::PreAttributeChange(const FGameplayAttribute &A
 void UMythicAttributeSet_Offense::PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const {
     Super::PreAttributeBaseChange(Attribute, NewValue);
 
-    if (IsProbabilityAttribute(Attribute)) {
-        NewValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
-    }
+    // Probability BASES are deliberately left alone. The permanent stat ledger writes a base, reads it back, and
+    // treats any clamp as corruption, so capping crit here unequips the character instead of capping crit. The
+    // damage execution already bends every chance through DiminishProbability, which never reaches certainty.
     // A negative multiplier would drain buildup on hit, which reads as curing the status by attacking.
-    else if (Attribute == GetStatusBuildupMultiplierAttribute() || IsStatusScalingAttribute(Attribute)) {
+    if (Attribute == GetStatusBuildupMultiplierAttribute() || IsStatusScalingAttribute(Attribute)) {
         NewValue = FMath::Max(0.0f, NewValue);
     }
 }

@@ -313,10 +313,10 @@ bool FMythicWeaponAttackSourceDomainTest::RunTest(
               EDomain::Weapon);
 
     Definition->ItemType = ITEMIZATION_TYPE_EQUIPMENT_TOOL_PICKAXE;
-    TestEqual(TEXT("a tool never resolves as an attack source"),
+    TestEqual(TEXT("a tool resolves as its own harvest source, so a weaponless player can still work a node"),
               UMythicWeaponAttackAbility::ResolveAttackSourceDomain(
                   AttackFragment),
-              EDomain::Invalid);
+              EDomain::HarvestTool);
 
     Item->AddTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SWORD);
     TestEqual(TEXT("an item claiming both source domains is rejected"),
@@ -351,6 +351,19 @@ bool FMythicWeaponAttackSourceDomainTest::RunTest(
     TestFalse(TEXT("an ambiguous source can never accept a target"),
               UMythicWeaponAttackAbility::IsTargetAllowedForSourceDomain(
                   EDomain::Invalid, true, true));
+
+    TestTrue(TEXT("a tool reaches a harvestable node"),
+             UMythicWeaponAttackAbility::IsTargetAllowedForSourceDomain(
+                 EDomain::HarvestTool, false, false, true));
+    TestFalse(TEXT("a tool can never reach a living target"),
+              UMythicWeaponAttackAbility::IsTargetAllowedForSourceDomain(
+                  EDomain::HarvestTool, true, false, false));
+    TestFalse(TEXT("a tool can never reach a plain destructible"),
+              UMythicWeaponAttackAbility::IsTargetAllowedForSourceDomain(
+                  EDomain::HarvestTool, false, true, false));
+    TestFalse(TEXT("a tool contacting a living target beside a node is still refused the kill"),
+              UMythicWeaponAttackAbility::IsTargetAllowedForSourceDomain(
+                  EDomain::HarvestTool, true, true, false));
     return true;
 }
 

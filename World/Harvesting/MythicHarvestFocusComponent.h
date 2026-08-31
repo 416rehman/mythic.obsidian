@@ -18,6 +18,8 @@ class UMythicHarvestableDefinition;
 class UMythicHarvestToolTypeDefinition;
 class UMythicItemInstance;
 class UMythicResourceISM;
+class UWidgetComponent;
+class UMythicHarvestPromptWidget;
 
 /** Local presentation result of matching the focused definition against exact live inventory fragments. */
 UENUM(BlueprintType)
@@ -176,6 +178,15 @@ protected:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
+    /** Creates the prompt once and repositions it thereafter; a per-focus allocation would sit on a 10 Hz path. */
+    void UpdatePromptPresentation(const FMythicHarvestFocusPresentation &Focus);
+
+    UPROPERTY(Transient)
+    TObjectPtr<UWidgetComponent> PromptWidgetComponent;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMythicHarvestPromptWidget> PromptWidget;
+
     void ResolveInputAssets();
     void SetContextMappingActive(bool bActive);
     void HandleContextInteractStarted();

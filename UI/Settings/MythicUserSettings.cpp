@@ -58,6 +58,14 @@ void UMythicUserSettings::SetAlwaysShowHUD(bool bAlways) {
     OnAccessibilityChanged.Broadcast();
 }
 
+void UMythicUserSettings::SetShowHarvestPrompts(bool bShow) {
+    if (bShowHarvestPrompts == bShow) {
+        return;
+    }
+    bShowHarvestPrompts = bShow;
+    OnAccessibilityChanged.Broadcast();
+}
+
 void UMythicUserSettings::ApplyImageSettings() const {
     PushCVar(TEXT("r.AntiAliasingMethod"), AntiAliasingMethod == 3 ? 4 : AntiAliasingMethod);
     PushCVar(TEXT("r.Tonemapper.Sharpen"), Sharpness);
@@ -499,6 +507,7 @@ void UMythicUserSettings::SetToDefaults() {
     AntiAliasingMethod = 4;
     Sharpness = 0.4f;
     bAlwaysShowHUD = false;
+    bShowHarvestPrompts = true;
     DisplayGamma = 2.2f;
     BackgroundFrameRateLimit = 30.0f;
     MotionBlurQuality = 0;

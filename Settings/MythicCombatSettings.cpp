@@ -106,6 +106,30 @@ UMythicCombatSettings::UMythicCombatSettings() {
         {EMythicDangerTier::High, 20},
         {EMythicDangerTier::Extreme, 30},
     };
+
+    MinChipDamage = 1.0f;
+    RageDamageBonus = 0.25f;
+    WeakenedDamagePenalty = 0.25f;
+    TerrifiedDamageBonus = 0.25f;
+    FortifyDamageReduction = 0.25f;
+
+    MinAttackSpeedPlayRate = 0.8f;
+    MaxAttackSpeedPlayRate = 1.4f;
+
+    StatusBuildupPerProc = 25.0f;
+    MaxStatusResistance = 1.0f;
+
+    MaxDodgeChance = 0.75f;
+    ProbabilitySoftCap = 0.5f;
+
+    MaxCooldownReduction = 0.8f;
+
+    MaxStaminaCostReduction = 1.0f;
+    ResolveStamina.BaseMaxStamina = 100.0f;
+    ResolveStamina.ResolveBonusCeiling = 150.0f;
+    ResolveStamina.ResolveHalfPoint = 40.0f;
+
+    EnlightenProficiencyBonus = 0.5f;
 }
 
 namespace MythicCombat {
@@ -143,6 +167,14 @@ int32 ResolveCombatLevelAt(const UWorld *World, const FVector &Location) {
 float GetMinSpeedScale() {
     const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
     return Settings ? FMath::Clamp(Settings->MinSpeedScale, 0.01f, 1.0f) : 0.1f;
+}
+
+float ResolveMaxStamina(const float Resolve) {
+    const FMythicResolveStaminaConfig &Config = GetDefault<UMythicCombatSettings>()->ResolveStamina;
+    const float ClampedResolve = FMath::IsFinite(Resolve) ? FMath::Max(0.0f, Resolve) : 0.0f;
+    const float HalfPoint = FMath::Max(KINDA_SMALL_NUMBER, Config.ResolveHalfPoint);
+    const float Scalar = ClampedResolve / (ClampedResolve + HalfPoint);
+    return Config.BaseMaxStamina + Config.ResolveBonusCeiling * Scalar;
 }
 
 float ComposeSpeedScale(const float SpeedMultiplier, const float SituationalScale, const bool bSprinting) {

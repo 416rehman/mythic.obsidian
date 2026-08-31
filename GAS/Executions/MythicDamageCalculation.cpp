@@ -7,6 +7,7 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "Engine/World.h"
 #include "GAS/Executions/MythicCombatRoll.h"
+#include "Settings/MythicCombatSettings.h"
 #include "GameModes/GameState/MythicGameState.h"
 
 struct FMythicDamageCalcStatics {
@@ -102,10 +103,7 @@ void UMythicDamageCalculation::Execute_Implementation(const FGameplayEffectCusto
      * cap each further point buys less than the last and the curve never reaches 1, which keeps stacking worth
      * something without ever removing the roll.
      */
-    const UAbilitySystemComponent *SourceASC = ExecutionParams.GetSourceAbilitySystemComponent();
-    const UWorld *World = SourceASC ? SourceASC->GetWorld() : nullptr;
-    const AMythicGameState *GameState = World ? World->GetGameState<AMythicGameState>() : nullptr;
-    const float SoftCap = GameState ? GameState->ProbabilitySoftCap : 0.5f;
+    const float SoftCap = GetDefault<UMythicCombatSettings>()->ProbabilitySoftCap;
     const auto ProcRoll = [SoftCap](float Chance) {
         return MythicCombat::RollSucceeds(MythicCombat::DiminishProbability(Chance, SoftCap), FMath::FRand());
     };

@@ -74,12 +74,12 @@ bool UHarvestToolFragment::IsValidFragment(FText &OutErrorMessage) const {
             "A harvest tool Item Definition requires exactly one Harvest Tool Fragment and one Durability Fragment on the same item.");
         return false;
     }
-    // A tool is passive gear that authorizes harvesting by occupying its slot; it is never swung, so an Attack
-    // Fragment on it would bind a second attacker beside the weapon.
-    if (AttackFragmentCount != 0) {
+    // The slotted tool grants its own swing, filtered to harvest nodes alone by the HarvestTool source domain, so a
+    // player with no weapon can still work a node.
+    if (AttackFragmentCount != 1) {
         OutErrorMessage = NSLOCTEXT(
-            "HarvestToolFragment", "ToolCarriesAttackFragment",
-            "A harvest tool Item Definition must not carry an Attack Fragment: tools are never wielded, and only the equipped weapon attacks.");
+            "HarvestToolFragment", "ToolMissingAttackFragment",
+            "A harvest tool Item Definition requires exactly one Attack Fragment: the tool grants the harvesting swing itself.");
         return false;
     }
     if (!DurabilityFragment || DurabilityFragment->DurabilityConfig.MaxDurability <= 0) {

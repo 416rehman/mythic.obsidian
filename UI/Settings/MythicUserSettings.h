@@ -73,6 +73,19 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetAlwaysShowHUD(bool bAlways);
 
+    /**
+     * Draw the prompt over a focused harvestable, naming the tool it needs.
+     *
+     * It is the only thing that says why a node will not yield, so it stays on by default. Players who know the tool
+     * rules and want an unbroken view of the world turn it off; focus, tool gating and harvesting are untouched.
+     */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
+    bool GetShowHarvestPrompts() const { return bShowHarvestPrompts; }
+
+    /** Shows or hides the harvest prompt. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
+    void SetShowHarvestPrompts(bool bShow);
+
     DECLARE_MULTICAST_DELEGATE(FMythicAccessibilityChanged);
     FMythicAccessibilityChanged OnAccessibilityChanged;
 
@@ -390,6 +403,9 @@ private:
 
     UPROPERTY(Config)
     bool bAlwaysShowHUD = false;
+
+    UPROPERTY(Config)
+    bool bShowHarvestPrompts = true;
 
     // ---- Display ----
     UPROPERTY(Config)

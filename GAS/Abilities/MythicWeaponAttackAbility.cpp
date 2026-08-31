@@ -11,6 +11,7 @@
 #include "GAS/Effects/MythicWeaponDamageEffects.h"
 #include "GAS/MythicTags_GAS.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "Itemization/InventoryProviderInterface.h"
@@ -18,10 +19,13 @@
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h"
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
+#include "Itemization/Inventory/Fragments/Passive/HarvestToolFragment.h"
 #include "Itemization/MythicTags_Inventory.h"
 #include "Misc/DataValidation.h"
 #include "Mythic.h"
 #include "Resources/MythicResourceISM.h"
+#include "World/Harvesting/MythicHarvestFocusComponent.h"
+#include "World/Harvesting/MythicHarvestToolTypeDefinition.h"
 #include "World/Harvesting/MythicHarvestWorldSubsystem.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(MythicWeaponAttackAbility)
@@ -106,6 +110,135 @@ bool IsSourceItemEquipped(const FGameplayAbilityActorInfo *ActorInfo,
         ResolveInventoryProvider(ActorInfo);
     return Provider
         && Provider->GetAllInventoryComponents().Contains(Inventory);
+}
+
+AController *ResolveOwningController(const FGameplayAbilityActorInfo *ActorInfo) {
+    if (!ActorInfo) {
+        return nullptr;
+    }
+    AActor *Candidates[] = {ActorInfo->OwnerActor.Get(),
+                            ActorInfo->AvatarActor.Get()};
+    for (AActor *Candidate : Candidates) {
+        if (AController *Controller = Cast<AController>(Candidate)) {
+            return Controller;
+        }
+        if (const APawn *Pawn = Cast<APawn>(Candidate)) {
+            if (AController *Controller = Pawn->GetController()) {
+                return Controller;
+            }
+        }
+        if (const APlayerState *PlayerState = Cast<APlayerState>(Candidate)) {
+            if (AController *Controller = PlayerState->GetPlayerController()) {
+                return Controller;
+            }
+        }
+    }
+    return nullptr;
+}
+
+// The owning client's focus service already answers "which node am I aimed at, and is one gear-slotted tool of its
+// family ready". Reuse that answer instead of tracing a second time; anything short of Ready names no family.
+const UMythicHarvestToolTypeDefinition *ResolveAimedHarvestFamily(
+    const FGameplayAbilityActorInfo *ActorInfo) {
+    const AController *Controller = ResolveOwningController(ActorInfo);
+    const UMythicHarvestFocusComponent *Focus = Controller
+        ? Controller->FindComponentByClass<UMythicHarvestFocusComponent>()
+        : nullptr;
+    if (!Focus || !Focus->CurrentFocus.bHasFocus
+        || !Focus->CurrentFocus.bCanHarvest) {
+        return nullptr;
+    }
+    return Focus->CurrentFocus.RequiredToolType;
+}
+
+struct FAttackSpecCandidate {
+    const FGameplayAbilitySpec *Spec = nullptr;
+    EMythicAttackSourceDomain Domain = EMythicAttackSourceDomain::Invalid;
+    const UMythicHarvestToolTypeDefinition *ToolFamily = nullptr;
+    FGuid ItemGuid;
+};
+
+bool ItemGuidLess(const FGuid &Left, const FGuid &Right) {
+    if (Left.A != Right.A) { return Left.A < Right.A; }
+    if (Left.B != Right.B) { return Left.B < Right.B; }
+    if (Left.C != Right.C) { return Left.C < Right.C; }
+    return Left.D < Right.D;
+}
+
+// A spec only competes for the press when its physical source passes the same equip and durability gates the
+// activation itself enforces, so a broken weapon hands the swing to a slotted tool instead of eating it.
+bool IsAttackSpecSourceUsable(const FGameplayAbilityActorInfo *ActorInfo,
+                              const UAttackFragment *AttackFragment) {
+    UMythicItemInstance *Item = AttackFragment
+        ? AttackFragment->GetOwningItemInstance()
+        : nullptr;
+    if (!IsSourceItemEquipped(ActorInfo, Item)) {
+        return false;
+    }
+    const UDurabilityFragment *Durability =
+        Item->GetFragment<UDurabilityFragment>();
+    return !Durability || !Durability->IsBroken();
+}
+
+void GatherUsableAttackSpecs(const FGameplayAbilityActorInfo *ActorInfo,
+                             TArray<FAttackSpecCandidate> &OutCandidates) {
+    const UAbilitySystemComponent *ASC = ActorInfo
+        ? ActorInfo->AbilitySystemComponent.Get()
+        : nullptr;
+    if (!ASC) {
+        return;
+    }
+    for (const FGameplayAbilitySpec &Spec : ASC->GetActivatableAbilities()) {
+        if (!Cast<UMythicWeaponAttackAbility>(Spec.Ability)) {
+            continue;
+        }
+        const UAttackFragment *AttackFragment =
+            Cast<UAttackFragment>(Spec.SourceObject.Get());
+        const EMythicAttackSourceDomain Domain =
+            UMythicWeaponAttackAbility::ResolveAttackSourceDomain(AttackFragment);
+        if (Domain == EMythicAttackSourceDomain::Invalid
+            || !IsAttackSpecSourceUsable(ActorInfo, AttackFragment)) {
+            continue;
+        }
+        FAttackSpecCandidate &Candidate = OutCandidates.AddDefaulted_GetRef();
+        Candidate.Spec = &Spec;
+        Candidate.Domain = Domain;
+        Candidate.ToolFamily =
+            UMythicWeaponAttackAbility::ResolveHarvestToolFamily(AttackFragment);
+        Candidate.ItemGuid =
+            AttackFragment->GetOwningItemInstance()->GetItemInstanceGuid();
+    }
+}
+
+bool GatherMontageSectionNames(const UAnimMontage *Montage,
+                               TArray<FName> &OutSectionNames) {
+    OutSectionNames.Reset();
+    const int32 SectionCount = Montage ? Montage->GetNumSections() : 0;
+    for (int32 SectionIndex = 0; SectionIndex < SectionCount; ++SectionIndex) {
+        const FName SectionName = Montage->GetSectionName(SectionIndex);
+        if (SectionName.IsNone()) {
+            OutSectionNames.Reset();
+            return false;
+        }
+        OutSectionNames.Add(SectionName);
+    }
+    return !OutSectionNames.IsEmpty();
+}
+
+// Mirrors the fragment-cached variant selection so a substituted montage stays prediction-stable: client and server
+// derive the same section index from the shared activation prediction key.
+FName SelectMontageSectionForPredictionKey(const FPredictionKey &PredictionKey,
+                                           const TArray<FName> &SectionNames) {
+    if (SectionNames.IsEmpty()) {
+        return NAME_None;
+    }
+    const int32 SectionIndex = PredictionKey.IsValidKey()
+        ? FRandomStream(static_cast<int32>(GetTypeHash(PredictionKey)))
+              .RandRange(0, SectionNames.Num() - 1)
+        : FMath::RandHelper(SectionNames.Num());
+    return SectionNames.IsValidIndex(SectionIndex)
+        ? SectionNames[SectionIndex]
+        : NAME_None;
 }
 
 bool HasLivingAbilitySystem(const AActor *HitActor) {
@@ -434,9 +567,23 @@ EMythicAttackSourceDomain UMythicWeaponAttackAbility::ResolveAttackSourceDomain(
     const bool bWeapon =
         ItemTypeProbe.HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON);
     const bool bTool = ItemTypeProbe.HasTag(ITEMIZATION_TYPE_EQUIPMENT_TOOL);
-    // A tool never attacks, and an item claiming both domains is contradictory content.
-    return bWeapon && !bTool ? EMythicAttackSourceDomain::Weapon
-                             : EMythicAttackSourceDomain::Invalid;
+    // An item claiming both domains is contradictory content and can never name one target policy.
+    if (bWeapon == bTool) {
+        return EMythicAttackSourceDomain::Invalid;
+    }
+    return bWeapon ? EMythicAttackSourceDomain::Weapon
+                   : EMythicAttackSourceDomain::HarvestTool;
+}
+
+const UMythicHarvestToolTypeDefinition *
+UMythicWeaponAttackAbility::ResolveHarvestToolFamily(
+    const UAttackFragment *AttackFragment) {
+    UMythicItemInstance *ItemInstance = AttackFragment
+        ? AttackFragment->GetOwningItemInstance()
+        : nullptr;
+    const UHarvestToolFragment *HarvestTool =
+        UHarvestToolFragment::FindOnItem(ItemInstance);
+    return HarvestTool ? HarvestTool->ToolType.Get() : nullptr;
 }
 
 EMythicAttackSourceDomain UMythicWeaponAttackAbility::ResolveAttackSourceDomain(
@@ -457,11 +604,16 @@ bool UMythicWeaponAttackAbility::IsTargetAllowedForSourceDomain(
     const bool bHasLivingAbilitySystem,
     const bool bIsDestructible,
     const bool bIsHarvestableResource) {
+    // A tool is worn, not wielded: its swing exists only to work a node, so it can never reach a living target or a
+    // plain destructible no matter what the contact geometry returns.
+    if (SourceDomain == EMythicAttackSourceDomain::HarvestTool) {
+        return bIsHarvestableResource;
+    }
     if (SourceDomain != EMythicAttackSourceDomain::Weapon) {
         return false;
     }
-    // The weapon is the only attacker, so it reaches every target class: living targets, plain destructibles, and
-    // harvestable nodes, where the harvest service decides whether the required tool is slotted.
+    // The weapon owns combat, so it reaches every target class: living targets, plain destructibles, and harvestable
+    // nodes, where the harvest service decides whether the required tool is slotted.
     return bIsHarvestableResource || bIsDestructible || bHasLivingAbilitySystem;
 }
 
@@ -480,6 +632,79 @@ void UMythicWeaponAttackAbility::FilterTargetHitsForSourceDomain(
                 ResolveDestructibleTargetIdentity(Hit).IsValid(),
                 Cast<UMythicResourceISM>(Hit.GetComponent()) != nullptr);
         });
+}
+
+bool UMythicWeaponAttackAbility::IsPreferredAttackSourceForPress(
+    const FGameplayAbilitySpecHandle Handle,
+    const FGameplayAbilityActorInfo *ActorInfo,
+    const EMythicAttackSourceDomain SourceDomain) const {
+    TArray<FAttackSpecCandidate> Candidates;
+    GatherUsableAttackSpecs(ActorInfo, Candidates);
+
+    const UMythicHarvestToolTypeDefinition *AimedFamily =
+        ResolveAimedHarvestFamily(ActorInfo);
+    const FAttackSpecCandidate *Chosen = nullptr;
+    if (AimedFamily) {
+        for (const FAttackSpecCandidate &Candidate : Candidates) {
+            if (Candidate.Domain == EMythicAttackSourceDomain::HarvestTool
+                && Candidate.ToolFamily == AimedFamily
+                && (!Chosen || ItemGuidLess(Candidate.ItemGuid, Chosen->ItemGuid))) {
+                Chosen = &Candidate;
+            }
+        }
+    }
+    if (Chosen) {
+        return Chosen->Spec->Handle == Handle;
+    }
+    if (SourceDomain == EMythicAttackSourceDomain::Weapon) {
+        return true;
+    }
+
+    // Nothing workable is aimed at. A worn weapon takes the swing; with no weapon at all one tool still answers, so
+    // the primary input is never dead just because the player is carrying an axe instead of a sword.
+    for (const FAttackSpecCandidate &Candidate : Candidates) {
+        if (Candidate.Domain == EMythicAttackSourceDomain::Weapon) {
+            return false;
+        }
+    }
+    for (const FAttackSpecCandidate &Candidate : Candidates) {
+        if (!Chosen || ItemGuidLess(Candidate.ItemGuid, Chosen->ItemGuid)) {
+            Chosen = &Candidate;
+        }
+    }
+    return Chosen && Chosen->Spec->Handle == Handle;
+}
+
+UAnimMontage *UMythicWeaponAttackAbility::ResolveHarvestFamilyMontage(
+    const UAttackFragment *AttackFragment) {
+    const UMythicHarvestToolTypeDefinition *Family =
+        ResolveHarvestToolFamily(AttackFragment);
+    if (!Family || Family->HarvestMontage.IsNull()) {
+        return nullptr;
+    }
+    // The rejection is cached alongside the acceptance so a content defect is reported once, not once per swing.
+    if (CachedHarvestFamily.Get() == Family) {
+        return CachedHarvestFamilyMontage;
+    }
+
+    CachedHarvestFamily = Family;
+    CachedHarvestFamilyMontage = nullptr;
+    UAnimMontage *FamilyMontage = Family->HarvestMontage.LoadSynchronous();
+    FText ContractError;
+    // The hit pipeline only accepts samples authorized from the montage it is playing. A family swing without an
+    // authored hit sample would therefore swing forever and never land, so it is refused rather than played.
+    if (!FamilyMontage
+        || !UAttackFragment::IsAttackMontageContractValid(FamilyMontage,
+                                                          &ContractError)) {
+        UE_LOG(Myth, Error,
+               TEXT("Harvest tool family %s authors a Harvest Montage that cannot carry a landing swing (%s); the granting item's own montage is used instead"),
+               *GetNameSafe(Family),
+               ContractError.IsEmpty() ? TEXT("montage failed to load")
+                                       : *ContractError.ToString());
+        return nullptr;
+    }
+    CachedHarvestFamilyMontage = FamilyMontage;
+    return FamilyMontage;
 }
 
 bool UMythicWeaponAttackAbility::CanActivateAbility(
@@ -526,11 +751,39 @@ bool UMythicWeaponAttackAbility::CanActivateAbility(
     const UDurabilityFragment *Durability = SourceItem
         ? SourceItem->GetFragment<UDurabilityFragment>()
         : nullptr;
-    if (!IsSourceItemEquipped(ActorInfo, SourceItem)
-        || (Durability && Durability->IsBroken())) {
-        UE_LOG(Myth, Verbose,
-               TEXT("Weapon attack %s rejected an unequipped or broken physical source"),
-               *GetPathName());
+    // Refusing the player's primary action must never be silent: name the exact condition, because "nothing happens
+    // on left click" is otherwise indistinguishable from the input never arriving.
+    if (!IsSourceItemEquipped(ActorInfo, SourceItem)) {
+        const UMythicInventoryComponent *SourceInventory = IsValid(SourceItem)
+            ? SourceItem->GetInventoryComponent()
+            : nullptr;
+        const TArray<FMythicInventorySlotEntry> *Slots =
+            SourceInventory ? &SourceInventory->GetAllSlots() : nullptr;
+        const int32 SlotIndex = IsValid(SourceItem) ? SourceItem->GetSlot() : INDEX_NONE;
+        const bool bSlotValid = Slots && Slots->IsValidIndex(SlotIndex);
+        UE_LOG(Myth, Warning,
+               TEXT("Weapon attack %s rejected its source: item=%s inventory=%s slot=%d slotValid=%s gearSlot=%s occupantMatches=%s providerOwnsInventory=%s"),
+               *GetPathName(), *GetNameSafe(SourceItem), *GetNameSafe(SourceInventory), SlotIndex,
+               bSlotValid ? TEXT("yes") : TEXT("no"),
+               bSlotValid && (*Slots)[SlotIndex].IsGearSlot() ? TEXT("yes") : TEXT("no"),
+               bSlotValid && (*Slots)[SlotIndex].SlottedItemInstance.Get() == SourceItem ? TEXT("yes") : TEXT("no"),
+               ResolveInventoryProvider(ActorInfo)
+                   && SourceInventory
+                   && ResolveInventoryProvider(ActorInfo)->GetAllInventoryComponents().Contains(
+                          const_cast<UMythicInventoryComponent *>(SourceInventory))
+                   ? TEXT("yes") : TEXT("no"));
+        return false;
+    }
+    if (Durability && Durability->IsBroken()) {
+        UE_LOG(Myth, Warning, TEXT("Weapon attack %s rejected a broken physical source %s"),
+               *GetPathName(), *GetNameSafe(SourceItem));
+        return false;
+    }
+    // A weapon and every slotted tool bind the same attack input, so exactly one granted spec must answer a press.
+    // Only the owner arbitrates: authority accepts the spec the owner chose because every gate above is independent
+    // of that choice, and a tool-domain swing can contact nothing but a harvest node.
+    if (ActorInfo->IsLocallyControlled()
+        && !IsPreferredAttackSourceForPress(Handle, ActorInfo, SourceDomain)) {
         return false;
     }
     return true;
@@ -577,11 +830,40 @@ void UMythicWeaponAttackAbility::ActivateAbility(
     }
     ActiveSourceDomain = SourceDomain;
 
-    const FName SelectedSection = SelectAttackMontageSection(AttackFragment);
-    const float PlayRate = GetClampedAttackSpeedPlayRate();
+    // The tool is worn, never wielded; only its animation is substituted. An unauthored or contract-breaking family
+    // swing falls back to the granting item's validated montage, because no swing at all is the worse failure.
+    if (SourceDomain == EMythicAttackSourceDomain::HarvestTool) {
+        if (UAnimMontage *FamilyMontage =
+                ResolveHarvestFamilyMontage(AttackFragment)) {
+            AttackMontage = FamilyMontage;
+        }
+    }
+
+    FName SelectedSection = NAME_None;
     TArray<const UMythicAnimNotify_SphereOverlap *> ResolvedHitSamples;
-    const bool bResolvedSamples = AttackFragment->GetRuntimeAuthorizedHitSamples(
-        SelectedSection, ResolvedHitSamples, &ConfigurationError);
+    bool bResolvedSamples = false;
+    if (AttackMontage == AttackFragment->AttackConfig.AttackMontage) {
+        SelectedSection = SelectAttackMontageSection(AttackFragment);
+        bResolvedSamples = AttackFragment->GetRuntimeAuthorizedHitSamples(
+            SelectedSection, ResolvedHitSamples, &ConfigurationError);
+    }
+    else {
+        TArray<FName> SectionNames;
+        if (GatherMontageSectionNames(AttackMontage, SectionNames)) {
+            SelectedSection = SelectMontageSectionForPredictionKey(
+                GetCurrentActivationInfo().GetActivationPredictionKey(),
+                SectionNames);
+            bResolvedSamples = UAttackFragment::FindCanonicalHitNotifiesForSection(
+                AttackMontage, SelectedSection, ResolvedHitSamples,
+                &ConfigurationError);
+        }
+        else {
+            SetConfigurationError(
+                &ConfigurationError,
+                TEXT("substituted tool montage exposes no named attack-variant section"));
+        }
+    }
+    const float PlayRate = GetClampedAttackSpeedPlayRate();
     for (const UMythicAnimNotify_SphereOverlap *Sample : ResolvedHitSamples) {
         AuthorizedHitSamples.Add(Sample);
     }
@@ -614,9 +896,10 @@ void UMythicWeaponAttackAbility::ActivateAbility(
             ? World->GetSubsystem<UMythicHarvestWorldSubsystem>() : nullptr;
         if (!HarvestSubsystem
             || !HarvestSubsystem->BeginAttackCycle(
-                *this, *AttackFragment, Handle, ActiveHarvestCycleToken)) {
+                *this, *AttackFragment, *AttackMontage, Handle,
+                ActiveHarvestCycleToken)) {
             UE_LOG(Myth, Warning,
-                   TEXT("Weapon attack %s committed without harvest-cycle provenance; combat remains available but resource contacts will fail closed."),
+                   TEXT("Attack %s committed without harvest-cycle provenance; every resource contact this swing makes will fail closed."),
                    *GetPathName());
         }
     }

@@ -7,6 +7,7 @@
 
 class UInputAction;
 class UInputMappingContext;
+class UMythicHarvestPromptWidget;
 
 /** Cross-cutting authority, replication, and feedback policy shared by every harvestable definition. */
 UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic Harvesting"))
@@ -15,6 +16,13 @@ class MYTHIC_API UMythicHarvestSettings : public UDeveloperSettings {
 
 public:
     virtual FName GetCategoryName() const override { return FName("Game"); }
+
+    /**
+     * World-anchored prompt shown at the focused harvestable. Unset means focus is resolved but never surfaced, so
+     * a player standing in front of a tree with no axe is told nothing.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Harvest|Presentation")
+    TSoftClassPtr<UMythicHarvestPromptWidget> PromptWidgetClass;
 
     /**
      * Server-owned maximum distance from authority avatar to authoritative impact point; clients may read it for
@@ -115,6 +123,62 @@ public:
      */
     UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Focus", meta = (ClampMin = "1.0", Units = "cm"))
     float FocusRangeCentimeters = 350.0f;
+
+    /**
+     * Client-owned half-angle from the view direction inside which a node may be picked; wider is more forgiving to
+     * aim, values outside (0, 180) fail validation, and units are degrees.
+     */
+    UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Focus", meta = (ClampMin = "1.0", ClampMax = "179.0", Units = "deg"))
+    float FocusMaxViewAngleDegrees = 55.0f;
+
+    /**
+     * Client-owned weight on how centred a node is in view when ranking candidates; raising it above
+     * FocusDistanceWeight makes what the player looks at win over what is merely closest, and the value is unitless.
+     */
+    UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Focus", meta = (ClampMin = "0.0"))
+    float FocusAngleWeight = 1.0f;
+
+    /**
+     * Client-owned weight on pawn distance when ranking candidates; nonfinite or negative values fail validation and
+     * the value is unitless.
+     */
+    UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Focus", meta = (ClampMin = "0.0"))
+    float FocusDistanceWeight = 0.35f;
+
+    /**
+     * Client-owned score advantage kept by the node already focused, so a candidate must be clearly better before the
+     * prompt jumps; predicts presentation only and the value is unitless.
+     */
+    UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Focus", meta = (ClampMin = "0.0"))
+    float FocusStickinessBonus = 0.15f;
+
+    /**
+     * Client-owned gate rejecting nodes the player cannot see; the sight test runs on LineOfSightTraceChannel and
+     * authority re-checks independently.
+     */
+    UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Focus")
+    bool bRequireFocusLineOfSight = true;
+
+    /**
+     * Client-owned distance the sight test stops short of a node anchor; an instance origin sits on the ground line,
+     * so tracing the last centimetres reports the terrain as the occluder for every node. Units are centimeters.
+     */
+    UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Focus", meta = (ClampMin = "0.0", Units = "cm"))
+    float FocusLineOfSightSlackCentimeters = 30.0f;
+
+    /**
+     * Client-owned screen size of the world-anchored prompt. UWidgetComponent sizes a screen-space prompt from this,
+     * not from the widget's own layout, so a zero here draws nothing. Units are pixels.
+     */
+    UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Focus")
+    FVector2D PromptDrawSize = FVector2D(420.0, 96.0);
+
+    /**
+     * Client-owned height above a node anchor at which the prompt is drawn; instance origins sit on the ground line,
+     * so an unraised prompt is buried in undergrowth. Units are Unreal centimeters.
+     */
+    UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "Focus", meta = (ClampMin = "0.0", Units = "cm"))
+    float PromptAnchorLiftCentimeters = 110.0f;
 
     /**
      * Server-owned side length used to assign changed nodes to spatial replication cells; clients receive the

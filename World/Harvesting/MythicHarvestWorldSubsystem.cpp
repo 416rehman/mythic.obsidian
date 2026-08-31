@@ -1456,6 +1456,7 @@ bool UMythicHarvestWorldSubsystem::ResolveHarvestTarget(
 
 bool UMythicHarvestWorldSubsystem::BeginAttackCycle(
     UMythicWeaponAttackAbility &Ability, const UAttackFragment &AttackFragment,
+    const UAnimMontage &PlayingMontage,
     const FGameplayAbilitySpecHandle AbilitySpecHandle,
     FMythicHarvestAttackCycleToken &OutToken) {
     OutToken = FMythicHarvestAttackCycleToken();
@@ -1467,8 +1468,6 @@ bool UMythicHarvestWorldSubsystem::BeginAttackCycle(
         ASC ? ASC->FindAbilitySpecFromHandle(AbilitySpecHandle) : nullptr;
     const UMythicHarvestSettings *Settings =
         GetDefault<UMythicHarvestSettings>();
-    const UAnimMontage *AttackMontage =
-        AttackFragment.AttackConfig.AttackMontage;
     const double PlayRate = static_cast<double>(
         Ability.GetClampedAttackSpeedPlayRate());
     const double CadenceTolerance = Settings
@@ -1477,7 +1476,7 @@ bool UMythicHarvestWorldSubsystem::BeginAttackCycle(
         || !IsAuthorityWorld(World)
         || !Ability.IsActive() || !Item || !Item->GetItemInstanceGuid().IsValid()
         || !Spec || !Spec->IsActive() || Spec->SourceObject.Get() != &AttackFragment
-        || Spec->GetPrimaryInstance() != &Ability || !AttackMontage
+        || Spec->GetPrimaryInstance() != &Ability
         || !FMath::IsFinite(PlayRate) || PlayRate <= 0.0
         || !FMath::IsFinite(CadenceTolerance) || CadenceTolerance < 0.0) {
         return false;
@@ -1495,9 +1494,11 @@ bool UMythicHarvestWorldSubsystem::BeginAttackCycle(
     State.Ability = &Ability;
     State.AttackFragment = const_cast<UAttackFragment *>(&AttackFragment);
     State.IssuedServerTime = World->GetTimeSeconds();
+    // The window follows the montage that is actually playing. Sizing it from the granting item's montage would
+    // expire a substituted tool swing mid-animation and reject its own contact.
     if (!FMythicHarvestCadencePolicy::TryCalculateExpiry(
             State.IssuedServerTime,
-            static_cast<double>(AttackMontage->GetPlayLength()), PlayRate,
+            static_cast<double>(PlayingMontage.GetPlayLength()), PlayRate,
             CadenceTolerance, State.ExpiresServerTime)) {
         OutToken = FMythicHarvestAttackCycleToken();
         return false;
@@ -1822,8 +1823,8 @@ FMythicHarvestResult UMythicHarvestWorldSubsystem::TryApplyHarvest(
         return Reject(EMythicHarvestRejectReason::WorldNotReady, Controller);
     }
 
-    // The swing comes from the combat weapon; the tool that gates and pays for
-    // this node is whatever sits in its own gear slot at the moment of impact.
+    // Whatever swung, the tool that gates and pays for this node is the one in
+    // its own gear slot at the moment of impact, selected only by this scan.
     UMythicItemInstance *Tool = nullptr;
     const UHarvestToolFragment *HarvestTool = nullptr;
     UDurabilityFragment *Durability = nullptr;

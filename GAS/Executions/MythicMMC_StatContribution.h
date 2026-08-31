@@ -32,4 +32,5 @@ protected:
 private:
     FGameplayEffectAttributeCaptureDefinition PowerDef;
     FGameplayEffectAttributeCaptureDefinition StrengthDef;
+    FGameplayEffectAttributeCaptureDefinition ResolveDef;
 };

@@ -71,67 +71,6 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Combat", meta = (WorldContext = "WorldContextObject"))
     static float EvaluateArmorMitigation(const UObject *WorldContextObject, float Armor);
 
-    /** Authored post-mitigation floor for nonzero hits; negative values are invalid and units are damage points. */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
-    float MinChipDamage = 1.0f;
-
-    /** Authored pre-mitigation Rage damage bonus; units are an additive fractional multiplier. */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
-    float RageDamageBonus = 0.25f;
-
-    /** Authored pre-mitigation Weakened damage penalty; units are an additive fractional multiplier. */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
-    float WeakenedDamagePenalty = 0.25f;
-
-    /** Authored pre-mitigation Terrified damage bonus; units are an additive fractional multiplier. */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
-    float TerrifiedDamageBonus = 0.25f;
-
-    /** Authored pre-mitigation Fortify damage reduction; units are an additive fractional multiplier. */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
-    float FortifyDamageReduction = 0.25f;
-
-    /** Authored Enlighten proficiency-XP bonus; units are an additive fractional multiplier. */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
-    float EnlightenProficiencyBonus = 0.5f;
-
-    /** Authored lower bound for attack montage play rate; positive values are unitless rate multipliers. */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
-    float MinAttackSpeedPlayRate = 0.8f;
-
-    /** Authored upper bound for attack montage play rate; values must not be below the minimum and are unitless. */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
-    float MaxAttackSpeedPlayRate = 1.4f;
-
-    /**
-     * Buildup a single landed proc contributes, before the source's StatusBuildupMultiplier. Against the ~100
-     * threshold this decides how many procs an unmodified attacker needs to land a status.
-     */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline", meta = (ClampMin = "0.0"))
-    float StatusBuildupPerProc = 25.0f;
-
-    /**
-     * Ceiling on dodge chance, however much an entity stacks. At 1.0 a build reaching 100% dodge is literally
-     * invulnerable, so this must stay below 1 for stacked dodge to remain a trade rather than an exploit.
-     */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MaxDodgeChance = 0.75f;
-
-    /**
-     * Where on-hit chances stop being worth their face value. Below this a chance is exactly what it says; above it
-     * each further point buys less than the last, approaching certainty without reaching it. Raise it to let gear
-     * carry more before the curve bites; lower it to make specialising bite sooner.
-     */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float ProbabilitySoftCap = 0.5f;
-
-    /**
-     * Safety ceiling used by cooldown-duration scaling; authored values are clamped to [0,1] and units are a
-     * reduction fraction. It prevents stacked cooldown reduction from reaching a degenerate zero duration.
-     */
-    UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MaxCooldownReduction = 0.8f;
-
     /** Authored minimum-health-by-level curve for NPC initialization; curve outputs use health points. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic | Baseline")
     FCurveTableRowHandle HealthMinCurveRowHandle;

@@ -12,13 +12,15 @@ class UAnimMontage;
 class UAttackFragment;
 class UGameplayEffect;
 class UMythicAnimNotify_SphereOverlap;
+class UMythicHarvestToolTypeDefinition;
 class USkeletalMeshComponent;
 
-/** Native target domain resolved from the exact item that granted an attack ability. Only an equipped weapon
- *  attacks: a harvesting tool authorizes work by occupying its slot and never swings. */
+/** Native target domain resolved from the exact item that granted an attack ability. A weapon owns combat and reaches
+ *  every target class; a harvesting tool sitting in its own gear slot reaches nothing but a harvest node. */
 enum class EMythicAttackSourceDomain : uint8 {
     Invalid,
-    Weapon
+    Weapon,
+    HarvestTool
 };
 
 /**
@@ -63,6 +65,10 @@ public:
 
     /** Resolves the attack domain from the exact live item instance that owns the granting fragment. */
     static EMythicAttackSourceDomain ResolveAttackSourceDomain(
+        const UAttackFragment *AttackFragment);
+
+    /** Returns the exact tool family carried by the item that granted this attack, or null for a weapon. */
+    static const UMythicHarvestToolTypeDefinition *ResolveHarvestToolFamily(
         const UAttackFragment *AttackFragment);
 
     /** Pure source/target-domain policy seam shared by runtime filtering and focused automation coverage. */
@@ -221,6 +227,21 @@ private:
     const UAttackFragment *ResolveAttackFragment(
         const FGameplayAbilitySpecHandle Handle,
         const FGameplayAbilityActorInfo *ActorInfo) const;
+
+    /**
+     * Returns whether this granted spec is the single source that answers the current press. A weapon and one or more
+     * slotted tools all bind the attack input, so exactly one must win: the tool family the owner is aimed at, else
+     * the weapon, else the deterministic tool fallback. Only the locally controlled side arbitrates.
+     */
+    bool IsPreferredAttackSourceForPress(
+        FGameplayAbilitySpecHandle Handle,
+        const FGameplayAbilityActorInfo *ActorInfo,
+        EMythicAttackSourceDomain SourceDomain) const;
+
+    /** Returns the tool family's shared swing when it satisfies the attack-montage contract, else null. */
+    UAnimMontage *ResolveHarvestFamilyMontage(
+        const UAttackFragment *AttackFragment);
+
     static void ResolveCanonicalEventHits(const FGameplayEventData &HitEvent,
                                           TArray<FHitResult> &OutHits);
     bool RegisterActiveMontageInstance(const UAnimMontage *AttackMontage);
@@ -249,6 +270,12 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<USkeletalMeshComponent> RegisteredMontageMesh = nullptr;
+
+    /** Keeps the soft-loaded family swing resident for this spec's lifetime; a per-swing sync load would hitch. */
+    UPROPERTY(Transient)
+    TObjectPtr<UAnimMontage> CachedHarvestFamilyMontage = nullptr;
+
+    TWeakObjectPtr<const UMythicHarvestToolTypeDefinition> CachedHarvestFamily;
 
     int32 RegisteredMontageInstanceId = INDEX_NONE;
 

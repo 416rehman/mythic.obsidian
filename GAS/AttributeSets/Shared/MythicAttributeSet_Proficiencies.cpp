@@ -1,6 +1,7 @@
 #include "MythicAttributeSet_Proficiencies.h"
 
 #include "Mythic.h"
+#include "Settings/MythicCombatSettings.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "Net/UnrealNetwork.h"
 #include "GAS/MythicTags_GAS.h"
@@ -273,15 +274,16 @@ float UMythicAttributeSet_Proficiencies::ScaleProficiencyXpGain(
     }
 
     float EnlightenBonus = 0.0f;
+    if (ASC->HasMatchingGameplayTag(GAS_BUFF_ENLIGHTEN))
+    {
+        EnlightenBonus = GetDefault<UMythicCombatSettings>()->EnlightenProficiencyBonus;
+    }
+
     float WorldTierXpMultiplier = 1.0f;
     if (const UWorld* World = GetWorld())
     {
         if (const AMythicGameState* GS = World->GetGameState<AMythicGameState>())
         {
-            if (ASC->HasMatchingGameplayTag(GAS_BUFF_ENLIGHTEN))
-            {
-                EnlightenBonus = GS->EnlightenProficiencyBonus;
-            }
             if (const UWorldTierAttributes* WTA = GS->WorldTierAttributes)
             {
                 WorldTierXpMultiplier = WTA->GetExperienceGainMultiplier();

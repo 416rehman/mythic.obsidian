@@ -1,5 +1,6 @@
 
 #include "Misc/AutomationTest.h"
+#include "Settings/MythicCombatSettings.h"
 #include "Serialization/MemoryWriter.h"
 #include "Serialization/MemoryReader.h"
 #include "World/LivingWorld/CausalFabric/CausalFabric.h"
@@ -2330,23 +2331,36 @@ bool FMythicOffenseProbabilityBaseClampTest::RunTest(const FString &Parameters) 
         return false;
     }
 
+    // The base is deliberately NOT clamped. The permanent stat ledger writes a base, reads it back, and treats any
+    // clamp as corruption, so a base clamp here did not cap crit - it rolled back the whole equip and stripped every
+    // affix on the character. Certainty is denied at consumption instead, where it costs nothing to be wrong.
     struct FCase {
         const TCHAR *Label;
         float In;
-        float Want;
     };
     const FCase Cases[] = {
-        {TEXT("over the cap clamps to 1"), 2.179f, 1.0f},
-        {TEXT("at the cap stays"), 1.0f, 1.0f},
-        {TEXT("in range passes through"), 0.35f, 0.35f},
-        {TEXT("negative clamps to 0"), -0.5f, 0.0f},
+        {TEXT("over the cap"), 2.179f},
+        {TEXT("at the cap"), 1.0f},
+        {TEXT("in range"), 0.35f},
+        {TEXT("negative"), -0.5f},
     };
 
     for (const FCase &C : Cases) {
         float Value = C.In;
         Set->PreAttributeBaseChange(O::GetCriticalHitChanceAttribute(), Value);
-        TestEqual(FString::Printf(TEXT("crit base %s"), C.Label), Value, C.Want);
+        TestEqual(FString::Printf(TEXT("crit base %s survives the ledger write unchanged"), C.Label),
+                  Value, C.In);
     }
+
+    // The coverage the base clamp used to carry now lives here: stacking always pays something and never reaches 1.
+    const float SoftCap = GetDefault<UMythicCombatSettings>()->ProbabilitySoftCap;
+    const float Diminished = MythicCombat::DiminishProbability(2.179f, SoftCap);
+    TestTrue(TEXT("an over-cap crit chance is bent below certainty at consumption"),
+             Diminished < 1.0f);
+    TestTrue(TEXT("and remains a real chance rather than collapsing to zero"), Diminished > 0.0f);
+    TestTrue(TEXT("stacking past the soft cap still pays something"),
+             MythicCombat::DiminishProbability(2.179f, SoftCap)
+                 > MythicCombat::DiminishProbability(1.0f, SoftCap));
 
     float CritDamage = 3.5f;
     Set->PreAttributeBaseChange(O::GetCriticalHitDamageAttribute(), CritDamage);

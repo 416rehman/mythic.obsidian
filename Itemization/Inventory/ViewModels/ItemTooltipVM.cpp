@@ -9,7 +9,6 @@
 #include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h"
 #include "GAS/Abilities/MythicGameplayAbility.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
-#include "GameModes/GameState/MythicGameState.h"
 #include "Itemization/Affixes/MythicPermanentStatLedger.h"
 #include "Itemization/Affixes/MythicItemizationDataRegistrySubsystem.h"
 #include "Itemization/Affixes/MythicTags_Affixes.h"
@@ -61,19 +60,12 @@ bool ComposeItemLocalAttackAttribute(
             StatDefinition.NeutralValue, Contributions, OutValue);
 }
 
-void ResolveAttackSpeedPlayRateBounds(const UMythicItemInstance &Item,
-                                      float &OutMinRate,
-                                      float &OutMaxRate) {
-    const AMythicGameState *GameState = nullptr;
-    if (const UWorld *World = Item.GetWorld()) {
-        GameState = World->GetGameState<AMythicGameState>();
-    }
-    if (!GameState) {
-        GameState = GetDefault<AMythicGameState>();
-    }
-
-    OutMinRate = GameState ? GameState->MinAttackSpeedPlayRate : 0.8f;
-    OutMaxRate = GameState ? GameState->MaxAttackSpeedPlayRate : 1.4f;
+// The projected DPS reads the same authored bounds the combat path clamps the montage to, so a displayed
+// attacks-per-second can never drift from the swing the player gets.
+void ResolveAttackSpeedPlayRateBounds(float &OutMinRate, float &OutMaxRate) {
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    OutMinRate = Settings->MinAttackSpeedPlayRate;
+    OutMaxRate = Settings->MaxAttackSpeedPlayRate;
 }
 
 FText FormatAttacksPerSecond(const float AttacksPerSecond) {
@@ -378,9 +370,9 @@ bool UItemTooltipVM::BuildWeaponAttackDisplayData(
         return false;
     }
 
-    float MinPlayRate = 0.8f;
-    float MaxPlayRate = 1.4f;
-    ResolveAttackSpeedPlayRateBounds(*Item, MinPlayRate, MaxPlayRate);
+    float MinPlayRate = 0.0f;
+    float MaxPlayRate = 0.0f;
+    ResolveAttackSpeedPlayRateBounds(MinPlayRate, MaxPlayRate);
 
     FMythicWeaponAttackViewData Candidate;
     const float BaseAttackCycleDuration =

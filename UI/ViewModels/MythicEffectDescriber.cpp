@@ -104,6 +104,15 @@ FMythicEffectLine DescribeRolledModifier(const FGameplayAttribute &Attribute, fl
         Line.Range = FText::FromString(FString::Printf(TEXT("[%s-%s]"), *MinText.ToString(), *MaxText.ToString()));
     }
 
+    // A roll may invert the stat's own polarity: a cooldown authored -10%..-2% is a reduction, and on a
+    // lower-is-better roll the reduction is the good outcome the player wants to read as a gain.
+    if (Roll.bLowerIsBetter) {
+        const bool bScalesAroundOne = Roll.Modifier == EGameplayModOp::Multiplicitive
+            || Roll.Modifier == EGameplayModOp::MultiplyAdditive
+            || Roll.Modifier == EGameplayModOp::MultiplyCompound;
+        Line.bPositive = bScalesAroundOne ? Value < 1.0f : Value < 0.0f;
+    }
+
     BuildRichText(Line);
     return Line;
 }

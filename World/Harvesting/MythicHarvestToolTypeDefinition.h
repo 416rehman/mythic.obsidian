@@ -48,9 +48,9 @@ public:
     TSoftObjectPtr<USoundBase> ActionSound;
 
     /**
-     * Definition-owned swing played instead of the weapon's own montage when the attack is aimed at a harvestable
-     * this family can work. The tool is never wielded; only the animation is substituted. Unset keeps the weapon
-     * montage, and the montage must carry the same authored hit-sample notifies as a weapon attack.
+     * Definition-owned swing shared by every tool of this family, played instead of the granting item's own attack
+     * montage. The tool is never wielded; only the animation is substituted. Unset falls back to that item's montage,
+     * and a montage without the same authored hit-sample notifies a weapon attack requires is refused, not played.
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Harvest Tool Type|Presentation")
     TSoftObjectPtr<UAnimMontage> HarvestMontage;

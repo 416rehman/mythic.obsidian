@@ -69,10 +69,10 @@ void UMythicAttributeSet_Utility::PreAttributeChange(const FGameplayAttribute &A
 void UMythicAttributeSet_Utility::PreAttributeBaseChange(const FGameplayAttribute &Attribute, float &NewValue) const {
     Super::PreAttributeBaseChange(Attribute, NewValue);
 
-    if (Attribute == GetCooldownReductionAttribute()) {
-        NewValue = FMath::Clamp(NewValue, 0.0f, FMath::Max(0.0f, GetMaxCooldownReduction()));
-    }
-    else if (Attribute == GetMaxCooldownReductionAttribute()) {
+    // CooldownReduction's BASE is deliberately left alone. The permanent stat ledger writes a base, reads it back,
+    // and treats any clamp as corruption, so capping here rolls the whole equip back instead of capping cooldowns.
+    // ApplyCooldown clamps the value to the ceiling where it is spent.
+    if (Attribute == GetMaxCooldownReductionAttribute()) {
         NewValue = FMath::Max(0.0f, NewValue);
     }
     else if (Attribute == GetHarvestWorkMultiplierAttribute()) {
@@ -82,18 +82,6 @@ void UMythicAttributeSet_Utility::PreAttributeBaseChange(const FGameplayAttribut
 
 void UMythicAttributeSet_Utility::PostAttributeChange(const FGameplayAttribute &Attribute, float OldValue, float NewValue) {
     Super::PostAttributeChange(Attribute, OldValue, NewValue);
-
-    if (Attribute == GetResolveAttribute()) {
-        if (!bIsUpdatingMaxStamina) {
-            bIsUpdatingMaxStamina = true;
-            const float BaseMaxStaminaValue = 100.0f;
-            float ClampedResolve = FMath::Max(0.0f, NewValue);
-            float ResolveScalar = ClampedResolve / (ClampedResolve + 40.0f);
-            float MaxStaminaBonus = 150.0f * ResolveScalar;
-            SetMaxStamina(BaseMaxStaminaValue + MaxStaminaBonus);
-            bIsUpdatingMaxStamina = false;
-        }
-    }
 
     if (Attribute == GetMaxCooldownReductionAttribute()) {
         if (GetCooldownReduction() > NewValue) {

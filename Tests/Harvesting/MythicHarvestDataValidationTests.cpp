@@ -336,19 +336,18 @@ bool FMythicHarvestToolFragmentValidationTest::RunTest(const FString &Parameters
     Harvest->ToolType = ToolType;
     Harvest->BaseWork = 1.25f;
     UDurabilityFragment *Durability = NewObject<UDurabilityFragment>(Definition);
-    Definition->Fragments = {Harvest, Durability};
-
-    FText Error;
-    TestTrue(TEXT("same-item harvest/durability composition passes"), Harvest->IsValidFragment(Error));
-
-    // A tool authorizes harvesting by occupying its slot and is never swung, so an Attack Fragment on it would
-    // bind a second attacker beside the equipped weapon.
     UAttackFragment *Attack = NewObject<UAttackFragment>(Definition);
     Definition->Fragments = {Harvest, Attack, Durability};
-    TestFalse(TEXT("a tool carrying an Attack Fragment fails closed"), Harvest->IsValidFragment(Error));
-    TestTrue(TEXT("the rejection explains that tools are never wielded"),
-             Error.ToString().Contains(TEXT("never wielded")));
+
+    FText Error;
+    TestTrue(TEXT("same-item harvest/attack/durability composition passes"), Harvest->IsValidFragment(Error));
+
+    // The tool grants the harvesting swing itself, so a weaponless player can still work a node.
     Definition->Fragments = {Harvest, Durability};
+    TestFalse(TEXT("a tool with no Attack Fragment fails closed"), Harvest->IsValidFragment(Error));
+    TestTrue(TEXT("the rejection names the missing Attack Fragment"),
+             Error.ToString().Contains(TEXT("Attack Fragment")));
+    Definition->Fragments = {Harvest, Attack, Durability};
     TestTrue(TEXT("native live-item detector is null-safe"), UHarvestToolFragment::FindOnItem(nullptr) == nullptr);
     TestTrue(TEXT("native definition detector returns exact fragment"), UHarvestToolFragment::FindOnDefinition(Definition) == Harvest);
 

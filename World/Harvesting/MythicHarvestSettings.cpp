@@ -60,6 +60,24 @@ bool UMythicHarvestSettings::AppendValidationErrors(TArray<FText> &OutErrors) co
     if (!FMath::IsFinite(FocusRangeCentimeters) || FocusRangeCentimeters <= 0.0f || FocusRangeCentimeters > AuthoritativeRangeCentimeters) {
         OutErrors.Add(LOCTEXT("InvalidFocusRange", "Focus Range must be finite, positive, and no greater than Authoritative Range."));
     }
+    if (!FMath::IsFinite(FocusMaxViewAngleDegrees) || FocusMaxViewAngleDegrees <= 0.0f || FocusMaxViewAngleDegrees >= 180.0f) {
+        OutErrors.Add(LOCTEXT("InvalidFocusViewAngle", "Focus Max View Angle must be finite and inside (0, 180) degrees."));
+    }
+    RequireFiniteNonNegative(FocusAngleWeight, LOCTEXT("InvalidFocusAngleWeight", "Focus Angle Weight must be finite and non-negative."));
+    RequireFiniteNonNegative(FocusDistanceWeight, LOCTEXT("InvalidFocusDistanceWeight", "Focus Distance Weight must be finite and non-negative."));
+    if (FMath::IsFinite(FocusAngleWeight) && FMath::IsFinite(FocusDistanceWeight)
+        && FocusAngleWeight <= 0.0f && FocusDistanceWeight <= 0.0f) {
+        OutErrors.Add(LOCTEXT("NoFocusRanking", "Focus Angle Weight and Focus Distance Weight cannot both be zero, or every candidate ties."));
+    }
+    RequireFiniteNonNegative(FocusStickinessBonus, LOCTEXT("InvalidFocusStickiness", "Focus Stickiness Bonus must be finite and non-negative."));
+    RequireFiniteNonNegative(FocusLineOfSightSlackCentimeters,
+                             LOCTEXT("InvalidFocusSightSlack", "Focus Line Of Sight Slack must be finite and non-negative."));
+    RequireFiniteNonNegative(PromptAnchorLiftCentimeters,
+                             LOCTEXT("InvalidPromptLift", "Prompt Anchor Lift must be finite and non-negative."));
+    if (!FMath::IsFinite(PromptDrawSize.X) || !FMath::IsFinite(PromptDrawSize.Y)
+        || PromptDrawSize.X <= 0.0 || PromptDrawSize.Y <= 0.0) {
+        OutErrors.Add(LOCTEXT("InvalidPromptDrawSize", "Prompt Draw Size must be finite and positive on both axes, or the prompt draws nothing."));
+    }
     RequireFinitePositive(ReplicationGridSizeCentimeters, LOCTEXT("InvalidReplicationGrid", "Replication Grid Size must be finite and positive."));
     RequireFinitePositive(ReplicationCullDistanceCentimeters, LOCTEXT("InvalidReplicationCull", "Replication Cull Distance must be finite and positive."));
     RequireFiniteNonNegative(ReplicationRelevancyMarginCentimeters,

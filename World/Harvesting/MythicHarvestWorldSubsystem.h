@@ -13,6 +13,7 @@
 class AMythicHarvestReplicationCell;
 class AMythicGameState;
 class AMythicPlayerController;
+class UAnimMontage;
 class UAttackFragment;
 class UMythicHarvestableDefinition;
 class UMythicHarvestToolTypeDefinition;
@@ -68,10 +69,13 @@ public:
 
     /**
      * Issues opaque authority provenance for one already-committed attack activation. The token is scoped to the
-     * exact ability instance, spec handle, source fragment, and physical item GUID until EndAttackCycle.
+     * exact ability instance, spec handle, source fragment, and physical item GUID until EndAttackCycle. PlayingMontage
+     * is the montage this activation actually started, which is not the granting fragment's montage when a harvesting
+     * tool substitutes its family swing.
      */
     bool BeginAttackCycle(UMythicWeaponAttackAbility &Ability,
                           const UAttackFragment &AttackFragment,
+                          const UAnimMontage &PlayingMontage,
                           FGameplayAbilitySpecHandle AbilitySpecHandle,
                           FMythicHarvestAttackCycleToken &OutToken);
 

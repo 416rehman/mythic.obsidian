@@ -1,5 +1,12 @@
 #include "World/Harvesting/MythicHarvestFocusComponent.h"
 
+#include "Engine/OverlapResult.h"
+
+#include "Components/WidgetComponent.h"
+#include "Mythic/Mythic.h"
+#include "World/Harvesting/MythicHarvestPromptWidget.h"
+#include "UI/Settings/MythicUserSettings.h"
+
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -23,6 +30,27 @@
 
 namespace {
 constexpr double MinimumFocusLossGraceSeconds = 0.15;
+
+static bool HasFocusLineOfSight(UWorld &World,
+                                const UMythicHarvestSettings &Settings,
+                                const FVector &ViewOrigin,
+                                const FVector &ToAnchor, double ViewDistance,
+                                const UMythicResourceISM &Resource,
+                                const FCollisionQueryParams &QueryParams) {
+    const double SightLength =
+        ViewDistance - Settings.FocusLineOfSightSlackCentimeters;
+    if (SightLength <= KINDA_SMALL_NUMBER) {
+        return true;
+    }
+    FHitResult SightHit;
+    const FVector SightEnd = ViewOrigin + ToAnchor * (SightLength / ViewDistance);
+    if (!World.LineTraceSingleByChannel(
+            SightHit, ViewOrigin, SightEnd,
+            Settings.LineOfSightTraceChannel.GetValue(), QueryParams)) {
+        return true;
+    }
+    return SightHit.GetComponent() == &Resource;
+}
 
 struct FMythicHarvestFocusCandidate {
     TWeakObjectPtr<UMythicResourceISM> Resource;
@@ -241,6 +269,12 @@ void UMythicHarvestFocusComponent::EndPlay(
     if (bInputBindingInstalled && BoundInputComponent.IsValid()) {
         BoundInputComponent->RemoveBindingByHandle(InputBindingHandle);
     }
+    if (PromptWidgetComponent) {
+        PromptWidgetComponent->SetWidget(nullptr);
+        PromptWidgetComponent->DestroyComponent();
+        PromptWidgetComponent = nullptr;
+    }
+    PromptWidget = nullptr;
     bInputBindingInstalled = false;
     InputBindingHandle = 0;
     BoundInputComponent.Reset();
@@ -360,41 +394,58 @@ void UMythicHarvestFocusComponent::RefreshLocalFocus() {
         return;
     }
 
-    const FVector TraceEnd = ViewOrigin
-        + ViewDirection * Settings->FocusRangeCentimeters;
+    APawn *ControlledPawn = Controller->GetPawn().Get();
+    const FVector PawnLocation = ControlledPawn->GetActorLocation();
+    if (!IsFiniteVector(PawnLocation)) {
+        ClearFocus();
+        return;
+    }
+
+    // Selection is proximity plus view cone, never an aimed ray. Reach is measured from the pawn so the feel is
+    // identical in first person, third person and top down, and looking roughly at a node is enough to pick it.
+    const double FocusReach = static_cast<double>(Settings->FocusRangeCentimeters)
+        + static_cast<double>(Settings->FocusRadiusCentimeters);
     FCollisionObjectQueryParams ObjectQuery;
     ObjectQuery.AddObjectTypesToQuery(ECC_Destructible);
-    APawn *ControlledPawn = Controller->GetPawn().Get();
     FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MythicHarvestFocus),
                                       false, ControlledPawn);
     QueryParams.bTraceComplex = false;
 
-    TArray<FHitResult> Hits;
-    const bool bHitAny = Settings->FocusRadiusCentimeters > KINDA_SMALL_NUMBER
-        ? World->SweepMultiByObjectType(
-              Hits, ViewOrigin, TraceEnd, FQuat::Identity, ObjectQuery,
-              FCollisionShape::MakeSphere(Settings->FocusRadiusCentimeters),
-              QueryParams)
-        : World->LineTraceMultiByObjectType(
-              Hits, ViewOrigin, TraceEnd, ObjectQuery, QueryParams);
+    TArray<FOverlapResult> Overlaps;
+    World->OverlapMultiByObjectType(
+        Overlaps, PawnLocation, FQuat::Identity, ObjectQuery,
+        FCollisionShape::MakeSphere(static_cast<float>(FocusReach)), QueryParams);
+
+    const double MinimumViewDot = FMath::Cos(FMath::DegreesToRadians(
+        static_cast<double>(FMath::Clamp(Settings->FocusMaxViewAngleDegrees,
+                                         1.0f, 179.0f))));
 
     FMythicHarvestFocusCandidate BestCandidate;
     bool bHasBestCandidate = false;
     bool bSawCurrentFocus = false;
     TSet<uint64> SeenRuntimeInstances;
-    if (bHitAny) {
-        for (const FHitResult &Hit : Hits) {
-            UMythicResourceISM *Resource =
-                Cast<UMythicResourceISM>(Hit.GetComponent());
-            if (!Resource || !Resource->HarvestableDefinition
-                || Hit.Item < 0) {
+    TSet<const UMythicResourceISM *> SeenResources;
+    for (const FOverlapResult &Overlap : Overlaps) {
+        UMythicResourceISM *Resource =
+            Cast<UMythicResourceISM>(Overlap.GetComponent());
+        if (!Resource || !Resource->HarvestableDefinition
+            || SeenResources.Contains(Resource)) {
+            continue;
+        }
+        SeenResources.Add(Resource);
+
+        const TArray<int32> NearbyInstances =
+            Resource->GetInstancesOverlappingSphere(
+                PawnLocation, static_cast<float>(FocusReach), true);
+        for (const int32 InstanceIndex : NearbyInstances) {
+            if (InstanceIndex < 0) {
                 continue;
             }
 
             FPrimitiveInstanceId PrimitiveInstanceId;
             FMythicHarvestNodeId NodeId;
             if (!Resource->ResolveAuthoritativeHitInstance(
-                    Hit.Item, PrimitiveInstanceId, NodeId)
+                    InstanceIndex, PrimitiveInstanceId, NodeId)
                 || !PrimitiveInstanceId.IsValid() || !NodeId.IsValid()) {
                 continue;
             }
@@ -408,29 +459,48 @@ void UMythicHarvestFocusComponent::RefreshLocalFocus() {
             SeenRuntimeInstances.Add(RuntimeInstanceKey);
 
             FTransform InstanceTransform;
-            if (!Resource->GetInstanceTransform(Hit.Item, InstanceTransform, true)
+            if (!Resource->GetInstanceTransform(InstanceIndex, InstanceTransform,
+                                                true)
                 || !IsFiniteVector(InstanceTransform.GetLocation())) {
                 continue;
             }
             const FVector Anchor = InstanceTransform.GetLocation();
-            const FVector ToAnchor = Anchor - ViewOrigin;
-            const double AlongRay = FVector::DotProduct(ToAnchor, ViewDirection);
-            if (!FMath::IsFinite(AlongRay) || AlongRay < 0.0
-                || AlongRay > Settings->FocusRangeCentimeters
-                    + Settings->FocusRadiusCentimeters) {
+            const double DistanceFromPawn = FVector::Dist(Anchor, PawnLocation);
+            if (!FMath::IsFinite(DistanceFromPawn)
+                || DistanceFromPawn > FocusReach) {
                 continue;
             }
-            const double LateralDistance =
-                FMath::Sqrt(FMath::Max(0.0,
-                    ToAnchor.SquaredLength() - AlongRay * AlongRay));
-            double Score = AlongRay + LateralDistance * 0.25;
+
+            const FVector ToAnchorFromView = Anchor - ViewOrigin;
+            const double ViewDistance = ToAnchorFromView.Size();
+            if (!FMath::IsFinite(ViewDistance)
+                || ViewDistance <= KINDA_SMALL_NUMBER) {
+                continue;
+            }
+            const double ViewDot = FVector::DotProduct(
+                ToAnchorFromView / ViewDistance, ViewDirection);
+            if (!FMath::IsFinite(ViewDot) || ViewDot < MinimumViewDot) {
+                continue;
+            }
+
+            if (Settings->bRequireFocusLineOfSight
+                && !HasFocusLineOfSight(*World, *Settings, ViewOrigin,
+                                        ToAnchorFromView, ViewDistance,
+                                        *Resource, QueryParams)) {
+                continue;
+            }
+
+            // Angle leads distance so the node being looked at wins over one that merely stands closer.
+            double Score = (1.0 - ViewDot)
+                    * static_cast<double>(Settings->FocusAngleWeight)
+                + (DistanceFromPawn / FMath::Max(1.0, FocusReach))
+                    * static_cast<double>(Settings->FocusDistanceWeight);
             const bool bIsCurrent = FocusedResource == Resource
                 && FocusedNodeId == NodeId
                 && FocusedPrimitiveInstanceId == PrimitiveInstanceId;
             if (bIsCurrent) {
                 bSawCurrentFocus = true;
-                Score -= FMath::Max(10.0f,
-                                    Settings->FocusRadiusCentimeters * 0.5f);
+                Score -= static_cast<double>(Settings->FocusStickinessBonus);
             }
 
             if (!bHasBestCandidate || Score < BestCandidate.Score) {
@@ -634,6 +704,7 @@ void UMythicHarvestFocusComponent::RefreshFocusedPresentation() {
     const bool bHadFocus = CurrentFocus.bHasFocus;
     if (!PresentationsEqual(CurrentFocus, NewPresentation)) {
         CurrentFocus = MoveTemp(NewPresentation);
+        UpdatePromptPresentation(CurrentFocus);
         OnFocusChanged.Broadcast(CurrentFocus);
     }
     if (!bHadFocus) {
@@ -649,8 +720,8 @@ void UMythicHarvestFocusComponent::HandleContextInteractStarted() {
     }
 
     RefreshFocusedPresentation();
-    // Harvesting is the weapon swing plus a passive tool-slot check, so the only
-    // thing this contextual key can still do is put a carried tool in its slot.
+    // The attack input swings the slotted tool itself, so the only thing this
+    // contextual key can still do is put a carried tool into its slot.
     if (CurrentFocus.Availability
         == EMythicHarvestFocusAvailability::EquipRequired) {
         if (!RequestEquipFocusedTool()) {
@@ -784,6 +855,77 @@ void UMythicHarvestFocusComponent::ClearFocus() {
     const FMythicHarvestFocusPresentation ClearedPresentation;
     if (!PresentationsEqual(CurrentFocus, ClearedPresentation)) {
         CurrentFocus = ClearedPresentation;
+        UpdatePromptPresentation(CurrentFocus);
         OnFocusChanged.Broadcast(CurrentFocus);
+    }
+}
+
+void UMythicHarvestFocusComponent::UpdatePromptPresentation(const FMythicHarvestFocusPresentation &Focus) {
+    const AMythicPlayerController *Controller = OwnerController.Get();
+    // UWidgetComponent refuses to join the screen layer while its owner IsHidden, and a PlayerController is hidden by
+    // construction, so a prompt parented to the controller is built correctly and then never drawn.
+    APawn *PromptOwner = Controller ? Controller->GetPawn() : nullptr;
+    UWorld *World = PromptOwner ? PromptOwner->GetWorld() : nullptr;
+    if (!World || !World->IsGameWorld()) {
+        return;
+    }
+
+    if (PromptWidgetComponent && PromptWidgetComponent->GetOwner() != PromptOwner) {
+        PromptWidgetComponent->DestroyComponent();
+        PromptWidgetComponent = nullptr;
+        PromptWidget = nullptr;
+    }
+
+    const UMythicHarvestSettings *Settings = GetDefault<UMythicHarvestSettings>();
+    if (!Settings) {
+        return;
+    }
+
+    // Player-facing off switch. Focus, tool gating and harvesting are unaffected; only the drawn prompt is.
+    const UMythicUserSettings *UserSettings = Cast<UMythicUserSettings>(GEngine->GetGameUserSettings());
+    const bool bPromptAllowed = !UserSettings || UserSettings->GetShowHarvestPrompts();
+    if (!bPromptAllowed) {
+        if (PromptWidgetComponent) {
+            PromptWidgetComponent->SetVisibility(false);
+        }
+        return;
+    }
+
+    if (!PromptWidgetComponent) {
+        if (!Focus.bHasFocus) {
+            return;
+        }
+        UClass *WidgetClass = Settings->PromptWidgetClass.LoadSynchronous();
+        if (!WidgetClass) {
+            UE_LOG(Myth, Warning,
+                   TEXT("Harvest focus on %s resolved '%s' but no PromptWidgetClass is authored, so the player is told nothing."),
+                   *GetPathName(), *Focus.PromptText.ToString());
+            return;
+        }
+        PromptWidget = CreateWidget<UMythicHarvestPromptWidget>(World, WidgetClass);
+        if (!PromptWidget) {
+            return;
+        }
+        PromptWidgetComponent = NewObject<UWidgetComponent>(PromptOwner);
+        PromptWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+        // Screen-space prompts take their size from the component, not the widget's own layout.
+        PromptWidgetComponent->SetDrawAtDesiredSize(false);
+        PromptWidgetComponent->SetDrawSize(Settings->PromptDrawSize);
+        PromptWidgetComponent->SetUsingAbsoluteLocation(true);
+        PromptWidgetComponent->SetUsingAbsoluteRotation(true);
+        PromptWidgetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        PromptWidgetComponent->SetWidget(PromptWidget);
+        PromptWidgetComponent->SetupAttachment(PromptOwner->GetRootComponent());
+        PromptWidgetComponent->RegisterComponentWithWorld(World);
+    }
+
+    if (Focus.bHasFocus) {
+        PromptWidgetComponent->SetWorldLocation(
+            Focus.AnchorLocation
+            + FVector(0.0, 0.0, Settings->PromptAnchorLiftCentimeters));
+    }
+    PromptWidgetComponent->SetVisibility(Focus.bHasFocus);
+    if (PromptWidget) {
+        PromptWidget->SetFocusPresentation(Focus);
     }
 }

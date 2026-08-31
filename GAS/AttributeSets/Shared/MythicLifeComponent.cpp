@@ -1340,6 +1340,16 @@ bool UMythicLifeComponent::ShouldRecoverFromExhaustion(float CurrentStamina, flo
     return CurrentStamina >= Threshold;
 }
 
+namespace {
+/**
+ * The stamina-cost reduction a build actually gets, after the authored ceiling. At a ceiling of 1.0 a stacked
+ * build acts for free and stamina stops being a resource, so both the check and the spend read it from here.
+ */
+float GrantedStaminaCostReduction(float RawReduction) {
+    return FMath::Min(RawReduction, GetDefault<UMythicCombatSettings>()->MaxStaminaCostReduction);
+}
+}
+
 bool UMythicLifeComponent::CanSpendStamina(float Cost) const {
     if (Cost <= 0.0f) {
         return true;
@@ -1348,7 +1358,7 @@ bool UMythicLifeComponent::CanSpendStamina(float Cost) const {
     if (!Util) {
         return false;
     }
-    return Util->GetCurrentStamina() >= EffectiveStaminaCost(Cost, Util->GetStaminaCostReduction());
+    return Util->GetCurrentStamina() >= EffectiveStaminaCost(Cost, GrantedStaminaCostReduction(Util->GetStaminaCostReduction()));
 }
 
 float UMythicLifeComponent::EffectiveStaminaCost(float RawCost, float StaminaCostReduction) {
@@ -1374,7 +1384,7 @@ bool UMythicLifeComponent::TrySpendStamina(float Cost) {
     if (!Util) {
         return false;
     }
-    const float Effective = EffectiveStaminaCost(Cost, Util->GetStaminaCostReduction());
+    const float Effective = EffectiveStaminaCost(Cost, GrantedStaminaCostReduction(Util->GetStaminaCostReduction()));
     const float Cur = Util->GetCurrentStamina();
     if (Cur < Effective) {
         return false;
