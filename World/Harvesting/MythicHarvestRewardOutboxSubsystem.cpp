@@ -3721,6 +3721,11 @@ bool UMythicHarvestRewardOutboxSubsystem::TryDeliverOneEscrowRow(
         && IsValid(CreatedItem)) {
         CreatedItem->Destroy();
     }
+    // Reported after the escrow commit, so the feed is exactly as idempotent as the insertion it describes:
+    // a retry that already applied never reaches here, and a full bag inserts nothing and stays silent.
+    if (InsertedQuantity > 0) {
+        Inventory->NotifyOwnerItemAcquired(Definition, InsertedQuantity);
+    }
     OutDeliveredQuantity = InsertedQuantity;
     bOutRowCompleted =
         Escrow->FindRow(Plan.ReceiptKey) == nullptr;

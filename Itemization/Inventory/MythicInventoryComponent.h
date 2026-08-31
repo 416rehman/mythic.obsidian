@@ -236,6 +236,12 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Slots")
     int32 AddToAnySlot(UMythicItemInstance *ItemInstance, bool bFromPlayer = false);
 
+    // Tell the owning player they gained an item: the loot feed line plus the Item Acquired gameplay event.
+    // Any path that inserts with AddToAnySlot rather than AddItem must call this, or the gain is silent and
+    // nothing keyed on Item Acquired ever fires.
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Slots")
+    void NotifyOwnerItemAcquired(const UItemDefinition *ItemDef, int32 Quantity);
+
     static bool ShouldAttemptStackMerge(int32 StackSizeMax) { return StackSizeMax > 1; }
 
     // Add item to the given slot. If the slot is already occupied, the item will be stacked if possible. Returns the amount of items that were added.

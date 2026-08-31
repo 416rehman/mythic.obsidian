@@ -639,17 +639,22 @@ bool UMythicInventoryComponent::ReconcileEquippedAffixSnapshotMutationTransactio
         && Application->ReconcileItemSnapshotMutationTransactional(ItemInstance, ProposedSnapshots);
 }
 
+void UMythicInventoryComponent::NotifyOwnerItemAcquired(const UItemDefinition *ItemDef, int32 Quantity) {
+    if (!ItemDef || Quantity <= 0) {
+        return;
+    }
+    if (AMythicPlayerController *OwningPC = Cast<AMythicPlayerController>(GetOwner())) {
+        OwningPC->ClientNotifyLootPickup(ItemDef->Name, Quantity, UItemDefinition::GetRarityColor(ItemDef->Rarity));
+        OwningPC->NotifyItemAcquired(ItemDef, Quantity);
+    }
+}
+
 AMythicWorldItem *UMythicInventoryComponent::AddItem(UMythicItemInstance *ItemInstance, AController *TargetRecipient) {
     auto OriginalQty = ItemInstance->GetStacks();
     auto PickupDef = ItemInstance->GetItemDefinition();
     auto AmountAdded = AddToAnySlot(ItemInstance);
 
-    if (AmountAdded > 0 && PickupDef) {
-        if (AMythicPlayerController *OwningPC = Cast<AMythicPlayerController>(GetOwner())) {
-            OwningPC->ClientNotifyLootPickup(PickupDef->Name, AmountAdded, UItemDefinition::GetRarityColor(PickupDef->Rarity));
-            OwningPC->NotifyItemAcquired(PickupDef, AmountAdded);
-        }
-    }
+    NotifyOwnerItemAcquired(PickupDef, AmountAdded);
 
     if (AmountAdded != OriginalQty) {
         UMythicLootManagerSubsystem *LootManager = GetOwner()->GetGameInstance()->GetSubsystem<UMythicLootManagerSubsystem>();
@@ -891,12 +896,7 @@ void UMythicInventoryComponent::PickupItem_Implementation(AMythicWorldItem *worl
         world_item->FlushNetDormancy();
     }
 
-    if (AmountAdded > 0 && PickupDef) {
-        if (AMythicPlayerController *OwningPC = Cast<AMythicPlayerController>(GetOwner())) {
-            OwningPC->ClientNotifyLootPickup(PickupDef->Name, AmountAdded, UItemDefinition::GetRarityColor(PickupDef->Rarity));
-            OwningPC->NotifyItemAcquired(PickupDef, AmountAdded);
-        }
-    }
+    NotifyOwnerItemAcquired(PickupDef, AmountAdded);
 }
 
 void UMythicInventoryComponent::HandleSlotsAdded(const TArrayView<int32> &AddedIndices, int32 FinalSize) {
