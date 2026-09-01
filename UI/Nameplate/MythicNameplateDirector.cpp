@@ -17,6 +17,7 @@
 #include "Interaction/Attention/MythicEntityAttentionSubsystem.h"
 #include "Interaction/Attention/MythicEntityAttentionTypes.h"
 #include "Interaction/ContextActions/MythicContextActionDefinition.h"
+#include "Interaction/ContextActions/MythicContextActionProjectionPolicy.h"
 #include "Interaction/ContextActions/MythicEntityActionGrantComponent.h"
 #include "Player/MythicPlayerController.h"
 #include "Player/MythicPlayerState.h"

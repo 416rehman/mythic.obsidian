@@ -62,7 +62,13 @@ void FMythicStatDefinitionHandle::Reset() {
 }
 
 float MythicStatPresentation::GetComparisonEpsilon(const FMythicStatNumberPresentation& Presentation) {
-    const int32 DecimalPlaces = FMath::Clamp(Presentation.DecimalPlaces, 0, 4);
+    // Integer and bipolar formatting intentionally force zero decimals. Comparison must use that same effective
+    // precision or two values that render identically can still produce a misleading "+0" delta chip.
+    const int32 DecimalPlaces =
+        Presentation.Format == EMythicStatFormat::Integer
+        || Presentation.Format == EMythicStatFormat::Bipolar
+            ? 0
+            : FMath::Clamp(Presentation.DecimalPlaces, 0, 4);
     const float DisplayScale =
         Presentation.Format == EMythicStatFormat::Percent || Presentation.Format == EMythicStatFormat::Multiplier
             ? 100.0f

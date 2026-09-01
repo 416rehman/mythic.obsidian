@@ -274,6 +274,24 @@ public:
         const FMythicInventoryTargetLocator &Target,
         int32 &OutQuantityProcessed);
 
+    /**
+     * Transfers an identity-checked player item into compatible empty/stacking slots in deterministic order. This is
+     * a native authority seam for server workflows that establish their own consent (for example accepted gifts); it
+     * is deliberately not an RPC and still routes every destination through TryPlayerMoveItem policy validation.
+     */
+    EMythicInventoryActionResult TryTransferPlayerItemToAnySlot(
+        const FMythicInventorySourceLocator &Source,
+        UMythicInventoryComponent *TargetInventory,
+        int32 &OutQuantityProcessed);
+
+    /**
+     * Performs the same identity, permission, compatibility, merge, and swap checks as TryPlayerMoveItem without
+     * mutating either inventory. Presentation code uses this seam so selectable destinations cannot drift from authority.
+     */
+    EMythicInventoryActionResult ValidatePlayerMoveItem(
+        const FMythicInventorySourceLocator &Source,
+        const FMythicInventoryTargetLocator &Target) const;
+
     // Drops an item instance to the ground through a WorldItem. Returns true if the item was dropped.
     // If TargetRecipient is provided, only they can interact with the item. Otherwise, all players can interact with the item.
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Slots")
@@ -335,43 +353,30 @@ public:
     UFUNCTION(Server, Reliable)
     void ServerRemoveItemByDefinition(UItemDefinition *ItemDefinition, int32 Amount = 1);
 
-    // split SplitAmount stacks from SourceSlotIndex into the first empty slot in the same group
-    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
-    void ServerSplitStack(int32 SourceSlotIndex, int32 SplitAmount);
-
-    int32 SplitStackToFreeSlot(int32 SourceSlotIndex, int32 SplitAmount);
-
     /** Splits an identity-checked stack and reports both a semantic result and the created slot. */
     EMythicInventoryActionResult TrySplitStackToFreeSlot(
         const FMythicInventorySourceLocator &Source,
         int32 SplitAmount,
         int32 &OutTargetSlotIndex);
 
-    // swap items between two slots, handling equipment activation/deactivation and empty slot moves
-    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
-    void ServerSwapSlots(int32 SlotA, int32 SlotB);
-
-    /** Authoritative result-bearing implementation used by the RPC and tests/callers that need commit status. */
-    bool TrySwapSlotsTransactional(int32 SlotA, int32 SlotB);
-
-    // move item from this inventory to a target inventory using AddToAnySlot
-    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
-    void ServerQuickMoveToInventory(int32 SourceSlotIndex, UMythicInventoryComponent *TargetInventory);
-
-    // sort all items in slots matching GroupTag by the specified mode
-    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
-    void ServerSortGroup(FGameplayTag GroupTag, ESortMode Mode);
-
     /** Sorts one carried group on authority and returns a semantic completion result. */
     EMythicInventoryActionResult TrySortGroup(FGameplayTag GroupTag, ESortMode Mode);
 
-    // move all non-equipment items (optionally filtered by type tag) to the target inventory
-    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
-    void ServerDepositAll(UMythicInventoryComponent *Target, FGameplayTag OptionalTypeFilter);
+    /**
+     * Strict deterministic ordering used by authoritative carried-group sort and automation coverage.
+     * Returns true only when A must appear before B for Mode; distinct valid physical items never compare equal.
+     */
+    static bool SortsBefore(const UMythicItemInstance &A,
+                            const UMythicItemInstance &B,
+                            ESortMode Mode);
 
-    // use a consumable item directly from inventory without equipping it
-    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
-    void ServerUseItemInSlot(int32 SlotIndex);
+    /**
+     * Moves every takeable non-equipment item into another authority-owned inventory. This is a native world-system
+     * seam (used when creating corpse containers), not a player RPC; it returns the exact quantity transferred.
+     */
+    int32 TransferAllTakeableItemsToInventory(
+        UMythicInventoryComponent *Target,
+        FGameplayTag OptionalTypeFilter = FGameplayTag());
 
     /** Executes an identity-checked in-inventory action and reports the quantity consumed by that action. */
     EMythicInventoryActionResult TryUseItemInSlot(

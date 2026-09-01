@@ -68,11 +68,11 @@ void ResolveAttackSpeedPlayRateBounds(float &OutMinRate, float &OutMaxRate) {
     OutMaxRate = Settings->MaxAttackSpeedPlayRate;
 }
 
-FText FormatAttacksPerSecond(const float AttacksPerSecond) {
-    FNumberFormattingOptions Options;
-    Options.SetMinimumFractionalDigits(2);
-    Options.SetMaximumFractionalDigits(2);
-    return FText::AsNumber(AttacksPerSecond, &Options);
+FMythicStatNumberPresentation MakeAttacksPerSecondPresentation() {
+    FMythicStatNumberPresentation Presentation;
+    Presentation.Format = EMythicStatFormat::Flat;
+    Presentation.DecimalPlaces = 2;
+    return Presentation;
 }
 
 } // namespace
@@ -309,6 +309,9 @@ bool UItemTooltipVM::CalculateWeaponAttackMetrics(
     }
 
     FMythicWeaponAttackViewData Candidate;
+    Candidate.DamageNumberPresentation.Format = EMythicStatFormat::Flat;
+    Candidate.DamageNumberPresentation.DecimalPlaces = 0;
+    Candidate.AttacksPerSecondNumberPresentation = MakeAttacksPerSecondPresentation();
     if (!MythicCombat::ResolveWeaponDamageRange(
             InDamagePerHit,
             Candidate.MinimumDamagePerHit,
@@ -383,13 +386,17 @@ bool UItemTooltipVM::BuildWeaponAttackDisplayData(
         return false;
     }
 
+    Candidate.DamageNumberPresentation = DamageStat->NumberPresentation;
+    Candidate.AttacksPerSecondNumberPresentation = MakeAttacksPerSecondPresentation();
+
     Candidate.DamagePerHitText = FText::Format(
         NSLOCTEXT("MythicItemAttack", "DamagePerHitRange", "{0} - {1}"),
         MythicStatDisplay::FormatValue(Candidate.MinimumDamagePerHit,
                                        DamageStat->NumberPresentation),
         MythicStatDisplay::FormatValue(Candidate.MaximumDamagePerHit,
                                        DamageStat->NumberPresentation));
-    Candidate.AttacksPerSecondText = FormatAttacksPerSecond(Candidate.AttacksPerSecond);
+    Candidate.AttacksPerSecondText = MythicStatDisplay::FormatValue(
+        Candidate.AttacksPerSecond, Candidate.AttacksPerSecondNumberPresentation);
     Candidate.DamagePerSecondText = MythicStatDisplay::FormatValue(
         Candidate.DamagePerSecond, DamageStat->NumberPresentation);
     if (Candidate.DamagePerHitText.IsEmpty() || Candidate.AttacksPerSecondText.IsEmpty()

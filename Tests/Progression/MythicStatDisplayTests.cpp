@@ -29,6 +29,14 @@ bool FMythicStatDisplayFormatsTest::RunTest(const FString& Parameters) {
     TestEqual(TEXT("a +0.06 additive contribution to a multiplier formats as six percentage points"),
               MythicStatDisplay::FormatBonus(0.06f, Percent).ToString(), FString(TEXT("+6%")));
 
+    FMythicStatNumberPresentation Integer;
+    Integer.Format = EMythicStatFormat::Integer;
+    Integer.DecimalPlaces = 4;
+    TestEqual(TEXT("integer comparison precision follows its forced zero-decimal rendering"),
+              MythicStatPresentation::GetComparisonEpsilon(Integer), 0.5f);
+    TestTrue(TEXT("a sub-half integer delta cannot render as a misleading plus zero chip"),
+             MythicStatDisplay::FormatBonus(0.1f, Integer).IsEmpty());
+
     UMythicStatDefinition* Definition = NewObject<UMythicStatDefinition>(GetTransientPackage());
     Definition->NumberPresentation = Multiplier;
     const FMythicStatNumberPresentation Additive = MythicStatDisplay::ResolveModifierPresentation(

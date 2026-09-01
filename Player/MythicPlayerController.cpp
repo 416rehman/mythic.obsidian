@@ -39,6 +39,7 @@
 #include "AI/Cognition/CognitiveBrainComponent.h"
 #include "AI/Party/PartySubsystem.h"
 #include "UI/MythicDamageNumberSubsystem.h"
+#include "UI/Inventory/MythicInventoryInteractionCoordinator.h"
 #include "World/Harvesting/MythicHarvestToolTypeDefinition.h"
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Inventory/Fragments/Passive/YieldQualityFragment.h"
@@ -446,6 +447,14 @@ void AMythicPlayerController::PreClientTravel(
     if (HasAuthority()) {
         EnterContextActionAuthorityBarrier();
     }
+    ResetInventoryActionSubmissionState();
+    if (ULocalPlayer *LocalPlayer = GetLocalPlayer()) {
+        if (UMythicInventoryInteractionCoordinator *Coordinator =
+                LocalPlayer->GetSubsystem<
+                    UMythicInventoryInteractionCoordinator>()) {
+            Coordinator->DetachFromController(this);
+        }
+    }
     Super::PreClientTravel(PendingURL, TravelType, bIsSeamlessTravel);
 }
 
@@ -461,6 +470,14 @@ void AMythicPlayerController::BeginPlay() {
     Super::BeginPlay();
 
     BindContextActionAttention();
+
+    if (ULocalPlayer *LocalPlayer = GetLocalPlayer()) {
+        if (UMythicInventoryInteractionCoordinator *Coordinator =
+                LocalPlayer->GetSubsystem<
+                    UMythicInventoryInteractionCoordinator>()) {
+            Coordinator->AttachToController(this);
+        }
+    }
 
     if (HasAuthority() && GetWorld() && ZoneCheckInterval > 0.0f) {
         GetWorld()->GetTimerManager().SetTimer(ZoneCheckTimerHandle, this, &AMythicPlayerController::CheckZoneEntry,
@@ -1294,12 +1311,51 @@ bool AMythicPlayerController::IsPlayerOwnedInventory(
 }
 
 int64 AMythicPlayerController::AllocateInventoryActionRequestId() {
-    if (NextInventoryActionRequestId <= 0) {
-        NextInventoryActionRequestId = 1;
+    if (bInventoryActionRequestIdsExhausted
+        || NextInventoryActionRequestId <= 0) {
+        return 0;
     }
     const int64 RequestId = NextInventoryActionRequestId;
-    NextInventoryActionRequestId = RequestId == MAX_int64 ? 1 : RequestId + 1;
+    if (RequestId == MAX_int64) {
+        bInventoryActionRequestIdsExhausted = true;
+        NextInventoryActionRequestId = 0;
+    }
+    else {
+        NextInventoryActionRequestId = RequestId + 1;
+    }
     return RequestId;
+}
+
+int64 AMythicPlayerController::BeginInventoryActionSubmission(
+    FMythicInventoryActionSubmission &Submission) {
+    if (!IsLocalController() || ActiveInventoryActionRequestId > 0) {
+        return 0;
+    }
+
+    const int64 RequestId = AllocateInventoryActionRequestId();
+    if (RequestId <= 0) {
+        return 0;
+    }
+
+    ActiveInventoryActionRequestId = RequestId;
+    Submission.RequestId = RequestId;
+    OnInventoryActionSubmitted.Broadcast(Submission);
+    return RequestId;
+}
+
+bool AMythicPlayerController::AcceptNewInventoryActionRequestId(
+    const int64 RequestId) {
+    if (RequestId <= 0 || RequestId <= HighestAcceptedInventoryActionRequestId) {
+        return false;
+    }
+    HighestAcceptedInventoryActionRequestId = RequestId;
+    return true;
+}
+
+void AMythicPlayerController::ResetInventoryActionSubmissionState() {
+    ActiveInventoryActionRequestId = 0;
+    ReceivedInventoryActionReceipts.Reset();
+    ReceivedInventoryActionReceiptOrder.Reset();
 }
 
 bool AMythicPlayerController::ReplayCachedInventoryActionReceipt(
@@ -1325,7 +1381,8 @@ void AMythicPlayerController::CompleteInventoryActionRequest(
         ? EMythicInventoryReceiptDisposition::Committed
         : EMythicInventoryReceiptDisposition::Rejected;
 
-    if (Receipt.RequestId > 0) {
+    if (Receipt.RequestId > 0
+        && Receipt.RequestId >= HighestAcceptedInventoryActionRequestId) {
         if (InventoryActionReceiptOrder.Num()
             >= MaxInventoryActionReceiptCacheSize) {
             const int64 OldestRequestId = InventoryActionReceiptOrder[0];
@@ -1356,7 +1413,17 @@ bool AMythicPlayerController::ConsumeReceivedInventoryActionReceipt(
 int64 AMythicPlayerController::SubmitInventoryMove(
     const FMythicInventorySourceLocator &Source,
     const FMythicInventoryTargetLocator &Target) {
-    const int64 RequestId = AllocateInventoryActionRequestId();
+    FMythicInventoryActionSubmission Submission;
+    Submission.Action = EMythicInventoryAction::Move;
+    Submission.Inventory = Source.Inventory;
+    Submission.ItemGuid = Source.ExpectedItemGuid;
+    Submission.SourceSlotIndex = Source.SlotIndex;
+    Submission.TargetSlotIndex = Target.SlotIndex;
+    Submission.RequestedQuantity = Source.ExpectedQuantity;
+    const int64 RequestId = BeginInventoryActionSubmission(Submission);
+    if (RequestId <= 0) {
+        return 0;
+    }
     ServerRequestInventoryMove(RequestId, Source, Target);
     return RequestId;
 }
@@ -1390,7 +1457,16 @@ int64 AMythicPlayerController::SubmitInventoryMoveBySlots(
 int64 AMythicPlayerController::SubmitInventorySplit(
     const FMythicInventorySourceLocator &Source,
     const int32 Quantity) {
-    const int64 RequestId = AllocateInventoryActionRequestId();
+    FMythicInventoryActionSubmission Submission;
+    Submission.Action = EMythicInventoryAction::Split;
+    Submission.Inventory = Source.Inventory;
+    Submission.ItemGuid = Source.ExpectedItemGuid;
+    Submission.SourceSlotIndex = Source.SlotIndex;
+    Submission.RequestedQuantity = Quantity;
+    const int64 RequestId = BeginInventoryActionSubmission(Submission);
+    if (RequestId <= 0) {
+        return 0;
+    }
     ServerRequestInventorySplit(RequestId, Source, Quantity);
     return RequestId;
 }
@@ -1398,7 +1474,16 @@ int64 AMythicPlayerController::SubmitInventorySplit(
 int64 AMythicPlayerController::SubmitInventoryDropQuantity(
     const FMythicInventorySourceLocator &Source,
     const int32 Quantity) {
-    const int64 RequestId = AllocateInventoryActionRequestId();
+    FMythicInventoryActionSubmission Submission;
+    Submission.Action = EMythicInventoryAction::DropQuantity;
+    Submission.Inventory = Source.Inventory;
+    Submission.ItemGuid = Source.ExpectedItemGuid;
+    Submission.SourceSlotIndex = Source.SlotIndex;
+    Submission.RequestedQuantity = Quantity;
+    const int64 RequestId = BeginInventoryActionSubmission(Submission);
+    if (RequestId <= 0) {
+        return 0;
+    }
     ServerRequestInventoryDropQuantity(RequestId, Source, Quantity);
     return RequestId;
 }
@@ -1419,7 +1504,16 @@ int64 AMythicPlayerController::SubmitInventoryDropWholeSlot(
 
 int64 AMythicPlayerController::SubmitInventoryUse(
     const FMythicInventorySourceLocator &Source) {
-    const int64 RequestId = AllocateInventoryActionRequestId();
+    FMythicInventoryActionSubmission Submission;
+    Submission.Action = EMythicInventoryAction::Use;
+    Submission.Inventory = Source.Inventory;
+    Submission.ItemGuid = Source.ExpectedItemGuid;
+    Submission.SourceSlotIndex = Source.SlotIndex;
+    Submission.RequestedQuantity = Source.ExpectedQuantity;
+    const int64 RequestId = BeginInventoryActionSubmission(Submission);
+    if (RequestId <= 0) {
+        return 0;
+    }
     ServerRequestInventoryUse(RequestId, Source);
     return RequestId;
 }
@@ -1427,7 +1521,17 @@ int64 AMythicPlayerController::SubmitInventoryUse(
 int64 AMythicPlayerController::SubmitInventorySetJunk(
     const FMythicInventorySourceLocator &Source,
     const bool bMarkedJunk) {
-    const int64 RequestId = AllocateInventoryActionRequestId();
+    FMythicInventoryActionSubmission Submission;
+    Submission.Action = EMythicInventoryAction::SetJunk;
+    Submission.Inventory = Source.Inventory;
+    Submission.ItemGuid = Source.ExpectedItemGuid;
+    Submission.SourceSlotIndex = Source.SlotIndex;
+    Submission.RequestedQuantity = Source.ExpectedQuantity;
+    Submission.bDesiredManualJunk = bMarkedJunk;
+    const int64 RequestId = BeginInventoryActionSubmission(Submission);
+    if (RequestId <= 0) {
+        return 0;
+    }
     ServerRequestInventorySetJunk(RequestId, Source, bMarkedJunk);
     return RequestId;
 }
@@ -1436,7 +1540,14 @@ int64 AMythicPlayerController::SubmitInventorySort(
     UMythicInventoryComponent *Inventory,
     const FGameplayTag GroupTag,
     const ESortMode SortMode) {
-    const int64 RequestId = AllocateInventoryActionRequestId();
+    FMythicInventoryActionSubmission Submission;
+    Submission.Action = EMythicInventoryAction::Sort;
+    Submission.Inventory = Inventory;
+    Submission.GroupTag = GroupTag;
+    const int64 RequestId = BeginInventoryActionSubmission(Submission);
+    if (RequestId <= 0) {
+        return 0;
+    }
     ServerRequestInventorySort(RequestId, Inventory, GroupTag, SortMode);
     return RequestId;
 }
@@ -1456,7 +1567,8 @@ void AMythicPlayerController::ServerRequestInventoryMove_Implementation(
     Receipt.SourceSlotIndex = Source.SlotIndex;
     Receipt.TargetSlotIndex = Target.SlotIndex;
 
-    if (RequestId <= 0 || !Source.IsStructurallyValid()
+    if (!AcceptNewInventoryActionRequestId(RequestId)
+        || !Source.IsStructurallyValid()
         || !Target.IsStructurallyValid()) {
         Receipt.Result = EMythicInventoryActionResult::InvalidRequest;
     }
@@ -1486,7 +1598,8 @@ void AMythicPlayerController::ServerRequestInventorySplit_Implementation(
     Receipt.ItemGuid = Source.ExpectedItemGuid;
     Receipt.SourceSlotIndex = Source.SlotIndex;
 
-    if (RequestId <= 0 || !Source.IsStructurallyValid() || Quantity <= 0) {
+    if (!AcceptNewInventoryActionRequestId(RequestId)
+        || !Source.IsStructurallyValid() || Quantity <= 0) {
         Receipt.Result = EMythicInventoryActionResult::InvalidRequest;
     }
     else if (!IsPlayerOwnedInventory(Source.Inventory)) {
@@ -1517,7 +1630,8 @@ void AMythicPlayerController::ServerRequestInventoryDropQuantity_Implementation(
     Receipt.SourceSlotIndex = Source.SlotIndex;
 
     APawn *PlayerPawn = GetPawn();
-    if (RequestId <= 0 || !Source.IsStructurallyValid() || Quantity <= 0
+    if (!AcceptNewInventoryActionRequestId(RequestId)
+        || !Source.IsStructurallyValid() || Quantity <= 0
         || !IsValid(PlayerPawn)) {
         Receipt.Result = EMythicInventoryActionResult::InvalidRequest;
     }
@@ -1546,7 +1660,8 @@ void AMythicPlayerController::ServerRequestInventoryUse_Implementation(
     Receipt.ItemGuid = Source.ExpectedItemGuid;
     Receipt.SourceSlotIndex = Source.SlotIndex;
 
-    if (RequestId <= 0 || !Source.IsStructurallyValid()) {
+    if (!AcceptNewInventoryActionRequestId(RequestId)
+        || !Source.IsStructurallyValid()) {
         Receipt.Result = EMythicInventoryActionResult::InvalidRequest;
     }
     else if (!IsPlayerOwnedInventory(Source.Inventory)) {
@@ -1573,7 +1688,8 @@ void AMythicPlayerController::ServerRequestInventorySetJunk_Implementation(
     Receipt.ItemGuid = Source.ExpectedItemGuid;
     Receipt.SourceSlotIndex = Source.SlotIndex;
 
-    if (RequestId <= 0 || !Source.IsStructurallyValid()) {
+    if (!AcceptNewInventoryActionRequestId(RequestId)
+        || !Source.IsStructurallyValid()) {
         Receipt.Result = EMythicInventoryActionResult::InvalidRequest;
     }
     else if (!IsPlayerOwnedInventory(Source.Inventory)) {
@@ -1599,7 +1715,7 @@ void AMythicPlayerController::ServerRequestInventorySort_Implementation(
     Receipt.RequestId = RequestId;
     Receipt.Action = EMythicInventoryAction::Sort;
 
-    if (RequestId <= 0 || !Inventory) {
+    if (!AcceptNewInventoryActionRequestId(RequestId) || !Inventory) {
         Receipt.Result = EMythicInventoryActionResult::InvalidRequest;
     }
     else if (!IsPlayerOwnedInventory(Inventory)) {
@@ -1626,6 +1742,10 @@ void AMythicPlayerController::ClientReceiveInventoryActionReceipt_Implementation
             ReceivedInventoryActionReceiptOrder.Add(Receipt.RequestId);
         }
         ReceivedInventoryActionReceipts.Add(Receipt.RequestId, Receipt);
+    }
+    if (Receipt.RequestId > 0
+        && Receipt.RequestId == ActiveInventoryActionRequestId) {
+        ActiveInventoryActionRequestId = 0;
     }
     OnInventoryActionReceiptReceived.Broadcast(Receipt);
 }
@@ -1824,10 +1944,17 @@ void AMythicPlayerController::ServerSetItemJunk_Implementation(UMythicItemInstan
     if (!HasAuthority() || !IsValid(Item)) {
         return;
     }
-    if (!GetAllInventoryComponents().Contains(Item->GetInventoryComponent())) {
+    UMythicInventoryComponent *Inventory = Item->GetInventoryComponent();
+    if (!GetAllInventoryComponents().Contains(Inventory)) {
         return;
     }
-    Item->ServerSetMarkedJunk(bJunk);
+
+    FMythicInventorySourceLocator Source;
+    Source.Inventory = Inventory;
+    Source.SlotIndex = Item->GetSlot();
+    Source.ExpectedItemGuid = Item->GetItemInstanceGuid();
+    Source.ExpectedQuantity = Item->GetStacks();
+    Inventory->TrySetItemJunk(Source, bJunk);
 }
 
 bool AMythicPlayerController::ServerSellAllJunk_Validate(AMythicVendor *Vendor) {
@@ -1988,31 +2115,36 @@ void AMythicPlayerController::ServerRespondGift_Implementation(bool bAccept) {
         const int32 GiftQty = MythicGift::ComputeGiftQuantity(PendingGiftQuantity, StacksBefore);
 
         if (GiftQty >= StacksBefore) {
-            SourceInv->ServerQuickMoveToInventory(SourceSlot, DestInv);
-            int32 RemainingInGiver = 0;
-            if (UMythicItemInstance *StillThere = SourceInv->GetItem(SourceSlot)) {
-                if (StillThere->GetItemDefinition() == OfferedDef) {
-                    RemainingInGiver = StillThere->GetStacks();
-                }
-            }
-            Moved = FMath::Max(0, StacksBefore - RemainingInGiver);
+            FMythicInventorySourceLocator GiftSource;
+            GiftSource.Inventory = SourceInv;
+            GiftSource.SlotIndex = SourceSlot;
+            GiftSource.ExpectedItemGuid = OfferedItem->GetItemInstanceGuid();
+            GiftSource.ExpectedQuantity = StacksBefore;
+            SourceInv->TryTransferPlayerItemToAnySlot(GiftSource, DestInv, Moved);
             Result = MythicGift::ClassifyGiftMove(StacksBefore, Moved);
         }
         else {
-            const int32 SplitSlot = SourceInv->SplitStackToFreeSlot(SourceSlot, GiftQty);
-            if (SplitSlot == INDEX_NONE) {
+            FMythicInventorySourceLocator GiftSource;
+            GiftSource.Inventory = SourceInv;
+            GiftSource.SlotIndex = SourceSlot;
+            GiftSource.ExpectedItemGuid = OfferedItem->GetItemInstanceGuid();
+            GiftSource.ExpectedQuantity = StacksBefore;
+            int32 SplitSlot = INDEX_NONE;
+            if (SourceInv->TrySplitStackToFreeSlot(GiftSource, GiftQty, SplitSlot)
+                != EMythicInventoryActionResult::Succeeded) {
                 Result = EMythicGiftResult::NoRoom;
                 Moved = 0;
             }
             else {
-                SourceInv->ServerQuickMoveToInventory(SplitSlot, DestInv);
-                int32 RemainingInSplit = 0;
-                if (UMythicItemInstance *StillThere = SourceInv->GetItem(SplitSlot)) {
-                    if (StillThere->GetItemDefinition() == OfferedDef) {
-                        RemainingInSplit = StillThere->GetStacks();
-                    }
+                UMythicItemInstance *SplitItem = SourceInv->GetItem(SplitSlot);
+                if (SplitItem && SplitItem->GetItemDefinition() == OfferedDef) {
+                    FMythicInventorySourceLocator SplitSource;
+                    SplitSource.Inventory = SourceInv;
+                    SplitSource.SlotIndex = SplitSlot;
+                    SplitSource.ExpectedItemGuid = SplitItem->GetItemInstanceGuid();
+                    SplitSource.ExpectedQuantity = SplitItem->GetStacks();
+                    SourceInv->TryTransferPlayerItemToAnySlot(SplitSource, DestInv, Moved);
                 }
-                Moved = FMath::Max(0, GiftQty - RemainingInSplit);
                 Result = MythicGift::ClassifyGiftMove(GiftQty, Moved);
             }
         }
@@ -3261,6 +3393,14 @@ void AMythicPlayerController::ClientNotifyStatusLearned_Implementation(const FTe
 
 void AMythicPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason) {
     UnbindContextActionAttention();
+    ResetInventoryActionSubmissionState();
+    if (ULocalPlayer *LocalPlayer = GetLocalPlayer()) {
+        if (UMythicInventoryInteractionCoordinator *Coordinator =
+                LocalPlayer->GetSubsystem<
+                    UMythicInventoryInteractionCoordinator>()) {
+            Coordinator->DetachFromController(this);
+        }
+    }
     if (GetWorld()) {
         GetWorld()->GetTimerManager().ClearTimer(ZoneCheckTimerHandle);
         GetWorld()->GetTimerManager().ClearTimer(

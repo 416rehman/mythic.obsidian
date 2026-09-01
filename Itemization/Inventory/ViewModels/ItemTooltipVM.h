@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "MVVMViewModelBase.h"
 #include "Itemization/Inventory/ItemDefinition.h"
+#include "Stats/MythicStatTypes.h"
 #include "UI/ViewModels/MythicAffixViewData.h"
 #include "ItemTooltipVM.generated.h"
 
@@ -59,6 +60,14 @@ struct MYTHIC_API FMythicWeaponAttackViewData {
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Tooltip|Attack")
     float DamagePerSecond = 0.0f;
 
+    /** Canonical live DamagePerHit formatting also used for average-hit and sustained-DPS comparison. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Tooltip|Attack")
+    FMythicStatNumberPresentation DamageNumberPresentation;
+
+    /** Canonical formatting for the effective attacks-per-second item metric. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Tooltip|Attack")
+    FMythicStatNumberPresentation AttacksPerSecondNumberPresentation;
+
     /** Localized minimum-to-maximum hit range formatted by the live DamagePerHit Stat Definition. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Tooltip|Attack")
     FText DamagePerHitText;
@@ -81,6 +90,12 @@ struct MYTHIC_API FMythicWeaponAttackViewData {
                FMath::IsNearlyEqual(AttacksPerSecond, Other.AttacksPerSecond) &&
                FMath::IsNearlyEqual(AttackTimeSeconds, Other.AttackTimeSeconds) &&
                FMath::IsNearlyEqual(DamagePerSecond, Other.DamagePerSecond) &&
+               DamageNumberPresentation.Format == Other.DamageNumberPresentation.Format &&
+               DamageNumberPresentation.DecimalPlaces == Other.DamageNumberPresentation.DecimalPlaces &&
+               DamageNumberPresentation.UnitSuffix.EqualTo(Other.DamageNumberPresentation.UnitSuffix) &&
+               AttacksPerSecondNumberPresentation.Format == Other.AttacksPerSecondNumberPresentation.Format &&
+               AttacksPerSecondNumberPresentation.DecimalPlaces == Other.AttacksPerSecondNumberPresentation.DecimalPlaces &&
+               AttacksPerSecondNumberPresentation.UnitSuffix.EqualTo(Other.AttacksPerSecondNumberPresentation.UnitSuffix) &&
                DamagePerHitText.EqualTo(Other.DamagePerHitText) &&
                AttacksPerSecondText.EqualTo(Other.AttacksPerSecondText) &&
                DamagePerSecondText.EqualTo(Other.DamagePerSecondText);

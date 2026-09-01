@@ -34,13 +34,16 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Itemization/Inventory/ViewModels/InventoryVM.h"
 #include "Itemization/Inventory/ViewModels/ItemSlotVM.h"
-#include "Itemization/Inventory/ViewModels/ItemComparisonVM.h"
 #include "Itemization/Inventory/MythicInventoryActionTypes.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
+#include "Itemization/Inventory/ItemDefinition.h"
+#include "Itemization/Inventory/InventoryProfile.h"
 #include "Itemization/Inventory/InventorySlotDefinition.h"
 #include "Itemization/MythicTags_Inventory.h"
 #include "InputAction.h"
+#include "InputCoreTypes.h"
+#include "Engine/LocalPlayer.h"
 #include "MVVMSubsystem.h"
 #include "View/MVVMView.h"
 #include "GameFramework/PlayerController.h"
@@ -52,6 +55,9 @@
 #include "Player/MythicPlayerState.h"
 #include "UObject/UObjectIterator.h"
 #include "UI/MythicHUDLayout.h"
+#include "UI/Inventory/MythicInventoryInteractionCoordinator.h"
+#include "UI/Inventory/MythicInventoryInteractionPolicy.h"
+#include "UI/Inventory/MythicItemDetailsWidget.h"
 #include "UI/Widgets/MythicBoundActionButton.h"
 
 namespace {
@@ -224,12 +230,15 @@ void UMythicCharacterPageWidget::NativeOnActivated() {
     BorrowInventory();
     BindSlotSelection();
     BindInventoryEvents();
+    if (UMythicInventoryInteractionCoordinator *Coordinator = GetInventoryInteractionCoordinator()) {
+        Coordinator->SetCharacterInventoryPageActive(true);
+    }
     BindInventoryInputs();
     BindProgression();
     RefreshHeader();
     BuildSockets();
     RefreshSockets();
-    SelectFirstOccupiedSlot();
+    RestoreSelectionByGuid();
     RefreshInventoryActionBar();
 
     // Focus one tick late: at activation the borrowed strips are not yet in a visible Slate path, and
@@ -241,6 +250,15 @@ void UMythicCharacterPageWidget::NativeOnActivated() {
 }
 
 UWidget *UMythicCharacterPageWidget::NativeGetDesiredFocusTarget() const {
+    if (const UItemSlotVM *Selected = GetSelectedSlot()) {
+        for (const TWeakObjectPtr<UListViewBase> &WeakList : BoundSlotLists) {
+            if (UListView *List = Cast<UListView>(WeakList.Get())) {
+                if (UUserWidget *Entry = List->GetEntryWidgetFromItem(const_cast<UItemSlotVM *>(Selected))) {
+                    return Entry;
+                }
+            }
+        }
+    }
     if (UListView *Strip = WeaponStrip.Get()) {
         return Strip;
     }
@@ -251,6 +269,16 @@ void UMythicCharacterPageWidget::FocusInitialSlot() {
     if (!IsActivated() || !GetOwningLocalPlayer()) {
         return;
     }
+    if (UItemSlotVM *Selected = GetSelectedSlot()) {
+        for (const TWeakObjectPtr<UListViewBase> &WeakList : BoundSlotLists) {
+            if (UListView *List = Cast<UListView>(WeakList.Get())) {
+                if (UUserWidget *Entry = List->GetEntryWidgetFromItem(Selected)) {
+                    Entry->SetFocus();
+                    return;
+                }
+            }
+        }
+    }
     UListView *Strip = WeaponStrip.Get();
     if (Strip && Strip->GetVisibility() != ESlateVisibility::Collapsed) {
         Strip->SetFocus();
@@ -258,14 +286,23 @@ void UMythicCharacterPageWidget::FocusInitialSlot() {
 }
 
 bool UMythicCharacterPageWidget::TryHandleNestedBackAction() {
-    if (InventoryPageState == EInventoryPageState::Pending) {
-        return true;
-    }
     if (InventoryPageState != EInventoryPageState::Browsing) {
         CloseInventoryModal(true);
         return true;
     }
     return false;
+}
+
+FReply UMythicCharacterPageWidget::NativeOnAnalogValueChanged(
+    const FGeometry &InGeometry,
+    const FAnalogInputEvent &InAnalogEvent) {
+    if (InAnalogEvent.GetKey() == EKeys::Gamepad_RightY
+        && FMath::Abs(InAnalogEvent.GetAnalogValue()) >= 0.18f
+        && DetailsCard
+        && DetailsCard->ScrollDetailsBy(-InAnalogEvent.GetAnalogValue() * 56.0f)) {
+        return FReply::Handled();
+    }
+    return Super::NativeOnAnalogValueChanged(InGeometry, InAnalogEvent);
 }
 
 void UMythicCharacterPageWidget::BuildInventoryInteractionChrome() {
@@ -365,7 +402,7 @@ void UMythicCharacterPageWidget::BuildInventoryActionBar() {
     const UMythicUIStyleSettings &Style = FMythicUIStyle::Get();
     PrimaryActionButton = CreateInventoryActionButton(Style.PrimaryActionButtonStyle.LoadSynchronous());
     ActionsActionButton = CreateInventoryActionButton(Style.SecondaryActionButtonStyle.LoadSynchronous());
-    CompareActionButton = CreateInventoryActionButton(Style.SecondaryActionButtonStyle.LoadSynchronous());
+    TargetActionButton = CreateInventoryActionButton(Style.SecondaryActionButtonStyle.LoadSynchronous());
     SortActionButton = CreateInventoryActionButton(Style.QuietActionButtonStyle.LoadSynchronous());
 
     if (PrimaryActionButton) {
@@ -374,8 +411,8 @@ void UMythicCharacterPageWidget::BuildInventoryActionBar() {
     if (ActionsActionButton) {
         ActionsActionButton->OnClicked().AddUObject(this, &UMythicCharacterPageWidget::HandleInventoryActionsAction);
     }
-    if (CompareActionButton) {
-        CompareActionButton->OnClicked().AddUObject(this, &UMythicCharacterPageWidget::HandleCompareInventoryAction);
+    if (TargetActionButton) {
+        TargetActionButton->OnClicked().AddUObject(this, &UMythicCharacterPageWidget::HandleCycleInventoryTarget);
     }
     if (SortActionButton) {
         SortActionButton->OnClicked().AddUObject(this, &UMythicCharacterPageWidget::HandleSortInventoryAction);
@@ -401,7 +438,7 @@ void UMythicCharacterPageWidget::BindInventoryInputs() {
     Bind(InventoryActionsInputAction,
          GET_FUNCTION_NAME_CHECKED(UMythicCharacterPageWidget, HandleInventoryActionsAction), ActionsBinding);
     Bind(InventoryCompareInputAction,
-         GET_FUNCTION_NAME_CHECKED(UMythicCharacterPageWidget, HandleCompareInventoryAction), CompareBinding);
+         GET_FUNCTION_NAME_CHECKED(UMythicCharacterPageWidget, HandleCycleInventoryTarget), CompareBinding);
     Bind(InventoryPreviousCategoryInputAction,
          GET_FUNCTION_NAME_CHECKED(UMythicCharacterPageWidget, HandlePreviousInventoryCategory), PreviousCategoryBinding);
     Bind(InventoryNextCategoryInputAction,
@@ -415,8 +452,8 @@ void UMythicCharacterPageWidget::BindInventoryInputs() {
     if (ActionsActionButton && ActionsBinding.Handle.IsValid()) {
         ActionsActionButton->SetRepresentedAction(ActionsBinding.Handle);
     }
-    if (CompareActionButton && CompareBinding.Handle.IsValid()) {
-        CompareActionButton->SetRepresentedAction(CompareBinding.Handle);
+    if (TargetActionButton && CompareBinding.Handle.IsValid()) {
+        TargetActionButton->SetRepresentedAction(CompareBinding.Handle);
     }
     if (SortActionButton && SortBinding.Handle.IsValid()) {
         SortActionButton->SetRepresentedAction(SortBinding.Handle);
@@ -445,9 +482,13 @@ void UMythicCharacterPageWidget::BindInventoryEvents() {
     if (UMythicInventoryComponent *Inventory = GetInventoryComponent()) {
         Inventory->OnSlotUpdated.AddUniqueDynamic(this, &UMythicCharacterPageWidget::HandleInventorySlotUpdated);
     }
-    if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(GetOwningPlayer())) {
-        PC->OnInventoryActionReceiptReceived.AddUniqueDynamic(
-            this, &UMythicCharacterPageWidget::HandleInventoryActionReceipt);
+    if (UMythicInventoryInteractionCoordinator *Coordinator = GetInventoryInteractionCoordinator()) {
+        Coordinator->OnFeedback.AddUniqueDynamic(
+            this, &ThisClass::HandleInventoryInteractionFeedback);
+        Coordinator->OnCompleted.AddUniqueDynamic(
+            this, &ThisClass::HandleInventoryActionReceipt);
+        Coordinator->OnPendingChanged.AddUniqueDynamic(
+            this, &ThisClass::HandleInventoryPendingChanged);
     }
 }
 
@@ -455,25 +496,38 @@ void UMythicCharacterPageWidget::ReleaseInventoryEvents() {
     if (UMythicInventoryComponent *Inventory = GetInventoryComponent()) {
         Inventory->OnSlotUpdated.RemoveDynamic(this, &UMythicCharacterPageWidget::HandleInventorySlotUpdated);
     }
-    if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(GetOwningPlayer())) {
-        PC->OnInventoryActionReceiptReceived.RemoveDynamic(
-            this, &UMythicCharacterPageWidget::HandleInventoryActionReceipt);
+    if (UMythicInventoryInteractionCoordinator *Coordinator = GetInventoryInteractionCoordinator()) {
+        Coordinator->OnFeedback.RemoveDynamic(
+            this, &ThisClass::HandleInventoryInteractionFeedback);
+        Coordinator->OnCompleted.RemoveDynamic(
+            this, &ThisClass::HandleInventoryActionReceipt);
+        Coordinator->OnPendingChanged.RemoveDynamic(
+            this, &ThisClass::HandleInventoryPendingChanged);
     }
 }
 
 void UMythicCharacterPageWidget::HandlePreviousInventoryCategory() {
-    if (InventoryPageState == EInventoryPageState::Browsing) {
+    if (InventoryPageState == EInventoryPageState::Quantity) {
+        ExecuteInventoryUICommand(EMythicInventoryUICommand::QuantityDecreaseLarge, INDEX_NONE);
+    }
+    else if (InventoryPageState == EInventoryPageState::Browsing) {
         CycleBagCategoryBack();
     }
 }
 
 void UMythicCharacterPageWidget::HandleNextInventoryCategory() {
-    if (InventoryPageState == EInventoryPageState::Browsing) {
+    if (InventoryPageState == EInventoryPageState::Quantity) {
+        ExecuteInventoryUICommand(EMythicInventoryUICommand::QuantityIncreaseLarge, INDEX_NONE);
+    }
+    else if (InventoryPageState == EInventoryPageState::Browsing) {
         CycleBagCategoryForward();
     }
 }
 
 void UMythicCharacterPageWidget::NativeOnDeactivated() {
+    if (UMythicInventoryInteractionCoordinator *Coordinator = GetInventoryInteractionCoordinator()) {
+        Coordinator->SetCharacterInventoryPageActive(false);
+    }
     CloseInventoryModal(false);
     ResetInventoryInteractionState();
     ReleaseInventoryInputs();
@@ -485,6 +539,9 @@ void UMythicCharacterPageWidget::NativeOnDeactivated() {
 }
 
 void UMythicCharacterPageWidget::NativeDestruct() {
+    if (UMythicInventoryInteractionCoordinator *Coordinator = GetInventoryInteractionCoordinator()) {
+        Coordinator->SetCharacterInventoryPageActive(false);
+    }
     CloseInventoryModal(false);
     ResetInventoryInteractionState();
     ReleaseInventoryInputs();
@@ -496,19 +553,14 @@ void UMythicCharacterPageWidget::NativeDestruct() {
 }
 
 void UMythicCharacterPageWidget::ResetInventoryInteractionState() {
-    PendingRequestId = 0;
-    PendingActionValue = INDEX_NONE;
     InventoryPageState = EInventoryPageState::Browsing;
     QuantityPurpose = EQuantityPurpose::None;
     QuantityValue = 1;
     QuantityMaximum = 1;
     ActiveTargetSlotIndex = INDEX_NONE;
-    StickyEquipmentTargetSlotIndex = INDEX_NONE;
-    bTargetPickerForComparison = false;
     bSelectionRestoreScheduled = false;
     ActionSourceGuid.Invalidate();
     ActionSourceSlotIndex = INDEX_NONE;
-    ComparisonVM = nullptr;
 }
 
 void UMythicCharacterPageWidget::CollectSlotLists(UUserWidget *Root, TArray<UListViewBase *> &Out) {
@@ -608,8 +660,6 @@ void UMythicCharacterPageWidget::UnbindSlotSelection() {
     }
     BoundSlotLists.Reset();
     SelectedList.Reset();
-    SelectedItemGuid.Invalidate();
-    LastSelectedSlotIndex = INDEX_NONE;
     ShowDetailsFor(nullptr);
 }
 
@@ -620,10 +670,26 @@ void UMythicCharacterPageWidget::HandleSlotSelectionChanged(UObject *Item) {
     }
 
     UListViewBase *SourceList = FindListSelecting(Item);
+    // Context, quantity, and sort are modal transactions over the item/group captured when they opened.
+    // Ignore focus leakage into the borrowed inventory so mouse and controller navigation cannot silently
+    // retarget a destructive command while its original labels and confirmation affordance remain visible.
+    if (InventoryPageState == EInventoryPageState::Context
+        || InventoryPageState == EInventoryPageState::Quantity
+        || InventoryPageState == EInventoryPageState::Sort) {
+        return;
+    }
     if (InventoryPageState == EInventoryPageState::MoveTarget) {
-        ActiveTargetSlotIndex = SlotVM->GetAbsoluteIndex();
-        SetFeedback(FText::Format(NSLOCTEXT("MythicInventory", "MoveTargetSelected", "Move to {0} — press Move Here to confirm"),
-                                  GetSlotDisplayName(ActiveTargetSlotIndex)));
+        FText RejectionReason;
+        if (!CanMoveSelectionToSlot(SlotVM->GetAbsoluteIndex(), &RejectionReason)) {
+            ActiveTargetSlotIndex = INDEX_NONE;
+            SetFeedback(RejectionReason, true);
+        }
+        else {
+            ActiveTargetSlotIndex = SlotVM->GetAbsoluteIndex();
+            SetFeedback(FText::Format(
+                NSLOCTEXT("MythicInventory", "MoveTargetSelected", "Move to {0} — press Move Here to confirm"),
+                GetSlotDisplayName(ActiveTargetSlotIndex)));
+        }
         RefreshInventoryActionBar();
         return;
     }
@@ -666,6 +732,7 @@ void UMythicCharacterPageWidget::SetSelectedSlot(UItemSlotVM *SlotVM, UListViewB
     ActionSourceGuid.Invalidate();
     ActionSourceSlotIndex = INDEX_NONE;
     ActiveTargetSlotIndex = INDEX_NONE;
+    ResolveActiveEquipmentTarget();
     ShowDetailsFor(SlotVM);
     if (UInventoryVM *VM = BoundInventoryVM.Get()) {
         if (VM->SelectionVM) {
@@ -701,7 +768,8 @@ void UMythicCharacterPageWidget::ScheduleRestoreSelection() {
 }
 
 void UMythicCharacterPageWidget::RestoreSelectionByGuid() {
-    if (!IsActivated() || InventoryPageState == EInventoryPageState::MoveTarget) {
+    // A modal owns focus until it closes. Its close path schedules the canonical source restoration.
+    if (!IsActivated() || InventoryPageState != EInventoryPageState::Browsing) {
         return;
     }
     UInventoryVM *VM = BoundInventoryVM.Get();
@@ -739,11 +807,27 @@ void UMythicCharacterPageWidget::RestoreSelectionByGuid() {
             TGuardValue<bool> SelectionGuard(bSynchronizingSelection, true);
             ClearOtherListSelections(List);
             List->SetSelectedItem(SlotToSelect);
+            if (ITypedUMGListView<UObject *> *Typed = AsTypedList(List)) {
+                Typed->RequestNavigateToItem(SlotToSelect);
+            }
             SelectedList = List;
             SelectedItemGuid = SlotToSelect->TryGetItemInstance()->GetItemInstanceGuid();
             LastSelectedSlotIndex = SlotToSelect->GetAbsoluteIndex();
+            ResolveActiveEquipmentTarget();
             ShowDetailsFor(SlotToSelect);
             RefreshInventoryActionBar();
+            if (UWorld *World = GetWorld()) {
+                TWeakObjectPtr<UListView> WeakResolvedList = List;
+                TWeakObjectPtr<UItemSlotVM> WeakSlot = SlotToSelect;
+                World->GetTimerManager().SetTimerForNextTick(
+                    FTimerDelegate::CreateWeakLambda(this, [WeakResolvedList, WeakSlot]() {
+                        if (UListView *ResolvedList = WeakResolvedList.Get()) {
+                            if (UUserWidget *Entry = ResolvedList->GetEntryWidgetFromItem(WeakSlot.Get())) {
+                                Entry->SetFocus();
+                            }
+                        }
+                    }));
+            }
             return;
         }
     }
@@ -787,6 +871,25 @@ bool UMythicCharacterPageWidget::BuildTargetLocator(
     return OutTarget.IsStructurallyValid();
 }
 
+bool UMythicCharacterPageWidget::CanMoveSelectionToSlot(
+    const int32 TargetSlotIndex,
+    FText *OutReason) const {
+    UMythicInventoryComponent *Inventory = GetInventoryComponent();
+    FMythicInventorySourceLocator Source;
+    FMythicInventoryTargetLocator Target;
+    EMythicInventoryActionResult Result = EMythicInventoryActionResult::InvalidRequest;
+    if (Inventory && BuildSourceLocator(Source) && BuildTargetLocator(TargetSlotIndex, Target)) {
+        Result = Inventory->ValidatePlayerMoveItem(Source, Target);
+    }
+    if (Result == EMythicInventoryActionResult::Succeeded) {
+        return true;
+    }
+    if (OutReason) {
+        *OutReason = UMythicInventoryInteractionCoordinator::DescribeResult(Result);
+    }
+    return false;
+}
+
 FText UMythicCharacterPageWidget::GetSlotDisplayName(int32 SlotIndex) const {
     UMythicInventoryComponent *Inventory = GetInventoryComponent();
     if (!Inventory) {
@@ -825,17 +928,46 @@ UMythicCharacterPageWidget::BuildEquipmentTargets() const {
     UItemSlotVM *SourceSlot = GetSelectedSlot();
     UMythicItemInstance *Item = SourceSlot ? SourceSlot->TryGetItemInstance() : nullptr;
     if (!Inventory || !Item || !Item->GetItemDefinition()
+        || !Inventory->GetAllSlots().IsValidIndex(SourceSlot->GetAbsoluteIndex())
         || !Item->GetItemDefinition()->ItemType.MatchesTag(ITEMIZATION_TYPE_EQUIPMENT)) {
         return Targets;
     }
+    const FGameplayTag ItemFamily = Item->GetItemDefinition()->ItemType;
+    const FEquipmentTargetKey *StickyKey = StickyEquipmentTargetKeys.Find(ItemFamily);
+    const FMythicInventorySlotEntry &SourceEntry =
+        Inventory->GetAllSlots()[SourceSlot->GetAbsoluteIndex()];
+    if (!SourceEntry.bCanPlayerTake) {
+        return Targets;
+    }
+
     for (int32 Index = 0; Index < Inventory->GetAllSlots().Num(); ++Index) {
         const FMythicInventorySlotEntry &Entry = Inventory->GetAllSlots()[Index];
         if (!Entry.IsGearSlot() || Index == SourceSlot->GetAbsoluteIndex()
+            || !Entry.bCanPlayerPut
             || !Inventory->CanSlotAcceptItem(Index, Item, true, Item)) {
             continue;
         }
+
+        // Occupied targets are valid only when the exact incumbent can be returned to the source slot.
+        // This mirrors the transactional server swap check, preventing a comparison/equip promise that authority
+        // must later reject because a helmet cannot be swapped into a weapon slot (or into protected storage).
+        if (Entry.SlottedItemInstance
+            && (!Entry.bCanPlayerTake
+                || !SourceEntry.bCanPlayerPut
+                || !Inventory->CanSlotAcceptItem(
+                    SourceSlot->GetAbsoluteIndex(), Entry.SlottedItemInstance, true,
+                    Entry.SlottedItemInstance))) {
+            continue;
+        }
         FEquipmentTarget Target;
+        Target.Key = BuildEquipmentTargetKey(Index);
         Target.SlotIndex = Index;
+        if (Inventory->InventoryProfile) {
+            if (const FInventorySlotGroup *Group =
+                    Inventory->InventoryProfile->SlotGroups.Find(Entry.GroupTag)) {
+                Target.GroupDisplayOrder = Group->DisplayOrder;
+            }
+        }
         Target.DisplayName = GetSlotDisplayName(Index);
         Target.bExpectEmpty = Entry.SlottedItemInstance == nullptr;
         if (Entry.SlottedItemInstance) {
@@ -844,10 +976,178 @@ UMythicCharacterPageWidget::BuildEquipmentTargets() const {
         }
         Targets.Add(MoveTemp(Target));
     }
-    Targets.Sort([](const FEquipmentTarget &A, const FEquipmentTarget &B) {
+    Targets.Sort([StickyKey](const FEquipmentTarget &A, const FEquipmentTarget &B) {
+        const bool bASticky = StickyKey && A.Key == *StickyKey;
+        const bool bBSticky = StickyKey && B.Key == *StickyKey;
+        if (bASticky != bBSticky) {
+            return bASticky;
+        }
+        if (A.bExpectEmpty != B.bExpectEmpty) {
+            return A.bExpectEmpty;
+        }
+        if (A.GroupDisplayOrder != B.GroupDisplayOrder) {
+            return A.GroupDisplayOrder < B.GroupDisplayOrder;
+        }
+        const FString AGroup = A.Key.GroupTag.ToString();
+        const FString BGroup = B.Key.GroupTag.ToString();
+        if (AGroup != BGroup) {
+            return AGroup < BGroup;
+        }
+        if (A.Key.EntryIndex != B.Key.EntryIndex) {
+            return A.Key.EntryIndex < B.Key.EntryIndex;
+        }
+        const FString ADefinition = A.Key.SlotDefinitionId.ToString();
+        const FString BDefinition = B.Key.SlotDefinitionId.ToString();
+        if (ADefinition != BDefinition) {
+            return ADefinition < BDefinition;
+        }
+        if (A.Key.RepetitionOrdinal != B.Key.RepetitionOrdinal) {
+            return A.Key.RepetitionOrdinal < B.Key.RepetitionOrdinal;
+        }
         return A.SlotIndex < B.SlotIndex;
     });
     return Targets;
+}
+
+UMythicCharacterPageWidget::FEquipmentTargetKey
+UMythicCharacterPageWidget::BuildEquipmentTargetKey(const int32 SlotIndex) const {
+    FEquipmentTargetKey Key;
+    UMythicInventoryComponent *Inventory = GetInventoryComponent();
+    if (!Inventory || !Inventory->GetAllSlots().IsValidIndex(SlotIndex)) {
+        return Key;
+    }
+
+    const FMythicInventorySlotEntry &Entry = Inventory->GetAllSlots()[SlotIndex];
+    Key.GroupTag = Entry.GroupTag;
+    Key.EntryIndex = Entry.EntryIndex;
+    if (Entry.SlotDefinition) {
+        Key.SlotDefinitionId = Entry.SlotDefinition->GetPrimaryAssetId();
+    }
+    for (int32 Index = 0; Index < SlotIndex; ++Index) {
+        const FMythicInventorySlotEntry &Candidate = Inventory->GetAllSlots()[Index];
+        if (Candidate.GroupTag == Entry.GroupTag
+            && Candidate.EntryIndex == Entry.EntryIndex
+            && Candidate.SlotDefinition == Entry.SlotDefinition) {
+            ++Key.RepetitionOrdinal;
+        }
+    }
+    return Key;
+}
+
+void UMythicCharacterPageWidget::ResolveActiveEquipmentTarget() {
+    ActiveTargetSlotIndex = INDEX_NONE;
+    UItemSlotVM *SlotVM = GetSelectedSlot();
+    if (!SlotVM || SlotVM->GetIsEquipped()) {
+        return;
+    }
+    const TArray<FEquipmentTarget> Targets = BuildEquipmentTargets();
+    if (Targets.Num() > 0) {
+        ActiveTargetSlotIndex = Targets[0].SlotIndex;
+    }
+}
+
+void UMythicCharacterPageWidget::CycleActiveEquipmentTarget() {
+    UItemSlotVM *SlotVM = GetSelectedSlot();
+    UMythicItemInstance *Item = SlotVM ? SlotVM->TryGetItemInstance() : nullptr;
+    if (!Item || !Item->GetItemDefinition()) {
+        return;
+    }
+
+    TArray<FEquipmentTarget> Targets = BuildEquipmentTargets();
+    if (Targets.Num() < 2) {
+        return;
+    }
+    // Cycle in canonical authored order, independent of the sticky-first presentation sort.
+    Targets.Sort([](const FEquipmentTarget &A, const FEquipmentTarget &B) {
+        if (A.bExpectEmpty != B.bExpectEmpty) {
+            return A.bExpectEmpty;
+        }
+        if (A.GroupDisplayOrder != B.GroupDisplayOrder) {
+            return A.GroupDisplayOrder < B.GroupDisplayOrder;
+        }
+        if (A.Key.GroupTag != B.Key.GroupTag) {
+            return A.Key.GroupTag.ToString() < B.Key.GroupTag.ToString();
+        }
+        if (A.Key.EntryIndex != B.Key.EntryIndex) {
+            return A.Key.EntryIndex < B.Key.EntryIndex;
+        }
+        const FString ADefinition = A.Key.SlotDefinitionId.ToString();
+        const FString BDefinition = B.Key.SlotDefinitionId.ToString();
+        if (ADefinition != BDefinition) {
+            return ADefinition < BDefinition;
+        }
+        if (A.Key.RepetitionOrdinal != B.Key.RepetitionOrdinal) {
+            return A.Key.RepetitionOrdinal < B.Key.RepetitionOrdinal;
+        }
+        return A.SlotIndex < B.SlotIndex;
+    });
+    int32 CurrentIndex = Targets.IndexOfByPredicate([this](const FEquipmentTarget &Target) {
+        return Target.SlotIndex == ActiveTargetSlotIndex;
+    });
+    CurrentIndex = CurrentIndex == INDEX_NONE ? 0 : (CurrentIndex + 1) % Targets.Num();
+    const FEquipmentTarget &Next = Targets[CurrentIndex];
+    ActiveTargetSlotIndex = Next.SlotIndex;
+    StickyEquipmentTargetKeys.Add(Item->GetItemDefinition()->ItemType, Next.Key);
+    RefreshDetailsForSelection();
+    RefreshInventoryActionBar();
+}
+
+int32 UMythicCharacterPageWidget::FindUnequipDestination() const {
+    UMythicInventoryComponent *Inventory = GetInventoryComponent();
+    UItemSlotVM *SourceSlot = GetSelectedSlot();
+    UMythicItemInstance *Item = SourceSlot ? SourceSlot->TryGetItemInstance() : nullptr;
+    if (!Inventory || !SourceSlot || !Item
+        || !Inventory->GetAllSlots().IsValidIndex(SourceSlot->GetAbsoluteIndex())) {
+        return INDEX_NONE;
+    }
+    const FMythicInventorySlotEntry &SourceEntry =
+        Inventory->GetAllSlots()[SourceSlot->GetAbsoluteIndex()];
+    if (!SourceEntry.IsGearSlot() || !SourceEntry.bCanPlayerTake) {
+        return INDEX_NONE;
+    }
+
+    TArray<int32> Candidates;
+    for (int32 Index = 0; Index < Inventory->GetAllSlots().Num(); ++Index) {
+        const FMythicInventorySlotEntry &Entry = Inventory->GetAllSlots()[Index];
+        if (!Entry.IsGearSlot() && !Entry.SlottedItemInstance && Entry.bCanPlayerPut
+            && Inventory->CanSlotAcceptItem(Index, Item, true, Item)) {
+            Candidates.Add(Index);
+        }
+    }
+    Candidates.Sort([Inventory](const int32 A, const int32 B) {
+        const FMythicInventorySlotEntry &Left = Inventory->GetAllSlots()[A];
+        const FMythicInventorySlotEntry &Right = Inventory->GetAllSlots()[B];
+        const FInventorySlotGroup *LeftGroup = Inventory->InventoryProfile
+            ? Inventory->InventoryProfile->SlotGroups.Find(Left.GroupTag) : nullptr;
+        const FInventorySlotGroup *RightGroup = Inventory->InventoryProfile
+            ? Inventory->InventoryProfile->SlotGroups.Find(Right.GroupTag) : nullptr;
+        const int32 LeftOrder = LeftGroup ? LeftGroup->DisplayOrder : 0;
+        const int32 RightOrder = RightGroup ? RightGroup->DisplayOrder : 0;
+        if (LeftOrder != RightOrder) {
+            return LeftOrder < RightOrder;
+        }
+        if (Left.GroupTag != Right.GroupTag) {
+            return Left.GroupTag.ToString() < Right.GroupTag.ToString();
+        }
+        if (Left.EntryIndex != Right.EntryIndex) {
+            return Left.EntryIndex < Right.EntryIndex;
+        }
+        return A < B;
+    });
+    return Candidates.IsEmpty() ? INDEX_NONE : Candidates[0];
+}
+
+UMythicInventoryInteractionCoordinator *
+UMythicCharacterPageWidget::GetInventoryInteractionCoordinator() const {
+    return GetOwningLocalPlayer()
+        ? GetOwningLocalPlayer()->GetSubsystem<UMythicInventoryInteractionCoordinator>()
+        : nullptr;
+}
+
+bool UMythicCharacterPageWidget::IsMutationPending() const {
+    const UMythicInventoryInteractionCoordinator *Coordinator =
+        GetInventoryInteractionCoordinator();
+    return Coordinator && Coordinator->IsMutationPending();
 }
 
 void UMythicCharacterPageWidget::RefreshInventoryActionBar() {
@@ -857,26 +1157,39 @@ void UMythicCharacterPageWidget::RefreshInventoryActionBar() {
     const bool bHasItem = Item && Item->GetItemInstanceGuid().IsValid();
     const bool bBrowsing = InventoryPageState == EInventoryPageState::Browsing;
     const bool bMoveTarget = InventoryPageState == EInventoryPageState::MoveTarget;
+    const bool bPending = IsMutationPending();
+    const TArray<FEquipmentTarget> EquipmentTargets =
+        bHasItem && !SlotVM->GetIsEquipped() ? BuildEquipmentTargets() : TArray<FEquipmentTarget>();
 
     if (PrimaryActionButton) {
-        FText Label = NSLOCTEXT("MythicInventory", "InspectAction", "Inspect");
-        bool bEnabled = bBrowsing && bHasItem;
+        FText Label;
+        bool bRelevant = false;
+        bool bEnabled = false;
         if (bMoveTarget) {
             Label = NSLOCTEXT("MythicInventory", "MoveHereAction", "Move Here");
+            bRelevant = true;
             bEnabled = ActiveTargetSlotIndex != INDEX_NONE
-                && ActiveTargetSlotIndex != ActionSourceSlotIndex;
+                && CanMoveSelectionToSlot(ActiveTargetSlotIndex) && !bPending;
         }
         else if (bBrowsing && bHasItem) {
             if (SlotVM->GetIsEquipped()) {
                 Label = NSLOCTEXT("MythicInventory", "UnequipAction", "Unequip");
+                bRelevant = true;
+                bEnabled = FindUnequipDestination() != INDEX_NONE && !bPending;
             }
-            else if (BuildEquipmentTargets().Num() > 0) {
+            else if (EquipmentTargets.Num() > 0) {
                 Label = NSLOCTEXT("MythicInventory", "EquipAction", "Equip");
+                bRelevant = true;
+                bEnabled = ActiveTargetSlotIndex != INDEX_NONE && !bPending;
             }
             else if (Inventory && Inventory->CanUseItemInSlot(SlotVM->GetAbsoluteIndex())) {
                 Label = NSLOCTEXT("MythicInventory", "UseAction", "Use");
+                bRelevant = true;
+                bEnabled = !bPending;
             }
         }
+        PrimaryActionButton->SetVisibility(
+            bRelevant ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
         PrimaryActionButton->SetLabelOverride(Label);
         PrimaryActionButton->SetIsEnabled(bEnabled);
     }
@@ -886,10 +1199,13 @@ void UMythicCharacterPageWidget::RefreshInventoryActionBar() {
                         : NSLOCTEXT("MythicInventory", "ActionsAction", "Actions"));
         ActionsActionButton->SetIsEnabled((bBrowsing && bHasItem) || bMoveTarget);
     }
-    if (CompareActionButton) {
-        CompareActionButton->SetLabelOverride(NSLOCTEXT("MythicInventory", "CompareAction", "Compare"));
-        CompareActionButton->SetIsEnabled(
-            bBrowsing && bHasItem && !SlotVM->GetIsEquipped() && BuildEquipmentTargets().Num() > 0);
+    if (TargetActionButton) {
+        const bool bCanCycle = bBrowsing && bHasItem && !SlotVM->GetIsEquipped()
+            && EquipmentTargets.Num() > 1;
+        TargetActionButton->SetLabelOverride(NSLOCTEXT("MythicInventory", "TargetAction", "Target"));
+        TargetActionButton->SetVisibility(
+            bCanCycle ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+        TargetActionButton->SetIsEnabled(bCanCycle);
     }
     if (SortActionButton) {
         SortActionButton->SetLabelOverride(NSLOCTEXT("MythicInventory", "SortAction", "Sort"));
@@ -898,7 +1214,7 @@ void UMythicCharacterPageWidget::RefreshInventoryActionBar() {
             FMythicInventorySlotEntry Entry;
             bCanSort = Inventory->GetSlotEntry(SlotVM->GetAbsoluteIndex(), Entry) && !Entry.IsGearSlot();
         }
-        SortActionButton->SetIsEnabled(bCanSort);
+        SortActionButton->SetIsEnabled(bCanSort && !bPending);
     }
 }
 
@@ -910,40 +1226,42 @@ void UMythicCharacterPageWidget::HandlePrimaryInventoryAction() {
     if (InventoryPageState != EInventoryPageState::Browsing) {
         return;
     }
+    if (IsMutationPending()) {
+        SetFeedback(NSLOCTEXT("MythicInventory", "RequestAlreadyPending", "Finish syncing the current inventory change first."));
+        return;
+    }
 
     UItemSlotVM *SlotVM = GetSelectedSlot();
     UMythicInventoryComponent *Inventory = GetInventoryComponent();
-    if (!SlotVM || !SlotVM->TryGetItemInstance() || !Inventory) {
+    UMythicItemInstance *Item = SlotVM ? SlotVM->TryGetItemInstance() : nullptr;
+    if (!Item || !Item->GetItemDefinition() || !Inventory) {
         return;
     }
     if (SlotVM->GetIsEquipped()) {
-        BeginMoveTargetSelection();
+        const int32 Destination = FindUnequipDestination();
+        if (Destination == INDEX_NONE) {
+            SetFeedback(NSLOCTEXT("MythicInventory", "NoUnequipSpace", "No compatible carried slot is available."), true);
+            return;
+        }
+        SubmitMoveToSlot(Destination);
         return;
     }
 
     const TArray<FEquipmentTarget> Targets = BuildEquipmentTargets();
     if (Targets.Num() > 0) {
-        const FEquipmentTarget *Sticky = Targets.FindByPredicate([this](const FEquipmentTarget &Target) {
-            return Target.SlotIndex == StickyEquipmentTargetSlotIndex;
+        ResolveActiveEquipmentTarget();
+        const FEquipmentTarget *Target = Targets.FindByPredicate([this](const FEquipmentTarget &Candidate) {
+            return Candidate.SlotIndex == ActiveTargetSlotIndex;
         });
-        if (Sticky) {
-            SubmitMoveToSlot(Sticky->SlotIndex);
-        }
-        else if (Targets.Num() == 1) {
-            StickyEquipmentTargetSlotIndex = Targets[0].SlotIndex;
-            SubmitMoveToSlot(Targets[0].SlotIndex);
-        }
-        else {
-            OpenEquipmentTargetPicker(false);
-        }
+        Target = Target ? Target : &Targets[0];
+        StickyEquipmentTargetKeys.Add(Item->GetItemDefinition()->ItemType, Target->Key);
+        SubmitMoveToSlot(Target->SlotIndex);
         return;
     }
     if (Inventory->CanUseItemInSlot(SlotVM->GetAbsoluteIndex())) {
         SubmitUse();
         return;
     }
-    ShowDetailsFor(SlotVM);
-    SetFeedback(NSLOCTEXT("MythicInventory", "InspectFeedback", "Item details are open on the right."));
 }
 
 void UMythicCharacterPageWidget::HandleInventoryActionsAction() {
@@ -952,37 +1270,21 @@ void UMythicCharacterPageWidget::HandleInventoryActionsAction() {
         return;
     }
     if (InventoryPageState == EInventoryPageState::Browsing && GetSelectedSlot()) {
-        OpenActionMenu();
+        OpenContextMenu();
     }
 }
 
-void UMythicCharacterPageWidget::HandleCompareInventoryAction() {
+void UMythicCharacterPageWidget::HandleCycleInventoryTarget() {
     if (InventoryPageState != EInventoryPageState::Browsing || !GetSelectedSlot()
         || GetSelectedSlot()->GetIsEquipped()) {
         return;
     }
-    const TArray<FEquipmentTarget> Targets = BuildEquipmentTargets();
-    if (Targets.Num() == 0) {
-        SetFeedback(NSLOCTEXT("MythicInventory", "NoCompareTarget", "No compatible equipment slot is available."), true);
-        return;
-    }
-    const FEquipmentTarget *Sticky = Targets.FindByPredicate([this](const FEquipmentTarget &Target) {
-        return Target.SlotIndex == StickyEquipmentTargetSlotIndex;
-    });
-    if (Sticky) {
-        OpenComparison(Sticky->SlotIndex);
-    }
-    else if (Targets.Num() == 1) {
-        StickyEquipmentTargetSlotIndex = Targets[0].SlotIndex;
-        OpenComparison(Targets[0].SlotIndex);
-    }
-    else {
-        OpenEquipmentTargetPicker(true);
-    }
+    CycleActiveEquipmentTarget();
 }
 
 void UMythicCharacterPageWidget::HandleSortInventoryAction() {
-    if (InventoryPageState == EInventoryPageState::Browsing && GetSelectedSlot()) {
+    if (InventoryPageState == EInventoryPageState::Browsing
+        && GetSelectedSlot() && !IsMutationPending()) {
         OpenSortMenu();
     }
 }
@@ -996,7 +1298,7 @@ void UMythicCharacterPageWidget::ClearModalOptions() {
 
 UWidget *UMythicCharacterPageWidget::AddModalCommand(
     const FText &Label, EMythicInventoryUICommand Command, int32 Payload,
-    bool bEnabled, const FText &Tooltip) {
+    bool bEnabled, const FText &Tooltip, const bool bRequiresHold) {
     if (!InventoryModalOptions) {
         return nullptr;
     }
@@ -1009,6 +1311,9 @@ UWidget *UMythicCharacterPageWidget::AddModalCommand(
         LabelWidget->SetText(Label);
     }
     Button->SetIsEnabled(bEnabled);
+    if (UCommonButtonBase *CommonButton = Cast<UCommonButtonBase>(Button)) {
+        CommonButton->SetRequiresHold(bRequiresHold);
+    }
     if (!Tooltip.IsEmpty()) {
         Button->SetToolTipText(Tooltip);
     }
@@ -1027,7 +1332,7 @@ UWidget *UMythicCharacterPageWidget::AddModalCommand(
     return Button;
 }
 
-void UMythicCharacterPageWidget::OpenActionMenu() {
+void UMythicCharacterPageWidget::OpenContextMenu() {
     UItemSlotVM *SlotVM = GetSelectedSlot();
     UMythicInventoryComponent *Inventory = GetInventoryComponent();
     UMythicItemInstance *Item = SlotVM ? SlotVM->TryGetItemInstance() : nullptr;
@@ -1036,45 +1341,76 @@ void UMythicCharacterPageWidget::OpenActionMenu() {
     }
     ActionSourceGuid = Item->GetItemInstanceGuid();
     ActionSourceSlotIndex = SlotVM->GetAbsoluteIndex();
-    InventoryPageState = EInventoryPageState::ActionMenu;
+    InventoryPageState = EInventoryPageState::Context;
     ClearModalOptions();
     InventoryModalTitle->SetText(SlotVM->GetItemName());
-    InventoryModalBody->SetText(NSLOCTEXT("MythicInventory", "ActionMenuHint", "Choose an action. Every option uses the same authoritative item identity."));
+    InventoryModalBody->SetText(NSLOCTEXT(
+        "MythicInventory", "ActionMenuHint",
+        "Available actions for this exact item."));
 
     const bool bCanTake = Inventory->CanPlayerTakeFromSlot(SlotVM->GetAbsoluteIndex());
     const bool bEquipped = SlotVM->GetIsEquipped();
-    const bool bCanEquip = !bEquipped && BuildEquipmentTargets().Num() > 0;
-    AddModalCommand(bEquipped
-                        ? NSLOCTEXT("MythicInventory", "UnequipMenu", "Unequip")
-                        : NSLOCTEXT("MythicInventory", "EquipMenu", "Equip"),
-                    EMythicInventoryUICommand::EquipOrUnequip,
-                    INDEX_NONE, bEquipped ? bCanTake : bCanEquip);
-    AddModalCommand(NSLOCTEXT("MythicInventory", "UseMenu", "Use"),
-                    EMythicInventoryUICommand::Use, INDEX_NONE,
-                    Inventory->CanUseItemInSlot(SlotVM->GetAbsoluteIndex()));
-    AddModalCommand(NSLOCTEXT("MythicInventory", "MoveMenu", "Move to Slot"),
-                    EMythicInventoryUICommand::BeginMove, INDEX_NONE, bCanTake);
-    AddModalCommand(NSLOCTEXT("MythicInventory", "CompareMenu", "Compare"),
-                    EMythicInventoryUICommand::Compare, INDEX_NONE,
-                    !bEquipped && BuildEquipmentTargets().Num() > 0);
-    AddModalCommand(NSLOCTEXT("MythicInventory", "SplitMenu", "Split Stack"),
-                    EMythicInventoryUICommand::Split, INDEX_NONE,
-                    bCanTake && Item->GetStacks() > 1);
-    AddModalCommand(NSLOCTEXT("MythicInventory", "DropMenu", "Drop"),
-                    EMythicInventoryUICommand::Drop, INDEX_NONE, bCanTake);
-    AddModalCommand(SlotVM->GetIsJunk()
-                        ? NSLOCTEXT("MythicInventory", "UnmarkJunkMenu", "Remove Junk Mark")
-                        : NSLOCTEXT("MythicInventory", "MarkJunkMenu", "Mark as Junk"),
-                    EMythicInventoryUICommand::ToggleJunk, INDEX_NONE, bCanTake);
-    AddModalCommand(NSLOCTEXT("MythicInventory", "SortMenu", "Sort Category"),
-                    EMythicInventoryUICommand::OpenSortMenu, INDEX_NONE, !bEquipped,
-                    NSLOCTEXT("MythicInventory", "SortMenuTooltip", "Opens all sort choices."));
-    AddModalCommand(NSLOCTEXT("MythicInventory", "InspectMenu", "Inspect"),
-                    EMythicInventoryUICommand::Inspect);
-    AddModalCommand(NSLOCTEXT("MythicInventory", "CancelMenu", "Back"),
-                    EMythicInventoryUICommand::Cancel);
+    const bool bCurrency = Item->GetItemDefinition()
+        && Item->GetItemDefinition()->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY);
+    const TArray<FEquipmentTarget> EquipmentTargets =
+        bEquipped ? TArray<FEquipmentTarget>() : BuildEquipmentTargets();
+    const bool bUsable = Inventory->CanUseItemInSlot(SlotVM->GetAbsoluteIndex());
+
+    FMythicInventoryInteractionPolicyInput PolicyInput;
+    PolicyInput.bIsEquipped = bEquipped;
+    PolicyInput.bEquippable = !bEquipped && EquipmentTargets.Num() > 0;
+    PolicyInput.bUsable = !bEquipped && bUsable;
+    PolicyInput.bPrimaryEnabled = bEquipped
+        ? FindUnequipDestination() != INDEX_NONE
+        : (PolicyInput.bEquippable || bUsable);
+    PolicyInput.bMoveRelevant = true;
+    PolicyInput.bMoveEnabled = bCanTake;
+    PolicyInput.bManualJunk = SlotVM->GetIsManuallyMarkedJunk();
+    PolicyInput.bCanToggleManualJunk = bCanTake && !bEquipped && !bCurrency;
+    PolicyInput.bCanDrop = bCanTake && !bEquipped && !bCurrency;
+    PolicyInput.bMutationPending = IsMutationPending();
+    PolicyInput.Quantity = Item->GetStacks();
+    PolicyInput.Rarity = SlotVM->GetRarity();
+    PolicyInput.PrimaryDisabledReason = bEquipped
+        ? EMythicInventoryActionResult::InventoryFull
+        : EMythicInventoryActionResult::IncompatibleTarget;
+    PolicyInput.MoveDisabledReason = EMythicInventoryActionResult::SourceProtected;
+
+    const TArray<FMythicInventoryContextAction> Actions =
+        FMythicInventoryInteractionPolicy::BuildContextActions(PolicyInput);
+    for (const FMythicInventoryContextAction &Action : Actions) {
+        EMythicInventoryUICommand Command = EMythicInventoryUICommand::BeginMove;
+        switch (Action.Verb) {
+        case EMythicInventoryContextVerb::Equip:
+        case EMythicInventoryContextVerb::Unequip:
+            Command = EMythicInventoryUICommand::EquipOrUnequip;
+            break;
+        case EMythicInventoryContextVerb::Use:
+            Command = EMythicInventoryUICommand::Use;
+            break;
+        case EMythicInventoryContextVerb::Split:
+            Command = EMythicInventoryUICommand::Split;
+            break;
+        case EMythicInventoryContextVerb::Move:
+            Command = EMythicInventoryUICommand::BeginMove;
+            break;
+        case EMythicInventoryContextVerb::ToggleManualJunk:
+            Command = EMythicInventoryUICommand::ToggleJunk;
+            break;
+        case EMythicInventoryContextVerb::Drop:
+            Command = EMythicInventoryUICommand::Drop;
+            break;
+        }
+        const FText DisabledTooltip = Action.bEnabled
+            ? FText::GetEmpty()
+            : UMythicInventoryInteractionCoordinator::DescribeResult(Action.DisabledReason);
+        AddModalCommand(
+            Action.Label, Command, INDEX_NONE, Action.bEnabled, DisabledTooltip,
+            Action.bRequiresHold);
+    }
     InventoryModalLayer->SetVisibility(ESlateVisibility::Visible);
-    if (UWidget *First = InventoryModalOptions->GetChildAt(0)) {
+    if (InventoryModalOptions->GetChildrenCount() > 0) {
+        UWidget *First = InventoryModalOptions->GetChildAt(0);
         First->SetFocus();
     }
     RefreshInventoryActionBar();
@@ -1083,7 +1419,7 @@ void UMythicCharacterPageWidget::OpenActionMenu() {
 void UMythicCharacterPageWidget::OpenSortMenu() {
     UItemSlotVM *SlotVM = GetSelectedSlot();
     UMythicInventoryComponent *Inventory = GetInventoryComponent();
-    if (!SlotVM || !Inventory || !InventoryModalLayer) {
+    if (!SlotVM || !Inventory || !InventoryModalLayer || IsMutationPending()) {
         return;
     }
     FMythicInventorySlotEntry Entry;
@@ -1095,7 +1431,7 @@ void UMythicCharacterPageWidget::OpenSortMenu() {
         ActionSourceGuid = Item->GetItemInstanceGuid();
         ActionSourceSlotIndex = SlotVM->GetAbsoluteIndex();
     }
-    InventoryPageState = EInventoryPageState::SortMenu;
+    InventoryPageState = EInventoryPageState::Sort;
     ClearModalOptions();
     InventoryModalTitle->SetText(NSLOCTEXT("MythicInventory", "SortTitle", "Sort Category"));
     InventoryModalBody->SetText(NSLOCTEXT("MythicInventory", "SortHint", "Choose how this carried-item group is ordered."));
@@ -1104,7 +1440,6 @@ void UMythicCharacterPageWidget::OpenSortMenu() {
     AddModalCommand(NSLOCTEXT("MythicInventory", "SortName", "Name"), EMythicInventoryUICommand::SortByName);
     AddModalCommand(NSLOCTEXT("MythicInventory", "SortValue", "Value"), EMythicInventoryUICommand::SortByValue);
     AddModalCommand(NSLOCTEXT("MythicInventory", "SortWeight", "Weight"), EMythicInventoryUICommand::SortByWeight);
-    AddModalCommand(NSLOCTEXT("MythicInventory", "CancelSort", "Back"), EMythicInventoryUICommand::Cancel);
     InventoryModalLayer->SetVisibility(ESlateVisibility::Visible);
     InventoryModalOptions->GetChildAt(0)->SetFocus();
     RefreshInventoryActionBar();
@@ -1113,7 +1448,7 @@ void UMythicCharacterPageWidget::OpenSortMenu() {
 void UMythicCharacterPageWidget::OpenQuantityPanel(EQuantityPurpose Purpose) {
     UItemSlotVM *SlotVM = GetSelectedSlot();
     UMythicItemInstance *Item = SlotVM ? SlotVM->TryGetItemInstance() : nullptr;
-    if (!Item || !InventoryModalLayer) {
+    if (!Item || !InventoryModalLayer || IsMutationPending()) {
         return;
     }
     QuantityPurpose = Purpose;
@@ -1140,105 +1475,8 @@ void UMythicCharacterPageWidget::OpenQuantityPanel(EQuantityPurpose Purpose) {
                         ? NSLOCTEXT("MythicInventory", "ConfirmSplit", "Confirm Split")
                         : NSLOCTEXT("MythicInventory", "ConfirmDrop", "Drop"),
                     EMythicInventoryUICommand::ConfirmQuantity);
-    AddModalCommand(NSLOCTEXT("MythicInventory", "CancelQuantity", "Cancel"),
-                    EMythicInventoryUICommand::Cancel);
     InventoryModalLayer->SetVisibility(ESlateVisibility::Visible);
     InventoryModalOptions->GetChildAt(0)->SetFocus();
-    RefreshInventoryActionBar();
-}
-
-void UMythicCharacterPageWidget::OpenEquipmentTargetPicker(bool bForComparison) {
-    const TArray<FEquipmentTarget> Targets = BuildEquipmentTargets();
-    if (Targets.Num() == 0 || !InventoryModalLayer) {
-        SetFeedback(NSLOCTEXT("MythicInventory", "NoEquipmentTarget", "No compatible equipment slot is available."), true);
-        return;
-    }
-    bTargetPickerForComparison = bForComparison;
-    InventoryPageState = EInventoryPageState::EquipmentTarget;
-    ClearModalOptions();
-    InventoryModalTitle->SetText(
-        bForComparison
-            ? NSLOCTEXT("MythicInventory", "CompareTargetTitle", "Compare With")
-            : NSLOCTEXT("MythicInventory", "EquipTargetTitle", "Equip To"));
-    InventoryModalBody->SetText(NSLOCTEXT(
-        "MythicInventory", "EquipmentTargetHint",
-        "Choose the exact slot. This same target is used for comparison and equip."));
-    for (const FEquipmentTarget &Target : Targets) {
-        FText Occupant = NSLOCTEXT("MythicInventory", "EmptyTarget", "Empty");
-        if (!Target.bExpectEmpty) {
-            FMythicInventorySlotEntry Entry;
-            if (GetInventoryComponent()->GetSlotEntry(Target.SlotIndex, Entry)
-                && Entry.SlottedItemInstance && Entry.SlottedItemInstance->GetItemDefinition()) {
-                Occupant = Entry.SlottedItemInstance->GetItemDefinition()->Name;
-            }
-        }
-        AddModalCommand(
-            FText::Format(NSLOCTEXT("MythicInventory", "EquipmentTargetRow", "{0}  —  {1}"),
-                          Target.DisplayName, Occupant),
-            EMythicInventoryUICommand::ChooseEquipmentTarget, Target.SlotIndex);
-    }
-    AddModalCommand(NSLOCTEXT("MythicInventory", "CancelTarget", "Cancel"),
-                    EMythicInventoryUICommand::Cancel);
-    InventoryModalLayer->SetVisibility(ESlateVisibility::Visible);
-    InventoryModalOptions->GetChildAt(0)->SetFocus();
-    RefreshInventoryActionBar();
-}
-
-void UMythicCharacterPageWidget::OpenComparison(int32 TargetSlotIndex) {
-    UItemSlotVM *SlotVM = GetSelectedSlot();
-    UMythicItemInstance *Item = SlotVM ? SlotVM->TryGetItemInstance() : nullptr;
-    FMythicInventoryTargetLocator Target;
-    if (!Item || !BuildTargetLocator(TargetSlotIndex, Target) || !InventoryModalLayer) {
-        SetFeedback(NSLOCTEXT("MythicInventory", "StaleCompareTarget", "That equipment slot changed. Choose it again."), true);
-        return;
-    }
-    StickyEquipmentTargetSlotIndex = TargetSlotIndex;
-    ActiveTargetSlotIndex = TargetSlotIndex;
-    ComparisonVM = UItemComparisonVM::CreateComparison(
-        this, Item, GetInventoryComponent(), TargetSlotIndex,
-        Target.bExpectEmpty, Target.ExpectedOccupantGuid);
-    if (!ComparisonVM) {
-        SetFeedback(NSLOCTEXT("MythicInventory", "CompareUnavailable", "Comparison is unavailable because the target changed."), true);
-        return;
-    }
-
-    InventoryPageState = EInventoryPageState::Comparison;
-    ClearModalOptions();
-    InventoryModalTitle->SetText(FText::Format(
-        NSLOCTEXT("MythicInventory", "CompareTitle", "Compare — {0}"), GetSlotDisplayName(TargetSlotIndex)));
-    InventoryModalBody->SetText(FText::Format(
-        NSLOCTEXT("MythicInventory", "CompareBody", "{0} versus the exact item currently in {1}"),
-        SlotVM->GetItemName(), GetSlotDisplayName(TargetSlotIndex)));
-
-    const UMythicUIStyleSettings &Style = FMythicUIStyle::Get();
-    int32 VisibleRows = 0;
-    for (const FAttributeDiff &Diff : ComparisonVM->GetAttributeDiffs()) {
-        if (VisibleRows++ >= 12) {
-            break;
-        }
-        UCommonTextBlock *Row = FMythicUIStyle::MakeText(this, EMythicTextRole::Body);
-        const bool bNeutral = FMath::IsNearlyZero(Diff.Delta);
-        const TCHAR *Arrow = bNeutral ? TEXT("•") : (Diff.bIsUpgrade ? TEXT("▲") : TEXT("▼"));
-        Row->SetText(FText::Format(
-            NSLOCTEXT("MythicInventory", "ComparisonDeltaRow", "{0}  {1}: {2}"),
-            FText::FromString(Arrow), Diff.AttributeName, FText::AsNumber(Diff.Delta)));
-        Row->SetColorAndOpacity(FSlateColor(
-            bNeutral ? Style.InkSubtle : (Diff.bIsUpgrade ? Style.Positive : Style.Negative)));
-        if (UVerticalBoxSlot *RowSlot = Cast<UVerticalBoxSlot>(InventoryModalOptions->AddChild(Row))) {
-            RowSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, Style.SpaceXS));
-        }
-    }
-    if (VisibleRows == 0) {
-        UCommonTextBlock *NoDelta = FMythicUIStyle::MakeText(this, EMythicTextRole::Subtle);
-        NoDelta->SetText(NSLOCTEXT("MythicInventory", "NoComparisonDeltas", "No comparable stat changes."));
-        InventoryModalOptions->AddChild(NoDelta);
-    }
-    AddModalCommand(NSLOCTEXT("MythicInventory", "EquipComparedItem", "Equip Here"),
-                    EMythicInventoryUICommand::ConfirmComparisonEquip, TargetSlotIndex);
-    AddModalCommand(NSLOCTEXT("MythicInventory", "CloseComparison", "Back"),
-                    EMythicInventoryUICommand::Cancel);
-    InventoryModalLayer->SetVisibility(ESlateVisibility::Visible);
-    InventoryModalOptions->GetChildAt(FMath::Max(0, InventoryModalOptions->GetChildrenCount() - 2))->SetFocus();
     RefreshInventoryActionBar();
 }
 
@@ -1247,19 +1485,17 @@ void UMythicCharacterPageWidget::CloseInventoryModal(bool bRestoreSourceSelectio
         InventoryModalLayer->SetVisibility(ESlateVisibility::Collapsed);
     }
     ClearModalOptions();
-    ComparisonVM = nullptr;
     QuantityPurpose = EQuantityPurpose::None;
     ActiveTargetSlotIndex = INDEX_NONE;
-    bTargetPickerForComparison = false;
-    if (InventoryPageState != EInventoryPageState::Pending) {
-        InventoryPageState = EInventoryPageState::Browsing;
-    }
+    InventoryPageState = EInventoryPageState::Browsing;
     if (bRestoreSourceSelection && ActionSourceGuid.IsValid()) {
         SelectedItemGuid = ActionSourceGuid;
         ScheduleRestoreSelection();
     }
     ActionSourceGuid.Invalidate();
     ActionSourceSlotIndex = INDEX_NONE;
+    ResolveActiveEquipmentTarget();
+    RefreshDetailsForSelection();
     SetFeedback(FText::GetEmpty());
     RefreshInventoryActionBar();
 }
@@ -1277,6 +1513,10 @@ void UMythicCharacterPageWidget::SetFeedback(const FText &Message, bool bIsError
 }
 
 void UMythicCharacterPageWidget::BeginMoveTargetSelection() {
+    if (IsMutationPending()) {
+        SetFeedback(NSLOCTEXT("MythicInventory", "RequestAlreadyPending", "Finish syncing the current inventory change first."));
+        return;
+    }
     FMythicInventorySourceLocator Source;
     if (!BuildSourceLocator(Source)) {
         SetFeedback(NSLOCTEXT("MythicInventory", "InvalidMoveSource", "That item is no longer available."), true);
@@ -1303,51 +1543,34 @@ void UMythicCharacterPageWidget::ConfirmMoveTarget() {
 
 void UMythicCharacterPageWidget::ExecuteInventoryUICommand(
     EMythicInventoryUICommand Command, int32 Payload) {
+    (void)Payload;
     switch (Command) {
     case EMythicInventoryUICommand::EquipOrUnequip:
-        if (UItemSlotVM *SlotVM = GetSelectedSlot()) {
-            if (SlotVM->GetIsEquipped()) {
-                BeginMoveTargetSelection();
-            }
-            else {
-                const TArray<FEquipmentTarget> Targets = BuildEquipmentTargets();
-                if (Targets.Num() == 1) {
-                    StickyEquipmentTargetSlotIndex = Targets[0].SlotIndex;
-                    SubmitMoveToSlot(Targets[0].SlotIndex);
-                }
-                else {
-                    OpenEquipmentTargetPicker(false);
-                }
-            }
-        }
+        CloseInventoryModal(true);
+        HandlePrimaryInventoryAction();
         break;
     case EMythicInventoryUICommand::Use:
+        CloseInventoryModal(true);
         SubmitUse();
         break;
     case EMythicInventoryUICommand::BeginMove:
         BeginMoveTargetSelection();
         break;
-    case EMythicInventoryUICommand::Compare:
-        InventoryPageState = EInventoryPageState::Browsing;
-        HandleCompareInventoryAction();
-        break;
     case EMythicInventoryUICommand::Split:
         OpenQuantityPanel(EQuantityPurpose::Split);
         break;
     case EMythicInventoryUICommand::Drop:
-        OpenQuantityPanel(EQuantityPurpose::Drop);
-        break;
-    case EMythicInventoryUICommand::ToggleJunk:
-        SubmitSetJunk();
-        break;
-    case EMythicInventoryUICommand::Inspect:
-        CloseInventoryModal(true);
-        if (UItemSlotVM *SlotVM = GetSelectedSlot()) {
-            ShowDetailsFor(SlotVM);
+        if (UItemSlotVM *SlotVM = GetSelectedSlot(); SlotVM && SlotVM->GetQuantity() <= 1) {
+            CloseInventoryModal(true);
+            SubmitDrop(1);
+        }
+        else {
+            OpenQuantityPanel(EQuantityPurpose::Drop);
         }
         break;
-    case EMythicInventoryUICommand::OpenSortMenu:
-        OpenSortMenu();
+    case EMythicInventoryUICommand::ToggleJunk:
+        CloseInventoryModal(true);
+        SubmitSetJunk();
         break;
     case EMythicInventoryUICommand::SortByRarity:
         SubmitSort(static_cast<int32>(ESortMode::ByRarity));
@@ -1380,6 +1603,22 @@ void UMythicCharacterPageWidget::ExecuteInventoryUICommand(
                 FText::AsNumber(QuantityValue), FText::AsNumber(QuantityMaximum)));
         }
         break;
+    case EMythicInventoryUICommand::QuantityDecreaseLarge:
+        QuantityValue = FMath::Clamp(QuantityValue - 10, 1, QuantityMaximum);
+        if (InventoryModalBody) {
+            InventoryModalBody->SetText(FText::Format(
+                NSLOCTEXT("MythicInventory", "QuantityReadout", "Quantity: {0} / {1}"),
+                FText::AsNumber(QuantityValue), FText::AsNumber(QuantityMaximum)));
+        }
+        break;
+    case EMythicInventoryUICommand::QuantityIncreaseLarge:
+        QuantityValue = FMath::Clamp(QuantityValue + 10, 1, QuantityMaximum);
+        if (InventoryModalBody) {
+            InventoryModalBody->SetText(FText::Format(
+                NSLOCTEXT("MythicInventory", "QuantityReadout", "Quantity: {0} / {1}"),
+                FText::AsNumber(QuantityValue), FText::AsNumber(QuantityMaximum)));
+        }
+        break;
     case EMythicInventoryUICommand::ConfirmQuantity:
         if (QuantityPurpose == EQuantityPurpose::Split) {
             SubmitSplit(QuantityValue);
@@ -1387,18 +1626,6 @@ void UMythicCharacterPageWidget::ExecuteInventoryUICommand(
         else if (QuantityPurpose == EQuantityPurpose::Drop) {
             SubmitDrop(QuantityValue);
         }
-        break;
-    case EMythicInventoryUICommand::ChooseEquipmentTarget:
-        StickyEquipmentTargetSlotIndex = Payload;
-        if (bTargetPickerForComparison) {
-            OpenComparison(Payload);
-        }
-        else {
-            SubmitMoveToSlot(Payload);
-        }
-        break;
-    case EMythicInventoryUICommand::ConfirmComparisonEquip:
-        SubmitMoveToSlot(Payload);
         break;
     case EMythicInventoryUICommand::Cancel:
         CloseInventoryModal(true);
@@ -1409,14 +1636,14 @@ void UMythicCharacterPageWidget::ExecuteInventoryUICommand(
 void UMythicCharacterPageWidget::SubmitMoveToSlot(int32 TargetSlotIndex) {
     FMythicInventorySourceLocator Source;
     FMythicInventoryTargetLocator Target;
-    if (!BuildSourceLocator(Source) || !BuildTargetLocator(TargetSlotIndex, Target)
+    if (!CanMoveSelectionToSlot(TargetSlotIndex)
+        || !BuildSourceLocator(Source) || !BuildTargetLocator(TargetSlotIndex, Target)
         || Source.SlotIndex == Target.SlotIndex) {
         SetFeedback(NSLOCTEXT("MythicInventory", "MoveTargetChanged", "The source or destination changed. Choose again."), true);
         return;
     }
     AMythicPlayerController *PC = Cast<AMythicPlayerController>(GetOwningPlayer());
-    BeginPendingRequest(PC ? PC->SubmitInventoryMove(Source, Target) : 0,
-                        static_cast<int32>(EMythicInventoryAction::Move));
+    HandleSubmittedRequest(PC ? PC->SubmitInventoryMove(Source, Target) : 0);
 }
 
 void UMythicCharacterPageWidget::SubmitUse() {
@@ -1426,7 +1653,7 @@ void UMythicCharacterPageWidget::SubmitUse() {
         SetFeedback(NSLOCTEXT("MythicInventory", "UseSourceChanged", "That item is no longer available."), true);
         return;
     }
-    BeginPendingRequest(PC->SubmitInventoryUse(Source), static_cast<int32>(EMythicInventoryAction::Use));
+    HandleSubmittedRequest(PC->SubmitInventoryUse(Source));
 }
 
 void UMythicCharacterPageWidget::SubmitSplit(int32 Quantity) {
@@ -1436,8 +1663,7 @@ void UMythicCharacterPageWidget::SubmitSplit(int32 Quantity) {
         SetFeedback(NSLOCTEXT("MythicInventory", "SplitSourceChanged", "The stack changed. Reopen Split."), true);
         return;
     }
-    BeginPendingRequest(PC->SubmitInventorySplit(Source, Quantity),
-                        static_cast<int32>(EMythicInventoryAction::Split));
+    HandleSubmittedRequest(PC->SubmitInventorySplit(Source, Quantity));
 }
 
 void UMythicCharacterPageWidget::SubmitDrop(int32 Quantity) {
@@ -1447,8 +1673,7 @@ void UMythicCharacterPageWidget::SubmitDrop(int32 Quantity) {
         SetFeedback(NSLOCTEXT("MythicInventory", "DropSourceChanged", "The stack changed. Reopen Drop."), true);
         return;
     }
-    BeginPendingRequest(PC->SubmitInventoryDropQuantity(Source, Quantity),
-                        static_cast<int32>(EMythicInventoryAction::DropQuantity));
+    HandleSubmittedRequest(PC->SubmitInventoryDropQuantity(Source, Quantity));
 }
 
 void UMythicCharacterPageWidget::SubmitSetJunk() {
@@ -1459,8 +1684,8 @@ void UMythicCharacterPageWidget::SubmitSetJunk() {
         SetFeedback(NSLOCTEXT("MythicInventory", "JunkSourceChanged", "That item is no longer available."), true);
         return;
     }
-    BeginPendingRequest(PC->SubmitInventorySetJunk(Source, !SlotVM->GetIsJunk()),
-                        static_cast<int32>(EMythicInventoryAction::SetJunk));
+    HandleSubmittedRequest(PC->SubmitInventorySetJunk(
+        Source, !SlotVM->GetIsManuallyMarkedJunk()));
 }
 
 void UMythicCharacterPageWidget::SubmitSort(int32 SortModeValue) {
@@ -1474,89 +1699,59 @@ void UMythicCharacterPageWidget::SubmitSort(int32 SortModeValue) {
         return;
     }
     const ESortMode Mode = static_cast<ESortMode>(SortModeValue);
-    BeginPendingRequest(PC->SubmitInventorySort(Inventory, Entry.GroupTag, Mode),
-                        static_cast<int32>(EMythicInventoryAction::Sort));
+    HandleSubmittedRequest(PC->SubmitInventorySort(Inventory, Entry.GroupTag, Mode));
 }
 
-void UMythicCharacterPageWidget::BeginPendingRequest(int64 RequestId, int32 ActionValue) {
+void UMythicCharacterPageWidget::HandleSubmittedRequest(const int64 RequestId) {
     if (RequestId <= 0) {
-        SetFeedback(NSLOCTEXT("MythicInventory", "RequestNotSent", "The inventory request could not be sent."), true);
+        SetFeedback(
+            IsMutationPending()
+                ? NSLOCTEXT("MythicInventory", "RequestAlreadyPending", "Finish syncing the current inventory change first.")
+                : NSLOCTEXT("MythicInventory", "RequestNotSent", "The inventory request could not be sent."),
+            true);
+        RefreshInventoryActionBar();
         return;
     }
-    PendingRequestId = RequestId;
-    PendingActionValue = ActionValue;
-    InventoryPageState = EInventoryPageState::Pending;
+
+    InventoryPageState = EInventoryPageState::Browsing;
     if (InventoryModalLayer) {
         InventoryModalLayer->SetVisibility(ESlateVisibility::Collapsed);
     }
     ClearModalOptions();
-    SetFeedback(NSLOCTEXT("MythicInventory", "RequestPending", "Updating inventory…"));
-    RefreshInventoryActionBar();
-
-    // Standalone and listen-server RPCs may complete synchronously inside SubmitInventory*. The controller buffers
-    // owning-client receipts before broadcasting so the page can reconcile a completion that arrived before the
-    // Submit call returned its correlation ID.
-    if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(GetOwningPlayer())) {
-        FMythicInventoryActionReceipt BufferedReceipt;
-        if (PC->ConsumeReceivedInventoryActionReceipt(RequestId, BufferedReceipt)) {
-            HandleInventoryActionReceipt(BufferedReceipt);
-        }
+    ActionSourceGuid.Invalidate();
+    ActionSourceSlotIndex = INDEX_NONE;
+    if (IsMutationPending()) {
+        SetFeedback(NSLOCTEXT("MythicInventory", "RequestPending", "Updating inventory..."));
     }
+    RefreshInventoryActionBar();
 }
 
-void UMythicCharacterPageWidget::HandleInventorySlotUpdated(int32 SlotIndex) {
+void UMythicCharacterPageWidget::HandleInventorySlotUpdated(const int32 SlotIndex) {
+    (void)SlotIndex;
     ScheduleRestoreSelection();
+}
+
+void UMythicCharacterPageWidget::HandleInventoryInteractionFeedback(
+    const FText &Message,
+    const bool bIsError) {
+    SetFeedback(Message, bIsError);
+}
+
+void UMythicCharacterPageWidget::HandleInventoryPendingChanged(
+    const bool bPending,
+    const FMythicInventoryActionSubmission &Submission) {
+    (void)bPending;
+    (void)Submission;
+    RefreshInventoryActionBar();
 }
 
 void UMythicCharacterPageWidget::HandleInventoryActionReceipt(
     const FMythicInventoryActionReceipt &Receipt) {
-    if (Receipt.RequestId != PendingRequestId) {
-        return;
-    }
-    if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(GetOwningPlayer())) {
-        FMythicInventoryActionReceipt ConsumedReceipt;
-        PC->ConsumeReceivedInventoryActionReceipt(Receipt.RequestId, ConsumedReceipt);
-    }
-    PendingRequestId = 0;
-    PendingActionValue = INDEX_NONE;
+    (void)Receipt;
     InventoryPageState = EInventoryPageState::Browsing;
     ActionSourceGuid.Invalidate();
     ActionSourceSlotIndex = INDEX_NONE;
-
-    if (Receipt.WasSuccessful()) {
-        SetFeedback(NSLOCTEXT("MythicInventory", "RequestSucceeded", "Inventory updated."));
-        ScheduleRestoreSelection();
-    }
-    else {
-        FText Failure = NSLOCTEXT("MythicInventory", "RequestRejected", "That action could not be completed.");
-        switch (Receipt.Result) {
-        case EMythicInventoryActionResult::StaleSource:
-        case EMythicInventoryActionResult::StaleTarget:
-            Failure = NSLOCTEXT("MythicInventory", "RequestStale", "The inventory changed before confirmation. Try again.");
-            break;
-        case EMythicInventoryActionResult::SourceProtected:
-        case EMythicInventoryActionResult::TargetProtected:
-        case EMythicInventoryActionResult::UnauthorizedInventory:
-            Failure = NSLOCTEXT("MythicInventory", "RequestProtected", "That item or slot cannot be changed.");
-            break;
-        case EMythicInventoryActionResult::InventoryFull:
-            Failure = NSLOCTEXT("MythicInventory", "RequestFull", "There is no compatible free slot.");
-            break;
-        case EMythicInventoryActionResult::IncompatibleTarget:
-            Failure = NSLOCTEXT("MythicInventory", "RequestIncompatible", "That item cannot go in the selected slot.");
-            break;
-        case EMythicInventoryActionResult::InvalidQuantity:
-            Failure = NSLOCTEXT("MythicInventory", "RequestQuantityChanged", "The stack quantity changed. Choose a new amount.");
-            break;
-        case EMythicInventoryActionResult::NotUsable:
-            Failure = NSLOCTEXT("MythicInventory", "RequestNotUsable", "That item cannot be used right now.");
-            break;
-        default:
-            break;
-        }
-        SetFeedback(Failure, true);
-        ScheduleRestoreSelection();
-    }
+    ScheduleRestoreSelection();
     RefreshInventoryActionBar();
 }
 
@@ -1569,13 +1764,15 @@ void UMythicCharacterPageWidget::BuildDetailsCard() {
         return;
     }
 
-    DetailsCard = CreateWidget<UUserWidget>(GetOwningPlayer(), ItemDetailsClass);
+    DetailsCard = CreateWidget<UMythicItemDetailsWidget>(GetOwningPlayer(), ItemDetailsClass);
     if (!DetailsCard) {
         return;
     }
 
     DetailsHost->AddChild(DetailsCard);
     DetailsCard->SetVisibility(ESlateVisibility::Collapsed);
+    DetailsCard->OnTargetCycleRequested().AddUObject(
+        this, &ThisClass::HandleCycleInventoryTarget);
 
     // The socket row takes an item instance, which no view model hands it. Found by class rather than by
     // name so renaming the widget on the card cannot quietly stop the row updating.
@@ -1592,26 +1789,68 @@ void UMythicCharacterPageWidget::BuildDetailsCard() {
 }
 
 void UMythicCharacterPageWidget::ShowDetailsFor(UObject *SlotVM) {
-    const bool bHasItem = SlotVM != nullptr && DetailsCard != nullptr;
+    UItemSlotVM *SelectedSlot = Cast<UItemSlotVM>(SlotVM);
+    UMythicItemInstance *SelectedItem = SelectedSlot
+        ? SelectedSlot->TryGetItemInstance() : nullptr;
+    const bool bHasItem = SelectedItem != nullptr && DetailsCard != nullptr;
 
     if (DetailsCard) {
         if (bHasItem) {
             if (UMVVMView *View = UMVVMSubsystem::GetViewFromUserWidget(DetailsCard)) {
                 View->SetViewModelByClass(TScriptInterface<INotifyFieldValueChanged>(SlotVM));
             }
+
+            FMythicItemDetailsComparisonContext Context;
+            if (!SelectedSlot->GetIsEquipped()) {
+                const TArray<FEquipmentTarget> Targets = BuildEquipmentTargets();
+                const FEquipmentTarget *Target = Targets.FindByPredicate([this](const FEquipmentTarget &Candidate) {
+                    return Candidate.SlotIndex == ActiveTargetSlotIndex;
+                });
+                if (!Target && Targets.Num() > 0) {
+                    Target = &Targets[0];
+                    ActiveTargetSlotIndex = Target->SlotIndex;
+                }
+                if (Target) {
+                    Context.bComparisonActive = true;
+                    Context.bTargetEmpty = Target->bExpectEmpty;
+                    Context.TargetSlotIndex = Target->SlotIndex;
+                    Context.bCanCycleTarget = Targets.Num() > 1;
+                    Context.TargetLabel = Target->DisplayName;
+                    if (Target->bExpectEmpty) {
+                        Context.BaselineItem = nullptr;
+                    }
+                    else {
+                        FMythicInventorySlotEntry Entry;
+                        if (UMythicInventoryComponent *Inventory = GetInventoryComponent();
+                            Inventory && Inventory->GetSlotEntry(Target->SlotIndex, Entry)
+                            && Entry.SlottedItemInstance) {
+                            Context.BaselineItem = Entry.SlottedItemInstance;
+                            Context.ExpectedBaselineGuid =
+                                Entry.SlottedItemInstance->GetItemInstanceGuid();
+                        }
+                    }
+                }
+            }
+            DetailsCard->PresentItemStatSections(SelectedItem, Context);
+        }
+        else {
+            DetailsCard->ClearPresentedItem();
         }
         DetailsCard->SetVisibility(bHasItem ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
     }
 
     if (SocketRow) {
-        const UItemSlotVM *SelectedSlot = bHasItem ? Cast<UItemSlotVM>(SlotVM) : nullptr;
-        SocketRow->SetItem(SelectedSlot ? SelectedSlot->TryGetItemInstance() : nullptr);
+        SocketRow->SetItem(bHasItem ? SelectedItem : nullptr);
     }
 
     if (DetailsPlaceholder) {
         DetailsPlaceholder->SetVisibility(bHasItem ? ESlateVisibility::Collapsed
                                                    : ESlateVisibility::SelfHitTestInvisible);
     }
+}
+
+void UMythicCharacterPageWidget::RefreshDetailsForSelection() {
+    ShowDetailsFor(GetSelectedSlot());
 }
 
 UMythicHUDLayout *UMythicCharacterPageWidget::FindHUDLayout() const {

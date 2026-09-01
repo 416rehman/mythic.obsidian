@@ -6,6 +6,7 @@
 #include "Itemization/Inventory/ViewModels/ItemTooltipVM.h"
 #include "Itemization/Inventory/ViewModels/MythicTags_ItemMetrics.h"
 #include "Settings/MythicCombatSettings.h"
+#include "UI/ViewModels/MythicStatDisplay.h"
 
 #include <limits>
 
@@ -251,10 +252,42 @@ bool FMythicWeaponAttackComparisonTest::RunTest(const FString &Parameters) {
              Comparison.bIsValid);
     TestTrue(TEXT("the comparison records that the replacement slot has a weapon"),
              Comparison.bHasEquippedWeaponAttack);
+    TestTrue(TEXT("an occupied weapon target produces inline metric deltas"),
+             Comparison.bHasComparisonDeltas);
     TestTrue(TEXT("the inspected canonical projection is retained"),
              Comparison.InspectedAttack == InspectedAttack);
     TestTrue(TEXT("the equipped canonical projection is retained"),
              Comparison.EquippedAttack == EquippedAttack);
+
+    TestEqual(TEXT("average hit uses the canonical item-metric identity"),
+              Comparison.AverageDamagePerHitComparison.ComparisonTag,
+              ITEM_METRIC_WEAPON_AVERAGE_DAMAGE_PER_HIT.GetTag());
+    TestTrue(TEXT("average hit uses the combat range expectation"),
+             FMath::IsNearlyEqual(
+                 Comparison.AverageDamagePerHitComparison.NewValue,
+                 InspectedAttack.AverageDamagePerHit,
+                 UE_KINDA_SMALL_NUMBER));
+    TestTrue(TEXT("average-hit baseline comes from the equipped combat range expectation"),
+             FMath::IsNearlyEqual(
+                 Comparison.AverageDamagePerHitComparison.CurrentValue,
+                 EquippedAttack.AverageDamagePerHit,
+                 UE_KINDA_SMALL_NUMBER));
+    TestTrue(TEXT("average-hit delta is candidate minus equipped"),
+             FMath::IsNearlyEqual(
+                 Comparison.AverageDamagePerHitComparison.Delta,
+                 MythicStatDisplay::QuantizeValueToDisplayPrecision(
+                     InspectedAttack.AverageDamagePerHit,
+                     InspectedAttack.DamageNumberPresentation)
+                     - MythicStatDisplay::QuantizeValueToDisplayPrecision(
+                         EquippedAttack.AverageDamagePerHit,
+                         InspectedAttack.DamageNumberPresentation),
+                 UE_KINDA_SMALL_NUMBER));
+    TestEqual(TEXT("the higher average hit moves upward"),
+              Comparison.AverageDamagePerHitComparison.Movement,
+              EMythicStatValueMovement::Increase);
+    TestEqual(TEXT("the higher average hit is beneficial"),
+              Comparison.AverageDamagePerHitComparison.Verdict,
+              EMythicComparisonVerdict::Better);
 
     TestEqual(TEXT("DPS uses the canonical item-metric identity"),
               Comparison.DamagePerSecondComparison.ComparisonTag,
@@ -272,10 +305,21 @@ bool FMythicWeaponAttackComparisonTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("DPS delta is inspected minus equipped"),
              FMath::IsNearlyEqual(
                  Comparison.DamagePerSecondComparison.Delta,
-                 InspectedAttack.DamagePerSecond - EquippedAttack.DamagePerSecond,
+                 MythicStatDisplay::QuantizeValueToDisplayPrecision(
+                     InspectedAttack.DamagePerSecond,
+                     InspectedAttack.DamageNumberPresentation)
+                     - MythicStatDisplay::QuantizeValueToDisplayPrecision(
+                         EquippedAttack.DamagePerSecond,
+                         InspectedAttack.DamageNumberPresentation),
                  UE_KINDA_SMALL_NUMBER));
-    TestTrue(TEXT("the higher-DPS candidate is independently marked as an upgrade"),
-             Comparison.DamagePerSecondComparison.bIsUpgrade);
+    TestEqual(TEXT("the higher-DPS candidate has increasing numeric movement"),
+              Comparison.DamagePerSecondComparison.Movement,
+              EMythicStatValueMovement::Increase);
+    TestEqual(TEXT("the higher-DPS candidate is independently better"),
+              Comparison.DamagePerSecondComparison.Verdict,
+              EMythicComparisonVerdict::Better);
+    TestFalse(TEXT("DPS comparison carries a canonical formatted delta"),
+              Comparison.DamagePerSecondComparison.FormattedDelta.IsEmpty());
 
     TestEqual(TEXT("effective APS uses the canonical item-metric identity"),
               Comparison.EffectiveAttacksPerSecondComparison.ComparisonTag,
@@ -293,18 +337,29 @@ bool FMythicWeaponAttackComparisonTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("APS delta is inspected minus equipped"),
              FMath::IsNearlyEqual(
                  Comparison.EffectiveAttacksPerSecondComparison.Delta,
-                 InspectedAttack.AttacksPerSecond - EquippedAttack.AttacksPerSecond,
+                 MythicStatDisplay::QuantizeValueToDisplayPrecision(
+                     InspectedAttack.AttacksPerSecond,
+                     InspectedAttack.AttacksPerSecondNumberPresentation)
+                     - MythicStatDisplay::QuantizeValueToDisplayPrecision(
+                         EquippedAttack.AttacksPerSecond,
+                         InspectedAttack.AttacksPerSecondNumberPresentation),
                  UE_KINDA_SMALL_NUMBER));
-    TestFalse(TEXT("a slower effective cadence is independently marked as a downgrade"),
-              Comparison.EffectiveAttacksPerSecondComparison.bIsUpgrade);
+    TestEqual(TEXT("a slower effective cadence has decreasing numeric movement"),
+              Comparison.EffectiveAttacksPerSecondComparison.Movement,
+              EMythicStatValueMovement::Decrease);
+    TestEqual(TEXT("a slower effective cadence is independently worse"),
+              Comparison.EffectiveAttacksPerSecondComparison.Verdict,
+              EMythicComparisonVerdict::Worse);
 
     const FMythicWeaponAttackComparisonViewData EmptySlotComparison =
         UItemComparisonVM::BuildWeaponAttackComparison(
-            InspectedAttack, FMythicWeaponAttackViewData());
-    TestTrue(TEXT("a valid weapon can be compared against an empty compatible slot"),
+            InspectedAttack, FMythicWeaponAttackViewData(), false);
+    TestTrue(TEXT("a core caller can explicitly project candidate-only weapon metrics"),
              EmptySlotComparison.bIsValid);
     TestFalse(TEXT("an empty slot is not reported as an equipped weapon"),
               EmptySlotComparison.bHasEquippedWeaponAttack);
+    TestTrue(TEXT("an explicit zero-baseline request emits inline metric deltas"),
+             EmptySlotComparison.bHasComparisonDeltas);
     TestEqual(TEXT("empty-slot DPS uses the zero item-metric identity"),
               EmptySlotComparison.DamagePerSecondComparison.CurrentValue, 0.0f);
     TestEqual(TEXT("empty-slot APS uses the zero item-metric identity"),
@@ -313,6 +368,22 @@ bool FMythicWeaponAttackComparisonTest::RunTest(const FString &Parameters) {
              EmptySlotComparison.DamagePerSecondComparison.bIsUpgrade);
     TestTrue(TEXT("positive candidate APS upgrades an empty slot"),
              EmptySlotComparison.EffectiveAttacksPerSecondComparison.bIsUpgrade);
+
+    const FMythicWeaponAttackComparisonViewData SuppressedEmptySlotComparison =
+        UItemComparisonVM::BuildWeaponAttackComparison(
+            InspectedAttack, FMythicWeaponAttackViewData());
+    TestTrue(TEXT("default empty-baseline suppression retains the valid candidate attack block"),
+             SuppressedEmptySlotComparison.bIsValid);
+    TestFalse(TEXT("empty-baseline suppression still reports no equipped weapon"),
+              SuppressedEmptySlotComparison.bHasEquippedWeaponAttack);
+    TestFalse(TEXT("empty-baseline suppression emits no misleading green deltas"),
+              SuppressedEmptySlotComparison.bHasComparisonDeltas);
+    TestFalse(TEXT("suppressed average-hit comparison has no metric identity"),
+              SuppressedEmptySlotComparison.AverageDamagePerHitComparison.ComparisonTag.IsValid());
+    TestFalse(TEXT("suppressed DPS comparison has no metric identity"),
+              SuppressedEmptySlotComparison.DamagePerSecondComparison.ComparisonTag.IsValid());
+    TestFalse(TEXT("suppressed APS comparison has no metric identity"),
+              SuppressedEmptySlotComparison.EffectiveAttacksPerSecondComparison.ComparisonTag.IsValid());
 
     FMythicWeaponAttackViewData InvalidInspected = InspectedAttack;
     InvalidInspected.bIsValid = false;

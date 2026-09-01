@@ -20,8 +20,31 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
+#include "Internationalization/Text.h"
 #include "Fragments/ActionableItemFragment.h"
 #include "Itemization/Affixes/MythicAffixApplicationComponent.h"
+
+namespace {
+
+FString StableAuthoredItemName(const UItemDefinition *Definition) {
+    if (!Definition) {
+        return FString();
+    }
+    if (const FString *Source = FTextInspector::GetSourceString(Definition->Name)) {
+        return *Source;
+    }
+    return FString();
+}
+
+int32 CompareGuidTuple(const FGuid &Left, const FGuid &Right) {
+    if (Left.A != Right.A) return Left.A < Right.A ? -1 : 1;
+    if (Left.B != Right.B) return Left.B < Right.B ? -1 : 1;
+    if (Left.C != Right.C) return Left.C < Right.C ? -1 : 1;
+    if (Left.D != Right.D) return Left.D < Right.D ? -1 : 1;
+    return 0;
+}
+
+} // namespace
 
 UMythicInventoryComponent::UMythicInventoryComponent(const FObjectInitializer &OI) :
     Super(OI) {
@@ -873,12 +896,9 @@ EMythicInventoryActionResult UMythicInventoryComponent::ResolveTargetLocator(
     return EMythicInventoryActionResult::Succeeded;
 }
 
-EMythicInventoryActionResult UMythicInventoryComponent::TryPlayerMoveItem(
+EMythicInventoryActionResult UMythicInventoryComponent::ValidatePlayerMoveItem(
     const FMythicInventorySourceLocator &Source,
-    const FMythicInventoryTargetLocator &Target,
-    int32 &OutQuantityProcessed) {
-    OutQuantityProcessed = 0;
-
+    const FMythicInventoryTargetLocator &Target) const {
     UMythicItemInstance *SourceItem = nullptr;
     EMythicInventoryActionResult Result = ResolveSourceLocator(Source, SourceItem);
     if (Result != EMythicInventoryActionResult::Succeeded) {
@@ -895,7 +915,7 @@ EMythicInventoryActionResult UMythicInventoryComponent::TryPlayerMoveItem(
     }
 
     const FMythicInventorySlotEntry &SourceSlot = Slots.Items[Source.SlotIndex];
-    FMythicInventorySlotEntry &TargetSlot = Target.Inventory->Slots.Items[Target.SlotIndex];
+    const FMythicInventorySlotEntry &TargetSlot = Target.Inventory->Slots.Items[Target.SlotIndex];
     if (!SourceSlot.bCanPlayerTake) {
         return EMythicInventoryActionResult::SourceProtected;
     }
@@ -907,14 +927,6 @@ EMythicInventoryActionResult UMythicInventoryComponent::TryPlayerMoveItem(
                 Target.SlotIndex, SourceItem, true, SourceItem)) {
             return EMythicInventoryActionResult::IncompatibleTarget;
         }
-        const FStagedSlotMutation Mutations[] = {
-            {this, Source.SlotIndex, SourceItem, nullptr},
-            {Target.Inventory, Target.SlotIndex, nullptr, SourceItem},
-        };
-        if (!CommitSlotMutationsTransactional(MakeArrayView(Mutations))) {
-            return EMythicInventoryActionResult::CommitFailed;
-        }
-        OutQuantityProcessed = Source.ExpectedQuantity;
         return EMythicInventoryActionResult::Succeeded;
     }
 
@@ -938,11 +950,6 @@ EMythicInventoryActionResult UMythicInventoryComponent::TryPlayerMoveItem(
                 bSourceFullyLeaves ? SourceItem : nullptr)) {
             return EMythicInventoryActionResult::IncompatibleTarget;
         }
-        const int32 Moved = SendItem(Source.SlotIndex, Target.Inventory, Target.SlotIndex);
-        if (Moved <= 0) {
-            return EMythicInventoryActionResult::CommitFailed;
-        }
-        OutQuantityProcessed = Moved;
         return EMythicInventoryActionResult::Succeeded;
     }
 
@@ -959,6 +966,57 @@ EMythicInventoryActionResult UMythicInventoryComponent::TryPlayerMoveItem(
         return EMythicInventoryActionResult::IncompatibleTarget;
     }
 
+    return EMythicInventoryActionResult::Succeeded;
+}
+
+EMythicInventoryActionResult UMythicInventoryComponent::TryPlayerMoveItem(
+    const FMythicInventorySourceLocator &Source,
+    const FMythicInventoryTargetLocator &Target,
+    int32 &OutQuantityProcessed) {
+    OutQuantityProcessed = 0;
+
+    EMythicInventoryActionResult Result = ValidatePlayerMoveItem(Source, Target);
+    if (Result != EMythicInventoryActionResult::Succeeded) {
+        return Result;
+    }
+
+    UMythicItemInstance *SourceItem = nullptr;
+    UMythicItemInstance *TargetItem = nullptr;
+    Result = ResolveSourceLocator(Source, SourceItem);
+    if (Result != EMythicInventoryActionResult::Succeeded) {
+        return Result;
+    }
+    Result = Target.Inventory->ResolveTargetLocator(Target, TargetItem);
+    if (Result != EMythicInventoryActionResult::Succeeded) {
+        return Result;
+    }
+
+    if (!TargetItem) {
+        const FStagedSlotMutation Mutations[] = {
+            {this, Source.SlotIndex, SourceItem, nullptr},
+            {Target.Inventory, Target.SlotIndex, nullptr, SourceItem},
+        };
+        if (!CommitSlotMutationsTransactional(MakeArrayView(Mutations))) {
+            return EMythicInventoryActionResult::CommitFailed;
+        }
+        OutQuantityProcessed = Source.ExpectedQuantity;
+        return EMythicInventoryActionResult::Succeeded;
+    }
+
+    const UItemDefinition *SourceDefinition = SourceItem->GetItemDefinition();
+    const bool bSameStackKind = SourceDefinition
+        && SourceDefinition == TargetItem->GetItemDefinition()
+        && SourceItem->isStackableWith(TargetItem)
+        && ShouldAttemptStackMerge(SourceDefinition->StackSizeMax);
+    if (bSameStackKind) {
+        const int32 Moved = SendItem(Source.SlotIndex, Target.Inventory, Target.SlotIndex);
+        if (Moved <= 0) {
+            return EMythicInventoryActionResult::CommitFailed;
+        }
+        OutQuantityProcessed = Moved;
+        return EMythicInventoryActionResult::Succeeded;
+    }
+
     const FStagedSlotMutation Mutations[] = {
         {this, Source.SlotIndex, SourceItem, TargetItem},
         {Target.Inventory, Target.SlotIndex, TargetItem, SourceItem},
@@ -968,6 +1026,92 @@ EMythicInventoryActionResult UMythicInventoryComponent::TryPlayerMoveItem(
     }
     OutQuantityProcessed = Source.ExpectedQuantity;
     return EMythicInventoryActionResult::Succeeded;
+}
+
+EMythicInventoryActionResult UMythicInventoryComponent::TryTransferPlayerItemToAnySlot(
+    const FMythicInventorySourceLocator &Source,
+    UMythicInventoryComponent *TargetInventory,
+    int32 &OutQuantityProcessed) {
+    OutQuantityProcessed = 0;
+    if (!TargetInventory || TargetInventory == this) {
+        return EMythicInventoryActionResult::InvalidRequest;
+    }
+
+    UMythicItemInstance *SourceItem = nullptr;
+    EMythicInventoryActionResult Result = ResolveSourceLocator(Source, SourceItem);
+    if (Result != EMythicInventoryActionResult::Succeeded) {
+        return Result;
+    }
+    const FGuid SourceGuid = Source.ExpectedItemGuid;
+
+    while (SourceItem && SourceItem->GetInventoryComponent() == this
+           && SourceItem->GetSlot() == Source.SlotIndex) {
+        const int32 QuantityBeforeStep = SourceItem->GetStacks();
+        const UItemDefinition *SourceDefinition = SourceItem->GetItemDefinition();
+        bool bMadeProgress = false;
+        EMythicInventoryActionResult LastRejection = EMythicInventoryActionResult::InventoryFull;
+
+        for (int32 TargetSlotIndex = 0;
+             TargetSlotIndex < TargetInventory->Slots.Num();
+             ++TargetSlotIndex) {
+            UMythicItemInstance *TargetItem =
+                TargetInventory->Slots.Items[TargetSlotIndex].SlottedItemInstance;
+            if (TargetItem) {
+                const bool bStackDestination = SourceDefinition
+                    && TargetItem->GetItemDefinition() == SourceDefinition
+                    && SourceItem->isStackableWith(TargetItem)
+                    && ShouldAttemptStackMerge(SourceDefinition->StackSizeMax)
+                    && TargetItem->GetStacks() < SourceDefinition->StackSizeMax;
+                if (!bStackDestination) {
+                    continue;
+                }
+            }
+
+            FMythicInventorySourceLocator CurrentSource;
+            CurrentSource.Inventory = this;
+            CurrentSource.SlotIndex = Source.SlotIndex;
+            CurrentSource.ExpectedItemGuid = SourceGuid;
+            CurrentSource.ExpectedQuantity = SourceItem->GetStacks();
+
+            FMythicInventoryTargetLocator Target;
+            Target.Inventory = TargetInventory;
+            Target.SlotIndex = TargetSlotIndex;
+            Target.bExpectEmpty = TargetItem == nullptr;
+            if (TargetItem) {
+                Target.ExpectedOccupantGuid = TargetItem->GetItemInstanceGuid();
+                Target.ExpectedOccupantQuantity = TargetItem->GetStacks();
+            }
+
+            int32 MovedThisStep = 0;
+            Result = TryPlayerMoveItem(CurrentSource, Target, MovedThisStep);
+            if (Result == EMythicInventoryActionResult::Succeeded && MovedThisStep > 0) {
+                OutQuantityProcessed += MovedThisStep;
+                bMadeProgress = true;
+                break;
+            }
+            LastRejection = Result;
+        }
+
+        UMythicItemInstance *CurrentItem = Slots.IsValidIndex(Source.SlotIndex)
+            ? Slots.Items[Source.SlotIndex].SlottedItemInstance
+            : nullptr;
+        if (!CurrentItem || CurrentItem->GetItemInstanceGuid() != SourceGuid) {
+            return EMythicInventoryActionResult::Succeeded;
+        }
+        SourceItem = CurrentItem;
+        if (bMadeProgress && SourceItem->GetStacks() >= QuantityBeforeStep) {
+            return EMythicInventoryActionResult::CommitFailed;
+        }
+        if (!bMadeProgress) {
+            return OutQuantityProcessed > 0
+                ? EMythicInventoryActionResult::InventoryFull
+                : LastRejection;
+        }
+    }
+
+    return OutQuantityProcessed > 0
+        ? EMythicInventoryActionResult::Succeeded
+        : EMythicInventoryActionResult::StaleSource;
 }
 
 bool UMythicInventoryComponent::DropItem(int32 SlotIndex, const FVector &location, const float radius, AController *TargetRecipient) {
@@ -1036,8 +1180,17 @@ EMythicInventoryActionResult UMythicInventoryComponent::DropItemQuantity(
     if (SourceResult != EMythicInventoryActionResult::Succeeded) {
         return SourceResult;
     }
-    if (!Slots.Items[Source.SlotIndex].bCanPlayerTake) {
+    const FMythicInventorySlotEntry &SourceEntry = Slots.Items[Source.SlotIndex];
+    if (!SourceEntry.bCanPlayerTake) {
         return EMythicInventoryActionResult::SourceProtected;
+    }
+    if (SourceEntry.IsGearSlot()) {
+        return EMythicInventoryActionResult::InvalidRequest;
+    }
+    const UItemDefinition *Definition = SourceItem->GetItemDefinition();
+    if (!Definition
+        || Definition->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY)) {
+        return EMythicInventoryActionResult::InvalidRequest;
     }
     if (Quantity <= 0 || Quantity > Source.ExpectedQuantity) {
         return EMythicInventoryActionResult::InvalidQuantity;
@@ -1137,10 +1290,10 @@ void UMythicInventoryComponent::HandleSlotsAdded(const TArrayView<int32> &AddedI
             Slots.Items[idx].ClientUpdateActiveState(this);
         }
 
-        OnSlotUpdated.Broadcast(idx);
         if (IsValid(ViewModel)) {
             ViewModel->RefreshSlotFromInventory(this, idx);
         }
+        OnSlotUpdated.Broadcast(idx);
     }
 }
 
@@ -1150,10 +1303,10 @@ void UMythicInventoryComponent::HandleSlotsChanged(const TArrayView<int32> &Chan
             Slots.Items[idx].ClientUpdateActiveState(this);
         }
 
-        OnSlotUpdated.Broadcast(idx);
         if (IsValid(ViewModel)) {
             ViewModel->RefreshSlotFromInventory(this, idx);
         }
+        OnSlotUpdated.Broadcast(idx);
     }
 }
 
@@ -1468,30 +1621,6 @@ bool UMythicInventoryComponent::RemoveSlot(UInventorySlotDefinition *SlotDefinit
     return RemovedCount > 0;
 }
 
-void UMythicInventoryComponent::ServerSplitStack_Implementation(int32 SourceSlotIndex, int32 SplitAmount) {
-    SplitStackToFreeSlot(SourceSlotIndex, SplitAmount);
-}
-
-int32 UMythicInventoryComponent::SplitStackToFreeSlot(int32 SourceSlotIndex, int32 SplitAmount) {
-    if (!Slots.IsValidIndex(SourceSlotIndex)) {
-        return INDEX_NONE;
-    }
-    UMythicItemInstance *SourceItem = Slots.Items[SourceSlotIndex].SlottedItemInstance;
-    if (!SourceItem || !SourceItem->GetItemInstanceGuid().IsValid()) {
-        return INDEX_NONE;
-    }
-    FMythicInventorySourceLocator Source;
-    Source.Inventory = this;
-    Source.SlotIndex = SourceSlotIndex;
-    Source.ExpectedItemGuid = SourceItem->GetItemInstanceGuid();
-    Source.ExpectedQuantity = SourceItem->GetStacks();
-
-    int32 TargetSlotIndex = INDEX_NONE;
-    return TrySplitStackToFreeSlot(Source, SplitAmount, TargetSlotIndex)
-               == EMythicInventoryActionResult::Succeeded
-        ? TargetSlotIndex : INDEX_NONE;
-}
-
 EMythicInventoryActionResult UMythicInventoryComponent::TrySplitStackToFreeSlot(
     const FMythicInventorySourceLocator &Source,
     const int32 SplitAmount,
@@ -1544,105 +1673,72 @@ EMythicInventoryActionResult UMythicInventoryComponent::TrySplitStackToFreeSlot(
     return EMythicInventoryActionResult::Succeeded;
 }
 
-void UMythicInventoryComponent::ServerSwapSlots_Implementation(int32 SlotA, int32 SlotB) {
-    if (!TrySwapSlotsTransactional(SlotA, SlotB)) {
-        UE_LOG(Myth, Warning,
-               TEXT("ServerSwapSlots: transactional swap rejected for slots %d / %d; old slots and GAS preserved"),
-               SlotA, SlotB);
-    }
-}
-
-bool UMythicInventoryComponent::TrySwapSlotsTransactional(const int32 SlotA, const int32 SlotB) {
-    AActor *lOwner = GetOwner();
-    if (!lOwner || !lOwner->HasAuthority()) {
-        return false;
+bool UMythicInventoryComponent::SortsBefore(
+    const UMythicItemInstance &A,
+    const UMythicItemInstance &B,
+    const ESortMode Mode) {
+    const UItemDefinition *DefA = A.GetItemDefinition();
+    const UItemDefinition *DefB = B.GetItemDefinition();
+    if (DefA != DefB && (!DefA || !DefB)) {
+        return DefA != nullptr;
     }
 
-    if (SlotA == SlotB) {
-        return Slots.IsValidIndex(SlotA);
-    }
-
-    if (!Slots.IsValidIndex(SlotA) || !Slots.IsValidIndex(SlotB)) {
-        UE_LOG(Myth, Warning, TEXT("ServerSwapSlots: invalid slot indices %d / %d"), SlotA, SlotB);
-        return false;
-    }
-
-    UMythicItemInstance *ItemA = Slots.Items[SlotA].SlottedItemInstance;
-    UMythicItemInstance *ItemB = Slots.Items[SlotB].SlottedItemInstance;
-
-    if (!ItemA && !ItemB) {
-        return true;
-    }
-
-    const FStagedSlotMutation Mutations[] = {
-        {this, SlotA, ItemA, ItemB},
-        {this, SlotB, ItemB, ItemA}
-    };
-    return CommitSlotMutationsTransactional(MakeArrayView(Mutations));
-}
-
-void UMythicInventoryComponent::ServerQuickMoveToInventory_Implementation(int32 SourceSlotIndex, UMythicInventoryComponent *TargetInventory) {
-    AActor *lOwner = GetOwner();
-    if (!lOwner || !lOwner->HasAuthority()) {
-        return;
-    }
-
-    if (!TargetInventory) {
-        UE_LOG(Myth, Warning, TEXT("ServerQuickMoveToInventory: null target inventory"));
-        return;
-    }
-
-    if (TargetInventory == this) {
-        UE_LOG(Myth, Warning, TEXT("ServerQuickMoveToInventory: target is self"));
-        return;
-    }
-
-    if (!Slots.IsValidIndex(SourceSlotIndex)) {
-        UE_LOG(Myth, Warning, TEXT("ServerQuickMoveToInventory: invalid source slot %d"), SourceSlotIndex);
-        return;
-    }
-
-    if (!Slots.Items[SourceSlotIndex].bCanPlayerTake) {
-        UE_LOG(Myth, Warning, TEXT("ServerQuickMoveToInventory: slot %d does not allow player take"), SourceSlotIndex);
-        return;
-    }
-
-    if (Slots.Items[SourceSlotIndex].IsGearSlot()) {
-        UMythicItemInstance *EquippedItem = Slots.Items[SourceSlotIndex].SlottedItemInstance;
-        if (!EquippedItem) {
-            return;
+    if (DefA && DefB) {
+        switch (Mode) {
+        case ESortMode::ByRarity: {
+            const int32 RarityA = static_cast<int32>(DefA->Rarity.GetValue());
+            const int32 RarityB = static_cast<int32>(DefB->Rarity.GetValue());
+            if (RarityA != RarityB) return RarityA > RarityB;
+            break;
         }
-        // Do not release first: an equipment-to-inventory move is one slot/GAS transaction or no move at all.
-        for (int32 TargetSlotIndex = 0; TargetSlotIndex < TargetInventory->Slots.Num(); ++TargetSlotIndex) {
-            if (!TargetInventory->Slots.Items[TargetSlotIndex].SlottedItemInstance
-                && TargetInventory->CanSlotAcceptItem(TargetSlotIndex, EquippedItem, true)
-                && TargetInventory->TryTransferToSlot(EquippedItem, TargetSlotIndex)) {
-                return;
+        case ESortMode::ByType: {
+            const int32 TypeOrder = DefA->ItemType.ToString().Compare(
+                DefB->ItemType.ToString(), ESearchCase::CaseSensitive);
+            if (TypeOrder != 0) return TypeOrder < 0;
+            break;
+        }
+        case ESortMode::ByName:
+            // The stable authored source-name tie below is also this mode's
+            // primary key; never sort physical slots by localized display text.
+            break;
+        case ESortMode::ByValue:
+            if (DefA->Value != DefB->Value) return DefA->Value > DefB->Value;
+            break;
+        case ESortMode::ByWeight: {
+            const bool bFiniteA = FMath::IsFinite(DefA->Weight);
+            const bool bFiniteB = FMath::IsFinite(DefB->Weight);
+            if (bFiniteA != bFiniteB) return bFiniteA;
+            // Exact finite ordering is deliberate: approximate equality is not transitive and therefore
+            // cannot participate in the strict-weak comparator required by TArray::Sort.
+            if (bFiniteA && DefA->Weight != DefB->Weight) {
+                return DefA->Weight > DefB->Weight;
             }
+            break;
         }
-        return;
+        }
+
+        const int32 NameOrder = StableAuthoredItemName(DefA).Compare(
+            StableAuthoredItemName(DefB), ESearchCase::CaseSensitive);
+        if (NameOrder != 0) return NameOrder < 0;
+
+        const FPrimaryAssetId AssetIdA = DefA->GetPrimaryAssetId();
+        const FPrimaryAssetId AssetIdB = DefB->GetPrimaryAssetId();
+        const FString StableDefinitionA = AssetIdA.IsValid()
+            ? AssetIdA.ToString() : DefA->GetPathName();
+        const FString StableDefinitionB = AssetIdB.IsValid()
+            ? AssetIdB.ToString() : DefB->GetPathName();
+        const int32 DefinitionOrder = StableDefinitionA.Compare(
+            StableDefinitionB, ESearchCase::CaseSensitive);
+        if (DefinitionOrder != 0) return DefinitionOrder < 0;
     }
 
-    UMythicItemInstance *Released = ReleaseFromSlot(SourceSlotIndex);
-    if (!Released) {
-        return;
-    }
+    const int32 GuidOrder = CompareGuidTuple(
+        A.GetItemInstanceGuid(), B.GetItemInstanceGuid());
+    if (GuidOrder != 0) return GuidOrder < 0;
 
-    int32 OriginalQty = Released->GetStacks();
-    int32 Added = TargetInventory->AddToAnySlot(Released, true);
-
-    if (Added == 0) {
-        SetItemInSlot(SourceSlotIndex, Released);
-        return;
-    }
-
-    if (Added < OriginalQty && IsValid(Released)) {
-        SetItemInSlot(SourceSlotIndex, Released);
-    }
-}
-
-void UMythicInventoryComponent::ServerSortGroup_Implementation(FGameplayTag GroupTag, ESortMode Mode) {
-    TrySortGroup(GroupTag, Mode);
+    // Invalid fixture identities still need strict weak ordering in automation;
+    // production physical items are required to have distinct valid GUIDs.
+    return A.GetPathName().Compare(B.GetPathName(), ESearchCase::CaseSensitive) < 0;
 }
 
 EMythicInventoryActionResult UMythicInventoryComponent::TrySortGroup(
@@ -1689,25 +1785,7 @@ EMythicInventoryActionResult UMythicInventoryComponent::TrySortGroup(
     }
 
     GroupItems.Sort([Mode](const UMythicItemInstance &A, const UMythicItemInstance &B) {
-        const UItemDefinition *DefA = A.GetItemDefinition();
-        const UItemDefinition *DefB = B.GetItemDefinition();
-        if (!DefA || !DefB) {
-            return DefA != nullptr;
-        }
-
-        switch (Mode) {
-            case ESortMode::ByRarity:
-                return static_cast<int32>(DefA->Rarity) > static_cast<int32>(DefB->Rarity);
-            case ESortMode::ByType:
-                return DefA->ItemType.ToString() < DefB->ItemType.ToString();
-            case ESortMode::ByName:
-                return DefA->Name.ToString() < DefB->Name.ToString();
-            case ESortMode::ByValue:
-                return DefA->Value > DefB->Value;
-            case ESortMode::ByWeight:
-                return DefA->Weight > DefB->Weight;
-        }
-        return false;
+        return UMythicInventoryComponent::SortsBefore(A, B, Mode);
     });
 
     TArray<FStagedSlotMutation> Mutations;
@@ -1728,74 +1806,43 @@ EMythicInventoryActionResult UMythicInventoryComponent::TrySortGroup(
         : EMythicInventoryActionResult::CommitFailed;
 }
 
-void UMythicInventoryComponent::ServerDepositAll_Implementation(UMythicInventoryComponent *Target, FGameplayTag OptionalTypeFilter) {
-    AActor *lOwner = GetOwner();
-    if (!lOwner || !lOwner->HasAuthority()) {
-        return;
+int32 UMythicInventoryComponent::TransferAllTakeableItemsToInventory(
+    UMythicInventoryComponent *Target,
+    const FGameplayTag OptionalTypeFilter) {
+    AActor *SourceOwner = GetOwner();
+    AActor *TargetOwner = Target ? Target->GetOwner() : nullptr;
+    if (!SourceOwner || !SourceOwner->HasAuthority()
+        || !TargetOwner || !TargetOwner->HasAuthority()
+        || Target == this) {
+        return 0;
     }
 
-    if (!Target || Target == this) {
-        return;
-    }
-
-    for (int32 i = Slots.Num() - 1; i >= 0; --i) {
-        const FMythicInventorySlotEntry &Slot = Slots.Items[i];
-
-        if (Slot.IsGearSlot()) {
-            continue;
-        }
-
-        if (!Slot.bCanPlayerTake) {
-            continue;
-        }
-
+    int32 TotalTransferred = 0;
+    for (int32 SlotIndex = Slots.Num() - 1; SlotIndex >= 0; --SlotIndex) {
+        const FMythicInventorySlotEntry &Slot = Slots.Items[SlotIndex];
         UMythicItemInstance *Item = Slot.SlottedItemInstance;
-        if (!Item) {
+        if (!Item || Slot.IsGearSlot() || !Slot.bCanPlayerTake) {
             continue;
         }
-
         if (OptionalTypeFilter.IsValid()) {
-            const UItemDefinition *Def = Item->GetItemDefinition();
-            if (!Def || !Def->ItemType.MatchesTag(OptionalTypeFilter)) {
+            const UItemDefinition *Definition = Item->GetItemDefinition();
+            if (!Definition || !Definition->ItemType.MatchesTag(OptionalTypeFilter)) {
                 continue;
             }
         }
 
-        UMythicItemInstance *Released = ReleaseFromSlot(i);
+        UMythicItemInstance *Released = ReleaseFromSlot(SlotIndex);
         if (!Released) {
             continue;
         }
-
-        int32 OriginalQty = Released->GetStacks();
-        int32 Added = Target->AddToAnySlot(Released, true);
-
-        if (Added == 0) {
-            SetItemInSlot(i, Released);
-            continue;
-        }
-
-        if (Added < OriginalQty && IsValid(Released)) {
-            SetItemInSlot(i, Released);
+        const int32 OriginalQuantity = Released->GetStacks();
+        const int32 Added = Target->AddToAnySlot(Released, true);
+        TotalTransferred += FMath::Clamp(Added, 0, OriginalQuantity);
+        if (Added <= 0 || (Added < OriginalQuantity && IsValid(Released))) {
+            SetItemInSlot(SlotIndex, Released);
         }
     }
-}
-
-void UMythicInventoryComponent::ServerUseItemInSlot_Implementation(int32 SlotIndex) {
-    if (!Slots.IsValidIndex(SlotIndex)) {
-        return;
-    }
-    UMythicItemInstance *Item = Slots.Items[SlotIndex].SlottedItemInstance;
-    if (!Item || !Item->GetItemInstanceGuid().IsValid()) {
-        return;
-    }
-
-    FMythicInventorySourceLocator Source;
-    Source.Inventory = this;
-    Source.SlotIndex = SlotIndex;
-    Source.ExpectedItemGuid = Item->GetItemInstanceGuid();
-    Source.ExpectedQuantity = Item->GetStacks();
-    int32 QuantityConsumed = 0;
-    TryUseItemInSlot(Source, QuantityConsumed);
+    return TotalTransferred;
 }
 
 EMythicInventoryActionResult UMythicInventoryComponent::TryUseItemInSlot(
@@ -1807,8 +1854,17 @@ EMythicInventoryActionResult UMythicInventoryComponent::TryUseItemInSlot(
     if (SourceResult != EMythicInventoryActionResult::Succeeded) {
         return SourceResult;
     }
-    if (!Slots.Items[Source.SlotIndex].bCanPlayerTake) {
+    const FMythicInventorySlotEntry &SourceEntry = Slots.Items[Source.SlotIndex];
+    if (!SourceEntry.bCanPlayerTake) {
         return EMythicInventoryActionResult::SourceProtected;
+    }
+    if (SourceEntry.IsGearSlot()) {
+        static const FGameplayTag QuickPouchGroup = FGameplayTag::RequestGameplayTag(
+            TEXT("Inventory.Group.Equipment.QuickPouch"), false);
+        if (!QuickPouchGroup.IsValid()
+            || !SourceEntry.GroupTag.MatchesTagExact(QuickPouchGroup)) {
+            return EMythicInventoryActionResult::NotUsable;
+        }
     }
 
     if (!Item->HasTag(ITEMIZATION_ACTIONTYPE_ININVENTORY)) {
@@ -1835,6 +1891,20 @@ EMythicInventoryActionResult UMythicInventoryComponent::TrySetItemJunk(
     if (SourceResult != EMythicInventoryActionResult::Succeeded) {
         return SourceResult;
     }
+    const FMythicInventorySlotEntry &SourceEntry = Slots.Items[Source.SlotIndex];
+    if (!SourceEntry.bCanPlayerTake) {
+        return EMythicInventoryActionResult::SourceProtected;
+    }
+    if (SourceEntry.IsGearSlot()) {
+        return EMythicInventoryActionResult::InvalidRequest;
+    }
+    const UItemDefinition *Definition = Item->GetItemDefinition();
+    if (!Definition) {
+        return EMythicInventoryActionResult::InvalidRequest;
+    }
+    if (Definition->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY)) {
+        return EMythicInventoryActionResult::InvalidRequest;
+    }
     Item->ServerSetMarkedJunk(bJunk);
     return EMythicInventoryActionResult::Succeeded;
 }
@@ -1844,7 +1914,20 @@ bool UMythicInventoryComponent::CanUseItemInSlot(int32 SlotIndex) const {
         return false;
     }
 
-    UMythicItemInstance *Item = Slots.Items[SlotIndex].SlottedItemInstance;
+    const FMythicInventorySlotEntry &Entry = Slots.Items[SlotIndex];
+    if (!Entry.bCanPlayerTake) {
+        return false;
+    }
+    if (Entry.IsGearSlot()) {
+        static const FGameplayTag QuickPouchGroup = FGameplayTag::RequestGameplayTag(
+            TEXT("Inventory.Group.Equipment.QuickPouch"), false);
+        if (!QuickPouchGroup.IsValid()
+            || !Entry.GroupTag.MatchesTagExact(QuickPouchGroup)) {
+            return false;
+        }
+    }
+
+    UMythicItemInstance *Item = Entry.SlottedItemInstance;
     if (!Item) {
         return false;
     }

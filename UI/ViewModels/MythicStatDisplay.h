@@ -227,6 +227,11 @@ struct MYTHIC_API FMythicStatContributionLine {
 };
 
 namespace MythicStatDisplay {
+    /** Rounds a source-unit value into the exact numeric bucket rendered by FormatValue. */
+    MYTHIC_API float QuantizeValueToDisplayPrecision(
+        float Value,
+        const FMythicStatNumberPresentation& Presentation);
+
     /** Formats a final/base stat value using its canonical StatDefinition presentation. */
     MYTHIC_API FText FormatValue(float Value, const FMythicStatNumberPresentation& Presentation);
 

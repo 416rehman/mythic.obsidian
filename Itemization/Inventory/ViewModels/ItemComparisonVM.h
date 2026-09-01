@@ -3,99 +3,11 @@
 
 #include "CoreMinimal.h"
 #include "MVVMViewModelBase.h"
-#include "ItemTooltipVM.h"
+#include "MythicItemComparisonTypes.h"
 #include "ItemComparisonVM.generated.h"
 
 class UMythicItemInstance;
 class UMythicInventoryComponent;
-
-/** One typed item-comparison row with canonical units and data-driven benefit direction. */
-USTRUCT(BlueprintType)
-struct FAttributeDiff {
-    GENERATED_BODY()
-
-    /** Stat.Attribute.* or ItemMetric.* identity. Localized labels are presentation only. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison")
-    FGameplayTag ComparisonTag;
-
-    /** Localized player-facing row label resolved from canonical stat or item-metric presentation data. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison")
-    FText AttributeName;
-
-    /** Comparable contribution supplied by the currently equipped item, expressed in the row's canonical units. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison")
-    float CurrentValue = 0.0f;
-
-    /** Comparable contribution supplied by the inspected item, expressed in the row's canonical units. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison")
-    float NewValue = 0.0f;
-
-    /** Signed NewValue minus CurrentValue; use bIsUpgrade for benefit because some stats prefer lower values. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison")
-    float Delta = 0.0f;
-
-    /** Data-driven benefit verdict using ComparisonDirection, not a hard-coded positive-delta assumption. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison")
-    bool bIsUpgrade = false;
-
-    /** Canonical direction from StatDefinition that determines whether higher or lower contributions are beneficial. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison")
-    EMythicStatComparisonDirection ComparisonDirection = EMythicStatComparisonDirection::Neutral;
-
-    /** Canonical no-contribution identity used when one compared item does not provide this stat or metric. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison")
-    float NeutralValue = 0.0f;
-
-    bool operator==(const FAttributeDiff& Other) const {
-        return ComparisonTag == Other.ComparisonTag &&
-               AttributeName.EqualTo(Other.AttributeName) &&
-               FMath::IsNearlyEqual(CurrentValue, Other.CurrentValue) &&
-               FMath::IsNearlyEqual(NewValue, Other.NewValue) &&
-               FMath::IsNearlyEqual(Delta, Other.Delta) &&
-               bIsUpgrade == Other.bIsUpgrade &&
-               ComparisonDirection == Other.ComparisonDirection &&
-               FMath::IsNearlyEqual(NeutralValue, Other.NeutralValue);
-    }
-};
-
-/** Atomic weapon-specific comparison projection for high-signal AAA ARPG item cards. */
-USTRUCT(BlueprintType)
-struct MYTHIC_API FMythicWeaponAttackComparisonViewData {
-    GENERATED_BODY()
-
-    /** True when the inspected item supplied a complete canonical weapon attack projection. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison|Weapon Attack")
-    bool bIsValid = false;
-
-    /** True when the replacement slot contains a weapon with a complete canonical attack projection. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison|Weapon Attack")
-    bool bHasEquippedWeaponAttack = false;
-
-    /** Canonical attack projection for the inspected candidate, identical in meaning to the item-details DPS block. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison|Weapon Attack")
-    FMythicWeaponAttackViewData InspectedAttack;
-
-    /** Canonical attack projection for the equipped item, or an invalid zero projection when the slot is empty. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison|Weapon Attack")
-    FMythicWeaponAttackViewData EquippedAttack;
-
-    /** Typed sustained-DPS comparison, with NewValue representing the inspected item and CurrentValue the equipped item. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison|Weapon Attack")
-    FAttributeDiff DamagePerSecondComparison;
-
-    /** Typed effective-APS comparison after the exact combat AttackSpeed clamp, never raw authored montage cadence. */
-    UPROPERTY(BlueprintReadOnly, Category="Mythic|Comparison|Weapon Attack")
-    FAttributeDiff EffectiveAttacksPerSecondComparison;
-
-    bool operator==(const FMythicWeaponAttackComparisonViewData& Other) const {
-        return bIsValid == Other.bIsValid &&
-               bHasEquippedWeaponAttack == Other.bHasEquippedWeaponAttack &&
-               InspectedAttack == Other.InspectedAttack &&
-               EquippedAttack == Other.EquippedAttack &&
-               DamagePerSecondComparison == Other.DamagePerSecondComparison &&
-               EffectiveAttacksPerSecondComparison == Other.EffectiveAttacksPerSecondComparison;
-    }
-};
 
 UCLASS()
 class MYTHIC_API UItemComparisonVM : public UMVVMViewModelBase {
@@ -111,7 +23,7 @@ public:
     UItemTooltipVM *EquippedItem = nullptr;
 
     /**
-     * Tag-union rows for canonical affix contributions plus weapon DPS, effective APS, and durability metrics.
+     * Tag-union rows for canonical affix contributions plus weapon average hit, DPS, effective APS, and durability.
      * These are display projections; immutable affix snapshots and live semantic definitions remain authority.
      */
     UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category="Mythic|Comparison")
@@ -133,10 +45,15 @@ public:
                                                int32 TargetSlotIndex, bool bExpectEmpty,
                                                FGuid ExpectedTargetOccupantGuid);
 
-    /** Builds the atomic typed weapon comparison from two canonical item-local attack projections. */
+    /**
+     * Builds the atomic typed weapon comparison from two canonical item-local attack projections.
+     * When bSuppressEmptyBaseline is true, a missing equipped projection retains candidate attack data but emits no
+     * zero-baseline metric deltas.
+     */
     static FMythicWeaponAttackComparisonViewData BuildWeaponAttackComparison(
         const FMythicWeaponAttackViewData &InspectedAttack,
-        const FMythicWeaponAttackViewData &EquippedAttack);
+        const FMythicWeaponAttackViewData &EquippedAttack,
+        bool bSuppressEmptyBaseline = true);
 
     void SetInspectedItem(UItemTooltipVM *InInspectedItem);
     UItemTooltipVM *GetInspectedItem() const;

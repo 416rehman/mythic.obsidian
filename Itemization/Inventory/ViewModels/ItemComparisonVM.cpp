@@ -38,13 +38,26 @@ void AppendWeaponAttackMetrics(const FMythicWeaponAttackViewData &Attack,
     }
 
     OutStats.Emplace(
+        ITEM_METRIC_WEAPON_AVERAGE_DAMAGE_PER_HIT,
+        NSLOCTEXT("MythicComparison", "WeaponAverageDamagePerHit", "Average Damage per Hit"),
+        Attack.AverageDamagePerHit,
+        0.0f,
+        EMythicStatComparisonDirection::HigherIsBetter,
+        Attack.DamageNumberPresentation);
+    OutStats.Emplace(
         ITEM_METRIC_WEAPON_DAMAGE_PER_SECOND,
         NSLOCTEXT("MythicComparison", "WeaponDamagePerSecond", "Damage per Second"),
-        Attack.DamagePerSecond);
+        Attack.DamagePerSecond,
+        0.0f,
+        EMythicStatComparisonDirection::HigherIsBetter,
+        Attack.DamageNumberPresentation);
     OutStats.Emplace(
         ITEM_METRIC_WEAPON_ATTACKS_PER_SECOND,
         NSLOCTEXT("MythicComparison", "WeaponAttacksPerSecond", "Attacks per Second"),
-        Attack.AttacksPerSecond);
+        Attack.AttacksPerSecond,
+        0.0f,
+        EMythicStatComparisonDirection::HigherIsBetter,
+        Attack.AttacksPerSecondNumberPresentation);
 }
 
 } // namespace
@@ -86,7 +99,8 @@ FMythicWeaponAttackComparisonViewData UItemComparisonVM::GetWeaponAttackComparis
 
 FMythicWeaponAttackComparisonViewData UItemComparisonVM::BuildWeaponAttackComparison(
     const FMythicWeaponAttackViewData &InspectedAttack,
-    const FMythicWeaponAttackViewData &EquippedAttack) {
+    const FMythicWeaponAttackViewData &EquippedAttack,
+    const bool bSuppressEmptyBaseline) {
     if (!IsComparableWeaponAttack(InspectedAttack)) {
         return FMythicWeaponAttackComparisonViewData();
     }
@@ -97,17 +111,26 @@ FMythicWeaponAttackComparisonViewData UItemComparisonVM::BuildWeaponAttackCompar
     if (Candidate.bHasEquippedWeaponAttack) {
         Candidate.EquippedAttack = EquippedAttack;
     }
+    else if (bSuppressEmptyBaseline) {
+        Candidate.bIsValid = true;
+        return Candidate;
+    }
 
     TArray<FMythicComparableStat> InspectedStats;
     TArray<FMythicComparableStat> EquippedStats;
     AppendWeaponAttackMetrics(Candidate.InspectedAttack, InspectedStats);
     AppendWeaponAttackMetrics(Candidate.EquippedAttack, EquippedStats);
 
+    bool bFoundAverageDamagePerHit = false;
     bool bFoundDamagePerSecond = false;
     bool bFoundAttacksPerSecond = false;
     for (const FAttributeDiff &Diff : FMythicStatDeltaCore::ComputeDiffs(
              InspectedStats, EquippedStats)) {
-        if (Diff.ComparisonTag == ITEM_METRIC_WEAPON_DAMAGE_PER_SECOND.GetTag()) {
+        if (Diff.ComparisonTag == ITEM_METRIC_WEAPON_AVERAGE_DAMAGE_PER_HIT.GetTag()) {
+            Candidate.AverageDamagePerHitComparison = Diff;
+            bFoundAverageDamagePerHit = true;
+        }
+        else if (Diff.ComparisonTag == ITEM_METRIC_WEAPON_DAMAGE_PER_SECOND.GetTag()) {
             Candidate.DamagePerSecondComparison = Diff;
             bFoundDamagePerSecond = true;
         }
@@ -116,10 +139,11 @@ FMythicWeaponAttackComparisonViewData UItemComparisonVM::BuildWeaponAttackCompar
             bFoundAttacksPerSecond = true;
         }
     }
-    if (!bFoundDamagePerSecond || !bFoundAttacksPerSecond) {
+    if (!bFoundAverageDamagePerHit || !bFoundDamagePerSecond || !bFoundAttacksPerSecond) {
         return FMythicWeaponAttackComparisonViewData();
     }
 
+    Candidate.bHasComparisonDeltas = true;
     Candidate.bIsValid = true;
     return Candidate;
 }
@@ -130,7 +154,15 @@ static void BuildComparableStats(const UItemTooltipVM *Tooltip, TArray<FMythicCo
     }
     AppendWeaponAttackMetrics(Tooltip->GetWeaponAttack(), OutStats);
     if (Tooltip->GetMaxDurability() > 0.0f) {
-        OutStats.Emplace(ITEM_METRIC_DURABILITY, NSLOCTEXT("MythicComparison", "MaxDurability", "Durability"), Tooltip->GetMaxDurability());
+        FMythicStatNumberPresentation DurabilityPresentation;
+        DurabilityPresentation.Format = EMythicStatFormat::Integer;
+        OutStats.Emplace(
+            ITEM_METRIC_DURABILITY,
+            NSLOCTEXT("MythicComparison", "MaxDurability", "Durability"),
+            Tooltip->GetMaxDurability(),
+            0.0f,
+            EMythicStatComparisonDirection::HigherIsBetter,
+            DurabilityPresentation);
     }
     for (const FAffixDisplayData &Affix : Tooltip->GetAffixes()) {
         if (Affix.bOwnedByWeaponAttackPresentation) {
@@ -138,7 +170,7 @@ static void BuildComparableStats(const UItemTooltipVM *Tooltip, TArray<FMythicCo
         }
         for (const FMythicAffixValueViewData &Value : Affix.ViewData.Values) {
             OutStats.Emplace(Value.StatTag, Value.StatLabel, Value.ComparisonValue, Value.ContributionIdentity,
-                             Value.ComparisonDirection, Affix.bIsPercentage);
+                             Value.ComparisonDirection, Value.NumberPresentation);
         }
     }
 }
@@ -197,8 +229,12 @@ UItemComparisonVM *UItemComparisonVM::CreateComparison(UObject *Outer, UMythicIt
             VM->SetEquippedItem(EquippedTooltip);
             BuildComparableStats(EquippedTooltip, EquippedStats);
         }
-        const TArray<FAttributeDiff> Diffs = FMythicStatDeltaCore::ComputeDiffs(InspectedStats, EquippedStats);
-        VM->SetAttributeDiffs(Diffs);
+        // An empty equipment target is contextual information, not a zero-valued item. Showing candidate-vs-zero
+        // gains here would disagree with the same ItemDetails card and exaggerate every stat as an upgrade.
+        VM->SetAttributeDiffs(
+            bExpectEmpty
+                ? TArray<FAttributeDiff>()
+                : FMythicStatDeltaCore::ComputeDiffs(InspectedStats, EquippedStats));
 
         const FMythicWeaponAttackViewData InspectedAttack = InspectedTooltip
             ? InspectedTooltip->GetWeaponAttack()

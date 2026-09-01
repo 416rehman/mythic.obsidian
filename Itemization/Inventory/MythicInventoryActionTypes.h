@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "MythicInventoryActionTypes.generated.h"
 
 class UMythicInventoryComponent;
@@ -154,4 +155,51 @@ struct MYTHIC_API FMythicInventoryActionReceipt {
     bool WasSuccessful() const {
         return Result == EMythicInventoryActionResult::Succeeded;
     }
+};
+
+/**
+ * Client-local snapshot published immediately before one inventory request enters the reliable RPC seam.
+ *
+ * This is presentation metadata only. The server continues to validate the full source and target locators carried by
+ * the request itself; UI code must never treat this projection as authority or mutate inventory from it.
+ */
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicInventoryActionSubmission {
+    GENERATED_BODY()
+
+    /** Positive controller-local correlation identifier shared with the eventual authoritative receipt. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Inventory|Action")
+    int64 RequestId = 0;
+
+    /** Inventory operation submitted through the canonical player-controller seam. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Inventory|Action")
+    EMythicInventoryAction Action = EMythicInventoryAction::Move;
+
+    /** Player-owned inventory that supplied the source item, or the sorted inventory for a group-wide request. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Inventory|Action")
+    TObjectPtr<UMythicInventoryComponent> Inventory = nullptr;
+
+    /** Stable physical item identity captured from the source locator; invalid for a group-wide sort. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Inventory|Action")
+    FGuid ItemGuid;
+
+    /** Absolute source slot, or INDEX_NONE when the request applies to a carried group. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Inventory|Action")
+    int32 SourceSlotIndex = INDEX_NONE;
+
+    /** Absolute destination slot for a move, otherwise INDEX_NONE. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Inventory|Action")
+    int32 TargetSlotIndex = INDEX_NONE;
+
+    /** Requested split/drop quantity, or the observed source quantity for actions that affect the whole item. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Inventory|Action")
+    int32 RequestedQuantity = 0;
+
+    /** Carried group affected by Sort; invalid for item-local actions. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Inventory|Action")
+    FGameplayTag GroupTag;
+
+    /** Desired manual-junk state for SetJunk; ignored by every other action. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Inventory|Action")
+    bool bDesiredManualJunk = false;
 };

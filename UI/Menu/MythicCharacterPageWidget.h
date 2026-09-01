@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/AssetManagerTypes.h"
 #include "GameplayTagContainer.h"
 #include "Components/ListViewBase.h"
 #include "FieldNotificationId.h"
@@ -19,7 +20,6 @@ class UInputAction;
 class UInventorySelectionVM;
 class UInventoryTabVM;
 class UInventoryVM;
-class UItemComparisonVM;
 class UItemSlotVM;
 class UListView;
 class UListViewBase;
@@ -28,6 +28,8 @@ class UMaterialInterface;
 class UMythicHUDLayout;
 class UMythicBoundActionButton;
 class UMythicInventoryComponent;
+class UMythicInventoryInteractionCoordinator;
+class UMythicItemDetailsWidget;
 class UMythicSectionHeader;
 class UOverlay;
 class UPanelWidget;
@@ -35,6 +37,8 @@ class USizeBox;
 class UVerticalBox;
 class UWidget;
 struct FGameplayEventData;
+struct FAnalogInputEvent;
+struct FGeometry;
 
 class UMythicCharacterPageWidget;
 
@@ -44,12 +48,9 @@ enum class EMythicInventoryUICommand : uint8 {
     EquipOrUnequip,
     Use,
     BeginMove,
-    Compare,
     Split,
     Drop,
     ToggleJunk,
-    Inspect,
-    OpenSortMenu,
     SortByRarity,
     SortByType,
     SortByName,
@@ -57,9 +58,9 @@ enum class EMythicInventoryUICommand : uint8 {
     SortByWeight,
     QuantityDecrease,
     QuantityIncrease,
+    QuantityDecreaseLarge,
+    QuantityIncreaseLarge,
     ConfirmQuantity,
-    ChooseEquipmentTarget,
-    ConfirmComparisonEquip,
     Cancel,
 };
 
@@ -138,6 +139,9 @@ protected:
     virtual void NativeOnDeactivated() override;
     virtual void NativeDestruct() override;
     virtual UWidget *NativeGetDesiredFocusTarget() const override;
+    virtual FReply NativeOnAnalogValueChanged(
+        const FGeometry &InGeometry,
+        const FAnalogInputEvent &InAnalogEvent) override;
 
     /** Performs the contextual primary verb for the selected slot (equip, unequip, use, or inspect). */
     UFUNCTION()
@@ -147,9 +151,9 @@ protected:
     UFUNCTION()
     void HandleInventoryActionsAction();
 
-    /** Opens comparison against an explicitly selected compatible equipment slot. */
+    /** Cycles the exact equipment target used by both inline comparison and Equip. */
     UFUNCTION()
-    void HandleCompareInventoryAction();
+    void HandleCycleInventoryTarget();
 
     /** Opens the data-safe sort choices for the selected carried group. */
     UFUNCTION()
@@ -164,6 +168,16 @@ protected:
     /** Receives the authoritative result for a correlated player-inventory request. */
     UFUNCTION()
     void HandleInventoryActionReceipt(const FMythicInventoryActionReceipt &Receipt);
+
+    /** Presents already-localized coordinator feedback without creating page-local transport state. */
+    UFUNCTION()
+    void HandleInventoryInteractionFeedback(const FText &Message, bool bIsError);
+
+    /** Refreshes mutation affordances while navigation and item details remain interactive. */
+    UFUNCTION()
+    void HandleInventoryPendingChanged(
+        bool bPending,
+        const FMythicInventoryActionSubmission &Submission);
 
     /** Coalesces replicated slot changes so selection is restored after the view model refreshes. */
     UFUNCTION()
@@ -208,7 +222,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Inventory|Input")
     TSoftObjectPtr<UInputAction> InventoryActionsInputAction;
 
-    /** Opens an explicit equipped-slot comparison: Left Shift/Y. */
+    /** Cycles the exact compatible equipment target: Left Shift/Y. Comparison updates inline in Item Details. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Inventory|Input")
     TSoftObjectPtr<UInputAction> InventoryCompareInputAction;
 
@@ -292,9 +306,9 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UWidget> DetailsPlaceholder;
 
-    /** WBP_ItemDetails. One instance for the page's lifetime — never created per selection. */
+    /** WBP_ItemDetails. One typed instance for the page's lifetime; never created per selection or comparison. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Character")
-    TSubclassOf<UUserWidget> ItemDetailsClass;
+    TSubclassOf<UMythicItemDetailsWidget> ItemDetailsClass;
 
     /** Shared with the proficiency tracks and the vital orbs, so every bar in the game is the same bar. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Character")
@@ -313,13 +327,10 @@ private:
 
     enum class EInventoryPageState : uint8 {
         Browsing,
-        ActionMenu,
-        EquipmentTarget,
+        Context,
         MoveTarget,
         Quantity,
-        Comparison,
-        SortMenu,
-        Pending,
+        Sort,
     };
 
     enum class EQuantityPurpose : uint8 {
@@ -328,8 +339,25 @@ private:
         Drop,
     };
 
+    /** Stable authored identity for a repeated equipment slot, independent of its current absolute array index. */
+    struct FEquipmentTargetKey {
+        FGameplayTag GroupTag;
+        FPrimaryAssetId SlotDefinitionId;
+        int32 EntryIndex = INDEX_NONE;
+        int32 RepetitionOrdinal = 0;
+
+        bool operator==(const FEquipmentTargetKey &Other) const {
+            return GroupTag == Other.GroupTag
+                && SlotDefinitionId == Other.SlotDefinitionId
+                && EntryIndex == Other.EntryIndex
+                && RepetitionOrdinal == Other.RepetitionOrdinal;
+        }
+    };
+
     struct FEquipmentTarget {
+        FEquipmentTargetKey Key;
         int32 SlotIndex = INDEX_NONE;
+        int32 GroupDisplayOrder = 0;
         FText DisplayName;
         bool bExpectEmpty = true;
         FGuid OccupantGuid;
@@ -406,25 +434,32 @@ private:
     void ReleaseInventoryEvents();
     void ResetInventoryInteractionState();
     void RefreshInventoryActionBar();
+    void RefreshDetailsForSelection();
     void ExecuteInventoryUICommand(EMythicInventoryUICommand Command, int32 Payload);
 
-    void OpenActionMenu();
+    void OpenContextMenu();
     void OpenSortMenu();
     void OpenQuantityPanel(EQuantityPurpose Purpose);
-    void OpenEquipmentTargetPicker(bool bForComparison);
-    void OpenComparison(int32 TargetSlotIndex);
     void CloseInventoryModal(bool bRestoreSourceSelection = true);
     void ClearModalOptions();
     UWidget *AddModalCommand(const FText &Label, EMythicInventoryUICommand Command,
                              int32 Payload = INDEX_NONE, bool bEnabled = true,
-                             const FText &Tooltip = FText::GetEmpty());
+                             const FText &Tooltip = FText::GetEmpty(),
+                             bool bRequiresHold = false);
     void SetFeedback(const FText &Message, bool bIsError = false);
 
     UItemSlotVM *GetSelectedSlot() const;
     UMythicInventoryComponent *GetInventoryComponent() const;
     bool BuildSourceLocator(struct FMythicInventorySourceLocator &OutSource) const;
     bool BuildTargetLocator(int32 SlotIndex, struct FMythicInventoryTargetLocator &OutTarget) const;
+    bool CanMoveSelectionToSlot(int32 TargetSlotIndex, FText *OutReason = nullptr) const;
     TArray<FEquipmentTarget> BuildEquipmentTargets() const;
+    int32 FindUnequipDestination() const;
+    void ResolveActiveEquipmentTarget();
+    void CycleActiveEquipmentTarget();
+    FEquipmentTargetKey BuildEquipmentTargetKey(int32 SlotIndex) const;
+    bool IsMutationPending() const;
+    UMythicInventoryInteractionCoordinator *GetInventoryInteractionCoordinator() const;
     FText GetSlotDisplayName(int32 SlotIndex) const;
     void BeginMoveTargetSelection();
     void ConfirmMoveTarget();
@@ -434,7 +469,7 @@ private:
     void SubmitDrop(int32 Quantity);
     void SubmitSetJunk();
     void SubmitSort(int32 SortModeValue);
-    void BeginPendingRequest(int64 RequestId, int32 ActionValue);
+    void HandleSubmittedRequest(int64 RequestId);
 
     void SetSelectedSlot(UItemSlotVM *SlotVM, UListViewBase *SourceList);
     void ClearOtherListSelections(UListViewBase *Except);
@@ -474,20 +509,16 @@ private:
     int32 QuantityValue = 1;
     int32 QuantityMaximum = 1;
     int32 ActiveTargetSlotIndex = INDEX_NONE;
-    int32 StickyEquipmentTargetSlotIndex = INDEX_NONE;
-    bool bTargetPickerForComparison = false;
     bool bSynchronizingSelection = false;
     bool bSelectionRestoreScheduled = false;
-    int64 PendingRequestId = 0;
-    int32 PendingActionValue = INDEX_NONE;
     FGuid SelectedItemGuid;
     FGuid ActionSourceGuid;
     int32 LastSelectedSlotIndex = INDEX_NONE;
     int32 ActionSourceSlotIndex = INDEX_NONE;
     TWeakObjectPtr<UListViewBase> SelectedList;
 
-    UPROPERTY(Transient)
-    TObjectPtr<UItemComparisonVM> ComparisonVM;
+    /** Last target choice per item family; stable authored keys survive slot-array reorder and replication refresh. */
+    TMap<FGameplayTag, FEquipmentTargetKey> StickyEquipmentTargetKeys;
 
     UPROPERTY(Transient)
     TObjectPtr<UCommonTextBlock> InventoryFeedback;
@@ -511,7 +542,7 @@ private:
     TObjectPtr<UMythicBoundActionButton> ActionsActionButton;
 
     UPROPERTY(Transient)
-    TObjectPtr<UMythicBoundActionButton> CompareActionButton;
+    TObjectPtr<UMythicBoundActionButton> TargetActionButton;
 
     UPROPERTY(Transient)
     TObjectPtr<UMythicBoundActionButton> SortActionButton;
@@ -541,7 +572,7 @@ private:
     TArray<TWeakObjectPtr<class UListViewBase>> BoundSlotLists;
 
     UPROPERTY(Transient)
-    TObjectPtr<UUserWidget> DetailsCard;
+    TObjectPtr<UMythicItemDetailsWidget> DetailsCard;
 
     UPROPERTY(Transient)
     TWeakObjectPtr<UWidget> BorrowedInventory;

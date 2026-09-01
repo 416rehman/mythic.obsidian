@@ -25,6 +25,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
     const FMythicInventoryActionReceipt &,
     Receipt);
 
+/** Owning-client edge emitted after one request is gated and before its reliable server RPC is invoked. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+    FMythicInventoryActionSubmitted,
+    const FMythicInventoryActionSubmission &,
+    Submission);
+
 class UMythicItemInstance;
 class UMythicHarvestFocusComponent;
 class UMythicContextActionDefinition;
@@ -375,6 +381,25 @@ public:
     /** Broadcast on the owning client for committed, rejected, and duplicate-replayed inventory requests. */
     UPROPERTY(BlueprintAssignable, Category = "Inventory|Actions")
     FMythicInventoryActionReceiptReceived OnInventoryActionReceiptReceived;
+
+    /**
+     * Broadcast locally after the one-request gate is installed and before the reliable inventory RPC is invoked.
+     * Presentation systems may observe this edge but must not use it as mutation authority.
+     */
+    UPROPERTY(BlueprintAssignable, Category = "Inventory|Actions")
+    FMythicInventoryActionSubmitted OnInventoryActionSubmitted;
+
+    /** True while this controller is awaiting the authoritative receipt for its one allowed inventory mutation. */
+    UFUNCTION(BlueprintPure, Category = "Inventory|Actions")
+    bool HasPendingInventoryAction() const {
+        return ActiveInventoryActionRequestId > 0;
+    }
+
+    /** Returns the active client-local request ID, or zero when inventory mutation input is unlocked. */
+    UFUNCTION(BlueprintPure, Category = "Inventory|Actions")
+    int64 GetPendingInventoryActionRequestId() const {
+        return ActiveInventoryActionRequestId;
+    }
 
     /**
      * Consumes a receipt that reached the owning client before its UI caller finished recording the returned request
@@ -765,6 +790,15 @@ private:
     /** Allocates a positive correlation ID for one locally submitted inventory request. */
     int64 AllocateInventoryActionRequestId();
 
+    /** Installs the one-request client gate and publishes metadata before the caller invokes its reliable RPC. */
+    int64 BeginInventoryActionSubmission(FMythicInventoryActionSubmission &Submission);
+
+    /** Accepts only a strictly increasing first-seen request ID after cached replay has been checked. */
+    bool AcceptNewInventoryActionRequestId(int64 RequestId);
+
+    /** Clears transient client submission state during controller replacement, travel, or teardown. */
+    void ResetInventoryActionSubmissionState();
+
     /** Re-delivers a cached receipt without re-executing its authoritative mutation. */
     bool ReplayCachedInventoryActionReceipt(int64 RequestId);
 
@@ -773,6 +807,15 @@ private:
 
     /** Next positive correlation ID allocated by this local controller. */
     int64 NextInventoryActionRequestId = 1;
+
+    /** One locally submitted request awaiting its matching reliable receipt; zero means input is unlocked. */
+    int64 ActiveInventoryActionRequestId = 0;
+
+    /** Highest first-seen request ID accepted by authority, including semantic rejections. */
+    int64 HighestAcceptedInventoryActionRequestId = 0;
+
+    /** True after the positive request-ID space is exhausted; IDs never wrap and collide with old cached work. */
+    bool bInventoryActionRequestIdsExhausted = false;
 
     /** First-execution receipts retained by request ID for duplicate suppression on authority. */
     TMap<int64, FMythicInventoryActionReceipt> InventoryActionReceiptCache;

@@ -33,9 +33,29 @@ public:
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
     UTexture2D *EmptySlotIcon = nullptr;
 
-    // is marked junk
-    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
-    bool IsJunk;
+    /** True only when the player explicitly marked this physical item as junk. */
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, Category = "Mythic|Inventory|Junk",
+              meta = (AllowPrivateAccess))
+    bool IsManuallyMarkedJunk = false;
+
+    /** True when the local data-driven loot filter classifies the item as junk without changing its saved flag. */
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, Category = "Mythic|Inventory|Junk",
+              meta = (AllowPrivateAccess))
+    bool IsAutomaticallyClassifiedJunk = false;
+
+    /** Effective presentation state: manual mark or automatic loot-filter classification. */
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, Category = "Mythic|Inventory|Junk",
+              meta = (AllowPrivateAccess))
+    bool IsTreatedAsJunk = false;
+
+    /**
+     * Deprecated compatibility alias for effective junk state. New action logic must use IsManuallyMarkedJunk so
+     * toggling an automatically classified item cannot accidentally create the opposite manual flag.
+     */
+    UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, Category = "Mythic|Inventory|Junk",
+              meta = (AllowPrivateAccess, DeprecatedProperty,
+                      DeprecationMessage = "Use IsManuallyMarkedJunk, IsAutomaticallyClassifiedJunk, or IsTreatedAsJunk."))
+    bool IsJunk = false;
 
     // background color for this item slot
     UPROPERTY(BlueprintReadWrite, FieldNotify, Setter, Getter, meta=(AllowPrivateAccess))
@@ -126,6 +146,12 @@ public:
 
     void SetEmptySlotIcon(UTexture2D *InIcon);
     UTexture2D *GetEmptySlotIcon() const;
+    void SetIsManuallyMarkedJunk(bool bInManuallyMarkedJunk);
+    bool GetIsManuallyMarkedJunk() const;
+    void SetIsAutomaticallyClassifiedJunk(bool bInAutomaticallyClassifiedJunk);
+    bool GetIsAutomaticallyClassifiedJunk() const;
+    void SetIsTreatedAsJunk(bool bInTreatedAsJunk);
+    bool GetIsTreatedAsJunk() const;
     void SetIsJunk(bool bInIsJunk);
     bool GetIsJunk() const;
     void SetBackgroundColor(FSlateColor InBackgroundColor);
@@ -178,11 +204,11 @@ public:
 
     void Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *InParentVM, UInventorySlotDefinition *InSlotDefinition, int32 InAbsoluteIndex);
 
-    // get owning inventory component from ParentInventoryVM
+    /** Returns the inventory component whose replicated slot this view model projects, or null when detached. */
     UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
     UMythicInventoryComponent *TryGetOwningInventoryComponent() const;
 
-    // try getting the item instance currently in this slot
+    /** Returns the live physical item currently occupying this projected slot, or null for an empty/stale slot. */
     UFUNCTION(BlueprintPure, Category="Mythic|Inventory|VM")
     UMythicItemInstance *TryGetItemInstance() const;
 };

@@ -33,6 +33,43 @@ UTexture2D *UItemSlotVM::GetEmptySlotIcon() const {
     return EmptySlotIcon;
 }
 
+void UItemSlotVM::SetIsManuallyMarkedJunk(const bool bInManuallyMarkedJunk) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(IsManuallyMarkedJunk, bInManuallyMarkedJunk)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(IsManuallyMarkedJunk);
+    }
+}
+
+bool UItemSlotVM::GetIsManuallyMarkedJunk() const {
+    return IsManuallyMarkedJunk;
+}
+
+void UItemSlotVM::SetIsAutomaticallyClassifiedJunk(
+    const bool bInAutomaticallyClassifiedJunk) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(
+            IsAutomaticallyClassifiedJunk,
+            bInAutomaticallyClassifiedJunk)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(
+            IsAutomaticallyClassifiedJunk);
+    }
+}
+
+bool UItemSlotVM::GetIsAutomaticallyClassifiedJunk() const {
+    return IsAutomaticallyClassifiedJunk;
+}
+
+void UItemSlotVM::SetIsTreatedAsJunk(const bool bInTreatedAsJunk) {
+    if (UE_MVVM_SET_PROPERTY_VALUE(IsTreatedAsJunk, bInTreatedAsJunk)) {
+        UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(IsTreatedAsJunk);
+    }
+    // Keep the old MVVM field alive until every shipped Widget Blueprint has
+    // compiled against the explicit manual/automatic/effective contract.
+    SetIsJunk(bInTreatedAsJunk);
+}
+
+bool UItemSlotVM::GetIsTreatedAsJunk() const {
+    return IsTreatedAsJunk;
+}
+
 void UItemSlotVM::SetIsJunk(bool NewIsJunk) {
     if (UE_MVVM_SET_PROPERTY_VALUE(IsJunk, NewIsJunk)) {
         UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(IsJunk);
@@ -243,7 +280,9 @@ void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *
     if (InItemInstance == nullptr) {
         SetIcon(nullptr);
         SetEmptySlotIcon(bSlotIsEquipment && SlotDefinition ? SlotDefinition->Icon.Get() : nullptr);
-        SetIsJunk(false);
+        SetIsManuallyMarkedJunk(false);
+        SetIsAutomaticallyClassifiedJunk(false);
+        SetIsTreatedAsJunk(false);
         SetBackgroundColor(FLinearColor::Black);
         SetQuantity(0);
         SetItemName(FText::GetEmpty());
@@ -266,7 +305,9 @@ void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *
         UE_LOG(Myth, Error, TEXT("ItemInstance %s has null ItemDefinition"), *GetNameSafe(InItemInstance));
         SetIcon(nullptr);
         SetEmptySlotIcon(bSlotIsEquipment && SlotDefinition ? SlotDefinition->Icon.Get() : nullptr);
-        SetIsJunk(false);
+        SetIsManuallyMarkedJunk(false);
+        SetIsAutomaticallyClassifiedJunk(false);
+        SetIsTreatedAsJunk(false);
         SetBackgroundColor(FLinearColor::Black);
         SetQuantity(0);
         SetItemName(FText::GetEmpty());
@@ -288,10 +329,18 @@ void UItemSlotVM::Initialize(UMythicItemInstance *InItemInstance, UInventoryVM *
     SetEmptySlotIcon(nullptr);
 
     const bool bItemIsCurrency = ItemDef->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY);
-    SetIsJunk(MythicLootFilter::IsJunk(InItemInstance->IsMarkedJunk(),
-                                       static_cast<int32>(ItemDef->Rarity.GetValue()),
-                                       MythicLootFilter::DefaultMaxJunkRarity,
-                                       ItemDef->Value, bItemIsCurrency, bSlotIsEquipment, bSlotCanTake));
+    const bool bManuallyMarkedJunk = InItemInstance->IsMarkedJunk();
+    const bool bAutomaticallyClassifiedJunk = MythicLootFilter::IsJunk(
+        false,
+        static_cast<int32>(ItemDef->Rarity.GetValue()),
+        MythicLootFilter::DefaultMaxJunkRarity,
+        ItemDef->Value,
+        bItemIsCurrency,
+        bSlotIsEquipment,
+        bSlotCanTake);
+    SetIsManuallyMarkedJunk(bManuallyMarkedJunk);
+    SetIsAutomaticallyClassifiedJunk(bAutomaticallyClassifiedJunk);
+    SetIsTreatedAsJunk(bManuallyMarkedJunk || bAutomaticallyClassifiedJunk);
 
     SetBackgroundColor(UItemDefinition::GetRarityColor(ItemDef->Rarity));
     SetQuantity(InItemInstance->GetStacks());

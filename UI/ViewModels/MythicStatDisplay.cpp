@@ -79,6 +79,29 @@ FMythicStatNumberPresentation DefaultPresentationForFormat(EMythicStatFormat For
 }
 
 namespace MythicStatDisplay {
+float QuantizeValueToDisplayPrecision(
+    const float Value,
+    const FMythicStatNumberPresentation& Presentation) {
+    if (!FMath::IsFinite(Value)) {
+        return Value;
+    }
+
+    const int32 DecimalPlaces = EffectiveDecimalPlaces(Presentation);
+    const double PrecisionScale = FMath::Pow(10.0, static_cast<double>(DecimalPlaces));
+    const double DisplayValue = ToDisplayNumber(Value, Presentation.Format);
+    const double QuantizedDisplay = FMath::RoundHalfToEven(DisplayValue * PrecisionScale)
+        / PrecisionScale;
+
+    switch (Presentation.Format) {
+    case EMythicStatFormat::Percent:
+        return static_cast<float>(QuantizedDisplay / 100.0);
+    case EMythicStatFormat::Multiplier:
+        return static_cast<float>((QuantizedDisplay / 100.0) + 1.0);
+    default:
+        return static_cast<float>(QuantizedDisplay);
+    }
+}
+
 FText FormatValue(float Value, const FMythicStatNumberPresentation& Presentation) {
     if (!FMath::IsFinite(Value)) {
         return FText::GetEmpty();

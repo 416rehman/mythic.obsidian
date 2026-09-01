@@ -159,7 +159,8 @@ void AMythicCorpse::ServerInitializeFromDeath(const FMythicCorpseIdentity &Ident
     }
 
     if (ContentsToAbsorb && ContainerInventory) {
-        ContentsToAbsorb->ServerDepositAll(ContainerInventory, FGameplayTag());
+        ContentsToAbsorb->TransferAllTakeableItemsToInventory(
+            ContainerInventory, FGameplayTag());
     }
 
     bDecayStarted = false;
