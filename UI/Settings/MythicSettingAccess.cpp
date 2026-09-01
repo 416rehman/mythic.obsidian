@@ -2,6 +2,7 @@
 #include "UI/Settings/MythicSettingAccess.h"
 
 #include "HAL/IConsoleManager.h"
+#include "Mythic/Mythic.h"
 #include "RenderUtils.h"
 #include "Scalability.h"
 #include "UI/Settings/MythicUserSettings.h"
@@ -49,6 +50,88 @@ bool WriteScalability(FName Group, int32 Value) {
     else { return false; }
     Scalability::SetQualityLevels(Q);
     return true;
+}
+
+bool OptionPayloadsEqual(const FMythicSettingOption &A, const FMythicSettingOption &B) {
+    if (!FMath::IsNearlyEqual(A.Value, B.Value, 0.001f) ||
+        A.ExtraCVars.Num() != B.ExtraCVars.Num()) {
+        return false;
+    }
+    for (const TPair<FName, float> &Extra : A.ExtraCVars) {
+        const float *OtherValue = B.ExtraCVars.Find(Extra.Key);
+        if (!OtherValue || !FMath::IsNearlyEqual(Extra.Value, *OtherValue, 0.001f)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int32 ResolveOptionIndex(const FMythicSettingDefinition &Def, float Current,
+                         bool bAllowValueOnlyFallback) {
+    const TArray<FMythicSettingOption> Options = UMythicSettingAccess::GetAvailableOptions(Def);
+
+    int32 ValueOnlyMatch = INDEX_NONE;
+    int32 BestExactMatch = INDEX_NONE;
+    int32 BestSpecificity = INDEX_NONE;
+    for (int32 i = 0; i < Options.Num(); ++i) {
+        if (!FMath::IsNearlyEqual(Options[i].Value, Current, 0.001f)) {
+            continue;
+        }
+        if (ValueOnlyMatch == INDEX_NONE) {
+            ValueOnlyMatch = i;
+        }
+        bool bExtrasMatch = true;
+        for (const TPair<FName, float> &Extra : Options[i].ExtraCVars) {
+            const IConsoleVariable *CVar = FindCVar(Extra.Key);
+            if (!CVar || !FMath::IsNearlyEqual(CVar->GetFloat(), Extra.Value, 0.001f)) {
+                bExtrasMatch = false;
+                break;
+            }
+        }
+        // Prefer the profile that proves the most companion state. An empty profile is still a valid
+        // exact match, but it must not mask a later Hardware/Software variant sharing the primary value.
+        if (bExtrasMatch && Options[i].ExtraCVars.Num() > BestSpecificity) {
+            BestExactMatch = i;
+            BestSpecificity = Options[i].ExtraCVars.Num();
+        }
+    }
+    if (BestExactMatch != INDEX_NONE) {
+        return BestExactMatch;
+    }
+    return bAllowValueOnlyFallback ? ValueOnlyMatch : INDEX_NONE;
+}
+
+int32 ResolveDefaultOptionIndex(const FMythicSettingDefinition &Def) {
+    const TArray<FMythicSettingOption> Options = UMythicSettingAccess::GetAvailableOptions(Def);
+
+    int32 MarkedDefault = INDEX_NONE;
+    int32 MarkedCount = 0;
+    for (int32 Index = 0; Index < Options.Num(); ++Index) {
+        if (Options[Index].bIsDefault) {
+            MarkedDefault = Index;
+            ++MarkedCount;
+        }
+    }
+    if (MarkedCount == 1) {
+        return MarkedDefault;
+    }
+    if (MarkedCount > 1) {
+        return INDEX_NONE;
+    }
+
+    // Existing unique-value catalogs need no redundant flag. A shared-value default does: choosing the
+    // first match would make reorderings silently change which companion profile Reset restores.
+    int32 UniqueValueMatch = INDEX_NONE;
+    for (int32 Index = 0; Index < Options.Num(); ++Index) {
+        if (!FMath::IsNearlyEqual(Options[Index].Value, Def.DefaultValue, 0.001f)) {
+            continue;
+        }
+        if (UniqueValueMatch != INDEX_NONE) {
+            return INDEX_NONE;
+        }
+        UniqueValueMatch = Index;
+    }
+    return UniqueValueMatch;
 }
 
 } // namespace
@@ -140,14 +223,12 @@ void UMythicSettingAccess::CommitStaged() {
         const FPending &Change = Pair.Value;
         ApplyValueForReal(Change.Def, Change.Value);
 
-        if (Change.OptionIndex != INDEX_NONE) {
-            const TArray<FMythicSettingOption> Options = GetAvailableOptions(Change.Def);
-            if (Options.IsValidIndex(Change.OptionIndex)) {
-                // A profile rides its option: choosing GTAO also sets its angle count and spatial filter.
-                for (const TPair<FName, float> &Extra : Options[Change.OptionIndex].ExtraCVars) {
-                    if (IConsoleVariable *CVar = FindCVar(Extra.Key)) {
-                        CVar->Set(Extra.Value, ECVF_SetByGameOverride);
-                    }
+        if (Change.bHasOption) {
+            // The authored payload is copied into the transaction. Re-filtering the option list on Apply
+            // would make a hardware availability change shift an index onto a different profile.
+            for (const TPair<FName, float> &Extra : Change.Option.ExtraCVars) {
+                if (IConsoleVariable *CVar = FindCVar(Extra.Key)) {
+                    CVar->Set(Extra.Value, ECVF_SetByGameOverride);
                 }
             }
         }
@@ -171,10 +252,19 @@ void UMythicSettingAccess::WriteValue(const FMythicSettingDefinition &Def, float
     if (Def.SourceName.IsNone()) {
         return;
     }
+
+    // Dirty means different from the committed value, not merely "the row was touched". Returning a
+    // slider or toggle to where it started must disable Apply and make Back read as Back again.
+    if (FMath::IsNearlyEqual(Value, ReadValueUncached(Def), 0.001f)) {
+        PendingChanges.Remove(Def.SourceName);
+        return;
+    }
+
     FPending &Change = PendingChanges.FindOrAdd(Def.SourceName);
     Change.Def = Def;
     Change.Value = Value;
-    Change.OptionIndex = INDEX_NONE;
+    Change.Option = FMythicSettingOption();
+    Change.bHasOption = false;
 }
 
 void UMythicSettingAccess::ApplyValueForReal(const FMythicSettingDefinition &Def, float Value) {
@@ -211,47 +301,20 @@ void UMythicSettingAccess::ApplyValueForReal(const FMythicSettingDefinition &Def
 
 int32 UMythicSettingAccess::ReadOptionIndex(const FMythicSettingDefinition &Def) {
     if (const FPending *Change = PendingChanges.Find(Def.SourceName)) {
-        if (Change->OptionIndex != INDEX_NONE) {
-            return Change->OptionIndex;
+        if (Change->bHasOption) {
+            const TArray<FMythicSettingOption> Options = GetAvailableOptions(Def);
+            return Options.IndexOfByPredicate(
+                [Change](const FMythicSettingOption &Option) {
+                    return OptionPayloadsEqual(Option, Change->Option);
+                });
         }
+        return ResolveOptionIndex(Def, Change->Value, /*bAllowValueOnlyFallback*/ true);
     }
-    const TArray<FMythicSettingOption> Options = GetAvailableOptions(Def);
-    const float Current = ReadValue(Def);
-
     /**
-     * Two options can share a primary value and differ only in the profile that rides them.
-     *
-     * Software and Hardware Ray Tracing are both r.DynamicGlobalIlluminationMethod 1; what separates them
-     * is r.Lumen.HardwareRayTracing. Matching on the primary value alone always returned the first of the
-     * pair, so choosing Hardware wrote the same 1, read back as Software, and the row snapped shut - it
-     * looked like the setting refused to change.
-     *
-     * So an option matches only when its extras match too. Exact matches are preferred over a bare
-     * value match, which keeps options that carry no profile working exactly as before.
+     * Two options can share a primary value and differ only in the profile that rides them. Exact extra
+     * cvar matches therefore win over a bare value match; a live value matching nothing reports NONE.
      */
-    int32 ValueOnlyMatch = INDEX_NONE;
-    for (int32 i = 0; i < Options.Num(); ++i) {
-        if (!FMath::IsNearlyEqual(Options[i].Value, Current, 0.001f)) {
-            continue;
-        }
-        if (ValueOnlyMatch == INDEX_NONE) {
-            ValueOnlyMatch = i;
-        }
-        bool bExtrasMatch = true;
-        for (const TPair<FName, float> &Extra : Options[i].ExtraCVars) {
-            const IConsoleVariable *CVar = FindCVar(Extra.Key);
-            if (!CVar || !FMath::IsNearlyEqual(CVar->GetFloat(), Extra.Value, 0.001f)) {
-                bExtrasMatch = false;
-                break;
-            }
-        }
-        if (bExtrasMatch) {
-            return i;
-        }
-    }
-
-    // A live value matching no authored option reports NONE rather than silently claiming the first one.
-    return ValueOnlyMatch;
+    return ResolveOptionIndex(Def, ReadValueUncached(Def), /*bAllowValueOnlyFallback*/ true);
 }
 
 void UMythicSettingAccess::WriteOptionIndex(const FMythicSettingDefinition &Def, int32 Index) {
@@ -259,12 +322,19 @@ void UMythicSettingAccess::WriteOptionIndex(const FMythicSettingDefinition &Def,
     if (!Options.IsValidIndex(Index) || Def.SourceName.IsNone()) {
         return;
     }
-    // Buffer the INDEX as well as the value: two options can share a value and differ only by the extra
-    // cvars they carry, so replaying on Apply needs to know which one was chosen.
+
+    if (Index == ResolveOptionIndex(Def, ReadValueUncached(Def),
+                                    /*bAllowValueOnlyFallback*/ false)) {
+        PendingChanges.Remove(Def.SourceName);
+        return;
+    }
+    // Copy the complete payload: two options can share a primary value and differ only by their companion
+    // cvars, and replaying a filtered-array index later could target a different option.
     FPending &Change = PendingChanges.FindOrAdd(Def.SourceName);
     Change.Def = Def;
     Change.Value = Options[Index].Value;
-    Change.OptionIndex = Index;
+    Change.Option = Options[Index];
+    Change.bHasOption = true;
 }
 
 FText UMythicSettingAccess::GetDisplayText(const FMythicSettingDefinition &Def) {
@@ -299,24 +369,66 @@ FText UMythicSettingAccess::GetDisplayText(const FMythicSettingDefinition &Def) 
 }
 
 bool UMythicSettingAccess::IsAtDefault(const FMythicSettingDefinition &Def) {
+    if (Def.Control == EMythicSettingControl::Select ||
+        Def.Control == EMythicSettingControl::Toggle) {
+        const int32 DefaultIndex = ResolveDefaultOptionIndex(Def);
+        if (DefaultIndex == INDEX_NONE) {
+            return false;
+        }
+        if (const FPending *Change = PendingChanges.Find(Def.SourceName)) {
+            const TArray<FMythicSettingOption> Options = GetAvailableOptions(Def);
+            if (Change->bHasOption) {
+                return Options.IsValidIndex(DefaultIndex) &&
+                       OptionPayloadsEqual(Change->Option, Options[DefaultIndex]);
+            }
+            return Options.IsValidIndex(DefaultIndex) &&
+                   Options[DefaultIndex].ExtraCVars.IsEmpty() &&
+                   FMath::IsNearlyEqual(Change->Value, Options[DefaultIndex].Value, 0.001f);
+        }
+        return ResolveOptionIndex(Def, ReadValueUncached(Def),
+                                  /*bAllowValueOnlyFallback*/ false) == DefaultIndex;
+    }
     return FMath::IsNearlyEqual(ReadValue(Def), Def.DefaultValue, 0.001f);
+}
+
+void UMythicSettingAccess::StageDefault(const FMythicSettingDefinition &Def) {
+    if (Def.Control == EMythicSettingControl::Select ||
+        Def.Control == EMythicSettingControl::Toggle) {
+        const int32 DefaultIndex = ResolveDefaultOptionIndex(Def);
+        if (DefaultIndex != INDEX_NONE) {
+            WriteOptionIndex(Def, DefaultIndex);
+            return;
+        }
+        UE_LOG(Myth, Error,
+               TEXT("Setting '%s' has no unambiguous available default option; refusing a partial reset"),
+               *Def.SourceName.ToString());
+        return;
+    }
+    WriteValue(Def, Def.DefaultValue);
 }
 
 void UMythicSettingAccess::RestoreDefaults(const UMythicSettingsCatalog *Catalog) {
     if (!Catalog) {
         return;
     }
-    // One loop over the catalog, so a setting cannot be left out of Restore Defaults the way nine of them
-    // were when each had to be remembered by hand. Applied FOR REAL, not staged: WriteValue only buffers,
-    // and a buffered restore was silently discarded the moment the player left the screen.
+    // Reset is one proposal like every other edit. It must remain reversible until Apply, otherwise the
+    // screen's Cancel button lies: pressing Reset and then Cancel would already have saved the reset.
     PendingChanges.Empty();
     for (const FMythicSettingDefinition &Def : Catalog->Settings) {
-        ApplyValueForReal(Def, Def.DefaultValue);
+        StageDefault(Def);
     }
-    if (UMythicUserSettings *Settings = UMythicUserSettings::Get()) {
-        Settings->ApplySettings(false);
-        Settings->SaveSettings();
+}
+
+bool UMythicSettingAccess::HasNonDefaultValues(const UMythicSettingsCatalog *Catalog) {
+    if (!Catalog) {
+        return false;
     }
+    for (const FMythicSettingDefinition &Def : Catalog->Settings) {
+        if (!IsAtDefault(Def)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool UMythicSettingAccess::ResolvesSource(const FMythicSettingDefinition &Def, FString &OutWhy) {

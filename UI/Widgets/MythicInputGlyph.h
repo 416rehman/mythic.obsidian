@@ -10,6 +10,7 @@
 #include "MythicInputGlyph.generated.h"
 
 class UInputAction;
+class UMaterialInstanceDynamic;
 
 UCLASS()
 class MYTHIC_API UMythicInputGlyph : public UImage {
@@ -26,10 +27,15 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mythic|Input", meta = (ClampMin = "4.0"))
     float GlyphHeight = 30.0f;
 
+    /** Changes the CommonUI action represented by this glyph and refreshes its current-device art. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
     void SetActionTag(FGameplayTag InActionTag);
 
+    /** Binds this glyph to a live CommonUI action, including its authoritative hold-progress delegate. */
     void SetActionBinding(FUIActionBindingHandle InHandle);
+
+    /** Updates the bottom-to-top visual fill for a live hold action. Values are clamped to the 0..1 range. */
+    void SetHoldProgress(float HeldPercent);
 
     /**
      * Show the key for a GAMEPLAY action — an Enhanced Input action from a mapping context, not a CommonUI menu
@@ -42,6 +48,12 @@ public:
     /** Re-read the key and repaint. Cheap: brush swap only, no layout unless the aspect changed. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
     void RefreshGlyph();
+
+    /** Returns whether the shared glyph has a material and scalar parameter capable of rendering hold progress. */
+    bool HasConfiguredHoldPresentation() const {
+        return !HoldProgressMaterial.IsNull()
+            && !HoldProgressParameterName.IsNone();
+    }
 
     /**
      * Short label for a key, as it should read on a cap: "E", "LMB", "Shift".
@@ -64,7 +76,11 @@ protected:
 
 private:
     void Listen(bool bListen);
+    void ListenToActionBinding(bool bListen);
     void HandleInputMethodChanged(ECommonInputType NewType);
+    void RefreshHoldPresentation();
+    void UpdateHoldProgressBrushSize(const FVector2D &NewSize);
+    bool IsCurrentActionHold() const;
 
     static bool KeyMatchesInputType(const FKey &Key, ECommonInputType InputType);
 
@@ -72,14 +88,22 @@ private:
 
     FUIActionBindingHandle BindingHandle;
     FDelegateHandle InputMethodHandle;
+    bool bIsHoldAction = false;
+    float HoldProgress = 0.0f;
 
     UPROPERTY()
     TObjectPtr<const UInputAction> EnhancedAction;
 
     TSharedPtr<class STextBlock> KeyLabel;
+    TSharedPtr<class SImage> HoldProgressImage;
 
     UPROPERTY(Transient)
     TObjectPtr<class UMaterialInstanceDynamic> KeyCapMID;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMaterialInstanceDynamic> HoldProgressMID;
+
+    FSlateBrush HoldProgressBrush;
 
 protected:
 
@@ -94,4 +118,20 @@ protected:
     /** Ink on the cap, and the cap's own line colour. One hue, two values. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mythic|Input")
     FLinearColor KeyInk = FLinearColor(0.86f, 0.84f, 0.78f, 1.0f);
+
+    /** Reusable CommonUI hold fill. The material must expose HoldProgressParameterName in the 0..1 range. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mythic|Input|Hold")
+    TSoftObjectPtr<UMaterialInterface> HoldProgressMaterial;
+
+    /** Scalar parameter driven by CommonUI's live hold-progress delegate. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mythic|Input|Hold")
+    FName HoldProgressParameterName = TEXT("percentage");
+
+    /** Warm fill drawn behind the key or controller glyph while a hold is in progress. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mythic|Input|Hold")
+    FLinearColor HoldProgressTint = FLinearColor(0.92f, 0.55f, 0.16f, 0.90f);
+
+    /** Persistent glyph tint that distinguishes hold actions from ordinary tap actions before input begins. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mythic|Input|Hold")
+    FLinearColor HoldGlyphTint = FLinearColor(0.98f, 0.76f, 0.34f, 1.0f);
 };

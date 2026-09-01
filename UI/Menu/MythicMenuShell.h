@@ -90,6 +90,7 @@ protected:
     virtual void NativeConstruct() override;
     virtual void NativeOnActivated() override;
     virtual void NativeOnDeactivated() override;
+    virtual bool NativeOnHandleBackAction() override;
 
     /** Pages, in tab order. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Menu")

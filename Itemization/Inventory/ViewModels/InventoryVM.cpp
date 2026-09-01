@@ -188,6 +188,7 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythic
     TMap<FGameplayTag, TObjectPtr<UInventoryTabVM>> GroupToTabMap;
 
     auto AsArray = SlotIndices.Array();
+    AsArray.Sort();
     for (int32 i = 0; i < AsArray.Num(); ++i) {
         int32 AbsIndex = AsArray[i];
         const FMythicInventorySlotEntry &Entry = allSlots[AbsIndex];
@@ -243,6 +244,20 @@ TArray<TObjectPtr<UInventoryTabVM>> UInventoryVM::CreateVMs(const TArray<FMythic
     }
 
     return TabsArray;
+}
+
+UItemSlotVM *UInventoryVM::FindSlotByItemGuid(const FGuid &ItemGuid) const {
+    if (!ItemGuid.IsValid()) {
+        return nullptr;
+    }
+
+    for (UItemSlotVM *SlotVM : AbsoluteIndexToSlotVM) {
+        const UMythicItemInstance *Item = SlotVM ? SlotVM->TryGetItemInstance() : nullptr;
+        if (Item && Item->GetItemInstanceGuid() == ItemGuid) {
+            return SlotVM;
+        }
+    }
+    return nullptr;
 }
 
 void UInventoryVM::InitializeFromInventoryComponent(UMythicInventoryComponent *InInventoryComponent) {

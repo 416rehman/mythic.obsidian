@@ -125,12 +125,13 @@ public:
     FMythicWeaponAttackComparisonViewData WeaponAttackComparison;
 
     /**
-     * Builds a display-only comparison against the item the candidate would replace. TargetSlotIndex addresses
-     * Inventory->GetAllSlots(); -1 prefers an empty compatible slot, then the first stable compatible slot.
+     * Builds a display-only comparison against one explicitly chosen equipment slot. The expected-empty flag and
+     * occupant GUID make stale presentation fail closed instead of silently comparing against a different item.
      */
     UFUNCTION(BlueprintCallable, Category="Mythic|Comparison")
     static UItemComparisonVM *CreateComparison(UObject *Outer, UMythicItemInstance *Inspected, UMythicInventoryComponent *Inventory,
-                                               int32 TargetSlotIndex = -1);
+                                               int32 TargetSlotIndex, bool bExpectEmpty,
+                                               FGuid ExpectedTargetOccupantGuid);
 
     /** Builds the atomic typed weapon comparison from two canonical item-local attack projections. */
     static FMythicWeaponAttackComparisonViewData BuildWeaponAttackComparison(

@@ -7,6 +7,7 @@
 #include "Net/Serialization/FastArraySerializer.h"
 #include "InventoryProfile.h"
 #include "InventorySlotDefinition.h"
+#include "MythicInventoryActionTypes.h"
 #include "MythicInventoryComponent.generated.h"
 
 UENUM(BlueprintType)
@@ -200,7 +201,11 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Slots")
     bool CanAcceptItemType(const FGameplayTag &ItemType) const;
 
-    bool CanSlotAcceptItem(int32 SlotIndex, UMythicItemInstance *ItemInstance, bool bFromPlayer = false) const;
+    bool CanSlotAcceptItem(
+        int32 SlotIndex,
+        UMythicItemInstance *ItemInstance,
+        bool bFromPlayer = false,
+        const UMythicItemInstance *IgnoredUniqueItem = nullptr) const;
 
     static bool MeetsEquipRequirement(const FGameplayTag &RequiredTag, const FGameplayTagContainer &OwnerTags);
 
@@ -259,10 +264,33 @@ public:
     UFUNCTION(BlueprintPure, Category = "Slots")
     bool CanPlayerTakeFromSlot(int32 SlotIndex) const;
 
+    /**
+     * Moves, merges, or swaps one identity-checked player item into one identity-checked destination. The caller owns
+     * inventory authorization; this seam revalidates slot permissions, item identities, whitelists, equip requirements,
+     * uniqueness, and the final GAS equipment transaction before publishing any pointer change.
+     */
+    EMythicInventoryActionResult TryPlayerMoveItem(
+        const FMythicInventorySourceLocator &Source,
+        const FMythicInventoryTargetLocator &Target,
+        int32 &OutQuantityProcessed);
+
     // Drops an item instance to the ground through a WorldItem. Returns true if the item was dropped.
     // If TargetRecipient is provided, only they can interact with the item. Otherwise, all players can interact with the item.
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Slots")
     bool DropItem(int32 SlotIndex, const FVector &location, float radius = 100.0f, AController *TargetRecipient = nullptr);
+
+    /**
+     * Drops an identity-checked whole or partial stack. Partial drops clone the complete persistent item state, transfer
+     * that clone to a verified world item, and only then decrement the source stack.
+     */
+    EMythicInventoryActionResult DropItemQuantity(
+        const FMythicInventorySourceLocator &Source,
+        int32 Quantity,
+        const FVector &Location,
+        float Radius,
+        AController *TargetRecipient,
+        int32 &OutQuantityDropped,
+        AMythicWorldItem *&OutWorldItem);
 
     // Picks up a WorldItem. Returns the amount of items (stacks) that were picked up.
     UFUNCTION(BlueprintCallable, Server, Reliable, BlueprintAuthorityOnly, Category = "Slots")
@@ -313,6 +341,12 @@ public:
 
     int32 SplitStackToFreeSlot(int32 SourceSlotIndex, int32 SplitAmount);
 
+    /** Splits an identity-checked stack and reports both a semantic result and the created slot. */
+    EMythicInventoryActionResult TrySplitStackToFreeSlot(
+        const FMythicInventorySourceLocator &Source,
+        int32 SplitAmount,
+        int32 &OutTargetSlotIndex);
+
     // swap items between two slots, handling equipment activation/deactivation and empty slot moves
     UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
     void ServerSwapSlots(int32 SlotA, int32 SlotB);
@@ -328,6 +362,9 @@ public:
     UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
     void ServerSortGroup(FGameplayTag GroupTag, ESortMode Mode);
 
+    /** Sorts one carried group on authority and returns a semantic completion result. */
+    EMythicInventoryActionResult TrySortGroup(FGameplayTag GroupTag, ESortMode Mode);
+
     // move all non-equipment items (optionally filtered by type tag) to the target inventory
     UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
     void ServerDepositAll(UMythicInventoryComponent *Target, FGameplayTag OptionalTypeFilter);
@@ -335,6 +372,16 @@ public:
     // use a consumable item directly from inventory without equipping it
     UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Slots")
     void ServerUseItemInSlot(int32 SlotIndex);
+
+    /** Executes an identity-checked in-inventory action and reports the quantity consumed by that action. */
+    EMythicInventoryActionResult TryUseItemInSlot(
+        const FMythicInventorySourceLocator &Source,
+        int32 &OutQuantityConsumed);
+
+    /** Applies the authority-owned junk flag to an identity-checked item. */
+    EMythicInventoryActionResult TrySetItemJunk(
+        const FMythicInventorySourceLocator &Source,
+        bool bJunk);
 
     // returns true if the item in the slot has actionable fragments that support in-inventory use
     UFUNCTION(BlueprintPure, Category = "Slots")
@@ -353,6 +400,13 @@ protected:
     static bool CommitSlotMutationsTransactional(TConstArrayView<FStagedSlotMutation> Mutations);
     static bool ValidateFinalSlotLayout(TConstArrayView<FStagedSlotMutation> Mutations);
     UMythicAffixApplicationComponent *ResolveAffixApplicationComponent() const;
+
+    EMythicInventoryActionResult ResolveSourceLocator(
+        const FMythicInventorySourceLocator &Source,
+        UMythicItemInstance *&OutItem) const;
+    EMythicInventoryActionResult ResolveTargetLocator(
+        const FMythicInventoryTargetLocator &Target,
+        UMythicItemInstance *&OutOccupant) const;
 
     bool DestroySlot(int32 SlotIndex);
 

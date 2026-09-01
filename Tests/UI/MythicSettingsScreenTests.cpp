@@ -2,8 +2,11 @@
 
 #include "UI/Menu/MythicEscapeMenuWidget.h"
 #include "UI/Menu/MythicMenuShell.h"
+#include "CommonButtonBase.h"
+#include "UI/MythicUIStyle.h"
 #include "UI/Settings/MythicSettingRowBase.h"
 #include "UI/Settings/MythicSettingsScreenBase.h"
+#include "UI/Widgets/MythicBoundActionButton.h"
 
 namespace {
 const TCHAR *ShellPath = TEXT("/Game/Mythic/UI/Menu/WBP_MenuShell.WBP_MenuShell_C");
@@ -150,6 +153,87 @@ bool FMythicSettingsGroupingTest::RunTest(const FString &Parameters) {
             }
         }
     }
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicSettingsActionFooterContractTest,
+    "Mythic.UI.SettingsActionFooterContract",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicSettingsActionFooterContractTest::RunTest(const FString &Parameters) {
+    const UMythicUIStyleSettings &Style = FMythicUIStyle::Get();
+
+    TestFalse(TEXT("footer actions have a bound-action button class"), Style.ActionButtonClass.IsNull());
+    TestFalse(TEXT("Apply has a primary button style"), Style.PrimaryActionButtonStyle.IsNull());
+    TestFalse(TEXT("Reset has a secondary button style"), Style.SecondaryActionButtonStyle.IsNull());
+    TestFalse(TEXT("Back and Cancel have a quiet button style"), Style.QuietActionButtonStyle.IsNull());
+
+    TSet<FSoftObjectPath> SemanticStyles;
+    SemanticStyles.Add(Style.PrimaryActionButtonStyle.ToSoftObjectPath());
+    SemanticStyles.Add(Style.SecondaryActionButtonStyle.ToSoftObjectPath());
+    SemanticStyles.Add(Style.QuietActionButtonStyle.ToSoftObjectPath());
+    TestEqual(TEXT("primary, secondary, and quiet actions remain visually distinct"), SemanticStyles.Num(), 3);
+
+    TestTrue(TEXT("footer buttons meet the 44 px minimum interaction target"),
+             Style.ActionButtonMinHeight >= 44.0f);
+    TestTrue(TEXT("footer buttons stay compact instead of becoming full-width menu rows"),
+             Style.ActionButtonMinWidth >= 160.0f && Style.ActionButtonMinWidth <= 280.0f);
+    TestTrue(TEXT("footer actions retain visible separation"), Style.ActionButtonGap >= 8.0f);
+
+    UClass *ActionClass = Style.ActionButtonClass.LoadSynchronous();
+    TestNotNull(TEXT("the configured action button class resolves"), ActionClass);
+    if (ActionClass) {
+        TestTrue(TEXT("the configured action button executes represented CommonUI bindings"),
+                 ActionClass->IsChildOf(UMythicBoundActionButton::StaticClass()));
+        if (UMythicBoundActionButton *Button =
+                NewObject<UMythicBoundActionButton>(GetTransientPackage(), ActionClass)) {
+            Button->SetActionBarPromptOnly(false);
+            TestEqual(TEXT("screen-local footer buttons accept pointer input"),
+                      Button->GetVisibility(), ESlateVisibility::Visible);
+            Button->SetActionBarPromptOnly(true);
+            TestEqual(TEXT("global action-bar prompts stay outside the hit-test grid"),
+                      Button->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
+        }
+        else {
+            AddError(TEXT("the configured action button could not be instantiated"));
+        }
+    }
+
+    const auto ValidateRoleStyle = [this](const TCHAR *Role,
+                                          const TSoftClassPtr<UCommonButtonStyle> &SoftStyle) {
+        UClass *StyleClass = SoftStyle.LoadSynchronous();
+        TestNotNull(*FString::Printf(TEXT("%s style resolves"), Role), StyleClass);
+        if (!StyleClass) {
+            return;
+        }
+
+        const UCommonButtonStyle *ButtonStyle = StyleClass->GetDefaultObject<UCommonButtonStyle>();
+        TestNotNull(*FString::Printf(TEXT("%s style has a CDO"), Role), ButtonStyle);
+        if (!ButtonStyle) {
+            return;
+        }
+
+        TestFalse(*FString::Printf(TEXT("%s uses independent interaction brushes"), Role),
+                  ButtonStyle->bSingleMaterial);
+        const auto ValidateBrush = [this, Role](const TCHAR *State, const FSlateBrush &Brush) {
+            TestTrue(*FString::Printf(TEXT("%s %s state draws"), Role, State),
+                     Brush.DrawAs != ESlateBrushDrawType::NoDrawType);
+            TestNotNull(*FString::Printf(TEXT("%s %s state has authored art"), Role, State),
+                        Brush.GetResourceObject());
+        };
+        ValidateBrush(TEXT("normal"), ButtonStyle->NormalBase);
+        ValidateBrush(TEXT("hover"), ButtonStyle->NormalHovered);
+        ValidateBrush(TEXT("pressed"), ButtonStyle->NormalPressed);
+        ValidateBrush(TEXT("disabled"), ButtonStyle->Disabled);
+        TestTrue(*FString::Printf(TEXT("%s style keeps an accessible height"), Role),
+                 ButtonStyle->MinHeight >= 44);
+    };
+
+    ValidateRoleStyle(TEXT("Apply"), Style.PrimaryActionButtonStyle);
+    ValidateRoleStyle(TEXT("Reset"), Style.SecondaryActionButtonStyle);
+    ValidateRoleStyle(TEXT("Back/Cancel"), Style.QuietActionButtonStyle);
 
     return true;
 }

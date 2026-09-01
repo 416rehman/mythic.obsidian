@@ -90,6 +90,10 @@ bool FMythicCombatThreatKnowledgeGatesTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("known noncombatant remains None before immunity warning"),
               FMythicCombatThreatAssessment::Assess(Inputs), EMythicThreatBand::None);
 
+    // The remaining cases isolate unavailable pressure. Clear the known-immunity scenario above; otherwise the
+    // classifier correctly returns Overwhelming before it ever reaches the pressure or rank-floor branches.
+    Inputs.bImmuneToViewerDamage = false;
+    Inputs.bImmunityKnownToViewer = false;
     Inputs.Rank = EMythicCombatThreatRank::Standard;
     Inputs.bRankKnownToViewer = false;
     Inputs.ViewerEffectivePressure = 0.0f;

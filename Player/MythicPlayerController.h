@@ -19,6 +19,12 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMythicHudNoticeRaised, const FMythicHudNotice &, Notice);
 
+/** Owning-client notification emitted after an authoritative inventory request completes or is replayed. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+    FMythicInventoryActionReceiptReceived,
+    const FMythicInventoryActionReceipt &,
+    Receipt);
+
 class UMythicItemInstance;
 class UMythicHarvestFocusComponent;
 class UMythicContextActionDefinition;
@@ -261,6 +267,122 @@ public:
 
     UFUNCTION(Server, Reliable, WithValidation, Category = "Storage")
     void ServerMoveItemBetweenInventories(UMythicInventoryComponent *Source, int32 SourceSlot, UMythicInventoryComponent *Target, int32 TargetSlot);
+
+    /**
+     * Requests an identity-checked move, merge, or swap between two player-owned inventory slots and returns its
+     * local correlation ID. Completion is reported through OnInventoryActionReceiptReceived.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Inventory|Actions")
+    int64 SubmitInventoryMove(
+        const FMythicInventorySourceLocator &Source,
+        const FMythicInventoryTargetLocator &Target);
+
+    /**
+     * Convenience bridge for legacy Blueprint drag nodes. It snapshots the current client-visible source and target
+     * identities, then forwards to SubmitInventoryMove; authority still performs every ownership and stale-state check.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Inventory|Actions")
+    int64 SubmitInventoryMoveBySlots(
+        UMythicInventoryComponent *SourceInventory,
+        int32 SourceSlotIndex,
+        UMythicInventoryComponent *TargetInventory,
+        int32 TargetSlotIndex);
+
+    /** Requests an identity-checked partial-stack split into a compatible free slot. */
+    UFUNCTION(BlueprintCallable, Category = "Inventory|Actions")
+    int64 SubmitInventorySplit(
+        const FMythicInventorySourceLocator &Source,
+        int32 Quantity);
+
+    /** Requests an identity-checked whole or partial drop at the authoritative player location. */
+    UFUNCTION(BlueprintCallable, Category = "Inventory|Actions")
+    int64 SubmitInventoryDropQuantity(
+        const FMythicInventorySourceLocator &Source,
+        int32 Quantity);
+
+    /**
+     * Convenience bridge for legacy Blueprint whole-slot drops. It snapshots the current client-visible item identity
+     * and quantity, then forwards to SubmitInventoryDropQuantity without introducing a separate mutation path.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Inventory|Actions")
+    int64 SubmitInventoryDropWholeSlot(
+        UMythicInventoryComponent *Inventory,
+        int32 SlotIndex);
+
+    /** Requests the authored in-inventory action for one identity-checked item. */
+    UFUNCTION(BlueprintCallable, Category = "Inventory|Actions")
+    int64 SubmitInventoryUse(const FMythicInventorySourceLocator &Source);
+
+    /** Requests an identity-checked change to one item's player-owned junk marker. */
+    UFUNCTION(BlueprintCallable, Category = "Inventory|Actions")
+    int64 SubmitInventorySetJunk(
+        const FMythicInventorySourceLocator &Source,
+        bool bMarkedJunk);
+
+    /** Requests a deterministic sort of one player-owned carried-item group. */
+    UFUNCTION(BlueprintCallable, Category = "Inventory|Actions")
+    int64 SubmitInventorySort(
+        UMythicInventoryComponent *Inventory,
+        FGameplayTag GroupTag,
+        ESortMode SortMode);
+
+    /** Server-authoritative move request; semantic failures return a receipt instead of disconnecting the caller. */
+    UFUNCTION(Server, Reliable)
+    void ServerRequestInventoryMove(
+        int64 RequestId,
+        const FMythicInventorySourceLocator &Source,
+        const FMythicInventoryTargetLocator &Target);
+
+    /** Server-authoritative split request with exact source identity and quantity preconditions. */
+    UFUNCTION(Server, Reliable)
+    void ServerRequestInventorySplit(
+        int64 RequestId,
+        const FMythicInventorySourceLocator &Source,
+        int32 Quantity);
+
+    /** Server-authoritative whole or partial drop request; the server derives the world spawn origin. */
+    UFUNCTION(Server, Reliable)
+    void ServerRequestInventoryDropQuantity(
+        int64 RequestId,
+        const FMythicInventorySourceLocator &Source,
+        int32 Quantity);
+
+    /** Server-authoritative in-inventory use request with exact source identity preconditions. */
+    UFUNCTION(Server, Reliable)
+    void ServerRequestInventoryUse(
+        int64 RequestId,
+        const FMythicInventorySourceLocator &Source);
+
+    /** Server-authoritative junk-marker request with exact source identity preconditions. */
+    UFUNCTION(Server, Reliable)
+    void ServerRequestInventorySetJunk(
+        int64 RequestId,
+        const FMythicInventorySourceLocator &Source,
+        bool bMarkedJunk);
+
+    /** Server-authoritative carried-group sort request. */
+    UFUNCTION(Server, Reliable)
+    void ServerRequestInventorySort(
+        int64 RequestId,
+        UMythicInventoryComponent *Inventory,
+        FGameplayTag GroupTag,
+        ESortMode SortMode);
+
+    /** Delivers one correlated authoritative inventory completion to this controller's owning client. */
+    UFUNCTION(Client, Reliable)
+    void ClientReceiveInventoryActionReceipt(const FMythicInventoryActionReceipt &Receipt);
+
+    /** Broadcast on the owning client for committed, rejected, and duplicate-replayed inventory requests. */
+    UPROPERTY(BlueprintAssignable, Category = "Inventory|Actions")
+    FMythicInventoryActionReceiptReceived OnInventoryActionReceiptReceived;
+
+    /**
+     * Consumes a receipt that reached the owning client before its UI caller finished recording the returned request
+     * ID. This closes the synchronous standalone/listen-server RPC race without making network clients poll.
+     */
+    bool ConsumeReceivedInventoryActionReceipt(
+        int64 RequestId,
+        FMythicInventoryActionReceipt &OutReceipt);
 
     /**
      * Total currency this player carries, summed across every inventory they own. This is the wallet balance a trade
@@ -636,6 +758,35 @@ private:
     static constexpr int32 MaxResolvedCombatTextBatchSize = 32;
 
     bool CanPlayerAccessInventory(UMythicInventoryComponent *Inventory) const;
+
+    /** Returns true only for inventories owned directly by this player, excluding opened world containers. */
+    bool IsPlayerOwnedInventory(const UMythicInventoryComponent *Inventory) const;
+
+    /** Allocates a positive correlation ID for one locally submitted inventory request. */
+    int64 AllocateInventoryActionRequestId();
+
+    /** Re-delivers a cached receipt without re-executing its authoritative mutation. */
+    bool ReplayCachedInventoryActionReceipt(int64 RequestId);
+
+    /** Records a bounded duplicate-suppression entry and delivers the first completion to the owning client. */
+    void CompleteInventoryActionRequest(FMythicInventoryActionReceipt Receipt);
+
+    /** Next positive correlation ID allocated by this local controller. */
+    int64 NextInventoryActionRequestId = 1;
+
+    /** First-execution receipts retained by request ID for duplicate suppression on authority. */
+    TMap<int64, FMythicInventoryActionReceipt> InventoryActionReceiptCache;
+
+    /** Oldest-to-newest request IDs retained in InventoryActionReceiptCache. */
+    TArray<int64> InventoryActionReceiptOrder;
+
+    /** Owning-client completions buffered briefly so synchronous local RPC delivery cannot outrun the submitting UI. */
+    TMap<int64, FMythicInventoryActionReceipt> ReceivedInventoryActionReceipts;
+
+    /** Oldest-to-newest IDs retained in ReceivedInventoryActionReceipts. */
+    TArray<int64> ReceivedInventoryActionReceiptOrder;
+
+    static constexpr int32 MaxInventoryActionReceiptCacheSize = 32;
 
     TWeakObjectPtr<AMythicPlayerController> PendingGiftGiver;
     TWeakObjectPtr<UMythicInventoryComponent> PendingGiftSourceInv;

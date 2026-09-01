@@ -1,6 +1,7 @@
 #include "ItemDefinition.h"
 #include "Fragments/ItemFragment.h"
 #include "Itemization/MythicTags_Inventory.h"
+#include "Mythic/Mythic.h"
 #include "Misc/DataValidation.h"
 
 UItemDefinition::UItemDefinition() {
@@ -32,6 +33,17 @@ FLinearColor UItemDefinition::GetRarityColor(EItemRarity InRarity) {
 #include "Fragments/Actionable/ConsumableActionFragment.h"
 #include "Fragments/Passive/AffixesFragment.h"
 
+namespace {
+bool IsSupportedWeaponClassTag(const FGameplayTag ItemType) {
+    return ItemType == ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SWORD
+        || ItemType == ITEMIZATION_TYPE_EQUIPMENT_WEAPON_AXE
+        || ItemType == ITEMIZATION_TYPE_EQUIPMENT_WEAPON_DAGGERS
+        || ItemType == ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SICKLE
+        || ItemType == ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SPEAR
+        || ItemType == ITEMIZATION_TYPE_EQUIPMENT_WEAPON_HAMMER;
+}
+}
+
 template <typename T>
 void UItemDefinition::EnsureFragment() {
     for (const auto &Frag : Fragments) {
@@ -44,8 +56,14 @@ void UItemDefinition::EnsureFragment() {
 }
 
 void UItemDefinition::Weapon() {
+    if (!IsSupportedWeaponClassTag(ItemType)) {
+        UE_LOG(
+            Myth, Error,
+            TEXT("ItemDefinition::Weapon refused to author %s: choose one exact supported weapon-class ItemType before configuring its fragments."),
+            *GetPathName());
+        return;
+    }
     Modify();
-    ItemType = ITEMIZATION_TYPE_EQUIPMENT_WEAPON;
     EnsureFragment<UAttackFragment>();
     EnsureFragment<UAffixesFragment>();
     PostEditChange();
@@ -193,6 +211,15 @@ EDataValidationResult UItemDefinition::IsDataValid(FDataValidationContext &Conte
         Context.AddError(NSLOCTEXT(
             "ItemDefinition", "InvalidWeaponFragmentShapeError",
             "Every weapon requires exactly one action-only Attack Fragment and one typed Affixes Fragment."));
+        Result = EDataValidationResult::Invalid;
+    }
+    if (ItemType.MatchesTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON)
+        && !IsSupportedWeaponClassTag(ItemType)) {
+        Context.AddError(FText::Format(
+            NSLOCTEXT(
+                "ItemDefinition", "MissingExactWeaponClassError",
+                "Weapon ItemType '{0}' is not an exact supported weapon class. Choose Sword, Axe, Daggers, Sickle, Spear, or Hammer; the generic Weapon parent cannot drive class-specific combat projection."),
+            FText::FromString(ItemType.ToString())));
         Result = EDataValidationResult::Invalid;
     }
 

@@ -1280,6 +1280,356 @@ bool AMythicPlayerController::CanPlayerAccessInventory(UMythicInventoryComponent
     return false;
 }
 
+bool AMythicPlayerController::IsPlayerOwnedInventory(
+    const UMythicInventoryComponent *Inventory) const {
+    if (!Inventory) {
+        return false;
+    }
+    for (const UMythicInventoryComponent *OwnedInventory : GetAllInventoryComponents()) {
+        if (OwnedInventory == Inventory) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int64 AMythicPlayerController::AllocateInventoryActionRequestId() {
+    if (NextInventoryActionRequestId <= 0) {
+        NextInventoryActionRequestId = 1;
+    }
+    const int64 RequestId = NextInventoryActionRequestId;
+    NextInventoryActionRequestId = RequestId == MAX_int64 ? 1 : RequestId + 1;
+    return RequestId;
+}
+
+bool AMythicPlayerController::ReplayCachedInventoryActionReceipt(
+    const int64 RequestId) {
+    if (RequestId <= 0) {
+        return false;
+    }
+    const FMythicInventoryActionReceipt *Cached =
+        InventoryActionReceiptCache.Find(RequestId);
+    if (!Cached) {
+        return false;
+    }
+
+    FMythicInventoryActionReceipt Replay = *Cached;
+    Replay.Disposition = EMythicInventoryReceiptDisposition::Replayed;
+    ClientReceiveInventoryActionReceipt(Replay);
+    return true;
+}
+
+void AMythicPlayerController::CompleteInventoryActionRequest(
+    FMythicInventoryActionReceipt Receipt) {
+    Receipt.Disposition = Receipt.WasSuccessful()
+        ? EMythicInventoryReceiptDisposition::Committed
+        : EMythicInventoryReceiptDisposition::Rejected;
+
+    if (Receipt.RequestId > 0) {
+        if (InventoryActionReceiptOrder.Num()
+            >= MaxInventoryActionReceiptCacheSize) {
+            const int64 OldestRequestId = InventoryActionReceiptOrder[0];
+            InventoryActionReceiptOrder.RemoveAt(0, 1, EAllowShrinking::No);
+            InventoryActionReceiptCache.Remove(OldestRequestId);
+        }
+        InventoryActionReceiptCache.Add(Receipt.RequestId, Receipt);
+        InventoryActionReceiptOrder.Add(Receipt.RequestId);
+    }
+    ClientReceiveInventoryActionReceipt(Receipt);
+}
+
+bool AMythicPlayerController::ConsumeReceivedInventoryActionReceipt(
+    const int64 RequestId,
+    FMythicInventoryActionReceipt &OutReceipt) {
+    FMythicInventoryActionReceipt *BufferedReceipt =
+        ReceivedInventoryActionReceipts.Find(RequestId);
+    if (!BufferedReceipt) {
+        return false;
+    }
+
+    OutReceipt = *BufferedReceipt;
+    ReceivedInventoryActionReceipts.Remove(RequestId);
+    ReceivedInventoryActionReceiptOrder.RemoveSingle(RequestId);
+    return true;
+}
+
+int64 AMythicPlayerController::SubmitInventoryMove(
+    const FMythicInventorySourceLocator &Source,
+    const FMythicInventoryTargetLocator &Target) {
+    const int64 RequestId = AllocateInventoryActionRequestId();
+    ServerRequestInventoryMove(RequestId, Source, Target);
+    return RequestId;
+}
+
+int64 AMythicPlayerController::SubmitInventoryMoveBySlots(
+    UMythicInventoryComponent *SourceInventory,
+    const int32 SourceSlotIndex,
+    UMythicInventoryComponent *TargetInventory,
+    const int32 TargetSlotIndex) {
+    FMythicInventorySourceLocator Source;
+    Source.Inventory = SourceInventory;
+    Source.SlotIndex = SourceSlotIndex;
+    if (UMythicItemInstance *SourceItem = SourceInventory
+            ? SourceInventory->GetItem(SourceSlotIndex) : nullptr) {
+        Source.ExpectedItemGuid = SourceItem->GetItemInstanceGuid();
+        Source.ExpectedQuantity = SourceItem->GetStacks();
+    }
+
+    FMythicInventoryTargetLocator Target;
+    Target.Inventory = TargetInventory;
+    Target.SlotIndex = TargetSlotIndex;
+    if (UMythicItemInstance *TargetItem = TargetInventory
+            ? TargetInventory->GetItem(TargetSlotIndex) : nullptr) {
+        Target.bExpectEmpty = false;
+        Target.ExpectedOccupantGuid = TargetItem->GetItemInstanceGuid();
+        Target.ExpectedOccupantQuantity = TargetItem->GetStacks();
+    }
+    return SubmitInventoryMove(Source, Target);
+}
+
+int64 AMythicPlayerController::SubmitInventorySplit(
+    const FMythicInventorySourceLocator &Source,
+    const int32 Quantity) {
+    const int64 RequestId = AllocateInventoryActionRequestId();
+    ServerRequestInventorySplit(RequestId, Source, Quantity);
+    return RequestId;
+}
+
+int64 AMythicPlayerController::SubmitInventoryDropQuantity(
+    const FMythicInventorySourceLocator &Source,
+    const int32 Quantity) {
+    const int64 RequestId = AllocateInventoryActionRequestId();
+    ServerRequestInventoryDropQuantity(RequestId, Source, Quantity);
+    return RequestId;
+}
+
+int64 AMythicPlayerController::SubmitInventoryDropWholeSlot(
+    UMythicInventoryComponent *Inventory,
+    const int32 SlotIndex) {
+    FMythicInventorySourceLocator Source;
+    Source.Inventory = Inventory;
+    Source.SlotIndex = SlotIndex;
+    if (UMythicItemInstance *Item = Inventory
+            ? Inventory->GetItem(SlotIndex) : nullptr) {
+        Source.ExpectedItemGuid = Item->GetItemInstanceGuid();
+        Source.ExpectedQuantity = Item->GetStacks();
+    }
+    return SubmitInventoryDropQuantity(Source, Source.ExpectedQuantity);
+}
+
+int64 AMythicPlayerController::SubmitInventoryUse(
+    const FMythicInventorySourceLocator &Source) {
+    const int64 RequestId = AllocateInventoryActionRequestId();
+    ServerRequestInventoryUse(RequestId, Source);
+    return RequestId;
+}
+
+int64 AMythicPlayerController::SubmitInventorySetJunk(
+    const FMythicInventorySourceLocator &Source,
+    const bool bMarkedJunk) {
+    const int64 RequestId = AllocateInventoryActionRequestId();
+    ServerRequestInventorySetJunk(RequestId, Source, bMarkedJunk);
+    return RequestId;
+}
+
+int64 AMythicPlayerController::SubmitInventorySort(
+    UMythicInventoryComponent *Inventory,
+    const FGameplayTag GroupTag,
+    const ESortMode SortMode) {
+    const int64 RequestId = AllocateInventoryActionRequestId();
+    ServerRequestInventorySort(RequestId, Inventory, GroupTag, SortMode);
+    return RequestId;
+}
+
+void AMythicPlayerController::ServerRequestInventoryMove_Implementation(
+    const int64 RequestId,
+    const FMythicInventorySourceLocator &Source,
+    const FMythicInventoryTargetLocator &Target) {
+    if (ReplayCachedInventoryActionReceipt(RequestId)) {
+        return;
+    }
+
+    FMythicInventoryActionReceipt Receipt;
+    Receipt.RequestId = RequestId;
+    Receipt.Action = EMythicInventoryAction::Move;
+    Receipt.ItemGuid = Source.ExpectedItemGuid;
+    Receipt.SourceSlotIndex = Source.SlotIndex;
+    Receipt.TargetSlotIndex = Target.SlotIndex;
+
+    if (RequestId <= 0 || !Source.IsStructurallyValid()
+        || !Target.IsStructurallyValid()) {
+        Receipt.Result = EMythicInventoryActionResult::InvalidRequest;
+    }
+    else if (Source.Inventory != Target.Inventory
+             || !IsPlayerOwnedInventory(Source.Inventory)
+             || !IsPlayerOwnedInventory(Target.Inventory)) {
+        Receipt.Result = EMythicInventoryActionResult::UnauthorizedInventory;
+    }
+    else {
+        Receipt.Result = Source.Inventory->TryPlayerMoveItem(
+            Source, Target, Receipt.QuantityProcessed);
+    }
+    CompleteInventoryActionRequest(Receipt);
+}
+
+void AMythicPlayerController::ServerRequestInventorySplit_Implementation(
+    const int64 RequestId,
+    const FMythicInventorySourceLocator &Source,
+    const int32 Quantity) {
+    if (ReplayCachedInventoryActionReceipt(RequestId)) {
+        return;
+    }
+
+    FMythicInventoryActionReceipt Receipt;
+    Receipt.RequestId = RequestId;
+    Receipt.Action = EMythicInventoryAction::Split;
+    Receipt.ItemGuid = Source.ExpectedItemGuid;
+    Receipt.SourceSlotIndex = Source.SlotIndex;
+
+    if (RequestId <= 0 || !Source.IsStructurallyValid() || Quantity <= 0) {
+        Receipt.Result = EMythicInventoryActionResult::InvalidRequest;
+    }
+    else if (!IsPlayerOwnedInventory(Source.Inventory)) {
+        Receipt.Result = EMythicInventoryActionResult::UnauthorizedInventory;
+    }
+    else {
+        Receipt.Result = Source.Inventory->TrySplitStackToFreeSlot(
+            Source, Quantity, Receipt.TargetSlotIndex);
+        if (Receipt.WasSuccessful()) {
+            Receipt.QuantityProcessed = Quantity;
+        }
+    }
+    CompleteInventoryActionRequest(Receipt);
+}
+
+void AMythicPlayerController::ServerRequestInventoryDropQuantity_Implementation(
+    const int64 RequestId,
+    const FMythicInventorySourceLocator &Source,
+    const int32 Quantity) {
+    if (ReplayCachedInventoryActionReceipt(RequestId)) {
+        return;
+    }
+
+    FMythicInventoryActionReceipt Receipt;
+    Receipt.RequestId = RequestId;
+    Receipt.Action = EMythicInventoryAction::DropQuantity;
+    Receipt.ItemGuid = Source.ExpectedItemGuid;
+    Receipt.SourceSlotIndex = Source.SlotIndex;
+
+    APawn *PlayerPawn = GetPawn();
+    if (RequestId <= 0 || !Source.IsStructurallyValid() || Quantity <= 0
+        || !IsValid(PlayerPawn)) {
+        Receipt.Result = EMythicInventoryActionResult::InvalidRequest;
+    }
+    else if (!IsPlayerOwnedInventory(Source.Inventory)) {
+        Receipt.Result = EMythicInventoryActionResult::UnauthorizedInventory;
+    }
+    else {
+        AMythicWorldItem *SpawnedWorldItem = nullptr;
+        Receipt.Result = Source.Inventory->DropItemQuantity(
+            Source, Quantity, PlayerPawn->GetActorLocation(), 100.0f, this,
+            Receipt.QuantityProcessed, SpawnedWorldItem);
+    }
+    CompleteInventoryActionRequest(Receipt);
+}
+
+void AMythicPlayerController::ServerRequestInventoryUse_Implementation(
+    const int64 RequestId,
+    const FMythicInventorySourceLocator &Source) {
+    if (ReplayCachedInventoryActionReceipt(RequestId)) {
+        return;
+    }
+
+    FMythicInventoryActionReceipt Receipt;
+    Receipt.RequestId = RequestId;
+    Receipt.Action = EMythicInventoryAction::Use;
+    Receipt.ItemGuid = Source.ExpectedItemGuid;
+    Receipt.SourceSlotIndex = Source.SlotIndex;
+
+    if (RequestId <= 0 || !Source.IsStructurallyValid()) {
+        Receipt.Result = EMythicInventoryActionResult::InvalidRequest;
+    }
+    else if (!IsPlayerOwnedInventory(Source.Inventory)) {
+        Receipt.Result = EMythicInventoryActionResult::UnauthorizedInventory;
+    }
+    else {
+        Receipt.Result = Source.Inventory->TryUseItemInSlot(
+            Source, Receipt.QuantityProcessed);
+    }
+    CompleteInventoryActionRequest(Receipt);
+}
+
+void AMythicPlayerController::ServerRequestInventorySetJunk_Implementation(
+    const int64 RequestId,
+    const FMythicInventorySourceLocator &Source,
+    const bool bMarkedJunk) {
+    if (ReplayCachedInventoryActionReceipt(RequestId)) {
+        return;
+    }
+
+    FMythicInventoryActionReceipt Receipt;
+    Receipt.RequestId = RequestId;
+    Receipt.Action = EMythicInventoryAction::SetJunk;
+    Receipt.ItemGuid = Source.ExpectedItemGuid;
+    Receipt.SourceSlotIndex = Source.SlotIndex;
+
+    if (RequestId <= 0 || !Source.IsStructurallyValid()) {
+        Receipt.Result = EMythicInventoryActionResult::InvalidRequest;
+    }
+    else if (!IsPlayerOwnedInventory(Source.Inventory)) {
+        Receipt.Result = EMythicInventoryActionResult::UnauthorizedInventory;
+    }
+    else {
+        Receipt.Result = Source.Inventory->TrySetItemJunk(
+            Source, bMarkedJunk);
+    }
+    CompleteInventoryActionRequest(Receipt);
+}
+
+void AMythicPlayerController::ServerRequestInventorySort_Implementation(
+    const int64 RequestId,
+    UMythicInventoryComponent *Inventory,
+    const FGameplayTag GroupTag,
+    const ESortMode SortMode) {
+    if (ReplayCachedInventoryActionReceipt(RequestId)) {
+        return;
+    }
+
+    FMythicInventoryActionReceipt Receipt;
+    Receipt.RequestId = RequestId;
+    Receipt.Action = EMythicInventoryAction::Sort;
+
+    if (RequestId <= 0 || !Inventory) {
+        Receipt.Result = EMythicInventoryActionResult::InvalidRequest;
+    }
+    else if (!IsPlayerOwnedInventory(Inventory)) {
+        Receipt.Result = EMythicInventoryActionResult::UnauthorizedInventory;
+    }
+    else {
+        Receipt.Result = Inventory->TrySortGroup(GroupTag, SortMode);
+    }
+    CompleteInventoryActionRequest(Receipt);
+}
+
+void AMythicPlayerController::ClientReceiveInventoryActionReceipt_Implementation(
+    const FMythicInventoryActionReceipt &Receipt) {
+    if (Receipt.RequestId > 0) {
+        if (!ReceivedInventoryActionReceipts.Contains(Receipt.RequestId)) {
+            if (ReceivedInventoryActionReceiptOrder.Num()
+                >= MaxInventoryActionReceiptCacheSize) {
+                const int64 OldestRequestId =
+                    ReceivedInventoryActionReceiptOrder[0];
+                ReceivedInventoryActionReceiptOrder.RemoveAt(
+                    0, 1, EAllowShrinking::No);
+                ReceivedInventoryActionReceipts.Remove(OldestRequestId);
+            }
+            ReceivedInventoryActionReceiptOrder.Add(Receipt.RequestId);
+        }
+        ReceivedInventoryActionReceipts.Add(Receipt.RequestId, Receipt);
+    }
+    OnInventoryActionReceiptReceived.Broadcast(Receipt);
+}
+
 void AMythicPlayerController::ServerMoveItemBetweenInventories_Implementation(UMythicInventoryComponent *Source, int32 SourceSlot,
                                                                               UMythicInventoryComponent *Target, int32 TargetSlot) {
     if (!HasAuthority() || !Source || !Target) {

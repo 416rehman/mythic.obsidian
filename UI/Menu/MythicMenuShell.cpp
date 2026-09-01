@@ -191,6 +191,17 @@ void UMythicMenuShell::NativeOnDeactivated() {
     Super::NativeOnDeactivated();
 }
 
+bool UMythicMenuShell::NativeOnHandleBackAction() {
+    // Pages live inside our switcher rather than on their own CommonUI layer. They may dismiss a local modal, but
+    // the ordinary browsing Back action belongs to this shell so the whole pushed screen leaves as one unit.
+    if (UMythicActivatableWidget *ActivePage = Cast<UMythicActivatableWidget>(GetPageWidget(ActivePageId))) {
+        if (ActivePage->TryHandleNestedBackAction()) {
+            return true;
+        }
+    }
+    return Super::NativeOnHandleBackAction();
+}
+
 UCommonActivatableWidget *UMythicMenuShell::GetPageWidget(FName PageId) const {
     const TObjectPtr<UCommonActivatableWidget> *Found = PageWidgets.Find(PageId);
     return Found ? *Found : nullptr;

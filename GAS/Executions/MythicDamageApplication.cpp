@@ -8,15 +8,18 @@
 #include "GAS/MythicTags_GAS.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/Feedback/MythicTags_FeedbackCues.h"
+#include "GAS/Combat/MythicWeaponOffenseProjection.h"
+#include "GAS/Abilities/MythicWeaponAttackAbility.h"
 #include "AI/MythicTags_AI.h"
+#include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h"
 #include "Itemization/MythicTags_Inventory.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/Executions/MythicCombatRoll.h"
-#include "GAS/MythicStatContribution.h"
 #include "GameModes/GameState/MythicGameState.h"
 #include "Curves/RealCurve.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Player/MythicPlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -297,7 +300,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     IncomingDamageMultiplier = FMath::Max(0.0f, IncomingDamageMultiplier);
 
     /**
-     * Power contributes an additive, diminished FRACTION of the weapon roll - not a bare multiplier.
+     * Primary stats contribute an additive, diminished FRACTION of the weapon roll - not a bare multiplier.
      *
      * It used to be FMath::Max(1.0f, Power) * Roll. Weapon damage rises with item level and Power rises with
      * character level, so multiplying them made damage grow quadratically: twice the level with twice the weapon
@@ -305,36 +308,102 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
      * Power value from 0 to 1 into the same output, so early investment did nothing and any debuff below 1 was
      * silently inert.
      *
-     * The fraction comes from the authored mapping, so the coefficient is not a literal here, and it passes the
-     * same diminishing curve as every other stacked stat.
-     */
-    float MinimumWeaponDamage = 0.0f;
-    float MaximumWeaponDamage = 0.0f;
-    float AverageWeaponDamage = 0.0f;
-    if (!MythicCombat::ResolveWeaponDamageRange(
-            DmgPerHit, MinimumWeaponDamage, MaximumWeaponDamage, AverageWeaponDamage)) {
+     * Power is the currently authored source, but the projection reads the contribution rows rather than hardcoding
+     * that assumption. The coefficient is not a literal here, and it passes the same diminishing curve as every
+     * other stacked stat.
+    */
+    FMythicWeaponDamageProjection WeaponDamage;
+    FGameplayTagContainer AttackSourceTags;
+    const UAttackFragment *ExactAttackSource = Cast<UAttackFragment>(
+        Spec->GetEffectContext().GetSourceObject());
+    const FGameplayTagContainer DynamicWeaponTags =
+        Spec->GetDynamicAssetTags().Filter(
+            FGameplayTagContainer(ITEMIZATION_TYPE_EQUIPMENT_WEAPON));
+    bool bAttackSourceInvalid = false;
+    if (ExactAttackSource) {
+        switch (UMythicWeaponAttackAbility::ResolveAttackSourceDomain(
+            ExactAttackSource)) {
+        case EMythicAttackSourceDomain::Weapon:
+            bAttackSourceInvalid =
+                !MythicCombat::ResolveWeaponTypeTags(
+                    ExactAttackSource, AttackSourceTags)
+                || DynamicWeaponTags != AttackSourceTags;
+            break;
+        case EMythicAttackSourceDomain::HarvestTool:
+            bAttackSourceInvalid = !DynamicWeaponTags.IsEmpty();
+            break;
+        case EMythicAttackSourceDomain::Invalid:
+        default:
+            bAttackSourceInvalid = true;
+            break;
+        }
+    }
+    else {
+        // Skill/status/environment sources legitimately have no AttackFragment. A weapon-tagged spec without its
+        // exact fragment provenance is corrupt; never reconstruct identity from the owner's aggregated tags.
+        bAttackSourceInvalid = !DynamicWeaponTags.IsEmpty();
+    }
+    if (bAttackSourceInvalid) {
         MarkDamageExecutionAborted(OutExecutionOutput);
-        UE_LOG(Myth, Error, TEXT("DamageApplication:: invalid DamagePerHit or weapon damage range configuration"));
+        UE_LOG(Myth, Error,
+               TEXT("DamageApplication:: attack source fragment and sealed dynamic weapon-class tags disagree"));
         return;
     }
-    const float WeaponRoll = FMath::FRandRange(MinimumWeaponDamage, MaximumWeaponDamage);
-    float FinalDamage = WeaponRoll;
-    if (const UMythicCombatSettings *CombatSettings = GetDefault<UMythicCombatSettings>()) {
-        FinalDamage = FMythicStatContributionRules::ApplyToBase(
-            CombatSettings->StatContributions.Contributions,
-            UMythicAttributeSet_Offense::GetDamagePerHitAttribute(), WeaponRoll,
-            [Power](const FGameplayAttribute &Attr) -> float {
-                // Only Power is captured by this execution, so any other source reads as absent rather than
-                // as zero-with-authority: a row feeding weapon damage off some stat we cannot see contributes
-                // nothing here instead of quietly cancelling itself.
-                return Attr == UMythicAttributeSet_Offense::GetPowerAttribute() ? Power : 0.0f;
-            });
+    if (!MythicCombat::ResolveWeaponDamageProjection(
+            DmgPerHit,
+            AttackSourceTags,
+            [SourceASC, Power, BonusSwordDamage, BonusAxeDamage,
+             BonusDaggerDamage, BonusSickleDamage, BonusSpearDamage,
+             BonusHammerDamage](const FGameplayAttribute &Attribute) -> float {
+                // Power remains a captured magnitude so source/target tag evaluation is identical to the rest of
+                // this execution. Any future data-authored source feeding weapon damage is read from the same live
+                // source ASC instead of requiring a second hardcoded formula in combat and every presentation path.
+                if (Attribute == UMythicAttributeSet_Offense::GetPowerAttribute()) {
+                    return Power;
+                }
+                if (Attribute == UMythicAttributeSet_Offense::GetBonusSwordDamageAttribute()) {
+                    return BonusSwordDamage;
+                }
+                if (Attribute == UMythicAttributeSet_Offense::GetBonusAxeDamageAttribute()) {
+                    return BonusAxeDamage;
+                }
+                if (Attribute == UMythicAttributeSet_Offense::GetBonusDaggerDamageAttribute()) {
+                    return BonusDaggerDamage;
+                }
+                if (Attribute == UMythicAttributeSet_Offense::GetBonusSickleDamageAttribute()) {
+                    return BonusSickleDamage;
+                }
+                if (Attribute == UMythicAttributeSet_Offense::GetBonusSpearDamageAttribute()) {
+                    return BonusSpearDamage;
+                }
+                if (Attribute == UMythicAttributeSet_Offense::GetBonusHammerDamageAttribute()) {
+                    return BonusHammerDamage;
+                }
+                return SourceASC && Attribute.IsValid()
+                    && SourceASC->HasAttributeSetForAttribute(Attribute)
+                    ? SourceASC->GetNumericAttribute(Attribute) : 0.0f;
+            },
+            WeaponDamage)) {
+        MarkDamageExecutionAborted(OutExecutionOutput);
+        UE_LOG(Myth, Error,
+               TEXT("DamageApplication:: invalid DamagePerHit, primary-stat contribution, or weapon damage range configuration"));
+        return;
     }
-    const float PowerFraction = WeaponRoll > KINDA_SMALL_NUMBER ? (FinalDamage / WeaponRoll) - 1.0f : 0.0f;
+    float FinalDamage = FMath::FRandRange(
+        WeaponDamage.EffectiveMinimumDamage,
+        WeaponDamage.EffectiveMaximumDamage);
     UE_LOG(Myth, Verbose,
-           TEXT("DamageApplication:: Damage %f = weapon range (%f - %f, expected %f) * (1 + Power %f -> +%.1f%%)"),
-           FinalDamage, MinimumWeaponDamage, MaximumWeaponDamage, AverageWeaponDamage,
-           Power, PowerFraction * 100.0f);
+           TEXT("DamageApplication:: Damage %f from effective range (%f - %f, expected %f); base (%f - %f), Power %f, primary +%.1f%%, weapon class %s x%.3f"),
+           FinalDamage,
+           WeaponDamage.EffectiveMinimumDamage,
+           WeaponDamage.EffectiveMaximumDamage,
+           WeaponDamage.EffectiveAverageDamage,
+           WeaponDamage.BaseMinimumDamage,
+           WeaponDamage.BaseMaximumDamage,
+           Power,
+           WeaponDamage.PrimaryStatBonusFraction * 100.0f,
+           *WeaponDamage.WeaponClassTag.ToString(),
+           WeaponDamage.WeaponClassBonusMultiplier);
     // Every damage-affecting fraction below is a stacked 0.0-based bonus, so each rides its authored diminishing
     // curve before it multiplies. A stat with no curve passes through unchanged, so this is a no-op until one is
     // authored - the curves in UMythicCombatSettings::StatDiminishing are the brake, not this call.
@@ -375,21 +444,6 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
                                                                    EvaluateParameters, DecreasedDamageFromEnemiesUnderStatusEffects);
         if (DecreasedDamageFromEnemiesUnderStatusEffects > 0.0f) {
             FinalDamage = FMath::Max(0.0f, FinalDamage * FMath::Max(0.0f, 1.0f - DecreasedDamageFromEnemiesUnderStatusEffects));
-        }
-    }
-
-    if (SourceTags) {
-        using Off = UMythicAttributeSet_Offense;
-        float WeaponMult = 1.0f;
-        if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SWORD)) { WeaponMult = CurveBonus(Off::GetBonusSwordDamageAttribute(), BonusSwordDamage); }
-        else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_AXE)) { WeaponMult = CurveBonus(Off::GetBonusAxeDamageAttribute(), BonusAxeDamage); }
-        else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_DAGGERS)) { WeaponMult = CurveBonus(Off::GetBonusDaggerDamageAttribute(), BonusDaggerDamage); }
-        else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SICKLE)) { WeaponMult = CurveBonus(Off::GetBonusSickleDamageAttribute(), BonusSickleDamage); }
-        else if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SPEAR)) { WeaponMult = CurveBonus(Off::GetBonusSpearDamageAttribute(), BonusSpearDamage); }
-        else
-            if (SourceTags->HasTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_HAMMER)) { WeaponMult = CurveBonus(Off::GetBonusHammerDamageAttribute(), BonusHammerDamage); }
-        if (WeaponMult != 1.0f) {
-            FinalDamage = FMath::Max(0.0f, FinalDamage * WeaponMult);
         }
     }
 

@@ -101,7 +101,10 @@ public:
 
 #if WITH_EDITOR
 
-    /** Configures this definition as a weapon and ensures its one Attack and one Affixes Fragment authoring shape. */
+    /**
+     * Ensures the weapon's one Attack and one Affixes Fragment authoring shape after an exact supported weapon-class
+     * ItemType has been selected. The generic Weapon parent is rejected because combat requires a concrete class.
+     */
     UFUNCTION(CallInEditor, Category="Set Category")
     void Weapon();
 

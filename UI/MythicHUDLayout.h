@@ -17,19 +17,6 @@ class UMythicNameplateLayer;
 class UNamedSlot;
 
 USTRUCT(BlueprintType)
-struct FMythicMenuHotkey {
-    GENERATED_BODY()
-
-    /** The CommonUI action this key is bound to (UI.Action.Inventory and friends). */
-    UPROPERTY(EditDefaultsOnly, Category = "Menu", meta = (Categories = "UI.Action"))
-    FGameplayTag ActionTag;
-
-    /** Which page of the shell it opens. Must match a PageId in the shell's Pages array. */
-    UPROPERTY(EditDefaultsOnly, Category = "Menu")
-    FName PageId;
-};
-
-USTRUCT(BlueprintType)
 struct FMythicHUDElementRule {
     GENERATED_BODY()
 
@@ -74,7 +61,7 @@ public:
     virtual void NativeDestruct() override;
 
 public:
-    // Return true to skip the menu opening
+    /** Return true when Blueprint handled Escape and the native escape menu should remain closed. */
     UFUNCTION(BlueprintImplementableEvent, Category = MythicHUDLayout)
     bool PreEscapeMenuOpen();
 
@@ -83,6 +70,7 @@ public:
 
 protected:
 
+    /** Escape-menu screen pushed by the HUD when Blueprint does not intercept the request. */
     UPROPERTY(EditDefaultsOnly)
     TSoftClassPtr<UCommonActivatableWidget> EscapeMenuClass;
 
@@ -91,13 +79,9 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Menu")
     TSubclassOf<UMythicMenuShell> MenuShellClass;
 
-    /** Which key lands on which page. Adding a hotkey is a row here, not new code. */
-    UPROPERTY(EditDefaultsOnly, Category = "Menu")
-    TArray<FMythicMenuHotkey> MenuHotkeys;
-
     /**
-     * The bare "open the menu" key (Tab). Lands on the leftmost tab rather than a named page, so Tab is the way in
-     * when you do not already know what you are looking for, and the per-system keys are the shortcuts when you do.
+     * The sole shell entry action (Tab / View). It opens the leftmost tab and closes the active shell when pressed
+     * again; page navigation belongs to the shell rather than global gameplay shortcuts.
      */
     UPROPERTY(EditDefaultsOnly, Category = "Menu", meta = (Categories = "UI.Action"))
     FGameplayTag OpenMenuAction;
@@ -108,19 +92,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Menu")
     void OpenMenuOnPage(FName PageId);
 
-    /** Read-only, for the validator that checks every hotkey lands on a page the shell actually has. */
-    const TArray<FMythicMenuHotkey> &GetMenuHotkeys() const { return MenuHotkeys; }
+    /** Read-only shell entry action used by the authored-content validator. */
+    const FGameplayTag &GetOpenMenuAction() const { return OpenMenuAction; }
 
 protected:
-    /**
-     * Route the existing Inventory key into the shell. Bound in C++ only when bRouteInventoryToShell is set, so the
-     * project can keep its old Blueprint-driven inventory until the shell fully replaces it.
-     */
-    UPROPERTY(EditDefaultsOnly, Category = "Menu")
-    bool bRouteInventoryToShell = false;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Menu")
-    FName InventoryPageId = TEXT("Inventory");
 
     // ---- Lending the inventory to the Character tab ----
     /**
@@ -203,7 +178,7 @@ public:
     void PokeElementByName(FName WidgetName);
 
 protected:
-    void HandleInventoryAction();
+    void HandleMenuAction();
     void HandleInspectEntityAction();
 
     /** Rebuilds the policy-bounded, input-tag-unique LocalPlayer CommonUI bindings from sanitized Focus action rows. */
@@ -238,6 +213,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ClampMin = "0.1"))
     float SalienceFadeInSpeed = 6.0f;
 
+    /** Slow semantic fade-out speed used after an element's attention window has elapsed. */
     UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ClampMin = "0.1"))
     float SalienceFadeOutSpeed = 1.7f;
 
@@ -282,6 +258,7 @@ private:
     void RefreshContextActionBindings();
     void ClearContextActionBindings();
     void RemoveContextActionBinding(FGameplayTag InputActionTag);
+    void SyncContextActionPresentationBindings();
 
     struct FMythicHUDElementState {
         TWeakObjectPtr<UWidget> Widget;

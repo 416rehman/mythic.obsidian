@@ -183,6 +183,9 @@ public:
     UPROPERTY(Transient)
     TArray<TObjectPtr<UItemSlotVM>> AbsoluteIndexToSlotVM;
 
+    /** Finds the live slot projection for one physical item identity, independent of sort or tab order. */
+    UItemSlotVM *FindSlotByItemGuid(const FGuid &ItemGuid) const;
+
 private:
     TArray<TObjectPtr<UInventoryTabVM>> CreateVMs(const TArray<FMythicInventorySlotEntry> &allSlots, TSet<int32> InventoryIndices);
 

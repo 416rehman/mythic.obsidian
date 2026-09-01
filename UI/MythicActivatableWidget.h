@@ -44,6 +44,12 @@ protected:
     virtual void NativeOnRemovedFromFocusPath(const FFocusEvent &InFocusEvent) override;
 
 public:
+	/**
+	 * Gives an active child page one chance to close local modal state before its owning screen handles Back.
+	 * Ordinary pages return false so Back remains owned by the container that was pushed onto the CommonUI layer.
+	 */
+	virtual bool TryHandleNestedBackAction() { return false; }
+
 	UFUNCTION(BlueprintCallable, Category = MythicActivatableWidget)
 	void RegisterInputBinding(FGameplayTag InputTag, EInputEvent InputType, const FInputActionExecutedDelegate& Callback, bool ShowInActionBar, FInputActionBindingHandle& BindingHandle);
 

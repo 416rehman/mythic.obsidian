@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Input/UIActionBindingHandle.h"
 #include "UI/Nameplate/MythicNameplateTypes.h"
 #include "MythicNameplateLayer.generated.h"
 
@@ -44,6 +45,11 @@ public:
         const FMythicNameplateActionRailProjection &Projection,
         FVector2D ScreenPosition, float PresentationAlpha = 1.0f,
         float PresentationScale = 1.0f);
+
+    /** Routes LocalPlayer-owned CommonUI handles into the prewarmed rail so hold progress is binding-driven. */
+    void SetActionRailBindings(
+        const TMap<FGameplayTag, FUIActionBindingHandle> &InActionBindings,
+        FUIActionBindingHandle InInspectBinding);
 
     /** Moves the already-prewarmed action rail without semantic copies, allocation, or layout mutation. */
     bool UpdateActionRailPlacement(

@@ -520,7 +520,7 @@ void UMythicSettingRowBase::SetNormalisedValue(float Normalised) {
 }
 
 void UMythicSettingRowBase::ResetToDefault() {
-    UMythicSettingAccess::WriteValue(Definition, Definition.DefaultValue);
+    UMythicSettingAccess::StageDefault(Definition);
     NotifyChanged();
 }
 

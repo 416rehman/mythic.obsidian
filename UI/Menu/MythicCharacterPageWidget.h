@@ -6,27 +6,81 @@
 #include "GameplayTagContainer.h"
 #include "Components/ListViewBase.h"
 #include "FieldNotificationId.h"
+#include "Itemization/Inventory/MythicInventoryActionTypes.h"
 #include "UI/MythicActivatableWidget.h"
 #include "MythicCharacterPageWidget.generated.h"
 
 class UBorder;
+class UCommonButtonBase;
 class UCommonTextBlock;
+class UHorizontalBox;
 class UImage;
+class UInputAction;
 class UInventorySelectionVM;
 class UInventoryTabVM;
 class UInventoryVM;
+class UItemComparisonVM;
+class UItemSlotVM;
 class UListView;
 class UListViewBase;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UMythicHUDLayout;
+class UMythicBoundActionButton;
+class UMythicInventoryComponent;
 class UMythicSectionHeader;
+class UOverlay;
 class UPanelWidget;
+class USizeBox;
 class UVerticalBox;
 class UWidget;
 struct FGameplayEventData;
 
 class UMythicCharacterPageWidget;
+
+/** Local commands shared by clickable inventory controls and controller input. */
+UENUM()
+enum class EMythicInventoryUICommand : uint8 {
+    EquipOrUnequip,
+    Use,
+    BeginMove,
+    Compare,
+    Split,
+    Drop,
+    ToggleJunk,
+    Inspect,
+    OpenSortMenu,
+    SortByRarity,
+    SortByType,
+    SortByName,
+    SortByValue,
+    SortByWeight,
+    QuantityDecrease,
+    QuantityIncrease,
+    ConfirmQuantity,
+    ChooseEquipmentTarget,
+    ConfirmComparisonEquip,
+    Cancel,
+};
+
+/** Payload-bearing click bridge for menu rows built from the project UI kit. */
+UCLASS()
+class MYTHIC_API UMythicInventoryActionClickProxy : public UObject {
+    GENERATED_BODY()
+
+public:
+    UPROPERTY()
+    TWeakObjectPtr<UMythicCharacterPageWidget> Page;
+
+    UPROPERTY()
+    EMythicInventoryUICommand Command = EMythicInventoryUICommand::Cancel;
+
+    UPROPERTY()
+    int32 Payload = INDEX_NONE;
+
+    UFUNCTION()
+    void HandleClicked();
+};
 
 UCLASS()
 class MYTHIC_API UMythicRuneSocketClickProxy : public UObject {
@@ -48,9 +102,11 @@ USTRUCT(BlueprintType)
 struct FMythicRuneCategoryColour {
     GENERATED_BODY()
 
+    /** Rune category whose socket mark receives this colour. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Runes", meta = (Categories = "Rune.Category"))
     FGameplayTag Category;
 
+    /** Player-facing tint used for runes in Category. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Runes")
     FLinearColor Colour = FLinearColor::White;
 };
@@ -62,13 +118,17 @@ class MYTHIC_API UMythicCharacterPageWidget : public UMythicActivatableWidget {
 public:
     void OpenSocketPicker(int32 SlotIndex);
 
+    /** Closes the character page's active inventory modal; browsing declines so the menu shell handles Back. */
+    virtual bool TryHandleNestedBackAction() override;
+
     /** Redraws the socket strip after the picker commits a change. */
     void NotifyRunesChanged();
 
-    /** Advances the bag's active category. Bound to LB/RB CommonUI actions by the page Blueprint. */
+    /** Advances the bag's active category. The page-local inventory context maps this to Right Trigger. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Inventory")
     void CycleBagCategoryForward();
 
+    /** Moves to the previous bag category. The page-local inventory context maps this to Left Trigger. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Inventory")
     void CycleBagCategoryBack();
 
@@ -78,6 +138,36 @@ protected:
     virtual void NativeOnDeactivated() override;
     virtual void NativeDestruct() override;
     virtual UWidget *NativeGetDesiredFocusTarget() const override;
+
+    /** Performs the contextual primary verb for the selected slot (equip, unequip, use, or inspect). */
+    UFUNCTION()
+    void HandlePrimaryInventoryAction();
+
+    /** Opens the complete controller-navigable action menu for the selected item. */
+    UFUNCTION()
+    void HandleInventoryActionsAction();
+
+    /** Opens comparison against an explicitly selected compatible equipment slot. */
+    UFUNCTION()
+    void HandleCompareInventoryAction();
+
+    /** Opens the data-safe sort choices for the selected carried group. */
+    UFUNCTION()
+    void HandleSortInventoryAction();
+
+    UFUNCTION()
+    void HandlePreviousInventoryCategory();
+
+    UFUNCTION()
+    void HandleNextInventoryCategory();
+
+    /** Receives the authoritative result for a correlated player-inventory request. */
+    UFUNCTION()
+    void HandleInventoryActionReceipt(const FMythicInventoryActionReceipt &Receipt);
+
+    /** Coalesces replicated slot changes so selection is restored after the view model refreshes. */
+    UFUNCTION()
+    void HandleInventorySlotUpdated(int32 SlotIndex);
 
     /** Where the borrowed inventory sits while this tab is up. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
@@ -110,16 +200,48 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Inventory")
     FName WeaponStripName = TEXT("Weapon");
 
+    /** Contextual confirm action: Enter/A. Mouse activates the same rail button directly. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Inventory|Input")
+    TSoftObjectPtr<UInputAction> InventoryPrimaryInputAction;
 
+    /** Opens the selected item's complete action list: F/X. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Inventory|Input")
+    TSoftObjectPtr<UInputAction> InventoryActionsInputAction;
+
+    /** Opens an explicit equipped-slot comparison: Left Shift/Y. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Inventory|Input")
+    TSoftObjectPtr<UInputAction> InventoryCompareInputAction;
+
+    /** Moves to the previous carried category: Left Bracket/Left Trigger. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Inventory|Input")
+    TSoftObjectPtr<UInputAction> InventoryPreviousCategoryInputAction;
+
+    /** Moves to the next carried category: Right Bracket/Right Trigger. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Inventory|Input")
+    TSoftObjectPtr<UInputAction> InventoryNextCategoryInputAction;
+
+    /** Opens the selected category's sort choices: R/Left Stick Click. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Inventory|Input")
+    TSoftObjectPtr<UInputAction> InventorySortInputAction;
+
+    /** Optional authored host for interactive inventory controls; C++ adds one to PageStack when absent. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UHorizontalBox> InventoryActionBar;
+
+
+    /** Character name displayed in the page header. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> Txt_CharacterName;
 
+    /** Current data-driven character level displayed in the page header. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> Txt_Level;
 
+    /** Material-backed progress bar for the current character-level XP interval. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UImage> Img_XpBar;
 
+    /** Numeric current/required XP readout paired with Img_XpBar. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> Txt_XpValue;
 
@@ -162,6 +284,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes")
     TSubclassOf<class UMythicRunePickerWidget> RunePickerClass;
 
+    /** Host that receives the persistent item-details widget for the selected physical item. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UPanelWidget> DetailsHost;
 
@@ -177,20 +300,47 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Character")
     TObjectPtr<UMaterialInterface> XpBarMaterial;
 
+    /** Leading colour of the character-level XP fill gradient. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Character")
     FLinearColor XpFillStart = FLinearColor(0.85f, 0.70f, 0.30f, 1.0f);
 
+    /** Trailing colour of the character-level XP fill gradient. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Character")
     FLinearColor XpFillEnd = FLinearColor(0.55f, 0.42f, 0.16f, 1.0f);
 
 private:
+    friend class UMythicInventoryActionClickProxy;
+
+    enum class EInventoryPageState : uint8 {
+        Browsing,
+        ActionMenu,
+        EquipmentTarget,
+        MoveTarget,
+        Quantity,
+        Comparison,
+        SortMenu,
+        Pending,
+    };
+
+    enum class EQuantityPurpose : uint8 {
+        None,
+        Split,
+        Drop,
+    };
+
+    struct FEquipmentTarget {
+        int32 SlotIndex = INDEX_NONE;
+        FText DisplayName;
+        bool bExpectEmpty = true;
+        FGuid OccupantGuid;
+        int32 OccupantQuantity = 0;
+    };
+
     struct FMythicRuneSocket {
         TObjectPtr<UWidget> Button;
         TObjectPtr<UImage> Well;
         TObjectPtr<UImage> Mark;
         int32 SlotIndex = INDEX_NONE;
-
-        UPROPERTY()
         TObjectPtr<UMythicRuneSocketClickProxy> Proxy;
     };
 
@@ -247,6 +397,51 @@ private:
     void CycleBagCategory(int32 Direction);
     void FocusInitialSlot();
 
+    void BuildInventoryInteractionChrome();
+    void BuildInventoryActionBar();
+    UMythicBoundActionButton *CreateInventoryActionButton(TSubclassOf<class UCommonButtonStyle> StyleClass);
+    void BindInventoryInputs();
+    void ReleaseInventoryInputs();
+    void BindInventoryEvents();
+    void ReleaseInventoryEvents();
+    void ResetInventoryInteractionState();
+    void RefreshInventoryActionBar();
+    void ExecuteInventoryUICommand(EMythicInventoryUICommand Command, int32 Payload);
+
+    void OpenActionMenu();
+    void OpenSortMenu();
+    void OpenQuantityPanel(EQuantityPurpose Purpose);
+    void OpenEquipmentTargetPicker(bool bForComparison);
+    void OpenComparison(int32 TargetSlotIndex);
+    void CloseInventoryModal(bool bRestoreSourceSelection = true);
+    void ClearModalOptions();
+    UWidget *AddModalCommand(const FText &Label, EMythicInventoryUICommand Command,
+                             int32 Payload = INDEX_NONE, bool bEnabled = true,
+                             const FText &Tooltip = FText::GetEmpty());
+    void SetFeedback(const FText &Message, bool bIsError = false);
+
+    UItemSlotVM *GetSelectedSlot() const;
+    UMythicInventoryComponent *GetInventoryComponent() const;
+    bool BuildSourceLocator(struct FMythicInventorySourceLocator &OutSource) const;
+    bool BuildTargetLocator(int32 SlotIndex, struct FMythicInventoryTargetLocator &OutTarget) const;
+    TArray<FEquipmentTarget> BuildEquipmentTargets() const;
+    FText GetSlotDisplayName(int32 SlotIndex) const;
+    void BeginMoveTargetSelection();
+    void ConfirmMoveTarget();
+    void SubmitMoveToSlot(int32 TargetSlotIndex);
+    void SubmitUse();
+    void SubmitSplit(int32 Quantity);
+    void SubmitDrop(int32 Quantity);
+    void SubmitSetJunk();
+    void SubmitSort(int32 SortModeValue);
+    void BeginPendingRequest(int64 RequestId, int32 ActionValue);
+
+    void SetSelectedSlot(UItemSlotVM *SlotVM, UListViewBase *SourceList);
+    void ClearOtherListSelections(UListViewBase *Except);
+    void ScheduleRestoreSelection();
+    void RestoreSelectionByGuid();
+    UListViewBase *FindListSelecting(UObject *Item) const;
+
     UInventoryVM *ResolveInventoryVM() const;
 
     static bool ChainHasName(UWidget *Leaf, const TArray<FName> &Names);
@@ -266,6 +461,67 @@ private:
     TWeakObjectPtr<UInventoryVM> BoundInventoryVM;
     TWeakObjectPtr<UInventorySelectionVM> BoundSelectionVM;
     FDelegateHandle BagTabHandle;
+
+    FInputActionBindingHandle PrimaryBinding;
+    FInputActionBindingHandle ActionsBinding;
+    FInputActionBindingHandle CompareBinding;
+    FInputActionBindingHandle PreviousCategoryBinding;
+    FInputActionBindingHandle NextCategoryBinding;
+    FInputActionBindingHandle SortBinding;
+
+    EInventoryPageState InventoryPageState = EInventoryPageState::Browsing;
+    EQuantityPurpose QuantityPurpose = EQuantityPurpose::None;
+    int32 QuantityValue = 1;
+    int32 QuantityMaximum = 1;
+    int32 ActiveTargetSlotIndex = INDEX_NONE;
+    int32 StickyEquipmentTargetSlotIndex = INDEX_NONE;
+    bool bTargetPickerForComparison = false;
+    bool bSynchronizingSelection = false;
+    bool bSelectionRestoreScheduled = false;
+    int64 PendingRequestId = 0;
+    int32 PendingActionValue = INDEX_NONE;
+    FGuid SelectedItemGuid;
+    FGuid ActionSourceGuid;
+    int32 LastSelectedSlotIndex = INDEX_NONE;
+    int32 ActionSourceSlotIndex = INDEX_NONE;
+    TWeakObjectPtr<UListViewBase> SelectedList;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UItemComparisonVM> ComparisonVM;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UCommonTextBlock> InventoryFeedback;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UBorder> InventoryModalLayer;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UCommonTextBlock> InventoryModalTitle;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UCommonTextBlock> InventoryModalBody;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UVerticalBox> InventoryModalOptions;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMythicBoundActionButton> PrimaryActionButton;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMythicBoundActionButton> ActionsActionButton;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMythicBoundActionButton> CompareActionButton;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMythicBoundActionButton> SortActionButton;
+
+    UPROPERTY()
+    TArray<TObjectPtr<UMythicInventoryActionClickProxy>> InventoryClickProxies;
+
+    /** Keeps the native rune click bridges reachable by GC for as long as their socket buttons exist. */
+    UPROPERTY()
+    TArray<TObjectPtr<UMythicRuneSocketClickProxy>> RuneSocketClickProxies;
 
     TWeakObjectPtr<UListView> WeaponStrip;
     TArray<TWeakObjectPtr<UListView>> ReorientedStrips;

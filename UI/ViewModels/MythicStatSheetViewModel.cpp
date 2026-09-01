@@ -416,7 +416,17 @@ void UMythicStatSheetViewModel::Rebuild() {
             Card.Description = Definition->Description;
             Card.Icon = Definition->Icon;
             Card.RawValue = Definition->Compute(AbilitySystem);
-            Card.Value = MythicStatDisplay::FormatValue(Card.RawValue, Definition->Format);
+            float RangeMinimum = 0.0f;
+            float RangeMaximum = 0.0f;
+            if (Definition->ComputeRange(AbilitySystem, RangeMinimum, RangeMaximum)) {
+                Card.Value = FText::Format(
+                    NSLOCTEXT("MythicStats", "SummaryRange", "{0} - {1}"),
+                    MythicStatDisplay::FormatValue(RangeMinimum, Definition->Format),
+                    MythicStatDisplay::FormatValue(RangeMaximum, Definition->Format));
+            }
+            else {
+                Card.Value = MythicStatDisplay::FormatValue(Card.RawValue, Definition->Format);
+            }
             NewSummaries.Add(MoveTemp(Card));
         }
     }

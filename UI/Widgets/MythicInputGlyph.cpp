@@ -15,6 +15,7 @@
 #include "Materials/MaterialInterface.h"
 #include "UI/MythicUIStyle.h"
 #include "Widgets/SOverlay.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Fonts/FontMeasure.h"
@@ -28,6 +29,10 @@ UMythicInputGlyph::UMythicInputGlyph() {
     KeyFont.TypefaceFontName = TEXT("Default");
     KeyFont.Size = 11;
     KeyFont.OutlineSettings.OutlineSize = 0;
+
+    HoldProgressMaterial = TSoftObjectPtr<UMaterialInterface>(
+        FSoftObjectPath(TEXT("/Game/Mythic/UI/Globals/materials/M_DownProgressMaterial.M_DownProgressMaterial")));
+    HoldProgressBrush.DrawAs = ESlateBrushDrawType::Image;
 }
 
 void UMythicInputGlyph::SetActionTag(FGameplayTag InActionTag) {
@@ -39,8 +44,18 @@ void UMythicInputGlyph::SetActionTag(FGameplayTag InActionTag) {
 }
 
 void UMythicInputGlyph::SetActionBinding(FUIActionBindingHandle InHandle) {
+    ListenToActionBinding(false);
     BindingHandle = InHandle;
+    HoldProgress = 0.0f;
+    ListenToActionBinding(true);
     RefreshGlyph();
+}
+
+void UMythicInputGlyph::SetHoldProgress(float HeldPercent) {
+    HoldProgress = bIsHoldAction ? FMath::Clamp(HeldPercent, 0.0f, 1.0f) : 0.0f;
+    if (HoldProgressMID && !HoldProgressParameterName.IsNone()) {
+        HoldProgressMID->SetScalarParameterValue(HoldProgressParameterName, HoldProgress);
+    }
 }
 
 void UMythicInputGlyph::SetEnhancedAction(const UInputAction *InAction) {
@@ -87,7 +102,24 @@ FText UMythicInputGlyph::GetShortKeyLabel(const FKey &Key) {
 TSharedRef<SWidget> UMythicInputGlyph::RebuildWidget() {
     TSharedRef<SWidget> Image = Super::RebuildWidget();
 
+    UMaterialInterface *ProgressMaterial = HoldProgressMaterial.IsNull()
+                                               ? nullptr
+                                               : HoldProgressMaterial.LoadSynchronous();
+    if (ProgressMaterial && (!HoldProgressMID || HoldProgressMID->Parent != ProgressMaterial)) {
+        HoldProgressMID = UMaterialInstanceDynamic::Create(ProgressMaterial, this);
+    }
+    HoldProgressBrush.SetResourceObject(HoldProgressMID);
+    HoldProgressBrush.TintColor = FSlateColor(HoldProgressTint);
+
     return SNew(SOverlay)
+           + SOverlay::Slot()
+           .HAlign(HAlign_Center)
+           .VAlign(VAlign_Center)
+           [
+               SAssignNew(HoldProgressImage, SImage)
+               .Image(&HoldProgressBrush)
+               .Visibility(EVisibility::Collapsed)
+           ]
            + SOverlay::Slot()
            [
                Image
@@ -105,12 +137,15 @@ TSharedRef<SWidget> UMythicInputGlyph::RebuildWidget() {
 void UMythicInputGlyph::OnWidgetRebuilt() {
     Super::OnWidgetRebuilt();
     Listen(true);
+    ListenToActionBinding(true);
     RefreshGlyph();
 }
 
 void UMythicInputGlyph::ReleaseSlateResources(bool bReleaseChildren) {
     Listen(false);
+    ListenToActionBinding(false);
     KeyLabel.Reset();
+    HoldProgressImage.Reset();
     Super::ReleaseSlateResources(bReleaseChildren);
 }
 
@@ -143,8 +178,59 @@ void UMythicInputGlyph::Listen(bool bListen) {
     }
 }
 
+void UMythicInputGlyph::ListenToActionBinding(bool bListen) {
+    if (const TSharedPtr<FUIActionBinding> Binding = FUIActionBinding::FindBinding(BindingHandle)) {
+        Binding->OnHoldActionProgressed.RemoveAll(this);
+        if (bListen) {
+            Binding->OnHoldActionProgressed.AddUObject(this, &UMythicInputGlyph::SetHoldProgress);
+        }
+    }
+}
+
 void UMythicInputGlyph::HandleInputMethodChanged(ECommonInputType NewType) {
+    HoldProgress = 0.0f;
     RefreshGlyph();
+}
+
+bool UMythicInputGlyph::IsCurrentActionHold() const {
+    const ULocalPlayer *LocalPlayer = GetOwningLocalPlayer();
+    const UCommonInputSubsystem *Input = LocalPlayer ? UCommonInputSubsystem::Get(LocalPlayer) : nullptr;
+    if (!Input || !BindingHandle.IsValid()) {
+        return false;
+    }
+
+    if (const TSharedPtr<FUIActionBinding> Binding = FUIActionBinding::FindBinding(BindingHandle)) {
+        const ECommonInputType InputType = Input->GetCurrentInputType();
+        for (const FUIActionKeyMapping &Mapping : Binding->HoldMappings) {
+            if (KeyMatchesInputType(Mapping.Key, InputType)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void UMythicInputGlyph::RefreshHoldPresentation() {
+    bIsHoldAction = IsCurrentActionHold();
+    if (!bIsHoldAction) {
+        HoldProgress = 0.0f;
+    }
+    SetHoldProgress(HoldProgress);
+
+    if (HoldProgressImage.IsValid()) {
+        HoldProgressImage->SetVisibility(
+            bIsHoldAction && HoldProgressMID ? EVisibility::SelfHitTestInvisible : EVisibility::Collapsed);
+        HoldProgressImage->Invalidate(EInvalidateWidgetReason::Paint);
+    }
+}
+
+void UMythicInputGlyph::UpdateHoldProgressBrushSize(const FVector2D &NewSize) {
+    if (HoldProgressBrush.GetImageSize() != NewSize) {
+        HoldProgressBrush.SetImageSize(NewSize);
+        if (HoldProgressImage.IsValid()) {
+            HoldProgressImage->Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+        }
+    }
 }
 
 bool UMythicInputGlyph::KeyMatchesInputType(const FKey &Key, ECommonInputType InputType) {
@@ -215,6 +301,8 @@ void UMythicInputGlyph::RefreshGlyph() {
         return;
     }
 
+    RefreshHoldPresentation();
+
     const ULocalPlayer *LocalPlayer = GetOwningLocalPlayer();
     const UCommonInputSubsystem *Input = LocalPlayer ? UCommonInputSubsystem::Get(LocalPlayer) : nullptr;
     if (!Input) {
@@ -247,7 +335,11 @@ void UMythicInputGlyph::RefreshGlyph() {
             if (!KeyCapMID || KeyCapMID->Parent != CapMaterial) {
                 KeyCapMID = UMaterialInstanceDynamic::Create(CapMaterial, this);
             }
-            const FLinearColor LetterInk = KeyInk.Equals(GetDefault<UMythicInputGlyph>()->KeyInk) ? FMythicUIStyle::Get().Ink : KeyInk;
+            const FLinearColor LetterInk = bIsHoldAction
+                                                ? HoldGlyphTint
+                                                : (KeyInk.Equals(GetDefault<UMythicInputGlyph>()->KeyInk)
+                                                       ? FMythicUIStyle::Get().Ink
+                                                       : KeyInk);
             if (KeyCapMID) {
                 KeyCapMID->SetVectorParameterValue(TEXT("LineColor"), LetterInk);
             }
@@ -270,6 +362,7 @@ void UMythicInputGlyph::RefreshGlyph() {
             CapBrush.ImageSize = FVector2D(Width, GlyphHeight);
             CapBrush.DrawAs = ESlateBrushDrawType::Image;
             SetBrush(CapBrush);
+            UpdateHoldProgressBrushSize(CapBrush.ImageSize);
 
             if (KeyLabel.IsValid()) {
                 KeyLabel->SetText(Label);
@@ -311,8 +404,10 @@ void UMythicInputGlyph::RefreshGlyph() {
     const float Aspect = (Source.Y > KINDA_SMALL_NUMBER) ? (Source.X / Source.Y) : 1.0f;
     Found.ImageSize = FVector2D(GlyphHeight * Aspect, GlyphHeight);
 
-    Found.TintColor = FSlateColor(FLinearColor(0.62f, 0.60f, 0.55f, 0.92f));
+    Found.TintColor = FSlateColor(
+        bIsHoldAction ? HoldGlyphTint : FLinearColor(0.62f, 0.60f, 0.55f, 0.92f));
 
     SetBrush(Found);
+    UpdateHoldProgressBrushSize(Found.ImageSize);
     SetVisibility(ESlateVisibility::HitTestInvisible);
 }

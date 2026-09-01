@@ -5,13 +5,13 @@
 #include "AI/MythicTags_AI.h"
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "GAS/Combat/MythicEntityCombatPresentationComponent.h"
+#include "GAS/Combat/MythicWeaponOffenseProjection.h"
 #include "GAS/Abilities/MythicWeaponAttackAbility.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Proficiencies.h"
 #include "GAS/Executions/MythicCombatRoll.h"
-#include "GAS/MythicStatContribution.h"
 #include "GAS/MythicStatDiminishing.h"
 #include "GAS/MythicTags_GAS.h"
 #include "GameModes/GameState/MythicGameState.h"
@@ -151,23 +151,20 @@ FMythicCombatPresentationProjectionRules::BuildAuthorityPressureSnapshot(
     const float DamagePerHit = ReadCombatAttribute(
         AbilitySystem,
         UMythicAttributeSet_Offense::GetDamagePerHitAttribute());
-    float MinimumDamage = 0.0f;
-    float MaximumDamage = 0.0f;
-    float AverageDamage = 0.0f;
-    if (MythicCombat::ResolveWeaponDamageRange(
-            DamagePerHit, MinimumDamage, MaximumDamage, AverageDamage)
-        && Settings) {
-        Snapshot.ExpectedDamagePerHit =
-            FMythicStatContributionRules::ApplyToBase(
-                Settings->StatContributions.Contributions,
-                UMythicAttributeSet_Offense::GetDamagePerHitAttribute(),
-                AverageDamage,
-                [AbilitySystem](const FGameplayAttribute &Attribute) {
-                    return Attribute
-                            == UMythicAttributeSet_Offense::GetPowerAttribute()
-                        ? ReadCombatAttribute(AbilitySystem, Attribute)
-                        : 0.0f;
-                });
+    FGameplayTagContainer WeaponTypeTags;
+    const bool bCanProjectWeaponDamage = Cast<AMythicNPCCharacter>(Actor)
+        || MythicCombat::ResolveActiveWeaponTypeTags(
+            AbilitySystem, WeaponTypeTags);
+    FMythicWeaponDamageProjection WeaponDamage;
+    if (bCanProjectWeaponDamage
+        && MythicCombat::ResolveWeaponDamageProjection(
+            DamagePerHit,
+            WeaponTypeTags,
+            [AbilitySystem](const FGameplayAttribute &Attribute) {
+                return ReadCombatAttribute(AbilitySystem, Attribute);
+            },
+            WeaponDamage)) {
+        Snapshot.ExpectedDamagePerHit = WeaponDamage.EffectiveAverageDamage;
     }
 
     const float AttackSpeedBonus = ReadCombatAttribute(

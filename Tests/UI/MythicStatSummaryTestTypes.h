@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GAS/Abilities/MythicWeaponAttackAbility.h"
 #include "GAS/MythicStatSummary.h"
 #include "MythicStatSummaryTestTypes.generated.h"
 
@@ -11,4 +12,11 @@ class UMythicStatSummaryCalculation_Fixed : public UMythicStatSummaryCalculation
 
 public:
     virtual float Calculate_Implementation(const UAbilitySystemComponent *ASC) const override { return 1234.5f; }
+};
+
+/** Concrete, never-activated weapon ability used only to give a summary fixture exact attack-source provenance. */
+UCLASS(NotBlueprintable, Hidden)
+class UMythicStatSummaryWeaponAbilityFixture final
+    : public UMythicWeaponAttackAbility {
+    GENERATED_BODY()
 };

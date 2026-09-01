@@ -7,7 +7,9 @@
 
 class UCommonButtonBase;
 class UCommonButtonGroupBase;
+class UCommonButtonStyle;
 class UCommonTextBlock;
+class UMythicBoundActionButton;
 class UMythicSettingRowBase;
 class UPanelWidget;
 class UVerticalBox;
@@ -42,6 +44,9 @@ protected:
 
     UFUNCTION()
     void HandleRestoreDefaultsAction();
+
+    UFUNCTION()
+    void HandleBackAction();
 
     /**
      * Exclusive selection for the rail.
@@ -187,6 +192,14 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
     FText DefaultsLabel = NSLOCTEXT("Mythic", "SettingsDefaults", "Restore Defaults");
 
+    /** Footer label while there is nothing to discard. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
+    FText BackLabel = NSLOCTEXT("Mythic", "SettingsBack", "Back");
+
+    /** Footer label while leaving will discard the staged transaction. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
+    FText CancelLabel = NSLOCTEXT("Mythic", "SettingsCancelChanges", "Cancel Changes");
+
     /** Shown when nothing has focus yet, so the detail panel is never three empty lines. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Settings")
     FText EmptyDetailHint = NSLOCTEXT("Mythic", "SettingsHint", "Choose a setting to read what it does.");
@@ -199,6 +212,10 @@ protected:
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UPanelWidget> RowList;
+
+    /** Authored footer host; C++ fills it with bound buttons after action handles are registered. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    TObjectPtr<UHorizontalBox> ActionBar;
 
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Settings")
     int32 ActiveCategory = 0;
@@ -222,6 +239,17 @@ private:
     /** Pushes title, detail panel and footer text into whichever bound widgets exist. */
     void PushChrome();
 
+    /** Creates the three local footer buttons once, then rebinds them on every activation. */
+    void BuildActionBar();
+
+    /** Updates labels, enabled states and explicit focus routes from the current staging transaction. */
+    void RefreshActionBar();
+
+    /** Unregisters activation-owned CommonUI bindings so reopening this same screen cannot duplicate them. */
+    void ReleaseActionBindings();
+
+    UMythicBoundActionButton *CreateActionButton(TSubclassOf<UCommonButtonStyle> StyleClass);
+
     void LabelButton(UCommonButtonBase *Button, const FText &Label) const;
 
     void HandleTabClicked(int32 CategoryIndex);
@@ -236,6 +264,15 @@ private:
     /** Rows of the active tab, so focus can start on the first real setting rather than a heading. */
     UPROPERTY()
     TArray<TObjectPtr<UMythicSettingRowBase>> ActiveRows;
+
+    UPROPERTY()
+    TObjectPtr<UMythicBoundActionButton> ResetButton;
+
+    UPROPERTY()
+    TObjectPtr<UMythicBoundActionButton> BackButton;
+
+    UPROPERTY()
+    TObjectPtr<UMythicBoundActionButton> ApplyButton;
 
     bool bScreenBuilt = false;
 };

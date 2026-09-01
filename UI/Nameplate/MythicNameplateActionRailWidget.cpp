@@ -43,28 +43,18 @@ void UMythicNameplateActionRailWidget::ApplyProjection(
         ResetForPool();
         return;
     }
-    const FMythicNameplateActionProjection *Primary =
-        Projection.Actions.IsEmpty() ? nullptr : &Projection.Actions[0];
-    ApplyEntry(PrimaryGlyph, PrimaryActionText,
-               Primary ? Primary->InputActionTag : FGameplayTag(),
-               Primary ? Primary->ResolvedLabel : FText::GetEmpty());
-
-    const FMythicNameplateActionProjection *Secondary = nullptr;
-    if (!Projection.bInspectAvailable && Projection.Actions.Num() > 1) {
-        Secondary = &Projection.Actions[1];
-    }
-    if (Projection.bInspectAvailable) {
-        ApplyEntry(SecondaryGlyph, SecondaryActionText,
-                   Projection.InspectInputActionTag,
-                   Projection.ResolvedInspectLabel);
-    } else {
-        ApplyEntry(SecondaryGlyph, SecondaryActionText,
-                   Secondary ? Secondary->InputActionTag : FGameplayTag(),
-                   Secondary ? Secondary->ResolvedLabel : FText::GetEmpty());
-    }
+    RefreshEntries();
 
     SetVisibility(ESlateVisibility::SelfHitTestInvisible);
     OnActionRailProjectionChanged();
+}
+
+void UMythicNameplateActionRailWidget::SetActionBindings(
+    const TMap<FGameplayTag, FUIActionBindingHandle> &InActionBindings,
+    FUIActionBindingHandle InInspectBinding) {
+    ActionBindings = InActionBindings;
+    InspectBinding = InInspectBinding;
+    RefreshEntries();
 }
 
 void UMythicNameplateActionRailWidget::SetPresentationStyle(
@@ -139,10 +129,16 @@ void UMythicNameplateActionRailWidget::ResetForPool() {
 
 void UMythicNameplateActionRailWidget::ApplyEntry(
     UMythicInputGlyph *Glyph, UTextBlock *Text,
-    const FGameplayTag &InputTag, const FText &Label) {
+    const FGameplayTag &InputTag, const FText &Label,
+    const FUIActionBindingHandle BindingHandle) {
     const bool bVisible = InputTag.IsValid() && !Label.IsEmpty();
     if (Glyph) {
-        Glyph->SetActionTag(bVisible ? InputTag : FGameplayTag());
+        Glyph->SetActionBinding(
+            bVisible && BindingHandle.IsValid()
+                ? BindingHandle : FUIActionBindingHandle());
+        Glyph->SetActionTag(
+            bVisible && !BindingHandle.IsValid()
+                ? InputTag : FGameplayTag());
         Glyph->SetVisibility(bVisible ? ESlateVisibility::SelfHitTestInvisible
                                       : ESlateVisibility::Collapsed);
     }
@@ -155,5 +151,38 @@ void UMythicNameplateActionRailWidget::ApplyEntry(
 
 void UMythicNameplateActionRailWidget::ResetEntry(
     UMythicInputGlyph *Glyph, UTextBlock *Text) {
-    ApplyEntry(Glyph, Text, FGameplayTag(), FText::GetEmpty());
+    ApplyEntry(Glyph, Text, FGameplayTag(), FText::GetEmpty(),
+               FUIActionBindingHandle());
+}
+
+void UMythicNameplateActionRailWidget::RefreshEntries() {
+    if (!Projection.IsPresentable()) {
+        ResetEntry(PrimaryGlyph, PrimaryActionText);
+        ResetEntry(SecondaryGlyph, SecondaryActionText);
+        return;
+    }
+
+    const FMythicNameplateActionProjection *Primary =
+        Projection.Actions.IsEmpty() ? nullptr : &Projection.Actions[0];
+    const FGameplayTag PrimaryInputTag =
+        Primary ? Primary->InputActionTag : FGameplayTag();
+    ApplyEntry(PrimaryGlyph, PrimaryActionText, PrimaryInputTag,
+               Primary ? Primary->ResolvedLabel : FText::GetEmpty(),
+               ActionBindings.FindRef(PrimaryInputTag));
+
+    const FMythicNameplateActionProjection *Secondary = nullptr;
+    if (!Projection.bInspectAvailable && Projection.Actions.Num() > 1) {
+        Secondary = &Projection.Actions[1];
+    }
+    if (Projection.bInspectAvailable) {
+        ApplyEntry(SecondaryGlyph, SecondaryActionText,
+                   Projection.InspectInputActionTag,
+                   Projection.ResolvedInspectLabel, InspectBinding);
+    } else {
+        const FGameplayTag SecondaryInputTag =
+            Secondary ? Secondary->InputActionTag : FGameplayTag();
+        ApplyEntry(SecondaryGlyph, SecondaryActionText, SecondaryInputTag,
+                   Secondary ? Secondary->ResolvedLabel : FText::GetEmpty(),
+                   ActionBindings.FindRef(SecondaryInputTag));
+    }
 }

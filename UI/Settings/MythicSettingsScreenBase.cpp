@@ -7,6 +7,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "CommonButtonBase.h"
 #include "CommonTextBlock.h"
+#include "ICommonInputModule.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -18,18 +19,22 @@
 #include "UI/Settings/MythicSettingAccess.h"
 #include "UI/Settings/MythicSettingRowBase.h"
 #include "UI/Settings/MythicUserSettings.h"
-
-namespace {
-const FGameplayTag TagApply = FGameplayTag::RequestGameplayTag(FName("UI.Action.ApplySettings"), false);
-const FGameplayTag TagRestore = FGameplayTag::RequestGameplayTag(FName("UI.Action.RestoreDefaults"), false);
-}
+#include "UI/Widgets/MythicBoundActionButton.h"
 
 void UMythicSettingsScreenBase::HandleApplyAction() {
-    ApplyAndSave();
+    if (UMythicSettingAccess::HasStagedChanges()) {
+        ApplyAndSave();
+    }
 }
 
 void UMythicSettingsScreenBase::HandleRestoreDefaultsAction() {
-    RestoreDefaults();
+    if (UMythicSettingAccess::HasNonDefaultValues(GetCatalog())) {
+        RestoreDefaults();
+    }
+}
+
+void UMythicSettingsScreenBase::HandleBackAction() {
+    DeactivateWidget();
 }
 
 UMythicSettingsCatalog *UMythicSettingsScreenBase::GetCatalog() const {
@@ -52,6 +57,10 @@ void UMythicSettingsScreenBase::NativeOnActivated() {
     BuildScreen();
     Super::NativeOnActivated();
 
+    // This widget instance can be popped and pushed repeatedly without being destroyed. Activation owns
+    // these handles, so clean up any stale pair before registering the new routing epoch.
+    ReleaseActionBindings();
+
     // Everything from here is a preview until Apply. Opening the screen is the baseline.
     UMythicSettingAccess::BeginStaging();
 
@@ -62,15 +71,29 @@ void UMythicSettingsScreenBase::NativeOnActivated() {
     if (UInputAction *Apply = ApplyInputAction.LoadSynchronous()) {
         FInputActionExecutedDelegate OnApply;
         OnApply.BindDynamic(this, &UMythicSettingsScreenBase::HandleApplyAction);
-        RegisterInputActionBinding(Apply, IE_Pressed, OnApply, /*ShowInActionBar*/ true, ApplyBinding);
+        RegisterInputActionBinding(Apply, IE_Pressed, OnApply, /*ShowInActionBar*/ false, ApplyBinding);
     }
     if (UInputAction *Restore = RestoreDefaultsInputAction.LoadSynchronous()) {
         FInputActionExecutedDelegate OnRestore;
         OnRestore.BindDynamic(this, &UMythicSettingsScreenBase::HandleRestoreDefaultsAction);
-        RegisterInputActionBinding(Restore, IE_Pressed, OnRestore, /*ShowInActionBar*/ true, RestoreBinding);
+        RegisterInputActionBinding(Restore, IE_Pressed, OnRestore, /*ShowInActionBar*/ false, RestoreBinding);
     }
+    BuildActionBar();
+    if (ApplyButton) {
+        ApplyButton->SetRepresentedAction(ApplyBinding.Handle);
+    }
+    if (ResetButton) {
+        ResetButton->SetRepresentedAction(RestoreBinding.Handle);
+    }
+    if (BackButton) {
+        // CommonActivatableWidget already owns the canonical Back binding. The visible control uses that
+        // same lifecycle for keyboard/gamepad, while its click delegate provides the mouse path. Creating
+        // another UI binding for the same action makes CommonUI reject one as a duplicate.
+        BackButton->SetGlyphEnhancedAction(ICommonInputModule::GetSettings().GetEnhancedInputBackAction());
+    }
+    RefreshActionBar();
 
-    UE_LOG(Myth, Log, TEXT("Settings activated: apply action %s (handle %s), restore action %s (handle %s)"),
+    UE_LOG(Myth, Log, TEXT("Settings activated: apply %s/%s, restore %s/%s"),
            ApplyInputAction.IsNull() ? TEXT("UNSET") : TEXT("ok"),
            ApplyBinding.Handle.IsValid() ? TEXT("ok") : TEXT("INVALID"),
            RestoreDefaultsInputAction.IsNull() ? TEXT("UNSET") : TEXT("ok"),
@@ -144,8 +167,6 @@ void UMythicSettingsScreenBase::BuildScreen() {
         }
     }
 
-    // No hand-placed buttons: Apply and Restore Defaults are CommonUI actions on the bound action bar, so
-    // they carry the glyph for whatever the player is holding and work identically on a pad.
     ApplyCategoryVisibility();
 }
 
@@ -205,6 +226,146 @@ void UMythicSettingsScreenBase::PushChrome() {
         Text_Status->SetVisibility(bPending ? ESlateVisibility::HitTestInvisible
                                             : ESlateVisibility::Collapsed);
     }
+
+    RefreshActionBar();
+}
+
+UMythicBoundActionButton *UMythicSettingsScreenBase::CreateActionButton(
+    TSubclassOf<UCommonButtonStyle> StyleClass) {
+    if (!ActionBar) {
+        return nullptr;
+    }
+
+    const UMythicUIStyleSettings &Style = FMythicUIStyle::Get();
+    UClass *ButtonClass = Style.ActionButtonClass.IsNull()
+                              ? nullptr
+                              : Style.ActionButtonClass.LoadSynchronous();
+    if (!ButtonClass || !ButtonClass->IsChildOf(UMythicBoundActionButton::StaticClass())) {
+        UE_LOG(Myth, Error,
+               TEXT("Settings footer requires ActionButtonClass to derive from UMythicBoundActionButton"));
+        return nullptr;
+    }
+
+    UMythicBoundActionButton *Button =
+        WidgetTree->ConstructWidget<UMythicBoundActionButton>(ButtonClass);
+    if (!Button) {
+        return nullptr;
+    }
+
+    if (StyleClass) {
+        Button->SetStyle(StyleClass);
+    }
+    Button->SetMinDimensions(FMath::RoundToInt(Style.ActionButtonMinWidth),
+                             FMath::RoundToInt(Style.ActionButtonMinHeight));
+    Button->SetIsSelectable(true);
+    Button->SetIsInteractableWhenSelected(true);
+    Button->SetShouldSelectUponReceivingFocus(true);
+    Button->bNavigateToNextWidgetOnDisable = true;
+    Button->OnFocusLost().AddWeakLambda(Button, [Button]() {
+        Button->ClearSelection();
+    });
+
+    if (UPanelSlot *Added = ActionBar->AddChild(Button)) {
+        if (UHorizontalBoxSlot *FooterSlot = Cast<UHorizontalBoxSlot>(Added)) {
+            FooterSlot->SetVerticalAlignment(VAlign_Center);
+            FooterSlot->SetPadding(
+                FMargin(ActionBar->GetChildrenCount() > 1 ? Style.ActionButtonGap : 0.0f,
+                        0.0f, 0.0f, 0.0f));
+        }
+    }
+    // Constructing the Blueprint child applies its designer defaults. Select interactive mode only after
+    // insertion so the prompt-only default cannot overwrite this screen-local button's hit-test state.
+    Button->SetActionBarPromptOnly(false);
+    return Button;
+}
+
+void UMythicSettingsScreenBase::BuildActionBar() {
+    if (!ActionBar) {
+        return;
+    }
+
+    const UMythicUIStyleSettings &Style = FMythicUIStyle::Get();
+    if (!BackButton) {
+        BackButton = CreateActionButton(Style.QuietActionButtonStyle.LoadSynchronous());
+        if (BackButton) {
+            BackButton->OnClicked().AddUObject(this, &UMythicSettingsScreenBase::HandleBackAction);
+        }
+    }
+    if (!ResetButton) {
+        ResetButton = CreateActionButton(Style.SecondaryActionButtonStyle.LoadSynchronous());
+    }
+    if (!ApplyButton) {
+        ApplyButton = CreateActionButton(Style.PrimaryActionButtonStyle.LoadSynchronous());
+    }
+}
+
+void UMythicSettingsScreenBase::RefreshActionBar() {
+    if (!ResetButton && !BackButton && !ApplyButton) {
+        return;
+    }
+
+    const bool bPending = UMythicSettingAccess::HasStagedChanges();
+    const bool bCanReset = UMythicSettingAccess::HasNonDefaultValues(GetCatalog());
+    bPendingApply = bPending;
+
+    if (ResetButton) {
+        ResetButton->SetLabelOverride(DefaultsLabel);
+        ResetButton->SetIsEnabled(bCanReset);
+        ResetButton->SetToolTipText(
+            NSLOCTEXT("MythicSettings", "ResetTooltip",
+                      "Stage every setting at its authored default. Apply confirms; Cancel Changes discards."));
+    }
+    if (BackButton) {
+        BackButton->SetLabelOverride(bPending ? CancelLabel : BackLabel);
+        BackButton->SetIsEnabled(true);
+        BackButton->SetToolTipText(
+            bPending
+                ? NSLOCTEXT("MythicSettings", "CancelTooltip", "Discard every unapplied change and go back.")
+                : NSLOCTEXT("MythicSettings", "BackTooltip", "Return to the previous screen."));
+    }
+    if (ApplyButton) {
+        ApplyButton->SetLabelOverride(ApplyLabel);
+        ApplyButton->SetIsEnabled(bPending);
+        ApplyButton->SetToolTipText(
+            bPending
+                ? NSLOCTEXT("MythicSettings", "ApplyTooltip", "Apply and save every staged setting.")
+                : NSLOCTEXT("MythicSettings", "ApplyDisabledTooltip", "No unapplied changes."));
+    }
+
+    TArray<UMythicBoundActionButton *> EnabledButtons;
+    if (BackButton) {
+        EnabledButtons.Add(BackButton);
+    }
+    if (ResetButton && ResetButton->GetIsEnabled()) {
+        EnabledButtons.Add(ResetButton);
+    }
+    if (ApplyButton && ApplyButton->GetIsEnabled()) {
+        EnabledButtons.Add(ApplyButton);
+    }
+    for (int32 Index = 0; Index < EnabledButtons.Num(); ++Index) {
+        UMythicBoundActionButton *Button = EnabledButtons[Index];
+        Button->SetNavigationRuleExplicit(
+            EUINavigation::Left,
+            EnabledButtons[(Index - 1 + EnabledButtons.Num()) % EnabledButtons.Num()]);
+        Button->SetNavigationRuleExplicit(
+            EUINavigation::Right, EnabledButtons[(Index + 1) % EnabledButtons.Num()]);
+    }
+
+    UMythicSettingRowBase *LastSetting = nullptr;
+    for (int32 Index = ActiveRows.Num() - 1; Index >= 0; --Index) {
+        if (ActiveRows[Index] && !IsGroupHeading(ActiveRows[Index]->GetDefinition())) {
+            LastSetting = ActiveRows[Index];
+            break;
+        }
+    }
+    UWidget *FooterTarget = bPending && ApplyButton ? static_cast<UWidget *>(ApplyButton.Get())
+                                                    : static_cast<UWidget *>(BackButton.Get());
+    if (LastSetting && FooterTarget) {
+        LastSetting->SetNavigationRuleExplicit(EUINavigation::Down, FooterTarget);
+        for (UMythicBoundActionButton *Button : EnabledButtons) {
+            Button->SetNavigationRuleExplicit(EUINavigation::Up, LastSetting);
+        }
+    }
 }
 
 void UMythicSettingsScreenBase::ApplyCategoryVisibility() {
@@ -221,14 +382,18 @@ void UMythicSettingsScreenBase::ApplyCategoryVisibility() {
         if (!bActive) {
             continue;
         }
-        for (UWidget *ColumnWidget : Container->GetAllChildren()) {
-            UVerticalBox *Column = Cast<UVerticalBox>(ColumnWidget);
-            if (!Column) {
+        // The current full-width layout stores rows directly in the category container. Retain support
+        // for one nested panel as well so a future alternate layout does not silently lose focus routing.
+        for (UWidget *Child : Container->GetAllChildren()) {
+            if (UMythicSettingRowBase *Row = Cast<UMythicSettingRowBase>(Child)) {
+                ActiveRows.Add(Row);
                 continue;
             }
-            for (UWidget *Child : Column->GetAllChildren()) {
-                if (UMythicSettingRowBase *Row = Cast<UMythicSettingRowBase>(Child)) {
-                    ActiveRows.Add(Row);
+            if (UPanelWidget *NestedPanel = Cast<UPanelWidget>(Child)) {
+                for (UWidget *NestedChild : NestedPanel->GetAllChildren()) {
+                    if (UMythicSettingRowBase *Row = Cast<UMythicSettingRowBase>(NestedChild)) {
+                        ActiveRows.Add(Row);
+                    }
                 }
             }
         }
@@ -403,38 +568,55 @@ void UMythicSettingsScreenBase::SetFocusedRow(const FMythicSettingDefinition &Ro
 }
 
 void UMythicSettingsScreenBase::MarkPendingApply() {
-    if (bPendingApply) {
-        return;
-    }
-    bPendingApply = true;
+    const bool bWasPending = bPendingApply;
+    bPendingApply = UMythicSettingAccess::HasStagedChanges();
     PushChrome();
-    OnPendingApplyChanged();
+    if (bWasPending != bPendingApply) {
+        OnPendingApplyChanged();
+    }
 }
 
 void UMythicSettingsScreenBase::NativeOnDeactivated() {
     // Leaving without applying puts everything back. A settings screen that keeps changes you walked away
     // from is how players end up with a renderer they never chose and cannot retrace.
     // Nothing was applied, so discarding is just forgetting - no restore pass to get wrong.
+    ReleaseActionBindings();
     RemoveUIInputContext();
     UMythicSettingAccess::RevertStaged();
     bPendingApply = false;
     Super::NativeOnDeactivated();
 }
 
+void UMythicSettingsScreenBase::ReleaseActionBindings() {
+    if (ApplyBinding.Handle.IsValid()) {
+        UnregisterInputBinding(ApplyBinding);
+    }
+    if (RestoreBinding.Handle.IsValid()) {
+        UnregisterInputBinding(RestoreBinding);
+    }
+    ApplyBinding = FInputActionBindingHandle();
+    RestoreBinding = FInputActionBindingHandle();
+}
+
 void UMythicSettingsScreenBase::ApplyAndSave() {
+    if (!UMythicSettingAccess::HasStagedChanges()) {
+        return;
+    }
     UMythicSettingAccess::CommitStaged();
     if (UMythicUserSettings *Settings = UMythicUserSettings::Get()) {
         Settings->ApplySettings(false);
         Settings->SaveSettings();
     }
     bPendingApply = false;
+    PushChrome();
     OnPendingApplyChanged();
     OnCategoryChanged();
 }
 
 void UMythicSettingsScreenBase::RestoreDefaults() {
     UMythicSettingAccess::RestoreDefaults(GetCatalog());
-    bPendingApply = false;
+    bPendingApply = UMythicSettingAccess::HasStagedChanges();
+    PushChrome();
     OnPendingApplyChanged();
 
     for (UMythicSettingRowBase *Row : ActiveRows) {

@@ -24,6 +24,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Settings")
     static float ReadValue(const FMythicSettingDefinition &Def);
 
+    /** Stages a raw value for Apply; writing the committed value again removes that setting from the dirty set. */
     UFUNCTION(BlueprintCallable, Category = "Settings")
     static void WriteValue(const FMythicSettingDefinition &Def, float Value);
 
@@ -43,6 +44,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Settings")
     static bool IsRequirementMet(FGameplayTag Requirement);
 
+    /** True when this setting's hardware or platform requirement is currently satisfied. */
     UFUNCTION(BlueprintPure, Category = "Settings")
     static bool IsSettingAvailable(const FMythicSettingDefinition &Def);
 
@@ -54,9 +56,17 @@ public:
     UFUNCTION(BlueprintPure, Category = "Settings")
     static bool IsAtDefault(const FMythicSettingDefinition &Def);
 
-    /** Returns every setting to its authored default. One loop, so no setting can be forgotten. */
+    /** Stages this setting's authored default, including a select option's companion cvar profile. */
+    UFUNCTION(BlueprintCallable, Category = "Settings")
+    static void StageDefault(const FMythicSettingDefinition &Def);
+
+    /** Stages every authored default; Apply commits them and Cancel can still discard them. */
     UFUNCTION(BlueprintCallable, Category = "Settings")
     static void RestoreDefaults(const UMythicSettingsCatalog *Catalog);
+
+    /** True when at least one catalog entry currently differs from its authored default, including staged values. */
+    UFUNCTION(BlueprintPure, Category = "Settings")
+    static bool HasNonDefaultValues(const UMythicSettingsCatalog *Catalog);
 
     /** Whether the source this setting names actually resolves. Validation uses this to catch dead settings. */
     static bool ResolvesSource(const FMythicSettingDefinition &Def, FString &OutWhy);
@@ -99,7 +109,8 @@ private:
     struct FPending {
         FMythicSettingDefinition Def;
         float Value = 0.0f;
-        int32 OptionIndex = INDEX_NONE;
+        FMythicSettingOption Option;
+        bool bHasOption = false;
     };
 
     /** Source name -> what the player asked for. Nothing here has touched the game yet. */

@@ -270,7 +270,11 @@ bool UMythicInventoryComponent::CanAcceptItemType(const FGameplayTag &ItemType) 
     return false;
 }
 
-bool UMythicInventoryComponent::CanSlotAcceptItem(int32 SlotIndex, UMythicItemInstance *ItemInstance, bool bFromPlayer) const {
+bool UMythicInventoryComponent::CanSlotAcceptItem(
+    const int32 SlotIndex,
+    UMythicItemInstance *ItemInstance,
+    const bool bFromPlayer,
+    const UMythicItemInstance *IgnoredUniqueItem) const {
     if (!Slots.IsValidIndex(SlotIndex) || !ItemInstance) {
         return false;
     }
@@ -304,7 +308,10 @@ bool UMythicInventoryComponent::CanSlotAcceptItem(int32 SlotIndex, UMythicItemIn
                 continue;
             }
             const FMythicInventorySlotEntry &OtherSlot = Slots.Items[i];
-            if (OtherSlot.GroupTag == Slot.GroupTag && OtherSlot.EntryIndex == Slot.EntryIndex && OtherSlot.SlottedItemInstance && OtherSlot.SlottedItemInstance
+            if (OtherSlot.GroupTag == Slot.GroupTag && OtherSlot.EntryIndex == Slot.EntryIndex
+                && OtherSlot.SlottedItemInstance
+                && OtherSlot.SlottedItemInstance != IgnoredUniqueItem
+                && OtherSlot.SlottedItemInstance
                 ->GetItemDefinition() == ItemInstance->GetItemDefinition()) {
                 return false;
             }
@@ -814,6 +821,155 @@ bool UMythicInventoryComponent::CanPlayerTakeFromSlot(int32 SlotIndex) const {
     return Slots.IsValidIndex(SlotIndex) && Slots.Items[SlotIndex].bCanPlayerTake;
 }
 
+EMythicInventoryActionResult UMythicInventoryComponent::ResolveSourceLocator(
+    const FMythicInventorySourceLocator &Source,
+    UMythicItemInstance *&OutItem) const {
+    OutItem = nullptr;
+    if (!Source.IsStructurallyValid() || Source.Inventory != this
+        || !GetOwner() || !GetOwner()->HasAuthority()) {
+        return EMythicInventoryActionResult::InvalidRequest;
+    }
+    if (!Slots.IsValidIndex(Source.SlotIndex)) {
+        return EMythicInventoryActionResult::InvalidSlot;
+    }
+    OutItem = Slots.Items[Source.SlotIndex].SlottedItemInstance;
+    if (!OutItem || OutItem->GetItemInstanceGuid() != Source.ExpectedItemGuid
+        || OutItem->GetStacks() != Source.ExpectedQuantity
+        || OutItem->GetInventoryComponent() != this
+        || OutItem->GetSlot() != Source.SlotIndex) {
+        OutItem = nullptr;
+        return EMythicInventoryActionResult::StaleSource;
+    }
+    return EMythicInventoryActionResult::Succeeded;
+}
+
+EMythicInventoryActionResult UMythicInventoryComponent::ResolveTargetLocator(
+    const FMythicInventoryTargetLocator &Target,
+    UMythicItemInstance *&OutOccupant) const {
+    OutOccupant = nullptr;
+    if (!Target.IsStructurallyValid() || Target.Inventory != this
+        || !GetOwner() || !GetOwner()->HasAuthority()) {
+        return EMythicInventoryActionResult::InvalidRequest;
+    }
+    if (!Slots.IsValidIndex(Target.SlotIndex)) {
+        return EMythicInventoryActionResult::InvalidSlot;
+    }
+    OutOccupant = Slots.Items[Target.SlotIndex].SlottedItemInstance;
+    if (Target.bExpectEmpty) {
+        if (OutOccupant) {
+            OutOccupant = nullptr;
+            return EMythicInventoryActionResult::StaleTarget;
+        }
+        return EMythicInventoryActionResult::Succeeded;
+    }
+    if (!OutOccupant
+        || OutOccupant->GetItemInstanceGuid() != Target.ExpectedOccupantGuid
+        || OutOccupant->GetStacks() != Target.ExpectedOccupantQuantity
+        || OutOccupant->GetInventoryComponent() != this
+        || OutOccupant->GetSlot() != Target.SlotIndex) {
+        OutOccupant = nullptr;
+        return EMythicInventoryActionResult::StaleTarget;
+    }
+    return EMythicInventoryActionResult::Succeeded;
+}
+
+EMythicInventoryActionResult UMythicInventoryComponent::TryPlayerMoveItem(
+    const FMythicInventorySourceLocator &Source,
+    const FMythicInventoryTargetLocator &Target,
+    int32 &OutQuantityProcessed) {
+    OutQuantityProcessed = 0;
+
+    UMythicItemInstance *SourceItem = nullptr;
+    EMythicInventoryActionResult Result = ResolveSourceLocator(Source, SourceItem);
+    if (Result != EMythicInventoryActionResult::Succeeded) {
+        return Result;
+    }
+    if (!Target.Inventory || (Target.Inventory == this && Target.SlotIndex == Source.SlotIndex)) {
+        return EMythicInventoryActionResult::InvalidRequest;
+    }
+
+    UMythicItemInstance *TargetItem = nullptr;
+    Result = Target.Inventory->ResolveTargetLocator(Target, TargetItem);
+    if (Result != EMythicInventoryActionResult::Succeeded) {
+        return Result;
+    }
+
+    const FMythicInventorySlotEntry &SourceSlot = Slots.Items[Source.SlotIndex];
+    FMythicInventorySlotEntry &TargetSlot = Target.Inventory->Slots.Items[Target.SlotIndex];
+    if (!SourceSlot.bCanPlayerTake) {
+        return EMythicInventoryActionResult::SourceProtected;
+    }
+    if (!TargetSlot.bCanPlayerPut) {
+        return EMythicInventoryActionResult::TargetProtected;
+    }
+    if (!TargetItem) {
+        if (!Target.Inventory->CanSlotAcceptItem(
+                Target.SlotIndex, SourceItem, true, SourceItem)) {
+            return EMythicInventoryActionResult::IncompatibleTarget;
+        }
+        const FStagedSlotMutation Mutations[] = {
+            {this, Source.SlotIndex, SourceItem, nullptr},
+            {Target.Inventory, Target.SlotIndex, nullptr, SourceItem},
+        };
+        if (!CommitSlotMutationsTransactional(MakeArrayView(Mutations))) {
+            return EMythicInventoryActionResult::CommitFailed;
+        }
+        OutQuantityProcessed = Source.ExpectedQuantity;
+        return EMythicInventoryActionResult::Succeeded;
+    }
+
+    const UItemDefinition *SourceDefinition = SourceItem->GetItemDefinition();
+    const bool bSameStackKind = SourceDefinition
+        && SourceDefinition == TargetItem->GetItemDefinition()
+        && SourceItem->isStackableWith(TargetItem)
+        && ShouldAttemptStackMerge(SourceDefinition->StackSizeMax);
+    if (bSameStackKind) {
+        if (SourceSlot.IsGearSlot() || TargetSlot.IsGearSlot()) {
+            return EMythicInventoryActionResult::IncompatibleTarget;
+        }
+        const int32 AvailableSpace = SourceDefinition->StackSizeMax
+            - TargetItem->GetStacks();
+        if (AvailableSpace <= 0) {
+            return EMythicInventoryActionResult::InventoryFull;
+        }
+        const bool bSourceFullyLeaves = AvailableSpace >= Source.ExpectedQuantity;
+        if (!Target.Inventory->CanSlotAcceptItem(
+                Target.SlotIndex, SourceItem, true,
+                bSourceFullyLeaves ? SourceItem : nullptr)) {
+            return EMythicInventoryActionResult::IncompatibleTarget;
+        }
+        const int32 Moved = SendItem(Source.SlotIndex, Target.Inventory, Target.SlotIndex);
+        if (Moved <= 0) {
+            return EMythicInventoryActionResult::CommitFailed;
+        }
+        OutQuantityProcessed = Moved;
+        return EMythicInventoryActionResult::Succeeded;
+    }
+
+    if (!TargetSlot.bCanPlayerTake) {
+        return EMythicInventoryActionResult::TargetProtected;
+    }
+    if (!SourceSlot.bCanPlayerPut) {
+        return EMythicInventoryActionResult::SourceProtected;
+    }
+    if (!Target.Inventory->CanSlotAcceptItem(
+            Target.SlotIndex, SourceItem, true, SourceItem)
+        || !CanSlotAcceptItem(
+            Source.SlotIndex, TargetItem, true, TargetItem)) {
+        return EMythicInventoryActionResult::IncompatibleTarget;
+    }
+
+    const FStagedSlotMutation Mutations[] = {
+        {this, Source.SlotIndex, SourceItem, TargetItem},
+        {Target.Inventory, Target.SlotIndex, TargetItem, SourceItem},
+    };
+    if (!CommitSlotMutationsTransactional(MakeArrayView(Mutations))) {
+        return EMythicInventoryActionResult::CommitFailed;
+    }
+    OutQuantityProcessed = Source.ExpectedQuantity;
+    return EMythicInventoryActionResult::Succeeded;
+}
+
 bool UMythicInventoryComponent::DropItem(int32 SlotIndex, const FVector &location, const float radius, AController *TargetRecipient) {
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("DropItem:: Invalid Inventory Owner"));
@@ -862,6 +1018,73 @@ bool UMythicInventoryComponent::DropItem(int32 SlotIndex, const FVector &locatio
     this->OnItemDropped.Broadcast(SlotIndex, world_item);
 
     return true;
+}
+
+EMythicInventoryActionResult UMythicInventoryComponent::DropItemQuantity(
+    const FMythicInventorySourceLocator &Source,
+    const int32 Quantity,
+    const FVector &Location,
+    const float Radius,
+    AController *TargetRecipient,
+    int32 &OutQuantityDropped,
+    AMythicWorldItem *&OutWorldItem) {
+    OutQuantityDropped = 0;
+    OutWorldItem = nullptr;
+
+    UMythicItemInstance *SourceItem = nullptr;
+    const EMythicInventoryActionResult SourceResult = ResolveSourceLocator(Source, SourceItem);
+    if (SourceResult != EMythicInventoryActionResult::Succeeded) {
+        return SourceResult;
+    }
+    if (!Slots.Items[Source.SlotIndex].bCanPlayerTake) {
+        return EMythicInventoryActionResult::SourceProtected;
+    }
+    if (Quantity <= 0 || Quantity > Source.ExpectedQuantity) {
+        return EMythicInventoryActionResult::InvalidQuantity;
+    }
+
+    if (Quantity == Source.ExpectedQuantity) {
+        if (!DropItem(Source.SlotIndex, Location, Radius, TargetRecipient)) {
+            return EMythicInventoryActionResult::CommitFailed;
+        }
+        OutQuantityDropped = Quantity;
+        return EMythicInventoryActionResult::Succeeded;
+    }
+
+    UMythicItemInstance *DroppedClone = SourceItem->CloneForStackSplit(this, Quantity);
+    if (!DroppedClone) {
+        return EMythicInventoryActionResult::CommitFailed;
+    }
+
+    UGameInstance *GameInstance = GetOwner() ? GetOwner()->GetGameInstance() : nullptr;
+    UMythicLootManagerSubsystem *LootManager = GameInstance
+        ? GameInstance->GetSubsystem<UMythicLootManagerSubsystem>() : nullptr;
+    if (!LootManager) {
+        DroppedClone->MarkAsGarbage();
+        return EMythicInventoryActionResult::SpawnFailed;
+    }
+
+    AMythicWorldItem *WorldItem = LootManager->Spawn(
+        DroppedClone, Location, Radius, TargetRecipient);
+    if (!WorldItem || WorldItem->ItemInstance != DroppedClone
+        || DroppedClone->GetOwningActor() != WorldItem) {
+        if (WorldItem) {
+            WorldItem->ItemInstance = nullptr;
+            WorldItem->Destroy();
+        }
+        DroppedClone->MarkAsGarbage();
+        return EMythicInventoryActionResult::SpawnFailed;
+    }
+
+    // SetStackSize cannot fail after the exact identity/quantity validation above. Publishing the world clone first
+    // means every earlier failure leaves the source byte-for-byte unchanged; both mutations still complete in one
+    // authority call before replication can expose an intermediate state.
+    SourceItem->SetStackSize(Source.ExpectedQuantity - Quantity);
+    OnItemDropped.Broadcast(Source.SlotIndex, WorldItem);
+
+    OutQuantityDropped = Quantity;
+    OutWorldItem = WorldItem;
+    return EMythicInventoryActionResult::Succeeded;
 }
 
 void UMythicInventoryComponent::PickupItem_Implementation(AMythicWorldItem *world_item) {
@@ -1250,71 +1473,75 @@ void UMythicInventoryComponent::ServerSplitStack_Implementation(int32 SourceSlot
 }
 
 int32 UMythicInventoryComponent::SplitStackToFreeSlot(int32 SourceSlotIndex, int32 SplitAmount) {
-    AActor *lOwner = GetOwner();
-    if (!lOwner || !lOwner->HasAuthority()) {
-        return INDEX_NONE;
-    }
-
     if (!Slots.IsValidIndex(SourceSlotIndex)) {
-        UE_LOG(Myth, Warning, TEXT("ServerSplitStack: invalid source slot %d"), SourceSlotIndex);
         return INDEX_NONE;
     }
-
-    const FMythicInventorySlotEntry &SourceSlot = Slots.Items[SourceSlotIndex];
-
-    if (SourceSlot.IsGearSlot()) {
-        UE_LOG(Myth, Warning, TEXT("ServerSplitStack: cannot split from equipment slot %d"), SourceSlotIndex);
+    UMythicItemInstance *SourceItem = Slots.Items[SourceSlotIndex].SlottedItemInstance;
+    if (!SourceItem || !SourceItem->GetItemInstanceGuid().IsValid()) {
         return INDEX_NONE;
     }
-
-    UMythicItemInstance *SourceItem = SourceSlot.SlottedItemInstance;
-    if (!SourceItem) {
-        UE_LOG(Myth, Warning, TEXT("ServerSplitStack: source slot %d is empty"), SourceSlotIndex);
-        return INDEX_NONE;
-    }
-
-    if (SplitAmount <= 0 || SplitAmount >= SourceItem->GetStacks()) {
-        UE_LOG(Myth, Warning, TEXT("ServerSplitStack: invalid split amount %d for stack of %d"), SplitAmount, SourceItem->GetStacks());
-        return INDEX_NONE;
-    }
+    FMythicInventorySourceLocator Source;
+    Source.Inventory = this;
+    Source.SlotIndex = SourceSlotIndex;
+    Source.ExpectedItemGuid = SourceItem->GetItemInstanceGuid();
+    Source.ExpectedQuantity = SourceItem->GetStacks();
 
     int32 TargetSlotIndex = INDEX_NONE;
-    for (int32 i = 0; i < Slots.Num(); ++i) {
-        if (i == SourceSlotIndex) {
-            continue;
-        }
-        const FMythicInventorySlotEntry &CandidateSlot = Slots.Items[i];
-        if (CandidateSlot.GroupTag == SourceSlot.GroupTag
-            && !CandidateSlot.IsGearSlot()
-            && !CandidateSlot.SlottedItemInstance) {
-            if (SlotWhitelistAccepts(i, SourceItem)) {
-                TargetSlotIndex = i;
-                break;
-            }
-        }
+    return TrySplitStackToFreeSlot(Source, SplitAmount, TargetSlotIndex)
+               == EMythicInventoryActionResult::Succeeded
+        ? TargetSlotIndex : INDEX_NONE;
+}
+
+EMythicInventoryActionResult UMythicInventoryComponent::TrySplitStackToFreeSlot(
+    const FMythicInventorySourceLocator &Source,
+    const int32 SplitAmount,
+    int32 &OutTargetSlotIndex) {
+    OutTargetSlotIndex = INDEX_NONE;
+
+    UMythicItemInstance *SourceItem = nullptr;
+    const EMythicInventoryActionResult SourceResult = ResolveSourceLocator(Source, SourceItem);
+    if (SourceResult != EMythicInventoryActionResult::Succeeded) {
+        return SourceResult;
+    }
+    const FMythicInventorySlotEntry &SourceSlot = Slots.Items[Source.SlotIndex];
+    if (!SourceSlot.bCanPlayerTake || SourceSlot.IsGearSlot()) {
+        return EMythicInventoryActionResult::SourceProtected;
+    }
+    if (SplitAmount <= 0 || SplitAmount >= Source.ExpectedQuantity) {
+        return EMythicInventoryActionResult::InvalidQuantity;
     }
 
-    if (TargetSlotIndex == INDEX_NONE) {
-        UE_LOG(Myth, Warning, TEXT("ServerSplitStack: no empty slot in group %s for split"), *SourceSlot.GroupTag.ToString());
-        return INDEX_NONE;
+    for (int32 CandidateIndex = 0; CandidateIndex < Slots.Num(); ++CandidateIndex) {
+        if (CandidateIndex == Source.SlotIndex) {
+            continue;
+        }
+        const FMythicInventorySlotEntry &Candidate = Slots.Items[CandidateIndex];
+        if (Candidate.GroupTag == SourceSlot.GroupTag
+            && !Candidate.IsGearSlot()
+            && Candidate.bCanPlayerPut
+            && !Candidate.SlottedItemInstance
+            && CanSlotAcceptItem(CandidateIndex, SourceItem, true)) {
+            OutTargetSlotIndex = CandidateIndex;
+            break;
+        }
+    }
+    if (OutTargetSlotIndex == INDEX_NONE) {
+        return EMythicInventoryActionResult::InventoryFull;
     }
 
     UMythicItemInstance *NewItem = SourceItem->CloneForStackSplit(this, SplitAmount);
-
     if (!NewItem) {
-        UE_LOG(Myth, Error,
-               TEXT("ServerSplitStack: failed to clone current immutable stack state"));
-        return INDEX_NONE;
+        OutTargetSlotIndex = INDEX_NONE;
+        return EMythicInventoryActionResult::CommitFailed;
     }
-
-    if (!SetItemInSlot(TargetSlotIndex, NewItem)) {
-        UE_LOG(Myth, Error, TEXT("ServerSplitStack: failed to place split item in slot %d"), TargetSlotIndex);
+    if (!SetItemInSlot(OutTargetSlotIndex, NewItem)) {
         NewItem->MarkAsGarbage();
-        return INDEX_NONE;
+        OutTargetSlotIndex = INDEX_NONE;
+        return EMythicInventoryActionResult::CommitFailed;
     }
 
-    SourceItem->SetStackSize(SourceItem->GetStacks() - SplitAmount);
-    return TargetSlotIndex;
+    SourceItem->SetStackSize(Source.ExpectedQuantity - SplitAmount);
+    return EMythicInventoryActionResult::Succeeded;
 }
 
 void UMythicInventoryComponent::ServerSwapSlots_Implementation(int32 SlotA, int32 SlotB) {
@@ -1415,13 +1642,20 @@ void UMythicInventoryComponent::ServerQuickMoveToInventory_Implementation(int32 
 }
 
 void UMythicInventoryComponent::ServerSortGroup_Implementation(FGameplayTag GroupTag, ESortMode Mode) {
+    TrySortGroup(GroupTag, Mode);
+}
+
+EMythicInventoryActionResult UMythicInventoryComponent::TrySortGroup(
+    const FGameplayTag GroupTag,
+    const ESortMode Mode) {
     AActor *lOwner = GetOwner();
     if (!lOwner || !lOwner->HasAuthority()) {
-        return;
+        return EMythicInventoryActionResult::InvalidRequest;
     }
 
-    if (!GroupTag.IsValid()) {
-        return;
+    if (!GroupTag.IsValid()
+        || static_cast<uint8>(Mode) > static_cast<uint8>(ESortMode::ByWeight)) {
+        return EMythicInventoryActionResult::InvalidGroup;
     }
 
     TArray<int32> GroupSlotIndices;
@@ -1433,8 +1667,13 @@ void UMythicInventoryComponent::ServerSortGroup_Implementation(FGameplayTag Grou
             continue;
         }
         if (Slot.IsGearSlot()) {
-            UE_LOG(Myth, Warning, TEXT("ServerSortGroup: cannot sort equipment group %s"), *GroupTag.ToString());
-            return;
+            return EMythicInventoryActionResult::InvalidGroup;
+        }
+        if (!Slot.bCanPlayerTake) {
+            return EMythicInventoryActionResult::SourceProtected;
+        }
+        if (!Slot.bCanPlayerPut) {
+            return EMythicInventoryActionResult::TargetProtected;
         }
         GroupSlotIndices.Add(i);
         if (Slot.SlottedItemInstance) {
@@ -1442,8 +1681,11 @@ void UMythicInventoryComponent::ServerSortGroup_Implementation(FGameplayTag Grou
         }
     }
 
+    if (GroupSlotIndices.IsEmpty()) {
+        return EMythicInventoryActionResult::InvalidGroup;
+    }
     if (GroupItems.Num() <= 1) {
-        return;
+        return EMythicInventoryActionResult::Succeeded;
     }
 
     GroupItems.Sort([Mode](const UMythicItemInstance &A, const UMythicItemInstance &B) {
@@ -1468,35 +1710,22 @@ void UMythicInventoryComponent::ServerSortGroup_Implementation(FGameplayTag Grou
         return false;
     });
 
-    for (int32 SlotIdx : GroupSlotIndices) {
-        UMythicItemInstance *Inst = Slots.Items[SlotIdx].SlottedItemInstance;
-        if (Inst) {
-            Inst->SetInventory(nullptr, INDEX_NONE);
-            Slots.ModifySlotAtIndex(SlotIdx, [](FMythicInventorySlotEntry &SlotData) {
-                SlotData.SlottedItemInstance = nullptr;
-            });
-        }
-    }
-
-    int32 ItemIdx = 0;
-    for (int32 SlotIdx : GroupSlotIndices) {
-        if (ItemIdx >= GroupItems.Num()) {
-            break;
-        }
-
-        UMythicItemInstance *Item = GroupItems[ItemIdx];
-        Slots.ModifySlotAtIndex(SlotIdx, [this, Item, SlotIdx](FMythicInventorySlotEntry &Slot) {
-            Slot.SlottedItemInstance = Item;
-            Item->SetOwner(this);
-            Item->SetInventory(this, SlotIdx);
+    TArray<FStagedSlotMutation> Mutations;
+    Mutations.Reserve(GroupSlotIndices.Num());
+    for (int32 GroupIndex = 0; GroupIndex < GroupSlotIndices.Num(); ++GroupIndex) {
+        const int32 SlotIndex = GroupSlotIndices[GroupIndex];
+        UMythicItemInstance *ProposedItem = GroupItems.IsValidIndex(GroupIndex)
+            ? GroupItems[GroupIndex] : nullptr;
+        Mutations.Add({
+            this,
+            SlotIndex,
+            Slots.Items[SlotIndex].SlottedItemInstance,
+            ProposedItem,
         });
-        NotifyItemInstanceUpdated(SlotIdx);
-        ++ItemIdx;
     }
-
-    for (int32 i = ItemIdx; i < GroupSlotIndices.Num(); ++i) {
-        NotifyItemInstanceUpdated(GroupSlotIndices[i]);
-    }
+    return CommitSlotMutationsTransactional(Mutations)
+        ? EMythicInventoryActionResult::Succeeded
+        : EMythicInventoryActionResult::CommitFailed;
 }
 
 void UMythicInventoryComponent::ServerDepositAll_Implementation(UMythicInventoryComponent *Target, FGameplayTag OptionalTypeFilter) {
@@ -1552,36 +1781,62 @@ void UMythicInventoryComponent::ServerDepositAll_Implementation(UMythicInventory
 }
 
 void UMythicInventoryComponent::ServerUseItemInSlot_Implementation(int32 SlotIndex) {
-    AActor *lOwner = GetOwner();
-    if (!lOwner || !lOwner->HasAuthority()) {
-        return;
-    }
-
     if (!Slots.IsValidIndex(SlotIndex)) {
-        UE_LOG(Myth, Warning, TEXT("ServerUseItemInSlot: invalid slot %d"), SlotIndex);
+        return;
+    }
+    UMythicItemInstance *Item = Slots.Items[SlotIndex].SlottedItemInstance;
+    if (!Item || !Item->GetItemInstanceGuid().IsValid()) {
         return;
     }
 
-    UMythicItemInstance *Item = Slots.Items[SlotIndex].SlottedItemInstance;
-    if (!Item) {
-        UE_LOG(Myth, Warning, TEXT("ServerUseItemInSlot: slot %d is empty"), SlotIndex);
-        return;
+    FMythicInventorySourceLocator Source;
+    Source.Inventory = this;
+    Source.SlotIndex = SlotIndex;
+    Source.ExpectedItemGuid = Item->GetItemInstanceGuid();
+    Source.ExpectedQuantity = Item->GetStacks();
+    int32 QuantityConsumed = 0;
+    TryUseItemInSlot(Source, QuantityConsumed);
+}
+
+EMythicInventoryActionResult UMythicInventoryComponent::TryUseItemInSlot(
+    const FMythicInventorySourceLocator &Source,
+    int32 &OutQuantityConsumed) {
+    OutQuantityConsumed = 0;
+    UMythicItemInstance *Item = nullptr;
+    const EMythicInventoryActionResult SourceResult = ResolveSourceLocator(Source, Item);
+    if (SourceResult != EMythicInventoryActionResult::Succeeded) {
+        return SourceResult;
+    }
+    if (!Slots.Items[Source.SlotIndex].bCanPlayerTake) {
+        return EMythicInventoryActionResult::SourceProtected;
     }
 
     if (!Item->HasTag(ITEMIZATION_ACTIONTYPE_ININVENTORY)) {
         const UItemDefinition *Def = Item->GetItemDefinition();
         if (!Def || !Def->ItemType.MatchesTag(ITEMIZATION_ACTIONTYPE_ININVENTORY)) {
-            UE_LOG(Myth, Warning, TEXT("ServerUseItemInSlot: item in slot %d does not support in-inventory use"), SlotIndex);
-            return;
+            return EMythicInventoryActionResult::NotUsable;
         }
     }
 
     if (const auto *ActionFrag = Item->GetFragment<UActionableItemFragment>()) {
         const_cast<UActionableItemFragment *>(ActionFrag)->ExecuteGenericAction(Item);
+        OutQuantityConsumed = Source.ExpectedQuantity
+            - (IsValid(Item) ? FMath::Max(0, Item->GetStacks()) : 0);
+        return EMythicInventoryActionResult::Succeeded;
     }
-    else {
-        UE_LOG(Myth, Warning, TEXT("ServerUseItemInSlot: no actionable fragment found on item in slot %d"), SlotIndex);
+    return EMythicInventoryActionResult::NotUsable;
+}
+
+EMythicInventoryActionResult UMythicInventoryComponent::TrySetItemJunk(
+    const FMythicInventorySourceLocator &Source,
+    const bool bJunk) {
+    UMythicItemInstance *Item = nullptr;
+    const EMythicInventoryActionResult SourceResult = ResolveSourceLocator(Source, Item);
+    if (SourceResult != EMythicInventoryActionResult::Succeeded) {
+        return SourceResult;
     }
+    Item->ServerSetMarkedJunk(bJunk);
+    return EMythicInventoryActionResult::Succeeded;
 }
 
 bool UMythicInventoryComponent::CanUseItemInSlot(int32 SlotIndex) const {

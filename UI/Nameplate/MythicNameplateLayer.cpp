@@ -192,6 +192,15 @@ bool UMythicNameplateLayer::ApplyActionRailProjection(
     return true;
 }
 
+void UMythicNameplateLayer::SetActionRailBindings(
+    const TMap<FGameplayTag, FUIActionBindingHandle> &InActionBindings,
+    const FUIActionBindingHandle InInspectBinding) {
+    if (ActionRailWidget) {
+        ActionRailWidget->SetActionBindings(InActionBindings,
+                                            InInspectBinding);
+    }
+}
+
 bool UMythicNameplateLayer::UpdateActionRailPlacement(
     const FMythicEntityPresentationInstance &Instance,
     const FVector2D ScreenPosition, const float PresentationAlpha,

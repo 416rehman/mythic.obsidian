@@ -27,7 +27,6 @@
 
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_UI_LAYER_MENU, "UI.Layer.Menu");
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_UI_ACTION_ESCAPE, "UI.Action.Escape");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_UI_ACTION_INVENTORY, "UI.Action.Inventory");
 
 namespace {
 bool ConfigureAuthoredCommonUIHold(const FUIActionBindingHandle Handle,
@@ -84,27 +83,9 @@ void UMythicHUDLayout::NativeOnInitialized() {
     InspectBindArgs.bConsumeInput = true;
     InspectActionBinding = RegisterUIActionBinding(InspectBindArgs);
 
-    if (bRouteInventoryToShell) {
-        RegisterUIActionBinding(FBindUIActionArgs(FUIActionTag::ConvertChecked(TAG_UI_ACTION_INVENTORY), false,
-                                                  FSimpleDelegate::CreateUObject(this, &ThisClass::HandleInventoryAction)));
-    }
-
     if (OpenMenuAction.IsValid()) {
         RegisterUIActionBinding(FBindUIActionArgs(FUIActionTag::ConvertChecked(OpenMenuAction), false,
-                                                  FSimpleDelegate::CreateWeakLambda(this, [this]() {
-                                                      OpenMenuOnPage(NAME_None);
-                                                  })));
-    }
-
-    for (const FMythicMenuHotkey &Hotkey : MenuHotkeys) {
-        if (!Hotkey.ActionTag.IsValid() || Hotkey.PageId.IsNone()) {
-            continue;
-        }
-        const FName PageId = Hotkey.PageId;
-        RegisterUIActionBinding(FBindUIActionArgs(FUIActionTag::ConvertChecked(Hotkey.ActionTag), false,
-                                                  FSimpleDelegate::CreateWeakLambda(this, [this, PageId]() {
-                                                      OpenMenuOnPage(PageId);
-                                                  })));
+                                                  FSimpleDelegate::CreateUObject(this, &ThisClass::HandleMenuAction)));
     }
 
     if (WorldOverlaySlot && NameplateLayerClass && !NameplateLayer) {
@@ -137,6 +118,7 @@ void UMythicHUDLayout::NativeOnInitialized() {
                TEXT("MythicHUDLayout: Inspect requires a %.2fs hold, but CommonUI supplied no usable keyboard/controller mapping."),
                InspectHoldSeconds);
     }
+    SyncContextActionPresentationBindings();
 
     if (RevealHUDAction.IsValid()) {
         RegisterUIActionBinding(FBindUIActionArgs(FUIActionTag::ConvertChecked(RevealHUDAction), false,
@@ -159,6 +141,7 @@ void UMythicHUDLayout::NativeDestruct() {
     ClearContextActionBindings();
     InspectActionBinding.Unregister();
     InspectActionBinding = FUIActionBindingHandle();
+    SyncContextActionPresentationBindings();
     if (UMythicNameplateDirector *Director = BoundNameplateDirector.Get()) {
         Director->OnNameplateProjectionsChanged.RemoveDynamic(
             this, &ThisClass::HandleNameplateProjectionsChanged);
@@ -465,8 +448,13 @@ void UMythicHUDLayout::TickSalience(float DeltaSeconds) {
     }
 }
 
-void UMythicHUDLayout::HandleInventoryAction() {
-    OpenMenuOnPage(InventoryPageId);
+void UMythicHUDLayout::HandleMenuAction() {
+    if (UMythicMenuShell *Existing = ActiveMenuShell.Get(); Existing && Existing->IsActivated()) {
+        Existing->DeactivateWidget();
+        return;
+    }
+
+    OpenMenuOnPage(NAME_None);
 }
 
 void UMythicHUDLayout::HandleInspectEntityAction() {
@@ -491,6 +479,7 @@ void UMythicHUDLayout::ClearContextActionBindings() {
         RemoveContextActionBinding(InputTag);
     }
     ContextActionBindings.Reset();
+    SyncContextActionPresentationBindings();
 }
 
 void UMythicHUDLayout::RemoveContextActionBinding(
@@ -613,6 +602,24 @@ void UMythicHUDLayout::RefreshContextActionBindings() {
             RemoveContextActionBinding(ExistingInputTag);
         }
     }
+    SyncContextActionPresentationBindings();
+}
+
+void UMythicHUDLayout::SyncContextActionPresentationBindings() {
+    if (!NameplateLayer) {
+        return;
+    }
+
+    TMap<FGameplayTag, FUIActionBindingHandle> PresentationBindings;
+    PresentationBindings.Reserve(ContextActionBindings.Num());
+    for (const TPair<FGameplayTag, FContextActionBindingRecord> &Pair :
+         ContextActionBindings) {
+        if (Pair.Key.IsValid() && Pair.Value.Handle.IsValid()) {
+            PresentationBindings.Add(Pair.Key, Pair.Value.Handle);
+        }
+    }
+    NameplateLayer->SetActionRailBindings(PresentationBindings,
+                                          InspectActionBinding);
 }
 
 void UMythicHUDLayout::OpenMenuOnPage(FName PageId) {

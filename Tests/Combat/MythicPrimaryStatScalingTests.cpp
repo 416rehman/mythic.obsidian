@@ -3,7 +3,9 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "GAS/Combat/MythicWeaponOffenseProjection.h"
 #include "GAS/MythicStatContribution.h"
+#include "Itemization/MythicTags_Inventory.h"
 #include "Settings/MythicCombatSettings.h"
 
 namespace {
@@ -184,5 +186,105 @@ bool FMythicIndependentMappingsTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("Strength feeds armor"), Armor > 0.0f);
     TestNotEqual(TEXT("and those two scale independently too"), Health, Armor);
 
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicEffectiveWeaponDamageProjectionTest,
+    "Mythic.Combat.EffectiveWeaponDamageProjection",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicEffectiveWeaponDamageProjectionTest::RunTest(const FString &Parameters) {
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    if (!TestNotNull(TEXT("combat settings resolve"), Settings)) {
+        return false;
+    }
+
+    constexpr float DamagePerHit = 6.0f;
+    constexpr float Power = 59.0f;
+    const FGameplayTagContainer NoWeaponClassTags;
+    FMythicWeaponDamageProjection Projection;
+    TestTrue(TEXT("Power 59 and DamagePerHit 6 resolve a complete projection"),
+             MythicCombat::ResolveWeaponDamageProjection(
+                 DamagePerHit,
+                 NoWeaponClassTags,
+                 [Power](const FGameplayAttribute &Attribute) -> float {
+                     return Attribute == UMythicAttributeSet_Offense::GetPowerAttribute()
+                         ? Power : 0.0f;
+                 },
+                 Projection));
+
+    float BaseMinimum = 0.0f;
+    float BaseMaximum = 0.0f;
+    float BaseAverage = 0.0f;
+    TestTrue(TEXT("the underlying weapon range resolves"),
+             MythicCombat::ResolveWeaponDamageRange(
+                 DamagePerHit, BaseMinimum, BaseMaximum, BaseAverage));
+    const float ExpectedMinimum = WeaponDamageAt(
+        Settings->StatContributions.Contributions, BaseMinimum, Power);
+    const float ExpectedMaximum = WeaponDamageAt(
+        Settings->StatContributions.Contributions, BaseMaximum, Power);
+    const float ExpectedAverage = WeaponDamageAt(
+        Settings->StatContributions.Contributions, BaseAverage, Power);
+
+    TestTrue(TEXT("projection minimum is the runtime Power-scaled lower endpoint"),
+             FMath::IsNearlyEqual(
+                 Projection.EffectiveMinimumDamage, ExpectedMinimum, UE_KINDA_SMALL_NUMBER));
+    TestTrue(TEXT("projection maximum is the runtime Power-scaled upper endpoint"),
+             FMath::IsNearlyEqual(
+                 Projection.EffectiveMaximumDamage, ExpectedMaximum, UE_KINDA_SMALL_NUMBER));
+    TestTrue(TEXT("projection expected hit is the midpoint of the effective range"),
+             FMath::IsNearlyEqual(
+                 Projection.EffectiveAverageDamage, ExpectedAverage, UE_KINDA_SMALL_NUMBER));
+    TestTrue(TEXT("the reported sample is roughly 12 to 18, not the pre-Power value 6"),
+             Projection.EffectiveMinimumDamage > 12.0f
+             && Projection.EffectiveMinimumDamage < 12.2f
+             && Projection.EffectiveMaximumDamage > 18.0f
+             && Projection.EffectiveMaximumDamage < 18.3f);
+    TestTrue(TEXT("Power 59 contributes about +102 percent rather than only six points"),
+             Projection.PrimaryStatBonusFraction > 1.0f
+             && Projection.PrimaryStatBonusFraction < 1.05f);
+
+    FGameplayTagContainer AxeTags;
+    AxeTags.AddTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_AXE);
+    constexpr float AxeBonus = 0.73648f;
+    FMythicWeaponDamageProjection AxeProjection;
+    TestTrue(TEXT("the equipped axe class context resolves in the same projection"),
+             MythicCombat::ResolveWeaponDamageProjection(
+                 4.0f,
+                 AxeTags,
+                 [Power, AxeBonus](const FGameplayAttribute &Attribute) -> float {
+                     if (Attribute == UMythicAttributeSet_Offense::GetPowerAttribute()) {
+                         return Power;
+                     }
+                     if (Attribute == UMythicAttributeSet_Offense::GetBonusAxeDamageAttribute()) {
+                         return AxeBonus;
+                     }
+                     return 0.0f;
+                 },
+                 AxeProjection));
+    TestTrue(TEXT("the axe-specific bonus produces the target-independent fourteen-to-twenty-one band"),
+             AxeProjection.EffectiveMinimumDamage > 14.0f
+             && AxeProjection.EffectiveMinimumDamage < 14.1f
+             && AxeProjection.EffectiveMaximumDamage > 21.0f
+             && AxeProjection.EffectiveMaximumDamage < 21.1f);
+    TestTrue(TEXT("the projection names and reports the weapon-class multiplier"),
+             AxeProjection.WeaponClassTag == ITEMIZATION_TYPE_EQUIPMENT_WEAPON_AXE
+             && FMath::IsNearlyEqual(
+                 AxeProjection.WeaponClassBonusMultiplier,
+                 1.0f + AxeBonus,
+                 UE_KINDA_SMALL_NUMBER));
+
+    FGameplayTagContainer AmbiguousWeaponTags = AxeTags;
+    AmbiguousWeaponTags.AddTag(ITEMIZATION_TYPE_EQUIPMENT_WEAPON_SWORD);
+    FMythicWeaponDamageProjection AmbiguousProjection;
+    TestFalse(TEXT("a corrupt source carrying two weapon-class leaves fails instead of choosing by code order"),
+              MythicCombat::ResolveWeaponDamageProjection(
+                  4.0f,
+                  AmbiguousWeaponTags,
+                  [](const FGameplayAttribute &) -> float { return 0.0f; },
+                  AmbiguousProjection));
+    TestFalse(TEXT("a failed projection publishes no stale weapon class"),
+              AmbiguousProjection.WeaponClassTag.IsValid());
     return true;
 }

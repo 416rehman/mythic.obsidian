@@ -6,6 +6,8 @@
 #include "UObject/Interface.h"
 #include "IMythicInteractable.generated.h"
 
+class UUserWidget;
+
 USTRUCT(BlueprintType)
 struct FMythicInteractionData {
     GENERATED_BODY()

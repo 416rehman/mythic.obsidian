@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Input/UIActionBindingHandle.h"
 #include "UI/Nameplate/MythicNameplateTypes.h"
 
 #include "MythicNameplateActionRailWidget.generated.h"
@@ -23,6 +24,11 @@ public:
     /** Applies one exact-subject, available-only projection without querying gameplay or rebuilding the widget tree. */
     void ApplyProjection(
         const FMythicNameplateActionRailProjection &InProjection);
+
+    /** Supplies the live LocalPlayer CommonUI bindings that own execution timing and hold-progress state. */
+    void SetActionBindings(
+        const TMap<FGameplayTag, FUIActionBindingHandle> &InActionBindings,
+        FUIActionBindingHandle InInspectBinding);
 
     /** Applies project visual tokens and local accessibility scale to this prewarmed rail. */
     void SetPresentationStyle(UMythicNameplateVisualStyle *InStyle,
@@ -72,8 +78,10 @@ protected:
 
 private:
     void ApplyEntry(UMythicInputGlyph *Glyph, UTextBlock *Text,
-                    const FGameplayTag &InputTag, const FText &Label);
+                    const FGameplayTag &InputTag, const FText &Label,
+                    FUIActionBindingHandle BindingHandle);
     void ResetEntry(UMythicInputGlyph *Glyph, UTextBlock *Text);
+    void RefreshEntries();
 
     /** Last exact-subject DTO, retained only so stale placement/release checks remain deterministic. */
     UPROPERTY(Transient)
@@ -82,6 +90,10 @@ private:
     /** Project visual tokens copied from the owning layer; no gameplay policy is read from this asset. */
     UPROPERTY(Transient)
     TObjectPtr<UMythicNameplateVisualStyle> VisualStyle;
+
+    /** Local-only CommonUI handles; never persisted, projected, or replicated. */
+    TMap<FGameplayTag, FUIActionBindingHandle> ActionBindings;
+    FUIActionBindingHandle InspectBinding;
 
     FMythicNameplateRenderPreferences RenderPreferences;
 };

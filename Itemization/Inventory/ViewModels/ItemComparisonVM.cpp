@@ -144,8 +144,9 @@ static void BuildComparableStats(const UItemTooltipVM *Tooltip, TArray<FMythicCo
 }
 
 UItemComparisonVM *UItemComparisonVM::CreateComparison(UObject *Outer, UMythicItemInstance *Inspected, UMythicInventoryComponent *Inventory,
-                                                       int32 TargetSlotIndex) {
-    if (!Outer || !Inspected) {
+                                                       int32 TargetSlotIndex, bool bExpectEmpty,
+                                                       FGuid ExpectedTargetOccupantGuid) {
+    if (!Outer || !Inspected || !Inventory) {
         return nullptr;
     }
 
@@ -161,43 +162,34 @@ UItemComparisonVM *UItemComparisonVM::CreateComparison(UObject *Outer, UMythicIt
     TArray<FMythicComparableStat> InspectedStats;
     BuildComparableStats(InspectedTooltip, InspectedStats);
 
-    UMythicItemInstance *EquippedInstance = nullptr;
-    bool bFoundCandidateSlot = false;
-    if (Inventory) {
-        FGameplayTagContainer InspectedProbe;
-        Inspected->GetTypeProbe(InspectedProbe);
+    FGameplayTagContainer InspectedProbe;
+    Inspected->GetTypeProbe(InspectedProbe);
 
-        const TArray<FMythicInventorySlotEntry> &AllSlots = Inventory->GetAllSlots();
-        auto SlotAcceptsItem = [&InspectedProbe](const FMythicInventorySlotEntry &Entry) {
-            if (!Entry.IsGearSlot() || !Entry.SlotDefinition) {
-                return false;
-            }
-            const FGameplayTagContainer &Whitelist = Entry.SlotDefinition->WhitelistedItemTypes;
-            return Whitelist.IsEmpty() || InspectedProbe.HasAny(Whitelist);
-        };
-
-        if (AllSlots.IsValidIndex(TargetSlotIndex) && SlotAcceptsItem(AllSlots[TargetSlotIndex])) {
-            EquippedInstance = AllSlots[TargetSlotIndex].SlottedItemInstance;
-            bFoundCandidateSlot = true;
-        }
-        else {
-            for (const FMythicInventorySlotEntry &Entry : AllSlots) {
-                if (!SlotAcceptsItem(Entry)) {
-                    continue;
-                }
-                bFoundCandidateSlot = true;
-                if (!Entry.SlottedItemInstance) {
-                    EquippedInstance = nullptr;
-                    break;
-                }
-                if (!EquippedInstance) {
-                    EquippedInstance = Entry.SlottedItemInstance;
-                }
-            }
-        }
+    const TArray<FMythicInventorySlotEntry> &AllSlots = Inventory->GetAllSlots();
+    if (!AllSlots.IsValidIndex(TargetSlotIndex)) {
+        return nullptr;
+    }
+    const FMythicInventorySlotEntry &TargetEntry = AllSlots[TargetSlotIndex];
+    const FGameplayTagContainer &Whitelist = TargetEntry.SlotDefinition
+        ? TargetEntry.SlotDefinition->WhitelistedItemTypes
+        : FGameplayTagContainer::EmptyContainer;
+    if (!TargetEntry.IsGearSlot() || !TargetEntry.SlotDefinition
+        || (!Whitelist.IsEmpty() && !InspectedProbe.HasAny(Whitelist))) {
+        return nullptr;
     }
 
-    if (bFoundCandidateSlot) {
+    UMythicItemInstance *EquippedInstance = TargetEntry.SlottedItemInstance;
+    if (bExpectEmpty) {
+        if (EquippedInstance || ExpectedTargetOccupantGuid.IsValid()) {
+            return nullptr;
+        }
+    }
+    else if (!EquippedInstance || !ExpectedTargetOccupantGuid.IsValid()
+             || EquippedInstance->GetItemInstanceGuid() != ExpectedTargetOccupantGuid) {
+        return nullptr;
+    }
+
+    {
         TArray<FMythicComparableStat> EquippedStats;
         UItemTooltipVM *EquippedTooltip = nullptr;
         if (EquippedInstance) {

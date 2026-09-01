@@ -9,8 +9,10 @@
 
 class UCommonBorderStyle;
 class UCommonButtonBase;
+class UCommonButtonStyle;
 class UCommonTextStyle;
 class UCommonTextBlock;
+class UMythicBoundActionButton;
 class UUserWidget;
 class UWidget;
 
@@ -43,8 +45,21 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Buttons")
     TSoftClassPtr<UCommonButtonBase> TabButtonClass;
 
+    /** Button class used for screen-local and global action bindings. It must implement the bound-action contract. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Buttons")
-    TSoftClassPtr<UCommonButtonBase> ActionButtonClass;
+    TSoftClassPtr<UMythicBoundActionButton> ActionButtonClass;
+
+    /** High-emphasis compact style for the action that commits a screen transaction. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Buttons")
+    TSoftClassPtr<UCommonButtonStyle> PrimaryActionButtonStyle;
+
+    /** Medium-emphasis compact style for reversible secondary actions. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Buttons")
+    TSoftClassPtr<UCommonButtonStyle> SecondaryActionButtonStyle;
+
+    /** Low-emphasis compact style for navigation such as Back or Cancel Changes. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Buttons")
+    TSoftClassPtr<UCommonButtonStyle> QuietActionButtonStyle;
 
     /**
      * The button every C++-built row uses. Without this, hand-built rows fall back to a raw UButton, which draws the
@@ -107,6 +122,18 @@ public:
     /** Every generated list scrolls with the same bar. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Metrics")
     float ScrollBarThickness = 6.0f;
+
+    /** Minimum width of a compact footer action; wide enough for a glyph and localized verb. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Metrics", meta = (ClampMin = "1.0"))
+    float ActionButtonMinWidth = 200.0f;
+
+    /** Minimum height of a footer action, preserving a clear mouse/touch target at the 10-foot scale. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Metrics", meta = (ClampMin = "1.0"))
+    float ActionButtonMinHeight = 48.0f;
+
+    /** Horizontal separation between independent footer actions. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Metrics", meta = (ClampMin = "0.0"))
+    float ActionButtonGap = 12.0f;
 
     // ── Semantic colours ──
     // Kept separate from the accent hue on purpose: these mean something, they are not decoration.

@@ -38,6 +38,7 @@ USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicSettingOption {
     GENERATED_BODY()
 
+    /** Localized text shown for this option in the setting row. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
     FText Label;
 
@@ -55,6 +56,13 @@ struct MYTHIC_API FMythicSettingOption {
     /** Named requirement this option needs. Unmet, the option is not offered at all. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting", meta = (Categories = "Settings.Requires"))
     FGameplayTag Requires;
+
+    /**
+     * Marks the canonical default when multiple options share a primary value and differ by companion cvars.
+     * Unique-value option lists may omit this; catalog validation rejects ambiguous defaults.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
+    bool bIsDefault = false;
 };
 
 /**
@@ -65,6 +73,7 @@ USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicSettingDefinition {
     GENERATED_BODY()
 
+    /** Localized player-facing name shown in the setting row. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
     FText Label;
 
@@ -80,9 +89,11 @@ struct MYTHIC_API FMythicSettingDefinition {
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
     FText Group;
 
+    /** Presentation control used to edit the value; it does not decide where the value is stored. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
     EMythicSettingControl Control = EMythicSettingControl::Select;
 
+    /** Data backend read and written by the generic settings access layer. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
     EMythicSettingSource Source = EMythicSettingSource::CVar;
 
@@ -98,9 +109,11 @@ struct MYTHIC_API FMythicSettingDefinition {
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
     float MinValue = 0.0f;
 
+    /** Highest value a slider can author. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
     float MaxValue = 1.0f;
 
+    /** Smallest controller/keyboard nudge applied to a slider. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting", meta = (ClampMin = "0.001"))
     float StepSize = 0.05f;
 
@@ -108,6 +121,7 @@ struct MYTHIC_API FMythicSettingDefinition {
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
     FString DisplaySuffix;
 
+    /** Number of fractional digits printed for a numeric setting. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting", meta = (ClampMin = "0", ClampMax = "3"))
     int32 DisplayDecimals = 0;
 
@@ -138,9 +152,11 @@ USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicSettingCategory {
     GENERATED_BODY()
 
+    /** Gameplay-tag identity used by setting definitions to join this category. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting", meta = (Categories = "Settings.Category"))
     FGameplayTag Id;
 
+    /** Localized label shown on the category rail. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Setting")
     FText Label;
 
@@ -158,9 +174,11 @@ class MYTHIC_API UMythicSettingsCatalog : public UDataAsset {
     GENERATED_BODY()
 
 public:
+    /** Ordered category rail authored for this settings catalog. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settings")
     TArray<FMythicSettingCategory> Categories;
 
+    /** Complete data-driven setting set rendered by the settings screen. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settings")
     TArray<FMythicSettingDefinition> Settings;
 

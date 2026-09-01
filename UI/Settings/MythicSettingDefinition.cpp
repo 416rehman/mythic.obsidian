@@ -75,6 +75,53 @@ EDataValidationResult UMythicSettingsCatalog::IsDataValid(FDataValidationContext
             Result = EDataValidationResult::Invalid;
         }
 
+        if (Def.Control == EMythicSettingControl::Select ||
+            Def.Control == EMythicSettingControl::Toggle) {
+            int32 MarkedDefaults = 0;
+            int32 ValueDefaults = 0;
+            const FMythicSettingOption *ResolvedDefault = nullptr;
+            for (const FMythicSettingOption &Option : Def.Options) {
+                if (Option.bIsDefault) {
+                    ++MarkedDefaults;
+                    ResolvedDefault = &Option;
+                }
+                if (FMath::IsNearlyEqual(Option.Value, Def.DefaultValue, 0.001f)) {
+                    ++ValueDefaults;
+                    if (MarkedDefaults == 0) {
+                        ResolvedDefault = &Option;
+                    }
+                }
+            }
+
+            if (MarkedDefaults > 1) {
+                Context.AddError(FText::Format(
+                    LOCTEXT("MultipleOptionDefaults", "'{0}' marks more than one option as the default."), Named));
+                Result = EDataValidationResult::Invalid;
+            }
+            else if (MarkedDefaults == 0 && ValueDefaults != 1) {
+                Context.AddError(FText::Format(
+                    LOCTEXT("AmbiguousOptionDefault",
+                            "'{0}' needs exactly one option matching DefaultValue, or one option explicitly marked as default."),
+                    Named));
+                Result = EDataValidationResult::Invalid;
+            }
+            else if (MarkedDefaults == 1 && ResolvedDefault &&
+                     !FMath::IsNearlyEqual(ResolvedDefault->Value, Def.DefaultValue, 0.001f)) {
+                Context.AddError(FText::Format(
+                    LOCTEXT("OptionDefaultValueMismatch",
+                            "'{0}' marks a default option whose value disagrees with DefaultValue."), Named));
+                Result = EDataValidationResult::Invalid;
+            }
+
+            if (ResolvedDefault && ResolvedDefault->Requires.IsValid()) {
+                Context.AddError(FText::Format(
+                    LOCTEXT("UnavailableOptionDefault",
+                            "'{0}' has a hardware-gated default. Reset must be available on every supported machine."),
+                    Named));
+                Result = EDataValidationResult::Invalid;
+            }
+        }
+
         if (Def.Control == EMythicSettingControl::Slider && Def.MaxValue <= Def.MinValue) {
             Context.AddError(FText::Format(
                 LOCTEXT("SliderRange", "'{0}' is a Slider whose Max is not above its Min."), Named));
