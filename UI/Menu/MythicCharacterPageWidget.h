@@ -34,11 +34,13 @@ class UMythicSectionHeader;
 class UOverlay;
 class UPanelWidget;
 class USizeBox;
+class UUserWidget;
 class UVerticalBox;
 class UWidget;
 struct FGameplayEventData;
 struct FAnalogInputEvent;
 struct FGeometry;
+struct FPointerEvent;
 
 class UMythicCharacterPageWidget;
 
@@ -142,6 +144,9 @@ protected:
     virtual FReply NativeOnAnalogValueChanged(
         const FGeometry &InGeometry,
         const FAnalogInputEvent &InAnalogEvent) override;
+    virtual FReply NativeOnPreviewMouseButtonDown(
+        const FGeometry &InGeometry,
+        const FPointerEvent &InMouseEvent) override;
 
     /** Performs the contextual primary verb for the selected slot (equip, unequip, use, or inspect). */
     UFUNCTION()
@@ -302,7 +307,7 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UPanelWidget> DetailsHost;
 
-    /** Shown while nothing is selected, so the right-hand column is never just a hole. */
+    /** Legacy empty-state child kept collapsed while the contextual details popover has no item. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UWidget> DetailsPlaceholder;
 
@@ -418,7 +423,7 @@ private:
     void UnbindSlotSelection();
 
     void BuildBagChrome();
-    void BindBagViewModel();
+    void BindBagViewModel(UInventoryVM *PreferredVM = nullptr);
     void UnbindBagViewModel();
     void HandleBagFieldChanged(UObject *Object, UE::FieldNotification::FFieldId FieldId);
     void RefreshBagHeader();
@@ -453,7 +458,7 @@ private:
     bool BuildSourceLocator(struct FMythicInventorySourceLocator &OutSource) const;
     bool BuildTargetLocator(int32 SlotIndex, struct FMythicInventoryTargetLocator &OutTarget) const;
     bool CanMoveSelectionToSlot(int32 TargetSlotIndex, FText *OutReason = nullptr) const;
-    TArray<FEquipmentTarget> BuildEquipmentTargets() const;
+    TArray<FEquipmentTarget> BuildEquipmentTargets(UItemSlotVM *SourceSlotOverride = nullptr) const;
     int32 FindUnequipDestination() const;
     void ResolveActiveEquipmentTarget();
     void CycleActiveEquipmentTarget();
@@ -565,14 +570,35 @@ private:
 
     void HandleSlotSelectionChanged(UObject *Item);
 
+    void HandleSlotClicked(UObject *Item);
+
+    void HandleSlotHoverChanged(UObject *Item, bool bIsHovered);
+
+    UListViewBase *FindListContaining(UObject *Item) const;
+
+    UUserWidget *FindEntryWidgetForItem(UObject *Item) const;
+
     void BuildDetailsCard();
 
     void ShowDetailsFor(UObject *SlotVM);
+
+    void ScheduleDetailsPosition(UItemSlotVM *SlotVM);
+
+    void PositionDetailsBeside(UItemSlotVM *SlotVM);
 
     TArray<TWeakObjectPtr<class UListViewBase>> BoundSlotLists;
 
     UPROPERTY(Transient)
     TObjectPtr<UMythicItemDetailsWidget> DetailsCard;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UWidget> DetailsSurface;
+
+    TWeakObjectPtr<UItemSlotVM> DisplayedDetailsSlot;
+
+    FGuid HoveredItemGuid;
+
+    uint32 DetailsPositionSerial = 0;
 
     UPROPERTY(Transient)
     TWeakObjectPtr<UWidget> BorrowedInventory;

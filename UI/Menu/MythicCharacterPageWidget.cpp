@@ -43,6 +43,7 @@
 #include "Itemization/MythicTags_Inventory.h"
 #include "InputAction.h"
 #include "InputCoreTypes.h"
+#include "Input/Events.h"
 #include "Engine/LocalPlayer.h"
 #include "MVVMSubsystem.h"
 #include "View/MVVMView.h"
@@ -269,6 +270,17 @@ void UMythicCharacterPageWidget::FocusInitialSlot() {
     if (!IsActivated() || !GetOwningLocalPlayer()) {
         return;
     }
+    // The borrowed inventory's nested MVVM SetListItems bindings may publish one frame after activation.
+    // Rebind against the now-populated lists and derive the authoritative VM from the first physical slot.
+    BindSlotSelection();
+    BindBagViewModel();
+    if (BoundInventoryVM.IsValid()) {
+        RestoreSelectionByGuid();
+    }
+    else {
+        SelectFirstOccupiedSlot();
+    }
+    BindInventoryEvents();
     if (UItemSlotVM *Selected = GetSelectedSlot()) {
         for (const TWeakObjectPtr<UListViewBase> &WeakList : BoundSlotLists) {
             if (UListView *List = Cast<UListView>(WeakList.Get())) {
@@ -303,6 +315,23 @@ FReply UMythicCharacterPageWidget::NativeOnAnalogValueChanged(
         return FReply::Handled();
     }
     return Super::NativeOnAnalogValueChanged(InGeometry, InAnalogEvent);
+}
+
+FReply UMythicCharacterPageWidget::NativeOnPreviewMouseButtonDown(
+    const FGeometry &InGeometry,
+    const FPointerEvent &InMouseEvent) {
+    // WBP_InventoryItemSlot legitimately captures the left press to begin drag detection. Pin the hovered item
+    // during the tunnel phase so that drag handling cannot prevent an ordinary click from opening its details.
+    if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton
+        && InventoryPageState == EInventoryPageState::Browsing
+        && HoveredItemGuid.IsValid()) {
+        UItemSlotVM *HoveredSlot = DisplayedDetailsSlot.Get();
+        UMythicItemInstance *HoveredItem = HoveredSlot ? HoveredSlot->TryGetItemInstance() : nullptr;
+        if (HoveredItem && HoveredItem->GetItemInstanceGuid() == HoveredItemGuid) {
+            SetSelectedSlot(HoveredSlot, FindListContaining(HoveredSlot));
+        }
+    }
+    return Super::NativeOnPreviewMouseButtonDown(InGeometry, InMouseEvent);
 }
 
 void UMythicCharacterPageWidget::BuildInventoryInteractionChrome() {
@@ -559,6 +588,9 @@ void UMythicCharacterPageWidget::ResetInventoryInteractionState() {
     QuantityMaximum = 1;
     ActiveTargetSlotIndex = INDEX_NONE;
     bSelectionRestoreScheduled = false;
+    HoveredItemGuid.Invalidate();
+    DisplayedDetailsSlot.Reset();
+    ++DetailsPositionSerial;
     ActionSourceGuid.Invalidate();
     ActionSourceSlotIndex = INDEX_NONE;
 }
@@ -579,7 +611,7 @@ void UMythicCharacterPageWidget::CollectSlotLists(UUserWidget *Root, TArray<ULis
 }
 
 void UMythicCharacterPageWidget::BindSlotSelection() {
-    if (!DetailsCard || BoundSlotLists.Num() > 0) {
+    if (!DetailsCard) {
         return;
     }
 
@@ -592,22 +624,15 @@ void UMythicCharacterPageWidget::BindSlotSelection() {
     CollectSlotLists(Inventory, Lists);
 
     for (UListViewBase *List : Lists) {
-        // The category rail is also a UListView. Its entries are UInventoryTabVMs and must never participate
-        // in item selection or clear the detail card when a category changes.
-        bool bContainsItemSlots = false;
-        if (UListView *ConcreteList = Cast<UListView>(List)) {
-            for (UObject *Entry : ConcreteList->GetListItems()) {
-                if (Cast<UItemSlotVM>(Entry)) {
-                    bContainsItemSlots = true;
-                    break;
-                }
-            }
-        }
-        if (!bContainsItemSlots) {
+        if (!List || BoundSlotLists.Contains(List)) {
             continue;
         }
+        // Bind before MVVM's delayed SetListItems runs. Category-list events are harmless because every handler
+        // is type-gated to UItemSlotVM, and ClearOtherListSelections preserves non-item selections.
         if (ITypedUMGListView<UObject *> *Typed = AsTypedList(List)) {
             Typed->OnItemSelectionChanged().AddUObject(this, &UMythicCharacterPageWidget::HandleSlotSelectionChanged);
+            Typed->OnItemClicked().AddUObject(this, &UMythicCharacterPageWidget::HandleSlotClicked);
+            Typed->OnItemIsHoveredChanged().AddUObject(this, &UMythicCharacterPageWidget::HandleSlotHoverChanged);
             BoundSlotLists.Add(List);
         }
     }
@@ -656,10 +681,15 @@ void UMythicCharacterPageWidget::UnbindSlotSelection() {
     for (const TWeakObjectPtr<UListViewBase> &Weak : BoundSlotLists) {
         if (ITypedUMGListView<UObject *> *Typed = AsTypedList(Weak.Get())) {
             Typed->OnItemSelectionChanged().RemoveAll(this);
+            Typed->OnItemClicked().RemoveAll(this);
+            Typed->OnItemIsHoveredChanged().RemoveAll(this);
         }
     }
     BoundSlotLists.Reset();
     SelectedList.Reset();
+    HoveredItemGuid.Invalidate();
+    DisplayedDetailsSlot.Reset();
+    ++DetailsPositionSerial;
     ShowDetailsFor(nullptr);
 }
 
@@ -670,6 +700,9 @@ void UMythicCharacterPageWidget::HandleSlotSelectionChanged(UObject *Item) {
     }
 
     UListViewBase *SourceList = FindListSelecting(Item);
+    if (!SourceList) {
+        SourceList = FindListContaining(Item);
+    }
     // Context, quantity, and sort are modal transactions over the item/group captured when they opened.
     // Ignore focus leakage into the borrowed inventory so mouse and controller navigation cannot silently
     // retarget a destructive command while its original labels and confirmation affordance remain visible.
@@ -699,6 +732,49 @@ void UMythicCharacterPageWidget::HandleSlotSelectionChanged(UObject *Item) {
     }
 }
 
+void UMythicCharacterPageWidget::HandleSlotClicked(UObject *Item) {
+    UItemSlotVM *SlotVM = Cast<UItemSlotVM>(Item);
+    if (!SlotVM || !SlotVM->TryGetItemInstance() || bSynchronizingSelection) {
+        return;
+    }
+
+    if (InventoryPageState == EInventoryPageState::MoveTarget) {
+        HandleSlotSelectionChanged(Item);
+        return;
+    }
+    if (InventoryPageState != EInventoryPageState::Browsing) {
+        return;
+    }
+
+    // Clicking pins the exact physical item even when a particular list's selection mode is disabled or the
+    // item was already selected. Hover remains a preview only; all inventory actions continue to use this pin.
+    HoveredItemGuid.Invalidate();
+    SetSelectedSlot(SlotVM, FindListContaining(Item));
+}
+
+void UMythicCharacterPageWidget::HandleSlotHoverChanged(UObject *Item, const bool bIsHovered) {
+    UItemSlotVM *SlotVM = Cast<UItemSlotVM>(Item);
+    UMythicItemInstance *ItemInstance = SlotVM ? SlotVM->TryGetItemInstance() : nullptr;
+    if (!ItemInstance || InventoryPageState != EInventoryPageState::Browsing) {
+        return;
+    }
+
+    const FGuid ItemGuid = ItemInstance->GetItemInstanceGuid();
+    if (!ItemGuid.IsValid()) {
+        return;
+    }
+    if (bIsHovered) {
+        // Hover is ordinary selection: the same physical GUID drives details, actions, comparison, and focus.
+        HoveredItemGuid = ItemGuid;
+        SetSelectedSlot(SlotVM, FindListContaining(Item));
+        return;
+    }
+
+    if (HoveredItemGuid == ItemGuid) {
+        HoveredItemGuid.Invalidate();
+    }
+}
+
 UListViewBase *UMythicCharacterPageWidget::FindListSelecting(UObject *Item) const {
     for (const TWeakObjectPtr<UListViewBase> &WeakList : BoundSlotLists) {
         if (UListView *List = Cast<UListView>(WeakList.Get())) {
@@ -710,11 +786,38 @@ UListViewBase *UMythicCharacterPageWidget::FindListSelecting(UObject *Item) cons
     return nullptr;
 }
 
+UListViewBase *UMythicCharacterPageWidget::FindListContaining(UObject *Item) const {
+    if (!Item) {
+        return nullptr;
+    }
+    for (const TWeakObjectPtr<UListViewBase> &WeakList : BoundSlotLists) {
+        if (UListView *List = Cast<UListView>(WeakList.Get());
+            List && List->GetListItems().Contains(Item)) {
+            return List;
+        }
+    }
+    return nullptr;
+}
+
+UUserWidget *UMythicCharacterPageWidget::FindEntryWidgetForItem(UObject *Item) const {
+    if (!Item) {
+        return nullptr;
+    }
+    for (const TWeakObjectPtr<UListViewBase> &WeakList : BoundSlotLists) {
+        if (UListView *List = Cast<UListView>(WeakList.Get()); List) {
+            if (UUserWidget *Entry = List->GetEntryWidgetFromItem(Item)) {
+                return Entry;
+            }
+        }
+    }
+    return nullptr;
+}
+
 void UMythicCharacterPageWidget::ClearOtherListSelections(UListViewBase *Except) {
     TGuardValue<bool> SelectionGuard(bSynchronizingSelection, true);
     for (const TWeakObjectPtr<UListViewBase> &WeakList : BoundSlotLists) {
         UListView *List = Cast<UListView>(WeakList.Get());
-        if (List && List != Except && List->GetSelectedItem()) {
+        if (List && List != Except && Cast<UItemSlotVM>(List->GetSelectedItem())) {
             List->ClearSelection();
         }
     }
@@ -725,7 +828,14 @@ void UMythicCharacterPageWidget::SetSelectedSlot(UItemSlotVM *SlotVM, UListViewB
     if (!Item || !Item->GetItemInstanceGuid().IsValid()) {
         return;
     }
+    BindBagViewModel(SlotVM->GetParentInventoryVM());
+    BindInventoryEvents();
     ClearOtherListSelections(SourceList);
+    if (UListView *List = Cast<UListView>(SourceList);
+        List && List->GetSelectedItem() != SlotVM) {
+        TGuardValue<bool> SelectionGuard(bSynchronizingSelection, true);
+        List->SetSelectedItem(SlotVM);
+    }
     SelectedList = SourceList;
     SelectedItemGuid = Item->GetItemInstanceGuid();
     LastSelectedSlotIndex = SlotVM->GetAbsoluteIndex();
@@ -922,10 +1032,10 @@ FText UMythicCharacterPageWidget::GetSlotDisplayName(int32 SlotIndex) const {
 }
 
 TArray<UMythicCharacterPageWidget::FEquipmentTarget>
-UMythicCharacterPageWidget::BuildEquipmentTargets() const {
+UMythicCharacterPageWidget::BuildEquipmentTargets(UItemSlotVM *SourceSlotOverride) const {
     TArray<FEquipmentTarget> Targets;
     UMythicInventoryComponent *Inventory = GetInventoryComponent();
-    UItemSlotVM *SourceSlot = GetSelectedSlot();
+    UItemSlotVM *SourceSlot = SourceSlotOverride ? SourceSlotOverride : GetSelectedSlot();
     UMythicItemInstance *Item = SourceSlot ? SourceSlot->TryGetItemInstance() : nullptr;
     if (!Inventory || !Item || !Item->GetItemDefinition()
         || !Inventory->GetAllSlots().IsValidIndex(SourceSlot->GetAbsoluteIndex())
@@ -1771,6 +1881,11 @@ void UMythicCharacterPageWidget::BuildDetailsCard() {
 
     DetailsHost->AddChild(DetailsCard);
     DetailsCard->SetVisibility(ESlateVisibility::Collapsed);
+    DetailsSurface = DetailsHost->GetParent();
+    if (!DetailsSurface) {
+        DetailsSurface = DetailsHost.Get();
+    }
+    DetailsSurface->SetVisibility(ESlateVisibility::Collapsed);
     DetailsCard->OnTargetCycleRequested().AddUObject(
         this, &ThisClass::HandleCycleInventoryTarget);
 
@@ -1802,13 +1917,17 @@ void UMythicCharacterPageWidget::ShowDetailsFor(UObject *SlotVM) {
 
             FMythicItemDetailsComparisonContext Context;
             if (!SelectedSlot->GetIsEquipped()) {
-                const TArray<FEquipmentTarget> Targets = BuildEquipmentTargets();
-                const FEquipmentTarget *Target = Targets.FindByPredicate([this](const FEquipmentTarget &Candidate) {
-                    return Candidate.SlotIndex == ActiveTargetSlotIndex;
+                const TArray<FEquipmentTarget> Targets = BuildEquipmentTargets(SelectedSlot);
+                const bool bPinnedSelection = SelectedItemGuid == SelectedItem->GetItemInstanceGuid();
+                const int32 PreferredTarget = bPinnedSelection ? ActiveTargetSlotIndex : INDEX_NONE;
+                const FEquipmentTarget *Target = Targets.FindByPredicate([PreferredTarget](const FEquipmentTarget &Candidate) {
+                    return Candidate.SlotIndex == PreferredTarget;
                 });
                 if (!Target && Targets.Num() > 0) {
                     Target = &Targets[0];
-                    ActiveTargetSlotIndex = Target->SlotIndex;
+                    if (bPinnedSelection) {
+                        ActiveTargetSlotIndex = Target->SlotIndex;
+                    }
                 }
                 if (Target) {
                     Context.bComparisonActive = true;
@@ -1832,11 +1951,20 @@ void UMythicCharacterPageWidget::ShowDetailsFor(UObject *SlotVM) {
                 }
             }
             DetailsCard->PresentItemStatSections(SelectedItem, Context);
+            DisplayedDetailsSlot = SelectedSlot;
+            ScheduleDetailsPosition(SelectedSlot);
         }
         else {
             DetailsCard->ClearPresentedItem();
+            DisplayedDetailsSlot.Reset();
+            ++DetailsPositionSerial;
         }
         DetailsCard->SetVisibility(bHasItem ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+    }
+
+    if (DetailsSurface) {
+        DetailsSurface->SetVisibility(
+            bHasItem ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
     }
 
     if (SocketRow) {
@@ -1844,13 +1972,86 @@ void UMythicCharacterPageWidget::ShowDetailsFor(UObject *SlotVM) {
     }
 
     if (DetailsPlaceholder) {
-        DetailsPlaceholder->SetVisibility(bHasItem ? ESlateVisibility::Collapsed
-                                                   : ESlateVisibility::SelfHitTestInvisible);
+        DetailsPlaceholder->SetVisibility(ESlateVisibility::Collapsed);
     }
 }
 
 void UMythicCharacterPageWidget::RefreshDetailsForSelection() {
     ShowDetailsFor(GetSelectedSlot());
+}
+
+void UMythicCharacterPageWidget::ScheduleDetailsPosition(UItemSlotVM *SlotVM) {
+    if (!SlotVM || !DetailsSurface) {
+        return;
+    }
+
+    const uint32 PositionSerial = ++DetailsPositionSerial;
+    PositionDetailsBeside(SlotVM);
+    if (UWorld *World = GetWorld()) {
+        const TWeakObjectPtr<UMythicCharacterPageWidget> WeakThis(this);
+        const TWeakObjectPtr<UItemSlotVM> WeakSlot(SlotVM);
+        World->GetTimerManager().SetTimerForNextTick(
+            FTimerDelegate::CreateLambda([WeakThis, WeakSlot, PositionSerial]() {
+                UMythicCharacterPageWidget *Page = WeakThis.Get();
+                UItemSlotVM *ResolvedSlot = WeakSlot.Get();
+                if (Page && ResolvedSlot && Page->DetailsPositionSerial == PositionSerial
+                    && Page->DisplayedDetailsSlot.Get() == ResolvedSlot) {
+                    Page->PositionDetailsBeside(ResolvedSlot);
+                }
+            }));
+    }
+}
+
+void UMythicCharacterPageWidget::PositionDetailsBeside(UItemSlotVM *SlotVM) {
+    UUserWidget *EntryWidget = FindEntryWidgetForItem(SlotVM);
+    UOverlaySlot *SurfaceSlot = DetailsSurface
+        ? Cast<UOverlaySlot>(DetailsSurface->Slot) : nullptr;
+    if (!EntryWidget || !SurfaceSlot) {
+        return;
+    }
+
+    const FGeometry PageGeometry = GetCachedGeometry();
+    const FGeometry EntryGeometry = EntryWidget->GetCachedGeometry();
+    const FVector2D PageSize = PageGeometry.GetLocalSize();
+    if (PageSize.X <= 1.0f || PageSize.Y <= 1.0f) {
+        return;
+    }
+
+    const FVector2D EntryTopLeft = PageGeometry.AbsoluteToLocal(EntryGeometry.GetAbsolutePosition());
+    const FVector2D EntryBottomRight = PageGeometry.AbsoluteToLocal(
+        EntryGeometry.LocalToAbsolute(EntryGeometry.GetLocalSize()));
+    FVector2D CardSize = DetailsSurface->GetDesiredSize();
+    if (CardSize.X <= 1.0f) {
+        CardSize.X = 380.0f;
+    }
+    if (CardSize.Y <= 1.0f) {
+        CardSize.Y = 520.0f;
+    }
+
+    constexpr float Gap = 12.0f;
+    constexpr float EdgePadding = 16.0f;
+    const float RightX = EntryBottomRight.X + Gap;
+    const float LeftX = EntryTopLeft.X - CardSize.X - Gap;
+    const bool bFitsRight = RightX + CardSize.X <= PageSize.X - EdgePadding;
+    const bool bFitsLeft = LeftX >= EdgePadding;
+    float X = RightX;
+    if (!bFitsRight && bFitsLeft) {
+        X = LeftX;
+    }
+    else if (!bFitsRight && !bFitsLeft) {
+        const float SpaceRight = PageSize.X - EntryBottomRight.X;
+        const float SpaceLeft = EntryTopLeft.X;
+        X = SpaceRight >= SpaceLeft ? RightX : LeftX;
+    }
+    X = FMath::Clamp(X, EdgePadding, FMath::Max(EdgePadding, PageSize.X - CardSize.X - EdgePadding));
+    const float Y = FMath::Clamp(
+        EntryTopLeft.Y,
+        EdgePadding,
+        FMath::Max(EdgePadding, PageSize.Y - CardSize.Y - EdgePadding));
+
+    SurfaceSlot->SetHorizontalAlignment(HAlign_Left);
+    SurfaceSlot->SetVerticalAlignment(VAlign_Top);
+    SurfaceSlot->SetPadding(FMargin(FMath::RoundToFloat(X), FMath::RoundToFloat(Y), 0.0f, 0.0f));
 }
 
 UMythicHUDLayout *UMythicCharacterPageWidget::FindHUDLayout() const {
@@ -2240,11 +2441,11 @@ UInventoryVM *UMythicCharacterPageWidget::ResolveInventoryVM() const {
     return nullptr;
 }
 
-void UMythicCharacterPageWidget::BindBagViewModel() {
+void UMythicCharacterPageWidget::BindBagViewModel(UInventoryVM *PreferredVM) {
     if (BoundSelectionVM.IsValid()) {
         return;
     }
-    UInventoryVM *VM = ResolveInventoryVM();
+    UInventoryVM *VM = PreferredVM ? PreferredVM : ResolveInventoryVM();
     if (!VM || !VM->SelectionVM) {
         return;
     }
