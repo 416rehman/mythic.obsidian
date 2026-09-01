@@ -3,7 +3,7 @@
 #include "UI/Inventory/MythicDPSWidget.h"
 
 #include "CommonTextBlock.h"
-#include "UI/MythicUIStyle.h"
+#include "UI/Inventory/MythicItemComparisonPresentation.h"
 
 namespace {
 
@@ -16,68 +16,42 @@ void SetDPSOptionalText(UCommonTextBlock *TextBlock, const FText &Text) {
         Text.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
 }
 
-FLinearColor ResolveComparisonColor(const FAttributeDiff &Diff) {
-    const UMythicUIStyleSettings &Style = FMythicUIStyle::Get();
-    if (Diff.Verdict == EMythicComparisonVerdict::Better) {
-        return Style.Positive;
-    }
-    if (Diff.Verdict == EMythicComparisonVerdict::Worse) {
-        return Style.Negative;
-    }
-    return Style.InkSubtle;
-}
-
-FText GetMovementGlyph(const FAttributeDiff &Diff) {
-    if (Diff.Movement == EMythicStatValueMovement::Increase) {
-        return NSLOCTEXT("MythicDPS", "MovementIncrease", "\u2191");
-    }
-    if (Diff.Movement == EMythicStatValueMovement::Decrease) {
-        return NSLOCTEXT("MythicDPS", "MovementDecrease", "\u2193");
-    }
-    return FText::GetEmpty();
-}
-
 bool ApplyMetricComparison(
     const FAttributeDiff &Diff,
     UCommonTextBlock *DeltaText,
-    UCommonTextBlock *BaselineText,
-    UCommonTextBlock *MovementText) {
-    if (!Diff.ComparisonTag.IsValid()
-        || Diff.Movement == EMythicStatValueMovement::Equal
-        || Diff.FormattedDelta.IsEmpty()) {
+    UCommonTextBlock *MovementText,
+    const bool bLabelAsAverage = false) {
+    if (!FMythicItemComparisonPresentation::HasVisibleDelta(Diff)) {
         SetDPSOptionalText(DeltaText, FText::GetEmpty());
-        SetDPSOptionalText(BaselineText, FText::GetEmpty());
         SetDPSOptionalText(MovementText, FText::GetEmpty());
         return false;
     }
 
-    SetDPSOptionalText(DeltaText, Diff.FormattedDelta);
+    const FText DeltaToken = FMythicItemComparisonPresentation::BuildDeltaToken(Diff);
     SetDPSOptionalText(
-        BaselineText,
-        FText::Format(
-            NSLOCTEXT("MythicDPS", "EquippedMetricBaseline", "Equipped {0}"),
-            Diff.FormattedCurrentValue));
-    SetDPSOptionalText(MovementText, GetMovementGlyph(Diff));
+        DeltaText,
+        bLabelAsAverage
+            ? FText::Format(NSLOCTEXT("MythicDPS", "AverageDelta", "AVG {0}"), DeltaToken)
+            : DeltaToken);
+    SetDPSOptionalText(
+        MovementText,
+        FMythicItemComparisonPresentation::BuildMovementGlyph(Diff));
 
-    const FLinearColor ComparisonColor = ResolveComparisonColor(Diff);
+    const FLinearColor ComparisonColor =
+        FMythicItemComparisonPresentation::ResolveOutcomeColor(Diff.Verdict);
     if (DeltaText) {
         DeltaText->SetColorAndOpacity(FSlateColor(ComparisonColor));
     }
     if (MovementText) {
         MovementText->SetColorAndOpacity(FSlateColor(ComparisonColor));
     }
-    if (BaselineText) {
-        BaselineText->SetColorAndOpacity(FSlateColor(FMythicUIStyle::Get().InkSubtle));
-    }
     return true;
 }
 
 void ClearMetricComparison(
     UCommonTextBlock *DeltaText,
-    UCommonTextBlock *BaselineText,
     UCommonTextBlock *MovementText) {
     SetDPSOptionalText(DeltaText, FText::GetEmpty());
-    SetDPSOptionalText(BaselineText, FText::GetEmpty());
     SetDPSOptionalText(MovementText, FText::GetEmpty());
 }
 
@@ -145,9 +119,9 @@ void UMythicDPSWidget::SetAttackComparisonData(
     const auto Apply = [&AccessibleParts](
         const FAttributeDiff &Diff,
         UCommonTextBlock *Delta,
-        UCommonTextBlock *Baseline,
-        UCommonTextBlock *Movement) {
-        if (ApplyMetricComparison(Diff, Delta, Baseline, Movement)
+        UCommonTextBlock *Movement,
+        const bool bLabelAsAverage = false) {
+        if (ApplyMetricComparison(Diff, Delta, Movement, bLabelAsAverage)
             && !Diff.AccessibleSummary.IsEmpty()) {
             AccessibleParts.Add(Diff.AccessibleSummary);
         }
@@ -156,18 +130,16 @@ void UMythicDPSWidget::SetAttackComparisonData(
     Apply(
         AttackComparisonData.DamagePerSecondComparison,
         DamagePerSecondDeltaText,
-        DamagePerSecondBaselineText,
         DamagePerSecondMovementIcon);
     Apply(
         AttackComparisonData.EffectiveAttacksPerSecondComparison,
         AttacksPerSecondDeltaText,
-        AttacksPerSecondBaselineText,
         AttacksPerSecondMovementIcon);
     Apply(
         AttackComparisonData.AverageDamagePerHitComparison,
         AverageDamagePerHitDeltaText,
-        AverageDamagePerHitBaselineText,
-        AverageDamagePerHitMovementIcon);
+        AverageDamagePerHitMovementIcon,
+        true);
 
     SetDPSOptionalText(
         AttackComparisonAccessibleText,
@@ -188,15 +160,12 @@ void UMythicDPSWidget::ClearAttackComparisonDataInternal() {
     AttackComparisonData = FMythicWeaponAttackComparisonViewData();
     ClearMetricComparison(
         DamagePerSecondDeltaText,
-        DamagePerSecondBaselineText,
         DamagePerSecondMovementIcon);
     ClearMetricComparison(
         AttacksPerSecondDeltaText,
-        AttacksPerSecondBaselineText,
         AttacksPerSecondMovementIcon);
     ClearMetricComparison(
         AverageDamagePerHitDeltaText,
-        AverageDamagePerHitBaselineText,
         AverageDamagePerHitMovementIcon);
     SetDPSOptionalText(AttackComparisonAccessibleText, FText::GetEmpty());
     OnAttackComparisonUpdated(AttackComparisonData);

@@ -2,8 +2,6 @@
 
 #include "UI/Inventory/MythicItemDetailsWidget.h"
 
-#include "CommonButtonBase.h"
-#include "CommonTextBlock.h"
 #include "Components/NamedSlot.h"
 #include "Components/PanelWidget.h"
 #include "Components/ScrollBox.h"
@@ -28,15 +26,6 @@ struct FPendingAffixRow {
     FMythicAffixRowPresentation Presentation;
     EAffixPanelRoute Route = EAffixPanelRoute::Affixes;
 };
-
-void SetItemDetailsOptionalText(UCommonTextBlock *TextBlock, const FText &Text) {
-    if (!TextBlock) {
-        return;
-    }
-    TextBlock->SetText(Text);
-    TextBlock->SetVisibility(
-        Text.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
-}
 
 bool IsAffixRoutedToCoreStats(const FAffixDisplayData &DisplayData) {
     return DisplayData.ViewData.SourceKind == AFFIX_SOURCE_IMPLICIT;
@@ -164,11 +153,6 @@ void BuildAffixRowPresentations(
 
 void UMythicItemDetailsWidget::NativeConstruct() {
     Super::NativeConstruct();
-    if (ComparisonTargetButton) {
-        ComparisonTargetButton->OnClicked().RemoveAll(this);
-        ComparisonTargetButton->OnClicked().AddUObject(
-            this, &ThisClass::HandleTargetButtonClicked);
-    }
     UpdateComparisonContextPresentation();
 }
 
@@ -289,18 +273,9 @@ void UMythicItemDetailsWidget::RefreshAffixSection(UMythicItemInstance *Item) {
     PresentItemStatSections(Item, FMythicItemDetailsComparisonContext());
 }
 
-void UMythicItemDetailsWidget::RequestTargetCycle() {
-    if (bRequestedCanCycleTarget && RequestedTargetSlotIndex != INDEX_NONE) {
-        TargetCycleRequested.Broadcast();
-    }
-}
-
 void UMythicItemDetailsWidget::NativeDestruct() {
     CancelPendingAffixRefresh();
     UnbindItemizationRegistry();
-    if (ComparisonTargetButton) {
-        ComparisonTargetButton->OnClicked().RemoveAll(this);
-    }
     RequestedCandidateItem.Reset();
     RequestedBaselineItem.Reset();
     RequestedCandidateGuid.Invalidate();
@@ -485,36 +460,7 @@ UMythicItemDetailsWidget::MakeCurrentComparisonContext() const {
 
 void UMythicItemDetailsWidget::UpdateComparisonContextPresentation() {
     const FMythicItemDetailsComparisonContext Context = MakeCurrentComparisonContext();
-    const bool bHasResolvedTarget = Context.TargetSlotIndex != INDEX_NONE
-        && !Context.TargetLabel.IsEmpty();
-    const FText TargetText = !bHasResolvedTarget
-        ? FText::GetEmpty()
-        : Context.bTargetEmpty
-            ? FText::Format(
-                NSLOCTEXT("MythicItemDetails", "EquipsToEmptyTarget", "Equips to Empty {0}"),
-                Context.TargetLabel)
-            : FText::Format(
-                NSLOCTEXT("MythicItemDetails", "EquipsToTarget", "Equips to {0}"),
-                Context.TargetLabel);
-    SetItemDetailsOptionalText(ComparisonTargetText, TargetText);
-    SetItemDetailsOptionalText(
-        ComparisonTargetCycleText,
-        bHasResolvedTarget && Context.bCanCycleTarget
-            ? NSLOCTEXT("MythicItemDetails", "CycleTarget", "Cycle Target")
-            : FText::GetEmpty());
-    if (ComparisonTargetButton) {
-        ComparisonTargetButton->SetVisibility(
-            bHasResolvedTarget
-                ? ESlateVisibility::Visible
-                : ESlateVisibility::Collapsed);
-        ComparisonTargetButton->SetIsEnabled(
-            bHasResolvedTarget && Context.bCanCycleTarget);
-    }
     OnComparisonContextUpdated(Context);
-}
-
-void UMythicItemDetailsWidget::HandleTargetButtonClicked() {
-    RequestTargetCycle();
 }
 
 void UMythicItemDetailsWidget::RebuildItemStatSections(

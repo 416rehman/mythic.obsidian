@@ -145,6 +145,21 @@ public:
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours")
     FLinearColor Negative = FLinearColor(0.78f, 0.35f, 0.30f, 1.0f);
 
+    /**
+     * Item-comparison improvement green. Kept separate from Positive so rarity gold and broad success styling cannot
+     * dilute the immediate candidate-versus-equipped meaning of a stat delta.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours|Item Comparison")
+    FLinearColor ComparisonBetter = FLinearColor(0.10f, 0.70f, 0.16f, 1.0f);
+
+    /** Item-comparison downgrade red; every worsening candidate delta uses this exact semantic color. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours|Item Comparison")
+    FLinearColor ComparisonWorse = FLinearColor(0.90f, 0.07f, 0.045f, 1.0f);
+
+    /** Item-comparison neutral used for mixed or semantically unresolved changes. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours|Item Comparison")
+    FLinearColor ComparisonNeutral = FLinearColor(0.50f, 0.46f, 0.39f, 1.0f);
+
     /** Caution without refusal: nearly broken, hazard incoming. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Colours")
     FLinearColor Caution = FLinearColor(0.85f, 0.70f, 0.30f, 1.0f);

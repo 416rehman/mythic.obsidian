@@ -1886,9 +1886,6 @@ void UMythicCharacterPageWidget::BuildDetailsCard() {
         DetailsSurface = DetailsHost.Get();
     }
     DetailsSurface->SetVisibility(ESlateVisibility::Collapsed);
-    DetailsCard->OnTargetCycleRequested().AddUObject(
-        this, &ThisClass::HandleCycleInventoryTarget);
-
     // The socket row takes an item instance, which no view model hands it. Found by class rather than by
     // name so renaming the widget on the card cannot quietly stop the row updating.
     if (DetailsCard->WidgetTree) {

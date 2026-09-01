@@ -7,8 +7,6 @@
 #include "UI/MythicActivatableWidget.h"
 #include "MythicItemDetailsWidget.generated.h"
 
-class UCommonButtonBase;
-class UCommonTextBlock;
 class UMythicAffixRowWidget;
 class UMythicDPSWidget;
 class UMythicItemInstance;
@@ -16,9 +14,6 @@ class UMythicItemizationDataRegistrySubsystem;
 class UNamedSlot;
 class UPanelWidget;
 class UScrollBox;
-
-/** Native notification that the ItemDetails target chip requested the next compatible equipment target. */
-DECLARE_MULTICAST_DELEGATE(FOnMythicItemDetailsTargetCycleRequested);
 
 /** Presentation state for the affix portion of an item-details card. */
 UENUM(BlueprintType)
@@ -50,7 +45,7 @@ public:
         UMythicItemInstance *CandidateItem,
         const FMythicItemDetailsComparisonContext &ComparisonContext);
 
-    /** Clears the represented item, target chip, pooled rows, and all transient comparison presentation. */
+    /** Clears the represented item, pooled rows, and all transient comparison presentation. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Item Details")
     void ClearPresentedItem();
 
@@ -68,15 +63,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Item Details",
               meta = (DisplayName = "Refresh Item Stat Sections"))
     void RefreshAffixSection(UMythicItemInstance *Item);
-
-    /** Requests target cycling when the current comparison/equip context exposes another compatible target. */
-    UFUNCTION(BlueprintCallable, Category = "Mythic|Item Details|Comparison")
-    void RequestTargetCycle();
-
-    /** Native event consumed by the owning inventory page; target cycling never changes ItemDetails ownership. */
-    FOnMythicItemDetailsTargetCycleRequested &OnTargetCycleRequested() {
-        return TargetCycleRequested;
-    }
 
     /** Current readiness and rendering state of the affix section. */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Mythic|Item Details")
@@ -102,18 +88,6 @@ protected:
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Item Details", meta = (BindWidgetOptional))
     TObjectPtr<UScrollBox> DetailsScrollBox;
 
-    /** Optional native fallback label for the active equip/comparison target chip. */
-    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Item Details|Comparison", meta = (BindWidgetOptional))
-    TObjectPtr<UCommonTextBlock> ComparisonTargetText;
-
-    /** Optional clickable target chip; it is visible for a resolved target and enabled only when cycling is valid. */
-    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Item Details|Comparison", meta = (BindWidgetOptional))
-    TObjectPtr<UCommonButtonBase> ComparisonTargetButton;
-
-    /** Optional action label shown beside the Blueprint's remap-aware glyph when target cycling is available. */
-    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Item Details|Comparison", meta = (BindWidgetOptional))
-    TObjectPtr<UCommonTextBlock> ComparisonTargetCycleText;
-
     /** Set to the WBP_Affix subclass after its parent is migrated to UMythicAffixRowWidget. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Item Details|Affixes",
               meta = (AllowAbstract = "false"))
@@ -129,7 +103,7 @@ protected:
               meta = (DisplayName = "On Affix Section State Changed"))
     void OnAffixSectionStateChanged(EMythicAffixSectionState NewState, const FText &Message);
 
-    /** Lets the existing ItemDetails Blueprint style its in-card target chip without owning comparison state. */
+    /** Lets Blueprint styling react to the typed comparison context without owning comparison or target state. */
     UFUNCTION(BlueprintImplementableEvent, Category = "Mythic|Item Details|Comparison",
               meta = (DisplayName = "On Comparison Context Updated"))
     void OnComparisonContextUpdated(
@@ -152,7 +126,6 @@ private:
         uint32 RequestSerial) const;
     FMythicItemDetailsComparisonContext MakeCurrentComparisonContext() const;
     void UpdateComparisonContextPresentation();
-    void HandleTargetButtonClicked();
     void SetAffixSectionState(EMythicAffixSectionState NewState, const FText &Message = FText::GetEmpty());
     bool EnsureDPSWidget();
     UMythicAffixRowWidget *AcquireAffixRow(int32 PoolIndex);
@@ -190,8 +163,6 @@ private:
     TWeakObjectPtr<UMythicItemizationDataRegistrySubsystem> BoundItemizationRegistry;
 
     FDelegateHandle SemanticDataChangedHandle;
-
-    FOnMythicItemDetailsTargetCycleRequested TargetCycleRequested;
 
     /** Consumer-side cancellation token for the registry's coalesced, one-shot readiness callbacks. */
     uint32 AffixRefreshSerial = 0;

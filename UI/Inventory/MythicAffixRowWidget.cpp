@@ -4,7 +4,7 @@
 
 #include "CommonTextBlock.h"
 #include "Components/Widget.h"
-#include "UI/MythicUIStyle.h"
+#include "UI/Inventory/MythicItemComparisonPresentation.h"
 #include "UI/ViewModels/MythicStatDisplay.h"
 
 namespace {
@@ -88,8 +88,7 @@ TArray<const FAttributeDiff *> GetVisibleDiffs(
     TArray<const FAttributeDiff *> Result;
     Result.Reserve(Presentation.ValueDiffs.Num());
     for (const FAttributeDiff &Diff : Presentation.ValueDiffs) {
-        if (Diff.Movement != EMythicStatValueMovement::Equal
-            && !Diff.FormattedDelta.IsEmpty()) {
+        if (FMythicItemComparisonPresentation::HasVisibleDelta(Diff)) {
             Result.Add(&Diff);
         }
     }
@@ -113,11 +112,10 @@ FText BuildDeltaText(const TArray<const FAttributeDiff *> &Diffs) {
             continue;
         }
 
-        FText Part = Diff->bAggregatedFromMultipleContributions
-            ? FText::Format(
-                NSLOCTEXT("MythicAffixRow", "NetComparisonDelta", "Net {0}"),
-                Diff->FormattedDelta)
-            : Diff->FormattedDelta;
+        const FText Part = FMythicItemComparisonPresentation::BuildDeltaToken(*Diff);
+        if (Part.IsEmpty()) {
+            continue;
+        }
         Parts.Add(Diffs.Num() > 1 ? LabelComparisonChannel(*Diff, Part) : Part);
     }
     return Parts.IsEmpty()
@@ -132,32 +130,14 @@ FText BuildMovementText(const TArray<const FAttributeDiff *> &Diffs) {
         if (!Diff) {
             continue;
         }
-        Parts.Add(Diff->Movement == EMythicStatValueMovement::Increase
-            ? NSLOCTEXT("MythicAffixRow", "MovementIncrease", "\u2191")
-            : NSLOCTEXT("MythicAffixRow", "MovementDecrease", "\u2193"));
+        const FText Glyph = FMythicItemComparisonPresentation::BuildMovementGlyph(*Diff);
+        if (!Glyph.IsEmpty()) {
+            Parts.Add(Glyph);
+        }
     }
     return Parts.IsEmpty()
         ? FText::GetEmpty()
         : FText::Join(NSLOCTEXT("MythicAffixRow", "MovementSeparator", " / "), Parts);
-}
-
-FText BuildBaselineText(const TArray<const FAttributeDiff *> &Diffs) {
-    TArray<FText> Parts;
-    Parts.Reserve(Diffs.Num());
-    for (const FAttributeDiff *Diff : Diffs) {
-        if (!Diff) {
-            continue;
-        }
-        const FText Value = Diffs.Num() > 1
-            ? LabelComparisonChannel(*Diff, Diff->FormattedCurrentValue)
-            : Diff->FormattedCurrentValue;
-        Parts.Add(FText::Format(
-            NSLOCTEXT("MythicAffixRow", "EquippedBaselineValue", "Equipped {0}"),
-            Value));
-    }
-    return Parts.IsEmpty()
-        ? FText::GetEmpty()
-        : FText::Join(NSLOCTEXT("MythicAffixRow", "BaselineChannelSeparator", " / "), Parts);
 }
 
 FText BuildAccessibleText(const TArray<const FAttributeDiff *> &Diffs) {
@@ -174,31 +154,15 @@ FText BuildAccessibleText(const TArray<const FAttributeDiff *> &Diffs) {
 }
 
 FLinearColor ResolveComparisonColor(const TArray<const FAttributeDiff *> &Diffs) {
-    bool bHasBetter = false;
-    bool bHasWorse = false;
-    for (const FAttributeDiff *Diff : Diffs) {
-        bHasBetter |= Diff && Diff->Verdict == EMythicComparisonVerdict::Better;
-        bHasWorse |= Diff && Diff->Verdict == EMythicComparisonVerdict::Worse;
-    }
-
-    const UMythicUIStyleSettings &Style = FMythicUIStyle::Get();
-    if (bHasBetter && !bHasWorse) {
-        return Style.Positive;
-    }
-    if (bHasWorse && !bHasBetter) {
-        return Style.Negative;
-    }
-    return Style.InkSubtle;
+    return FMythicItemComparisonPresentation::ResolveCombinedOutcomeColor(Diffs);
 }
 
 void ClearComparisonBindings(
     UCommonTextBlock *Delta,
     UCommonTextBlock *Movement,
-    UCommonTextBlock *Baseline,
     UCommonTextBlock *Accessible) {
     SetAffixOptionalText(Delta, FText::GetEmpty());
     SetAffixOptionalText(Movement, FText::GetEmpty());
-    SetAffixOptionalText(Baseline, FText::GetEmpty());
     SetAffixOptionalText(Accessible, FText::GetEmpty());
 }
 
@@ -237,14 +201,12 @@ void UMythicAffixRowWidget::SetPresentation(
     SetAffixOptionalText(Roll, RollText);
     SetAffixOptionalText(RollRange, RangeText);
 
-    ClearComparisonBindings(
-        DeltaText, MovementIcon, EquippedBaselineText, ComparisonAccessibleText);
+    ClearComparisonBindings(DeltaText, MovementIcon, ComparisonAccessibleText);
     const TArray<const FAttributeDiff *> VisibleDiffs = GetVisibleDiffs(Presentation);
     if (!VisibleDiffs.IsEmpty()) {
         const FLinearColor ComparisonColor = ResolveComparisonColor(VisibleDiffs);
         SetAffixOptionalText(DeltaText, BuildDeltaText(VisibleDiffs));
         SetAffixOptionalText(MovementIcon, BuildMovementText(VisibleDiffs));
-        SetAffixOptionalText(EquippedBaselineText, BuildBaselineText(VisibleDiffs));
         SetAffixOptionalText(
             ComparisonAccessibleText,
             Presentation.AccessibleSummary.IsEmpty()
@@ -255,10 +217,6 @@ void UMythicAffixRowWidget::SetPresentation(
         }
         if (MovementIcon) {
             MovementIcon->SetColorAndOpacity(FSlateColor(ComparisonColor));
-        }
-        if (EquippedBaselineText) {
-            EquippedBaselineText->SetColorAndOpacity(
-                FSlateColor(FMythicUIStyle::Get().InkSubtle));
         }
     }
 
@@ -274,7 +232,6 @@ void UMythicAffixRowWidget::ClearDeltaPresentation() {
     Presentation.ValueDiffs.Reset();
     Presentation.bBaselineOnly = false;
     Presentation.AccessibleSummary = FText::GetEmpty();
-    ClearComparisonBindings(
-        DeltaText, MovementIcon, EquippedBaselineText, ComparisonAccessibleText);
+    ClearComparisonBindings(DeltaText, MovementIcon, ComparisonAccessibleText);
     OnAffixComparisonUpdated(Presentation);
 }

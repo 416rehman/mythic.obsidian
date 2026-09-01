@@ -35,7 +35,7 @@ public:
     void SetAttackComparisonData(
         const FMythicWeaponAttackComparisonViewData &InComparisonData);
 
-    /** Clears transient equipped values and delta glyphs without clearing the ordinary candidate attack block. */
+    /** Clears transient compact deltas and movement glyphs without clearing the ordinary candidate attack block. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Item Details|Attack|Comparison")
     void ClearAttackComparisonData();
 
@@ -66,11 +66,6 @@ protected:
               meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> DamagePerSecondDeltaText;
 
-    /** Optional equipped sustained-DPS baseline. */
-    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Item Details|Attack|Comparison",
-              meta = (BindWidgetOptional))
-    TObjectPtr<UCommonTextBlock> DamagePerSecondBaselineText;
-
     /** Optional numeric movement glyph for sustained DPS. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Item Details|Attack|Comparison",
               meta = (BindWidgetOptional))
@@ -81,25 +76,15 @@ protected:
               meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> AttacksPerSecondDeltaText;
 
-    /** Optional equipped effective-attacks-per-second baseline. */
-    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Item Details|Attack|Comparison",
-              meta = (BindWidgetOptional))
-    TObjectPtr<UCommonTextBlock> AttacksPerSecondBaselineText;
-
     /** Optional numeric movement glyph for effective attacks per second. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Item Details|Attack|Comparison",
               meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> AttacksPerSecondMovementIcon;
 
-    /** Optional signed expected average-hit delta attached to the ordinary min/max damage range. */
+    /** Optional explicitly-labelled average-hit delta attached to the ordinary min/max damage range. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Item Details|Attack|Comparison",
               meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> AverageDamagePerHitDeltaText;
-
-    /** Optional equipped expected average-hit baseline. */
-    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Item Details|Attack|Comparison",
-              meta = (BindWidgetOptional))
-    TObjectPtr<UCommonTextBlock> AverageDamagePerHitBaselineText;
 
     /** Optional numeric movement glyph for expected average damage per hit. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Item Details|Attack|Comparison",

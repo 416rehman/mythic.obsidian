@@ -57,17 +57,13 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> RollRange;
 
-    /** Optional compact signed delta text; collapsed when the canonical diff renders equal. */
+    /** Optional compact signed delta, NEW, or LOST token; collapsed when the canonical diff renders equal. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Affixes|Comparison", meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> DeltaText;
 
     /** Optional up/down movement glyph; color communicates benefit independently from direction. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Affixes|Comparison", meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> MovementIcon;
-
-    /** Optional equipped value shown beside the ordinary candidate value or a baseline-only loss row. */
-    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Affixes|Comparison", meta = (BindWidgetOptional))
-    TObjectPtr<UCommonTextBlock> EquippedBaselineText;
 
     /** Optional non-color comparison summary available to accessible/native fallback layouts. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Affixes|Comparison", meta = (BindWidgetOptional))
