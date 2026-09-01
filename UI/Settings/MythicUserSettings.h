@@ -356,20 +356,20 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetDamageNumberScale(float Scale);
 
-    /** Returns whether authored affix roll ranges remain visible while comparing items. */
-    UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Item Comparison")
-    bool GetShowItemComparisonRollRanges() const { return bShowItemComparisonRollRanges; }
+    /** Returns whether authored affix roll ranges are visible throughout Item Details. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Item Details")
+    bool GetShowItemRollRanges() const { return bShowItemRollRanges; }
 
-    /** Enables or disables authored roll ranges during comparison; ordinary item inspection always keeps them. */
-    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings|Item Comparison")
-    void SetShowItemComparisonRollRanges(bool bShow);
+    /** Enables or disables authored roll ranges globally in ordinary and comparison Item Details. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings|Item Details")
+    void SetShowItemRollRanges(bool bShow);
 
     /** Returns whether comparison includes affixes present on only one of the two items. */
-    UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Item Comparison")
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Item Details")
     bool GetCompareAllItemAffixes() const { return bCompareAllItemAffixes; }
 
     /** Selects all-affix comparison or shared-affixes-only comparison. */
-    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings|Item Comparison")
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings|Item Details")
     void SetCompareAllItemAffixes(bool bCompareAll);
 
     /** Returns the player's contextual entity-presentation ceiling; it never grants knowledge or reveals secret state. */
@@ -571,9 +571,9 @@ private:
     UPROPERTY(Config)
     float DamageNumberScale = 1.0f;
 
-    /** Saved preference for showing authored roll ranges beside affixes during comparison. */
+    /** Saved global preference for showing authored roll ranges throughout Item Details. */
     UPROPERTY(Config)
-    bool bShowItemComparisonRollRanges = true;
+    bool bShowItemRollRanges = true;
 
     /** Saved preference for comparing one-sided affixes instead of only stats present on both items. */
     UPROPERTY(Config)

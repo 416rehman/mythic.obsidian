@@ -223,9 +223,7 @@ void UMythicAffixRowWidget::SetPresentation(
             ? JoinChannelText(Channels, false)
             : FormatLegacyValue(Presentation.DisplayData);
     const UMythicUserSettings *UserSettings = UMythicUserSettings::Get();
-    const bool bShowRange = !Presentation.bComparisonActive
-        || !UserSettings
-        || UserSettings->GetShowItemComparisonRollRanges();
+    const bool bShowRange = !UserSettings || UserSettings->GetShowItemRollRanges();
     const FText RangeText = !bShowRange
         ? FText::GetEmpty()
         : Channels.Num() > 0
