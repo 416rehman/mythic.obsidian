@@ -443,6 +443,22 @@ void UMythicUserSettings::SetDamageNumberScale(float Scale) {
     OnInterfaceChanged.Broadcast();
 }
 
+void UMythicUserSettings::SetShowItemComparisonRollRanges(const bool bShow) {
+    if (bShowItemComparisonRollRanges == bShow) {
+        return;
+    }
+    bShowItemComparisonRollRanges = bShow;
+    OnInterfaceChanged.Broadcast();
+}
+
+void UMythicUserSettings::SetCompareAllItemAffixes(const bool bCompareAll) {
+    if (bCompareAllItemAffixes == bCompareAll) {
+        return;
+    }
+    bCompareAllItemAffixes = bCompareAll;
+    OnInterfaceChanged.Broadcast();
+}
+
 void UMythicUserSettings::SetNameplatePresentationMode(const EMythicNameplatePresentationMode Mode) {
     if (NameplatePresentationMode == Mode) {
         return;
@@ -575,6 +591,8 @@ void UMythicUserSettings::SetToDefaults() {
     HUDOpacity = 1.0f;
     DamageNumberMode = 1;
     DamageNumberScale = 1.0f;
+    bShowItemComparisonRollRanges = true;
+    bCompareAllItemAffixes = true;
     NameplatePresentationMode = EMythicNameplatePresentationMode::Contextual;
     NameplateScale = 1.0f;
     bShowNameplateHealthPercent = false;

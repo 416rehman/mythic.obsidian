@@ -356,6 +356,22 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetDamageNumberScale(float Scale);
 
+    /** Returns whether authored affix roll ranges remain visible while comparing items. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Item Comparison")
+    bool GetShowItemComparisonRollRanges() const { return bShowItemComparisonRollRanges; }
+
+    /** Enables or disables authored roll ranges during comparison; ordinary item inspection always keeps them. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings|Item Comparison")
+    void SetShowItemComparisonRollRanges(bool bShow);
+
+    /** Returns whether comparison includes affixes present on only one of the two items. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Item Comparison")
+    bool GetCompareAllItemAffixes() const { return bCompareAllItemAffixes; }
+
+    /** Selects all-affix comparison or shared-affixes-only comparison. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|Settings|Item Comparison")
+    void SetCompareAllItemAffixes(bool bCompareAll);
+
     /** Returns the player's contextual entity-presentation ceiling; it never grants knowledge or reveals secret state. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings|Nameplates")
     EMythicNameplatePresentationMode GetNameplatePresentationMode() const { return NameplatePresentationMode; }
@@ -554,6 +570,14 @@ private:
 
     UPROPERTY(Config)
     float DamageNumberScale = 1.0f;
+
+    /** Saved preference for showing authored roll ranges beside affixes during comparison. */
+    UPROPERTY(Config)
+    bool bShowItemComparisonRollRanges = true;
+
+    /** Saved preference for comparing one-sided affixes instead of only stats present on both items. */
+    UPROPERTY(Config)
+    bool bCompareAllItemAffixes = true;
 
     /** Saved presentation ceiling; private config is read through documented Blueprint getters. */
     UPROPERTY(Config)

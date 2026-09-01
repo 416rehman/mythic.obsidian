@@ -5,6 +5,7 @@
 #include "CommonTextBlock.h"
 #include "Components/Widget.h"
 #include "UI/Inventory/MythicItemComparisonPresentation.h"
+#include "UI/Settings/MythicUserSettings.h"
 #include "UI/ViewModels/MythicStatDisplay.h"
 
 namespace {
@@ -221,7 +222,11 @@ void UMythicAffixRowWidget::SetPresentation(
         : Channels.Num() > 0
             ? JoinChannelText(Channels, false)
             : FormatLegacyValue(Presentation.DisplayData);
-    const FText RangeText = Presentation.bComparisonActive
+    const UMythicUserSettings *UserSettings = UMythicUserSettings::Get();
+    const bool bShowRange = !Presentation.bComparisonActive
+        || !UserSettings
+        || UserSettings->GetShowItemComparisonRollRanges();
+    const FText RangeText = !bShowRange
         ? FText::GetEmpty()
         : Channels.Num() > 0
             ? JoinChannelText(Channels, true)

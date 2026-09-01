@@ -1,6 +1,7 @@
 // Copyright Stellar Games. All Rights Reserved.
 
 #include "UI/Inventory/MythicItemDetailsWidget.h"
+#include "UI/Settings/MythicUserSettings.h"
 
 #include "Components/NamedSlot.h"
 #include "Components/PanelWidget.h"
@@ -88,6 +89,8 @@ void BuildAffixRowPresentations(
 
     TSet<FGameplayTag> ClaimedCandidateDiffs;
     ClaimedCandidateDiffs.Reserve(Diffs.Num());
+    const UMythicUserSettings *UserSettings = UMythicUserSettings::Get();
+    const bool bCompareAllAffixes = !UserSettings || UserSettings->GetCompareAllItemAffixes();
     for (const FAffixDisplayData &CandidateAffix : CandidateAffixes) {
         if (CandidateAffix.bOwnedByWeaponAttackPresentation) {
             continue;
@@ -103,7 +106,10 @@ void BuildAffixRowPresentations(
         if (bComparisonActive) {
             for (const FMythicAffixValueViewData &Channel : CandidateAffix.ViewData.Values) {
                 const FAttributeDiff *Found = DiffByTag.FindRef(Channel.StatTag);
-                if (Found && !ClaimedCandidateDiffs.Contains(Channel.StatTag)) {
+                const bool bAllowedByScope = bCompareAllAffixes
+                    || (Found && !Found->bCandidateOnly && !Found->bBaselineOnly);
+                if (Found && bAllowedByScope
+                    && !ClaimedCandidateDiffs.Contains(Channel.StatTag)) {
                     Pending.Presentation.ValueDiffs.Add(*Found);
                     ClaimedCandidateDiffs.Add(Channel.StatTag);
                 }
@@ -113,7 +119,7 @@ void BuildAffixRowPresentations(
         }
     }
 
-    if (!bComparisonActive) {
+    if (!bComparisonActive || !bCompareAllAffixes) {
         return;
     }
 
