@@ -157,6 +157,30 @@ FLinearColor ResolveComparisonColor(const TArray<const FAttributeDiff *> &Diffs)
     return FMythicItemComparisonPresentation::ResolveCombinedOutcomeColor(Diffs);
 }
 
+bool AreAllDiffsCandidateOnly(const TArray<const FAttributeDiff *> &Diffs) {
+    if (Diffs.IsEmpty()) {
+        return false;
+    }
+    for (const FAttributeDiff *Diff : Diffs) {
+        if (!Diff || !Diff->bCandidateOnly) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool AreAllDiffsBaselineOnly(const TArray<const FAttributeDiff *> &Diffs) {
+    if (Diffs.IsEmpty()) {
+        return false;
+    }
+    for (const FAttributeDiff *Diff : Diffs) {
+        if (!Diff || !Diff->bBaselineOnly) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void ClearComparisonBindings(
     UCommonTextBlock *Delta,
     UCommonTextBlock *Movement,
@@ -185,13 +209,19 @@ void UMythicAffixRowWidget::SetPresentation(
         AttributeText = Presentation.DisplayData.AttributeName;
     }
 
+    const TArray<const FAttributeDiff *> VisibleDiffs = GetVisibleDiffs(Presentation);
+    const bool bCandidateOnlyRow = AreAllDiffsCandidateOnly(VisibleDiffs);
+    const bool bBaselineOnlyRow = Presentation.bBaselineOnly
+        || AreAllDiffsBaselineOnly(VisibleDiffs);
+    const bool bOneSidedRow = bCandidateOnlyRow || bBaselineOnlyRow;
+
     const TArray<const FMythicAffixValueViewData *> Channels = GetDisplayOrderedValues(ViewData);
-    const FText RollText = Presentation.bBaselineOnly
-        ? NSLOCTEXT("MythicAffixRow", "MissingCandidateValue", "\u2014")
+    const FText RollText = bOneSidedRow
+        ? BuildDeltaText(VisibleDiffs)
         : Channels.Num() > 0
             ? JoinChannelText(Channels, false)
             : FormatLegacyValue(Presentation.DisplayData);
-    const FText RangeText = Presentation.bBaselineOnly
+    const FText RangeText = Presentation.bComparisonActive
         ? FText::GetEmpty()
         : Channels.Num() > 0
             ? JoinChannelText(Channels, true)
@@ -200,13 +230,26 @@ void UMythicAffixRowWidget::SetPresentation(
     SetAffixOptionalText(Attribute, AttributeText);
     SetAffixOptionalText(Roll, RollText);
     SetAffixOptionalText(RollRange, RangeText);
+    if (Roll) {
+        if (!bHasCapturedDefaultRollColor) {
+            DefaultRollColor = Roll->GetColorAndOpacity();
+            bHasCapturedDefaultRollColor = true;
+        }
+        Roll->SetColorAndOpacity(DefaultRollColor);
+    }
 
     ClearComparisonBindings(DeltaText, MovementIcon, ComparisonAccessibleText);
-    const TArray<const FAttributeDiff *> VisibleDiffs = GetVisibleDiffs(Presentation);
     if (!VisibleDiffs.IsEmpty()) {
         const FLinearColor ComparisonColor = ResolveComparisonColor(VisibleDiffs);
-        SetAffixOptionalText(DeltaText, BuildDeltaText(VisibleDiffs));
-        SetAffixOptionalText(MovementIcon, BuildMovementText(VisibleDiffs));
+        if (bOneSidedRow) {
+            if (Roll) {
+                Roll->SetColorAndOpacity(FSlateColor(ComparisonColor));
+            }
+        }
+        else {
+            SetAffixOptionalText(DeltaText, BuildDeltaText(VisibleDiffs));
+            SetAffixOptionalText(MovementIcon, BuildMovementText(VisibleDiffs));
+        }
         SetAffixOptionalText(
             ComparisonAccessibleText,
             Presentation.AccessibleSummary.IsEmpty()
@@ -230,8 +273,12 @@ void UMythicAffixRowWidget::SetPresentation(
 void UMythicAffixRowWidget::ClearDeltaPresentation() {
     ++PresentationMutationSerial;
     Presentation.ValueDiffs.Reset();
+    Presentation.bComparisonActive = false;
     Presentation.bBaselineOnly = false;
     Presentation.AccessibleSummary = FText::GetEmpty();
     ClearComparisonBindings(DeltaText, MovementIcon, ComparisonAccessibleText);
+    if (Roll && bHasCapturedDefaultRollColor) {
+        Roll->SetColorAndOpacity(DefaultRollColor);
+    }
     OnAffixComparisonUpdated(Presentation);
 }

@@ -57,11 +57,11 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> RollRange;
 
-    /** Optional compact signed delta, NEW, or LOST token; collapsed when the canonical diff renders equal. */
+    /** Optional compact signed delta; collapsed for equal and one-sided rows. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Affixes|Comparison", meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> DeltaText;
 
-    /** Optional up/down movement glyph; color communicates benefit independently from direction. */
+    /** Legacy optional movement binding; kept collapsed because signed numbers already communicate direction. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Affixes|Comparison", meta = (BindWidgetOptional))
     TObjectPtr<UCommonTextBlock> MovementIcon;
 
@@ -80,5 +80,7 @@ protected:
     void OnAffixComparisonUpdated(const FMythicAffixRowPresentation &InPresentation);
 
 private:
+    FSlateColor DefaultRollColor;
+    bool bHasCapturedDefaultRollColor = false;
     uint32 PresentationMutationSerial = 0;
 };

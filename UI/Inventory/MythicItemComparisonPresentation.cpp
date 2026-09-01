@@ -14,25 +14,11 @@ FText FMythicItemComparisonPresentation::BuildDeltaToken(const FAttributeDiff &D
     if (!HasVisibleDelta(Diff)) {
         return FText::GetEmpty();
     }
-    if (Diff.bCandidateOnly) {
-        return NSLOCTEXT("MythicItemComparison", "CandidateOnly", "NEW");
-    }
-    if (Diff.bBaselineOnly) {
-        return NSLOCTEXT("MythicItemComparison", "BaselineOnly", "LOST");
-    }
     return Diff.FormattedDelta;
 }
 
 FText FMythicItemComparisonPresentation::BuildMovementGlyph(const FAttributeDiff &Diff) {
-    if (!HasVisibleDelta(Diff) || Diff.bCandidateOnly || Diff.bBaselineOnly) {
-        return FText::GetEmpty();
-    }
-    if (Diff.Movement == EMythicStatValueMovement::Increase) {
-        return NSLOCTEXT("MythicItemComparison", "MovementIncrease", "\u25B2");
-    }
-    if (Diff.Movement == EMythicStatValueMovement::Decrease) {
-        return NSLOCTEXT("MythicItemComparison", "MovementDecrease", "\u25BC");
-    }
+    (void)Diff;
     return FText::GetEmpty();
 }
 

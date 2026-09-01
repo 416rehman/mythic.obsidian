@@ -16,14 +16,14 @@ struct MYTHIC_API FMythicItemComparisonPresentation {
     static bool HasVisibleDelta(const FAttributeDiff &Diff);
 
     /**
-     * Returns the single compact token shown beside the candidate value. Shared stats use the canonical signed
-     * delta; one-sided stats use NEW or LOST so the candidate value is not printed twice.
+     * Returns the canonical signed numeric delta. One-sided affix rows place this number in their primary value
+     * position so the UI never substitutes NEW/LOST prose or repeats the same value.
      */
     static FText BuildDeltaToken(const FAttributeDiff &Diff);
 
     /**
-     * Returns a directional triangle only for shared numeric changes. NEW and LOST are already self-describing and
-     * deliberately receive no second glyph.
+     * Retained for Blueprint binding compatibility. Signed numbers already disclose direction, so the compact
+     * presentation deliberately emits no separate movement glyph.
      */
     static FText BuildMovementGlyph(const FAttributeDiff &Diff);
 

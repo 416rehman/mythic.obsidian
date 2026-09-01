@@ -170,6 +170,10 @@ struct MYTHIC_API FMythicAffixRowPresentation {
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Comparison|Affix")
     TArray<FAttributeDiff> ValueDiffs;
 
+    /** True while this row is rendered inside an active candidate-versus-equipped comparison. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Comparison|Affix")
+    bool bComparisonActive = false;
+
     /** True when this row exists only to disclose a contribution lost from the equipped baseline. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Comparison|Affix")
     bool bBaselineOnly = false;

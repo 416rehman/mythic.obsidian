@@ -95,6 +95,7 @@ void BuildAffixRowPresentations(
 
         FPendingAffixRow &Pending = OutRows.AddDefaulted_GetRef();
         Pending.Presentation.DisplayData = CandidateAffix;
+        Pending.Presentation.bComparisonActive = bComparisonActive;
         Pending.Route = IsAffixRoutedToCoreStats(CandidateAffix)
             ? EAffixPanelRoute::CoreStats
             : EAffixPanelRoute::Affixes;
@@ -140,6 +141,7 @@ void BuildAffixRowPresentations(
         }
 
         Synthetic.bBaselineOnly = true;
+        Synthetic.bComparisonActive = true;
         Synthetic.AccessibleSummary = BuildRowAccessibleSummary(Synthetic.ValueDiffs);
         FPendingAffixRow &Pending = OutRows.AddDefaulted_GetRef();
         Pending.Presentation = MoveTemp(Synthetic);

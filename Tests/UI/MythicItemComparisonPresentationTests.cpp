@@ -36,19 +36,18 @@ bool FMythicCompactItemComparisonPresentationTest::RunTest(const FString &Parame
         TEXT("a shared stat renders only its canonical signed delta"),
         FMythicItemComparisonPresentation::BuildDeltaToken(SharedIncrease).ToString(),
         FString(TEXT("+6.8%")));
-    TestEqual(
-        TEXT("a shared increase has one compact non-color direction glyph"),
-        FMythicItemComparisonPresentation::BuildMovementGlyph(SharedIncrease).ToString(),
-        FString(TEXT("\u25B2")));
+    TestTrue(
+        TEXT("a signed shared delta needs no redundant direction glyph"),
+        FMythicItemComparisonPresentation::BuildMovementGlyph(SharedIncrease).IsEmpty());
 
     FAttributeDiff CandidateOnly = SharedIncrease;
     CandidateOnly.bCandidateOnly = true;
     TestEqual(
-        TEXT("a candidate-only affix does not repeat its rolled value as a delta"),
+        TEXT("a candidate-only affix retains its signed numeric value"),
         FMythicItemComparisonPresentation::BuildDeltaToken(CandidateOnly).ToString(),
-        FString(TEXT("NEW")));
+        FString(TEXT("+6.8%")));
     TestTrue(
-        TEXT("NEW needs no redundant direction glyph"),
+        TEXT("a candidate-only number needs no redundant direction glyph"),
         FMythicItemComparisonPresentation::BuildMovementGlyph(CandidateOnly).IsEmpty());
 
     FAttributeDiff BaselineOnly = MakeVisibleDiff(
@@ -57,11 +56,11 @@ bool FMythicCompactItemComparisonPresentationTest::RunTest(const FString &Parame
         EMythicComparisonVerdict::Worse);
     BaselineOnly.bBaselineOnly = true;
     TestEqual(
-        TEXT("a removed equipped affix uses one loss token instead of an equipped-value sentence"),
+        TEXT("a removed equipped affix renders as a signed numeric decrease"),
         FMythicItemComparisonPresentation::BuildDeltaToken(BaselineOnly).ToString(),
-        FString(TEXT("LOST")));
+        FString(TEXT("-61.3%")));
     TestTrue(
-        TEXT("LOST needs no redundant direction glyph"),
+        TEXT("a baseline-only decrease needs no redundant direction glyph"),
         FMythicItemComparisonPresentation::BuildMovementGlyph(BaselineOnly).IsEmpty());
 
     FAttributeDiff Equal = SharedIncrease;
@@ -104,10 +103,9 @@ bool FMythicItemComparisonColorSemanticsTest::RunTest(const FString &Parameters)
         TEXT("a lower-is-better decrease remains green even though its direction glyph points down"),
         FMythicItemComparisonPresentation::ResolveOutcomeColor(LowerIsBetterDecrease.Verdict),
         Style.ComparisonBetter);
-    TestEqual(
-        TEXT("numeric direction remains independently disclosed"),
-        FMythicItemComparisonPresentation::BuildMovementGlyph(LowerIsBetterDecrease).ToString(),
-        FString(TEXT("\u25BC")));
+    TestTrue(
+        TEXT("the signed lower-is-better delta needs no redundant direction glyph"),
+        FMythicItemComparisonPresentation::BuildMovementGlyph(LowerIsBetterDecrease).IsEmpty());
 
     FAttributeDiff BetterDiff = MakeVisibleDiff(
         TEXT("+1"),
