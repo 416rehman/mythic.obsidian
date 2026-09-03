@@ -6,8 +6,10 @@
 #include "Engine/AssetManagerTypes.h"
 #include "GameplayTagContainer.h"
 #include "Components/ListViewBase.h"
+#include "Engine/TimerHandle.h"
 #include "FieldNotificationId.h"
 #include "Itemization/Inventory/MythicInventoryActionTypes.h"
+#include "Progression/Runes/MythicRuneComponent.h"
 #include "UI/MythicActivatableWidget.h"
 #include "MythicCharacterPageWidget.generated.h"
 
@@ -30,10 +32,14 @@ class UMythicBoundActionButton;
 class UMythicInventoryComponent;
 class UMythicInventoryInteractionCoordinator;
 class UMythicItemDetailsWidget;
+class UMythicRuneDefinition;
+class UMythicRunePickerWidget;
+class UMythicRuneSocketWidget;
 class UMythicSectionHeader;
 class UOverlay;
 class UPanelWidget;
 class USizeBox;
+class UTexture2D;
 class UUserWidget;
 class UVerticalBox;
 class UWidget;
@@ -85,27 +91,12 @@ public:
     void HandleClicked();
 };
 
-UCLASS()
-class MYTHIC_API UMythicRuneSocketClickProxy : public UObject {
-    GENERATED_BODY()
-
-public:
-    UPROPERTY()
-    TWeakObjectPtr<UMythicCharacterPageWidget> Page;
-
-    UPROPERTY()
-    int32 SlotIndex = INDEX_NONE;
-
-    UFUNCTION()
-    void HandleClicked();
-};
-
-/** What colour a rune's category draws in. Authored so a new category is a row, not a code change. */
+/** The colour a rune's category draws in, and its place in the picker's sort. Authored so a new category is a row. */
 USTRUCT(BlueprintType)
 struct FMythicRuneCategoryColour {
     GENERATED_BODY()
 
-    /** Rune category whose socket mark receives this colour. */
+    /** Rune category whose socket glow receives this colour. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Runes", meta = (Categories = "Rune.Category"))
     FGameplayTag Category;
 
@@ -124,8 +115,15 @@ public:
     /** Closes the character page's active inventory modal; browsing declines so the menu shell handles Back. */
     virtual bool TryHandleNestedBackAction() override;
 
-    /** Redraws the socket strip after the picker commits a change. */
-    void NotifyRunesChanged();
+    const TArray<FMythicRuneCategoryColour> &GetRuneCategoryColours() const { return RuneCategoryColours; }
+
+    FLinearColor RuneCategoryColour(const UMythicRuneDefinition *Rune) const;
+
+    /** The pooled socket cell for one slot, or null before the strip is built. */
+    UMythicRuneSocketWidget *GetSocketWidget(int32 SlotIndex) const;
+
+    /** The socket the picker was last opened from; focus returns here when the picker closes. */
+    int32 LastOpenedSocket = INDEX_NONE;
 
     /** Advances the bag's active category. The page-local inventory context maps this to Right Trigger. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Inventory")
@@ -187,6 +185,28 @@ protected:
     /** Coalesces replicated slot changes so selection is restored after the view model refreshes. */
     UFUNCTION()
     void HandleInventorySlotUpdated(int32 SlotIndex);
+
+    /** Redraws the strip from replicated state; Land, Unland and Unseal play from the diff. */
+    UFUNCTION()
+    void HandleRunesChanged();
+
+    /** A server refusal: the socket shakes and the header says why. */
+    UFUNCTION()
+    void HandleRuneRefused(int32 SlotIndex, EMythicRuneRefusal Reason);
+
+    /** Click or Confirm on a socket: opens the picker, or shakes when the socket is sealed. */
+    UFUNCTION()
+    void HandleSocketPressed(int32 SlotIndex);
+
+    /** Right-click on a filled socket unequips it. */
+    UFUNCTION()
+    void HandleSocketAltPressed(int32 SlotIndex);
+
+    UFUNCTION()
+    void HandleSocketFocusChanged(int32 SlotIndex, bool bOn);
+
+    UFUNCTION()
+    void HandleSocketHoverChanged(int32 SlotIndex, bool bOn);
 
     /** Where the borrowed inventory sits while this tab is up. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
@@ -278,6 +298,10 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UPanelWidget> SocketStrip;
 
+    /** Where the socket section header goes when the shrine stacks it above the plinth; unset, it leads the strip. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UPanelWidget> SocketHeaderHost;
+
     /**
      * The house section header, so the socket row is announced like every other group on the page.
      *
@@ -286,6 +310,27 @@ protected:
      */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes")
     TSubclassOf<class UMythicSectionHeader> SocketHeaderClass;
+
+    /** WBP_RuneSocket. The same cell the picker draws, so the page and the picker share one language. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes")
+    TSubclassOf<UMythicRuneSocketWidget> SocketClass;
+
+    /** WBP_Tooltip. One per socket, re-texted on every redraw. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes")
+    TSubclassOf<UUserWidget> SocketTooltipClass;
+
+    /** The text block inside SocketTooltipClass that carries the line. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes")
+    FName SocketTooltipTextName = TEXT("Txt_Tip");
+
+    /** Emblem on the strip header. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes")
+    TSoftObjectPtr<UTexture2D> SocketEmblem =
+        TSoftObjectPtr<UTexture2D>(FSoftObjectPath(TEXT("/Game/Mythic/UI/Icons/Emblem/T_Emblem_Sockets.T_Emblem_Sockets")));
+
+    /** How long a refusal reason stays in the header before the socket count returns. */
+    UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes", meta = (ClampMin = "0.5", ClampMax = "10.0"))
+    float RefusalNoticeSeconds = 2.0f;
 
     /** The widget inside the borrowed inventory that holds the bag, as opposed to an equipment strip. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Inventory")
@@ -369,26 +414,49 @@ private:
         int32 OccupantQuantity = 0;
     };
 
+    /** The socket widget sits in SocketStrip and the tip hangs off it, so both stay reachable by GC. */
     struct FMythicRuneSocket {
-        TObjectPtr<UWidget> Button;
-        TObjectPtr<UImage> Well;
-        TObjectPtr<UImage> Mark;
+        TObjectPtr<UMythicRuneSocketWidget> Widget;
+        TObjectPtr<UUserWidget> Tip;
+        FSoftObjectPath LastDrawn;
+        bool bLastUnlocked = false;
         int32 SlotIndex = INDEX_NONE;
-        TObjectPtr<UMythicRuneSocketClickProxy> Proxy;
     };
 
     void BuildSockets();
 
     void RefreshSockets();
 
-    FLinearColor RuneCategoryColour(const class UMythicRuneDefinition *Rune) const;
+    void BindRunes();
+    void UnbindRunes();
+    UMythicRuneComponent *FindRuneComponent() const;
 
+    /** "{worn} / {open} sockets". */
+    FText SocketCountText() const;
+    void SetSocketHeaderTrailing(const FText &Trailing);
+    void RestoreSocketHeader();
+    void SetSocketTip(const FMythicRuneSocket &Socket, const FText &Line);
+    /** "Sealed - earn {Deed}" and the full tooltip line for a sealed socket. */
+    FText SealedSocketLine(int32 SlotIndex, FText &OutDeedName) const;
+    UTexture2D *ResolveRuneIcon(const UMythicRuneDefinition *Rune) const;
 
     TArray<FMythicRuneSocket> Sockets;
 
+    TWeakObjectPtr<UMythicRuneComponent> BoundRunes;
+
+    /** Set once the strip has drawn real state; the first draw never animates. */
+    bool bSocketsDrawn = false;
+
+    int32 FocusedSocket = INDEX_NONE;
+
+    FTimerHandle RefusalNoticeTimer;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMythicSectionHeader> SocketHeader;
+
     /** One picker for the page's lifetime. Creating a widget per click is a frame spike. */
     UPROPERTY()
-    TObjectPtr<class UMythicRunePickerWidget> RunePicker;
+    TObjectPtr<UMythicRunePickerWidget> RunePicker;
 
     /** The socket row inside the details card, cached when the card is built. */
     UPROPERTY()
@@ -554,10 +622,6 @@ private:
 
     UPROPERTY()
     TArray<TObjectPtr<UMythicInventoryActionClickProxy>> InventoryClickProxies;
-
-    /** Keeps the native rune click bridges reachable by GC for as long as their socket buttons exist. */
-    UPROPERTY()
-    TArray<TObjectPtr<UMythicRuneSocketClickProxy>> RuneSocketClickProxies;
 
     TWeakObjectPtr<UListView> WeaponStrip;
     TArray<TWeakObjectPtr<UListView>> ReorientedStrips;

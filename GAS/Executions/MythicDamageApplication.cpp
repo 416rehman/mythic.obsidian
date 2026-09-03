@@ -416,6 +416,14 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         UE_LOG(Myth, Verbose, TEXT("DamageApplication:: Critical hit! Damage increased by %f Percent"), CriticalHitDamage * 100.0f);
     }
 
+    // A rune's one-shot multiplier is a MORE multiplier outside the compose buckets: no diminishing curve and no
+    // More stack cap, or "the next hit deals 500% more" quietly becomes less.
+    const float BonusDamageMultiplier = MythicContext->GetBonusDamageMultiplier();
+    if (BonusDamageMultiplier != 1.0f) {
+        FinalDamage = FMath::Max(0.0f, FinalDamage * BonusDamageMultiplier);
+        UE_LOG(Myth, Verbose, TEXT("DamageApplication:: bonus hit multiplier x%.3f -> %f"), BonusDamageMultiplier, FinalDamage);
+    }
+
     FinalDamage = FMath::Max(0.0f, FinalDamage * OutgoingDamageMultiplier * IncomingDamageMultiplier);
 
     {

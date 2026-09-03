@@ -182,6 +182,7 @@ void UMythicLifeComponent::InitializeWithAbilitySystem(UAbilitySystemComponent *
     if (GetOwner()->HasAuthority() && RegenInterval > 0.0f && GetWorld()) {
         GetWorld()->GetTimerManager().SetTimer(RegenTimerHandle, this, &ThisClass::ApplyRegen, RegenInterval, true);
     }
+    StartMovementSampling();
 
     auto HealthAttr = UMythicAttributeSet_Life::GetHealthAttribute();
     auto MaxHealthAttr = UMythicAttributeSet_Life::GetMaxHealthAttribute();
@@ -216,7 +217,12 @@ void UMythicLifeComponent::UninitializeFromAbilitySystem() {
     if (GetWorld()) {
         GetWorld()->GetTimerManager().ClearTimer(RegenTimerHandle);
         GetWorld()->GetTimerManager().ClearTimer(BleedOutTimerHandle);
+        GetWorld()->GetTimerManager().ClearTimer(MovementSampleTimerHandle);
     }
+    if (ACharacter *Char = Cast<ACharacter>(GetOwner())) {
+        Char->MovementModeChangedDelegate.RemoveDynamic(this, &ThisClass::HandleMovementModeChanged);
+    }
+    ResetMovementSampling();
 
     CancelReviveChannel();
 
@@ -310,6 +316,10 @@ void UMythicLifeComponent::HandleDeathEvent(const FGameplayEventData *Payload) {
     if (AbilitySystemComponent->HasMatchingGameplayTag(GAS_STATE_DEAD)) {
         return;
     }
+    // Second gate for a listener that claimed the death on GAS.Event.Death rather than PreDeath.
+    if (LifeSet && const_cast<UMythicAttributeSet_Life *>(LifeSet.Get())->ConsumeDeathHandled()) {
+        return;
+    }
     AActor *Killer = Payload ? const_cast<AActor *>(Payload->Instigator.Get()) : nullptr;
 
     const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
@@ -363,6 +373,21 @@ void UMythicLifeComponent::EnterDownedState(AActor *Killer) {
             if (!bIsDowned) {
                 return;
             }
+            // Bleeding out is the third way to die, so it gets the same last word as a lethal hit.
+            if (AbilitySystemComponent && LifeSet) {
+                FGameplayEventData PrePayload;
+                PrePayload.EventTag = GAS_EVENT_DEATH_PRE;
+                PrePayload.Instigator = DownedKiller.Get();
+                PrePayload.Target = GetOwner();
+                AbilitySystemComponent->HandleGameplayEvent(GAS_EVENT_DEATH_PRE, &PrePayload);
+                if (const_cast<UMythicAttributeSet_Life *>(LifeSet.Get())->ConsumeDeathHandled()) {
+                    LeaveDownedState();
+                    CancelReviveChannel();
+                    OnRevivedNative.Broadcast(GetOwner());
+                    OnRevived.Broadcast(GetOwner());
+                    return;
+                }
+            }
             bIsDowned = false;
             if (AbilitySystemComponent) {
                 SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_DOWNED, false);
@@ -372,6 +397,33 @@ void UMythicLifeComponent::EnterDownedState(AActor *Killer) {
     }
 }
 
+void UMythicLifeComponent::LeaveDownedState() {
+    if (UWorld *W = GetWorld()) {
+        W->GetTimerManager().ClearTimer(BleedOutTimerHandle);
+    }
+    bIsDowned = false;
+    DownedKiller = nullptr;
+    if (AbilitySystemComponent) {
+        SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_DOWNED, false);
+    }
+
+    if (ACharacter *Char = Cast<ACharacter>(GetOwner())) {
+        if (UCharacterMovementComponent *Move = Char->GetCharacterMovement()) {
+            Move->SetMovementMode(MOVE_Walking);
+        }
+    }
+}
+
+void UMythicLifeComponent::ServerSetHealthFraction(float Fraction) {
+    if (!AbilitySystemComponent || !AbilitySystemComponent->IsOwnerActorAuthoritative() || !LifeSet
+        || !FMath::IsFinite(Fraction)) {
+        return;
+    }
+    const float NewHealth = LifeSet->GetMaxHealth() * FMath::Clamp(Fraction, 0.0f, 1.0f);
+    AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Life::GetHealthAttribute(), NewHealth);
+    const_cast<UMythicAttributeSet_Life *>(LifeSet.Get())->RefreshOutOfHealthLatch();
+}
+
 void UMythicLifeComponent::ServerReviveFromDowned() {
     if (!AbilitySystemComponent || !bIsDowned) {
         return;
@@ -379,18 +431,7 @@ void UMythicLifeComponent::ServerReviveFromDowned() {
     APawn *Reviver = ActiveReviver.Get();
     const bool bPayReviver = bPayReviverOnNextRevive;
     bPayReviverOnNextRevive = false;
-    if (UWorld *W = GetWorld()) {
-        W->GetTimerManager().ClearTimer(BleedOutTimerHandle);
-    }
-    bIsDowned = false;
-    DownedKiller = nullptr;
-    SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_DOWNED, false);
-
-    if (ACharacter *Char = Cast<ACharacter>(GetOwner())) {
-        if (UCharacterMovementComponent *Move = Char->GetCharacterMovement()) {
-            Move->SetMovementMode(MOVE_Walking);
-        }
-    }
+    LeaveDownedState();
 
     const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
     const float Fraction = Settings ? Settings->ReviveHealthFraction : 0.5f;
@@ -692,6 +733,8 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
         return;
     }
     AActor *Owner = GetOwner();
+    // An immediate respawn destroys the pawn, and with it this component's binding, before the pipeline ends.
+    UAbilitySystemComponent *ASC = AbilitySystemComponent;
 
     APawn *KillerPawn = nullptr;
     AController *KillerController = nullptr;
@@ -998,6 +1041,14 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
                 }
             }
         }
+    }
+
+    if (IsValid(ASC)) {
+        FGameplayEventData PostPayload;
+        PostPayload.EventTag = GAS_EVENT_DEATH_POST;
+        PostPayload.Instigator = Killer;
+        PostPayload.Target = Owner;
+        ASC->HandleGameplayEvent(GAS_EVENT_DEATH_POST, &PostPayload);
     }
 }
 
@@ -1435,6 +1486,135 @@ void UMythicLifeComponent::ClearGameplayTags() const {
         SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_DEAD, false);
         SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_EXHAUSTED, false);
         SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_INCOMBAT, false);
+        SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_MOVING, false);
+    }
+}
+
+void UMythicLifeComponent::StartMovementSampling() {
+    const APawn *OwnerPawn = Cast<APawn>(GetOwner());
+    UWorld *World = GetWorld();
+    if (!World || !OwnerPawn || !OwnerPawn->HasAuthority() || !OwnerPawn->IsPlayerControlled()) {
+        return;
+    }
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    const float Interval = Settings ? Settings->MovementSampleIntervalSeconds : 0.0f;
+    if (Interval <= 0.0f) {
+        return;
+    }
+    ResetMovementSampling();
+    World->GetTimerManager().SetTimer(MovementSampleTimerHandle, this, &ThisClass::SampleMovement, Interval, true);
+    if (ACharacter *Char = Cast<ACharacter>(GetOwner())) {
+        Char->MovementModeChangedDelegate.AddUniqueDynamic(this, &ThisClass::HandleMovementModeChanged);
+    }
+}
+
+void UMythicLifeComponent::HandleMovementModeChanged(ACharacter *Character, EMovementMode PrevMovementMode, uint8 PreviousCustomMode) {
+    const UCharacterMovementComponent *Move = Character ? Character->GetCharacterMovement() : nullptr;
+    LatchFallState(Move && Move->IsFalling(), Character ? static_cast<float>(Character->GetActorLocation().Z) : 0.0f);
+}
+
+void UMythicLifeComponent::LatchFallState(const bool bFalling, const float Z) {
+    if (!bFalling) {
+        bFallTracked = false;
+        return;
+    }
+    if (!bFallTracked) {
+        bFallTracked = true;
+        FallStartZ = Z;
+    }
+    // A jump's rise is not depth: measure from the top of the arc so a leap off a ledge reads like its landing.
+    FallStartZ = FMath::Max(FallStartZ, Z);
+}
+
+void UMythicLifeComponent::ResetMovementSampling() {
+    bHasSampledLocation = false;
+    bMovingTagActive = false;
+    bStillBeganRaised = false;
+    DistanceSinceStill = 0.0f;
+    SecondsStill = 0.0f;
+    bFallTracked = false;
+    FallStartZ = 0.0f;
+}
+
+void UMythicLifeComponent::RaiseMovedEvent(const float Centimetres) const {
+    if (Centimetres <= 0.0f || !AbilitySystemComponent) {
+        return;
+    }
+    FGameplayEventData Payload;
+    Payload.EventTag = GAS_EVENT_MOVED;
+    Payload.Instigator = GetOwner();
+    Payload.Target = GetOwner();
+    Payload.EventMagnitude = Centimetres;
+    AbilitySystemComponent->HandleGameplayEvent(GAS_EVENT_MOVED, &Payload);
+}
+
+void UMythicLifeComponent::AddDistanceSinceStill(const float Centimetres) {
+    if (!AbilitySystemComponent || !AbilitySystemComponent->IsOwnerActorAuthoritative() || !FMath::IsFinite(Centimetres)
+        || Centimetres <= 0.0f) {
+        return;
+    }
+    DistanceSinceStill += Centimetres;
+    RaiseMovedEvent(Centimetres);
+}
+
+float UMythicLifeComponent::GetFallDepthMetres() const {
+    if (!bFallTracked) {
+        return 0.0f;
+    }
+    const ACharacter *Char = Cast<ACharacter>(GetOwner());
+    const UCharacterMovementComponent *Move = Char ? Char->GetCharacterMovement() : nullptr;
+    if (!Move || !Move->IsFalling()) {
+        return 0.0f;
+    }
+    return FMath::Max(0.0f, FallStartZ - static_cast<float>(Char->GetActorLocation().Z)) / 100.0f;
+}
+
+void UMythicLifeComponent::SampleMovement() {
+    AActor *Owner = GetOwner();
+    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
+    if (!Owner || !Settings || !AbilitySystemComponent || !AbilitySystemComponent->IsOwnerActorAuthoritative()) {
+        return;
+    }
+
+    const FVector Location = Owner->GetActorLocation();
+    FVector Delta = bHasSampledLocation ? Location - LastSampledLocation : FVector::ZeroVector;
+    LastSampledLocation = Location;
+    bHasSampledLocation = true;
+
+    const ACharacter *Char = Cast<ACharacter>(Owner);
+    const UCharacterMovementComponent *Move = Char ? Char->GetCharacterMovement() : nullptr;
+    const bool bFalling = Move && Move->IsFalling();
+    LatchFallState(bFalling, static_cast<float>(Location.Z));
+    if (bFalling) {
+        // A fall is not travel; only the ground covered under the arc counts.
+        Delta.Z = 0.0;
+        OnFallDepthSampled.Broadcast(GetFallDepthMetres());
+    }
+
+    const float Threshold = FMath::Max(0.0f, Settings->MovingSpeedThresholdCmPerSec);
+    const bool bTravelling = Owner->GetVelocity().SizeSquared2D() > FMath::Square(Threshold);
+    if (bTravelling) {
+        const float Step = static_cast<float>(Delta.Size());
+        SecondsStill = 0.0f;
+        bStillBeganRaised = false;
+        DistanceSinceStill += Step;
+        if (!bMovingTagActive) {
+            bMovingTagActive = true;
+            SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_MOVING, true);
+        }
+        RaiseMovedEvent(Step);
+        return;
+    }
+
+    SecondsStill += FMath::Max(0.0f, Settings->MovementSampleIntervalSeconds);
+    if (bMovingTagActive && !bStillBeganRaised) {
+        bStillBeganRaised = true;
+        OnStillBegan.Broadcast();
+    }
+    if (bMovingTagActive && SecondsStill + KINDA_SMALL_NUMBER >= Settings->StillGraceSeconds) {
+        bMovingTagActive = false;
+        DistanceSinceStill = 0.0f;
+        SetReplicatedStateTag(AbilitySystemComponent, GAS_STATE_MOVING, false);
     }
 }
 

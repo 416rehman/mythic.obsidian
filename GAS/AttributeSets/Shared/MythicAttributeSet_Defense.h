@@ -119,6 +119,10 @@ protected:
     UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_IncomingDamageMultiplier)
     FGameplayAttributeData IncomingDamageMultiplier;
 
+    // Multiplies a landing's fall damage before it is applied: 1 is plain, 0 is immune.
+    UPROPERTY(BlueprintReadOnly, Category = "Attributes", ReplicatedUsing = OnRep_FallDamageTaken)
+    FGameplayAttributeData FallDamageTaken;
+
 public:
     UMythicAttributeSet_Defense();
 
@@ -149,6 +153,7 @@ public:
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, LifePerHit);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, LifePerKill);
     ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, IncomingDamageMultiplier);
+    ATTRIBUTE_ACCESSORS(UMythicAttributeSet_Defense, FallDamageTaken);
 
     static float ComputeBuildupAfterDecay(float Cur, float DecayPerSecond, float DeltaSeconds);
 
@@ -219,6 +224,8 @@ public:
     virtual void OnRep_LifePerKill(const FGameplayAttributeData &OldLifePerKill);
     UFUNCTION()
     virtual void OnRep_IncomingDamageMultiplier(const FGameplayAttributeData &OldIncomingDamageMultiplier);
+    UFUNCTION()
+    virtual void OnRep_FallDamageTaken(const FGameplayAttributeData &OldFallDamageTaken);
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;
 

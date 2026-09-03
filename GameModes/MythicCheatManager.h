@@ -93,6 +93,50 @@ public:
     void MythGiveTalent(const FString &TalentName);
 
     UFUNCTION(Exec)
+    void MythListRunes();
+
+    // Slot -1 takes the first empty open socket. Runs the real server verb, so every refusal is the real refusal.
+    UFUNCTION(Exec)
+    void MythGiveRune(const FString &Name, int32 Slot = -1);
+
+    UFUNCTION(Exec)
+    void MythRemoveRune(int32 Slot);
+
+    UFUNCTION(Exec)
+    void MythMoveRune(int32 From, int32 To);
+
+    // Both directions: closing a socket takes out whatever it held. The first socket never closes.
+    UFUNCTION(Exec)
+    void MythRuneSlots(int32 Count);
+
+    // Earns every deed the rune library gates on, so the picker offers all of them.
+    UFUNCTION(Exec)
+    void MythUnlockAllRunes();
+
+    UFUNCTION(Exec)
+    void MythUnlockAllRuneSlots();
+
+    // Reads the replicated HUD rows, so it answers on a client as well as the server.
+    UFUNCTION(Exec)
+    void MythRuneHud();
+
+    UFUNCTION(Exec)
+    void MythRuneRolls();
+
+    // Pushes the deed's stat counters to their thresholds through the ledger, so the whole unlock chain runs.
+    UFUNCTION(Exec)
+    void MythGiveDeed(const FString &AchievementName);
+
+    UFUNCTION(Exec)
+    void MythClearDeed(const FString &AchievementName);
+
+    UFUNCTION(Exec)
+    void MythRecordStat(const FString &StatTag, int32 Delta = 1);
+
+    UFUNCTION(Exec)
+    void MythSetSeason(const FString &Season);
+
+    UFUNCTION(Exec)
     void MythListSkills();
 
     // Runs the real levelling route Count times. Server/standalone only - a skill levels on the server or nowhere.
@@ -127,6 +171,11 @@ public:
 
     UFUNCTION(Exec)
     void MythSetAttribute(const FString &AttributeName, float Value);
+
+    // Goes through the life component so the death latch follows the write; MythSetAttribute Health leaves it stale.
+    // A value above 1 reads as a percent.
+    UFUNCTION(Exec)
+    void MythSetHealth(float Fraction);
 
 
     UFUNCTION(Exec)
@@ -200,4 +249,8 @@ public:
 
     UFUNCTION(Exec)
     void MythDumpActions();
+
+private:
+    /** Drives one deed's counters and story tags through their real writers. Returns whether it ended up earned. */
+    bool Cheat_GrantDeed(class AMythicPlayerState *PS, const class UMythicAchievementDefinition *Def, bool bVerbose);
 };

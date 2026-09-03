@@ -10,6 +10,7 @@
 class UImage;
 class UMaterialInstanceDynamic;
 class UMythicPlayerStatusViewModel;
+class UMythicRuneHudCellWidget;
 
 USTRUCT()
 struct FMythicVitalBar {
@@ -99,6 +100,25 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     TObjectPtr<UWidget> Icon_Exhausted;
 
+    /**
+     * One pooled cell per rune socket, authored in the Blueprint and re-texted here. A socket with nothing to show
+     * collapses its cell; the row collapses when every socket is quiet.
+     */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UMythicRuneHudCellWidget> RuneCell_0;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UMythicRuneHudCellWidget> RuneCell_1;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UMythicRuneHudCellWidget> RuneCell_2;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UMythicRuneHudCellWidget> RuneCell_3;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    TObjectPtr<UWidget> RuneRow;
+
     /** How fast the delayed-damage chip catches up, in bar fractions per second. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|HUD", meta = (ClampMin = "0.05"))
     float ChipDrainPerSecond = 0.55f;
@@ -145,6 +165,11 @@ private:
 
     void RefreshStatusBadges();
 
+    void RefreshRuneBadges();
+    void TickRunes();
+    void SetRuneTicking(bool bEnabled);
+    UMythicRuneHudCellWidget *RuneCell(int32 SlotIndex) const;
+
     UPROPERTY()
     TObjectPtr<UMythicPlayerStatusViewModel> ViewModel;
 
@@ -157,6 +182,7 @@ private:
 
     FTimerHandle BindRetryTimer;
     FTimerHandle ChipTimer;
+    FTimerHandle RuneTimer;
     float ChipHoldRemaining = 0.0f;
     int32 BindAttempts = 0;
 

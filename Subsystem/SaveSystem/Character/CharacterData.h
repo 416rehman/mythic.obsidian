@@ -8,6 +8,7 @@
 #include "SavedQuestJournal.h"
 #include "SavedFactionStanding.h"
 #include "Progression/MythicStatCounterTypes.h"
+#include "Progression/Runes/MythicRuneComponent.h"
 #include "Progression/Skills/MythicSkillProgressTypes.h"
 #include "Knowledge/MythicCodexTypes.h"
 #include "GAS/Progression/MythicRenownTypes.h"
@@ -220,6 +221,13 @@ struct FSerializedCharacterData {
 
     UPROPERTY(BlueprintReadWrite)
     int32 UnlockedRuneSlots = 0;
+
+    // Per-player RUNE ROLLS — the numbers rolled for every rune this character has ever socketed, keyed on the
+    // definition rather than a socket so a rune keeps its roll while unequipped. Restored through RestoreRuneRolls
+    // BEFORE RestoreRunes, because a re-granted rune reads its numbers as it activates. Empty for saves older than
+    // rune rolls: RestoreRunes then rolls each worn rune as a first socket, so no version bump is needed.
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FMythicRuneRollSet> RuneRolls;
 
     // Per-player SKILL SLOTS — the skill bound to each slot (definition soft path; a null entry is an empty slot, so
     // the array index is the slot index) plus how many slots are open. Persists UMythicSkillComponent, whose SaveGame

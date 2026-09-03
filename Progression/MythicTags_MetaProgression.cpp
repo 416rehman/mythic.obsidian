@@ -23,6 +23,9 @@ UE_DEFINE_GAMEPLAY_TAG(STAT_SKILL_USED, "Stat.Skill.Used")
 UE_DEFINE_GAMEPLAY_TAG(STAT_DEED_MERCY, "Stat.Deed.Mercy")
 UE_DEFINE_GAMEPLAY_TAG(STAT_DEED_VIOLENCE, "Stat.Deed.Violence")
 
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(STAT_RUNE_DEATHS_CHEATED, "Stat.Rune.DeathsCheated", "Lethal blows a rune turned aside; never counted in Stat.Death")
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(STAT_RUNE_GOLD_WAGERED, "Stat.Rune.GoldWagered", "Gold paid out when a Blood Wager stake banks")
+
 UE_DEFINE_GAMEPLAY_TAG(ACHIEVEMENT_SLAYER, "Achievement.Slayer")
 UE_DEFINE_GAMEPLAY_TAG(ACHIEVEMENT_BOSS_HUNTER, "Achievement.BossHunter")
 

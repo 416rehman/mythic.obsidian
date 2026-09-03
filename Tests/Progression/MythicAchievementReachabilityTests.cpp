@@ -216,7 +216,12 @@ bool FMythicStatCounterReachabilityTest::RunTest(const FString &Parameters) {
 
     // Counters with no producer yet. Listed explicitly so a NEW counter added without a recorder fails this test
     // instead of joining a silent graveyard. Drop an entry the moment it earns a producer.
-    const TSet<FString> KnownUnproduced;
+    // The two rune counters are written by rune Blueprints calling UMythicGA_Rune::RecordRuneStat with the tag on
+    // the pin, so no symbol for either appears in source and the scan can never see the producer.
+    const TSet<FString> KnownUnproduced = {
+        TEXT("Stat.Rune.DeathsCheated"),
+        TEXT("Stat.Rune.GoldWagered"),
+    };
 
     // Stat sheet identities that exist only as native fixtures declared by Tests/Stats/MythicStatRegistryTests.cpp.
     // That test builds its definitions as transient objects, so no asset ever claims these five.

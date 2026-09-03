@@ -5,6 +5,7 @@
 #include "Abilities/GameplayAbility.h"
 #include "Engine/DataAsset.h"
 #include "GameplayTagContainer.h"
+#include "Itemization/Inventory/Fragments/FragmentTypes.h"
 #include "UObject/SoftObjectPtr.h"
 #include "MythicRuneDefinition.generated.h"
 
@@ -21,11 +22,21 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rune")
     TSoftObjectPtr<UTexture2D> Icon;
 
-    // Drawn by a RichTextBlock, so style markup in the authored string is live.
+    // Drawn on the HUD badge. Icon stands in while this is unset.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rune")
+    TSoftObjectPtr<UTexture2D> HudIcon;
+
+    // Drawn by a RichTextBlock, so style markup in the authored string is live. "<#Rune.Param.X>" draws the owner's
+    // roll for that parameter against its range.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rune", meta = (MultiLine = true))
     FText Description;
 
-    // Passive. Granted while the rune sits in a slot, cleared when it leaves.
+    // The numbers this rune rolls, keyed Rune.Param.<Rune>.<Name>. Each owner rolls them once, at the rune's first
+    // socket, and keeps them; the ability reads them through UMythicRuneComponent::GetRolledRuneValue.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rune", meta = (Categories = "Rune.Param"))
+    TMap<FGameplayTag, FRollDefinition> Parameters;
+
+    // Passive. Granted while the rune sits in a slot, cleared when it leaves. Must be a UMythicGA_Rune.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rune")
     TSubclassOf<UGameplayAbility> Ability;
 
@@ -41,5 +52,12 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rune")
     FGameplayTagContainer CategoryTags;
 
-    bool HasPayload() const { return Ability != nullptr; }
+    // The middle of Parameter's range, rounded for a whole-number roll; Fallback for a tag this rune does not roll.
+    UFUNCTION(BlueprintPure, Category = "Rune")
+    float GetParameterMidpoint(FGameplayTag Parameter, float Fallback) const;
+
+    const TSoftObjectPtr<UTexture2D> &GetHudIconOrIcon() const { return HudIcon.IsNull() ? Icon : HudIcon; }
+
+    // Only a UMythicGA_Rune carries the seams a socketed rune listens on, so anything else is no payload at all.
+    bool HasPayload() const;
 };

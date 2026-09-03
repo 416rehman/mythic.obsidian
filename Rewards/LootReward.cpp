@@ -31,6 +31,15 @@ bool ULootReward::ResolveEntryDropChance(float OverrideDropChance, int32 RarityI
     return false;
 }
 
+FLootTierBonus ULootReward::PrepareLootRoll(UMythicLootManagerSubsystem *LootManager, APlayerController *PlayerController, const int32 EnemyTierInt,
+                                            const float QuantityFind) {
+    FLootTierBonus Bonus = FMythicLootScaling::ComputeTierLootBonus(EnemyTierInt, QuantityFind);
+    if (LootManager && EnemyTierInt > 0) {
+        LootManager->OnPreLootRoll.Broadcast(PlayerController, Bonus);
+    }
+    return Bonus;
+}
+
 bool ULootReward::Give(FRewardContext &Context) const {
     FLootRewardContext *LootContext = static_cast<FLootRewardContext *>(&Context);
     checkf(LootContext, TEXT("LootReward::Give - LootRewardContext is null"));
@@ -76,13 +85,13 @@ bool ULootReward::Give(FRewardContext &Context) const {
     bool bQuantityFindFound = false;
     const float RarityFind = ASC->GetGameplayAttributeValue(UMythicAttributeSet_Utility::GetItemRarityFindAttribute(), bRarityFindFound);
     const float QuantityFind = ASC->GetGameplayAttributeValue(UMythicAttributeSet_Utility::GetItemQuantityFindAttribute(), bQuantityFindFound);
-    const int32 EnemyTierInt = LootContext->EnemyTierInt;
+    const FLootTierBonus TierBonus = PrepareLootRoll(MythicLootManager, PlayerController, LootContext->EnemyTierInt, QuantityFind);
 
     for (auto LootTable : OverridenLootSource.LootTables) {
         UE_LOG(Myth, Log, TEXT("LootReward::Give - Using loot source %s"), *LootTable->GetName());
         RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, MythicRate, GoldMult, PlayerController, LootContext->ItemLevel, LootTable,
                               LootContext->PutInInventory, OverridenLootSource.IsPrivate, LootContext->SpawnLocation, MythicLootManager,
-                              RarityFind, QuantityFind, EnemyTierInt);
+                              RarityFind, TierBonus);
     }
     if (OverridenLootSource.bSkipGlobal) {
         UE_LOG(Myth, Log, TEXT("LootReward::Give - Skipping global loot source"));
@@ -104,7 +113,7 @@ bool ULootReward::Give(FRewardContext &Context) const {
     UE_LOG(Myth, Log, TEXT("LootReward::Give - Using global loot source"));
     RequestLootFromSource(CommonRate, RareRate, EpicRate, LegendaryRate, MythicRate, GoldMult, PlayerController, LootContext->ItemLevel,
                           LootTable, LootContext->PutInInventory, OverridenLootSource.IsPrivate, LootContext->SpawnLocation,
-                          MythicLootManager, RarityFind, QuantityFind, EnemyTierInt);
+                          MythicLootManager, RarityFind, TierBonus);
 
     return true;
 }
@@ -115,7 +124,7 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
                                         UMythicLootTable *LootTable, TScriptInterface<IInventoryProviderInterface> InventoryProvider, bool isPrivate,
                                         FVector SpawnLocation,
                                         UMythicLootManagerSubsystem *MythicLootManager,
-                                        float RarityFind, float QuantityFind, int32 EnemyTierInt) {
+                                        float RarityFind, const FLootTierBonus &TierBonus) {
     if (!LootTable || LootTable->Entries.Num() == 0) {
         UE_LOG(Myth, Error, TEXT("LootReward::RequestLootFromSource - Loot table is empty or invalid"));
         return;
@@ -127,8 +136,6 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
                LootTable->DropChance, procRoll);
         return;
     }
-
-    const FLootTierBonus TierBonus = FMythicLootScaling::ComputeTierLootBonus(EnemyTierInt, QuantityFind);
 
     constexpr int32 NumRarities = 5;
     float WeightsByRarity[NumRarities] = {
@@ -221,11 +228,15 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
         return;
     }
 
-    const int32 NumItemsToDrop = FMath::RandRange(1, FMath::Min(LootTable->MaxItems, ValidIndices.Num()))
-        + FMath::Max(0, TierBonus.ExtraDropCount)
-        + ((TierBonus.FractionalDropChance > 0.0f && FMath::FRand() < TierBonus.FractionalDropChance) ? 1 : 0);
-    UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Will drop %d items from %d eligible items (tier extra: %d)"),
-           NumItemsToDrop, ValidIndices.Num(), TierBonus.ExtraDropCount);
+    const int32 NumItemsToDrop = FMythicLootScaling::ResolveDropCount(
+        FMath::RandRange(1, FMath::Min(LootTable->MaxItems, ValidIndices.Num())), TierBonus, FMath::FRand());
+    if (NumItemsToDrop <= 0) {
+        UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - The pre-loot roll suppressed every drop from table %s"),
+               *LootTable->GetName());
+        return;
+    }
+    UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - Will drop %d items from %d eligible items (tier extra: %d, scale: %.2f)"),
+           NumItemsToDrop, ValidIndices.Num(), TierBonus.ExtraDropCount, TierBonus.DropCountScale);
 
     TBitArray<> UsedIndices;
     UsedIndices.Init(false, ValidIndices.Num());

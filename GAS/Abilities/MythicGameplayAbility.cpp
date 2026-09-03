@@ -444,10 +444,10 @@ void UMythicGameplayAbility::SetCategoryBlock(bool bBlocked) {
         return;
     }
     if (bBlocked) {
-        ASC->AddLooseGameplayTag(CooldownCategoryTag);
+        ASC->AddLooseGameplayTag(CooldownCategoryTag, 1, EGameplayTagReplicationState::TagOnly);
     }
     else {
-        ASC->RemoveLooseGameplayTag(CooldownCategoryTag);
+        ASC->RemoveLooseGameplayTag(CooldownCategoryTag, 1, EGameplayTagReplicationState::TagOnly);
     }
 }
 

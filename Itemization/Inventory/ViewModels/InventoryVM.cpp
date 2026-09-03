@@ -4,6 +4,7 @@
 
 #include "Mythic.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
+#include "Itemization/Inventory/MythicItemInstance.h"
 #include "Itemization/Inventory/MythicEncumbrance.h"
 #include "Settings/MythicDeveloperSettings.h"
 #include "Engine/Texture2D.h"

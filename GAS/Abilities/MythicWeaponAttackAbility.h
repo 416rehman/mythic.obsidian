@@ -6,6 +6,7 @@
 #include "World/Harvesting/MythicHarvestTypes.h"
 #include "MythicWeaponAttackAbility.generated.h"
 
+class UAbilitySystemComponent;
 class UAbilityTask_PlayMontageAndWait;
 class UAbilityTask_WaitGameplayEvent;
 class UAnimMontage;
@@ -14,6 +15,7 @@ class UGameplayEffect;
 class UMythicAnimNotify_SphereOverlap;
 class UMythicHarvestToolTypeDefinition;
 class USkeletalMeshComponent;
+struct FGameplayEventData;
 
 /** Native target domain resolved from the exact item that granted an attack ability. A weapon owns combat and reaches
  *  every target class; a harvesting tool sitting in its own gear slot reaches nothing but a harvest node. */
@@ -104,6 +106,20 @@ public:
         TArray<FHitResult> &OutHits,
         const AActor *AvatarActor,
         EMythicAttackSourceDomain SourceDomain = EMythicAttackSourceDomain::Invalid);
+
+    /**
+     * Builds the Harvest.Struck payload for one harvest contact: Instigator the striker, Target the resource actor,
+     * EventMagnitude the work units the node took, Harvest.Felled among InstigatorTags when the strike emptied it.
+     * False for a rejected contact, which raises nothing.
+     */
+    static bool MakeHarvestStruckEvent(
+        const FMythicHarvestResult &Result, AActor *Striker, AActor *ResourceActor,
+        FGameplayEventData &OutEvent);
+
+    /** Raises Harvest.Struck on the striker's ability system for one accepted contact; false when nothing was raised. */
+    static bool RaiseHarvestStruck(
+        UAbilitySystemComponent *StrikerAbilitySystem, AActor *Striker, AActor *ResourceActor,
+        const FMythicHarvestResult &Result);
 
     /** Resolves the active ability token registered for an exact skeletal-mesh montage instance. */
     static UObject *ResolveMontageActivationToken(

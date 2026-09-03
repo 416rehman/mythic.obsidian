@@ -17,6 +17,10 @@ DECLARE_DYNAMIC_MULTICAST_SPARSE_DELEGATE_TwoParams(FOnMovementModeChangeSignatu
                                                     PrevMovementMode,
                                                     uint8, PreviousCustomMode);
 
+// ImpactSpeed in cm/s; Damage after FallDamageTaken and the fall hooks; bPrevented when nothing is applied (immune
+// tag, or no damage to apply). The immune case still reports the damage it refused.
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnMythicFallDamageResolved, float /*ImpactSpeed*/, float /*Damage*/, bool /*bPrevented*/);
+
 
 UCLASS(Abstract)
 class MYTHIC_API AMythicCharacter : public ACharacter, public IAbilitySystemInterface, public IMythicRegistryInterface {
@@ -44,7 +48,21 @@ public:
 
     virtual void Landed(const FHitResult &Hit) override;
 
+    // Server only, once per landing, after the fall damage is decided and before it is applied.
+    FOnMythicFallDamageResolved OnFallDamageResolved;
+
     static float ComputeFallDamage(float ImpactSpeed, float SafeSpeed, float DamagePerSpeed, float MaxDamage);
+
+protected:
+    // Native word on a damaging landing before the Blueprint's. Runs only for a landing that would hurt.
+    virtual float ModifyFallDamage(float ImpactSpeed, float Damage) { return Damage; }
+
+    // Last word on a damaging landing: returns the damage to apply, 0 applies nothing.
+    UFUNCTION(BlueprintNativeEvent, Category = "Mythic|Fall Damage")
+    float OnFallDamageComputed(float ImpactSpeed, float Damage);
+    virtual float OnFallDamageComputed_Implementation(float ImpactSpeed, float Damage) { return Damage; }
+
+public:
 
     // LookAt Actor. Used by AnimBP to set the head of this character to look at the specified actor.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Blueprintable)
@@ -109,8 +127,8 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Fall Damage", meta = (EditCondition = "bEnableFallDamage"))
     float MaxFallDamage = 100.0f;
 
-    // GameplayEffect applied to self on a damaging landing (designer asset). The computed damage is the spec
-    // LEVEL, so the GE's Health modifier should scale by level — mirrors the environmental-hazard GE pattern.
+    // Applied to self on a damaging landing. Instant, Life.Damage += SetByCaller.Generic: Landed sets that magnitude
+    // to the resolved damage, so the landing runs the whole damage pipeline instead of writing Health directly.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Fall Damage", meta = (EditCondition = "bEnableFallDamage"))
     TSubclassOf<UGameplayEffect> FallDamageEffect;
 

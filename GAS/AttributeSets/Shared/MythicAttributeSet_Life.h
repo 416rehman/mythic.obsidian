@@ -112,4 +112,11 @@ public:
      * death stays set and every later hit is zeroed.
      */
     void RefreshOutOfHealthLatch();
+
+    /**
+     * SERVER: honours GAS.Pipeline.Death.Handled after a PreDeath send. When a listener claimed the death this
+     * leaves Health at >= 1, re-derives the latch and clears the tag, returning true. The tag is consumed here so
+     * a claim can never carry over and silently skip the next death.
+     */
+    bool ConsumeDeathHandled();
 };

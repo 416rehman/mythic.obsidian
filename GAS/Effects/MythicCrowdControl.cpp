@@ -6,6 +6,8 @@
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_IMMUNE_HARDCC, "GAS.Immune.HardCC",
                                "Target is temporarily immune to hard crowd control (Stun/Freeze); granted by the CC-escalation framework");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_IMMUNE_FALLDAMAGE, "GAS.Immune.FallDamage",
+                               "Target takes no fall damage while this is on its ASC; held by a rune as a loose server tag");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_SETBYCALLER_CCIMMUNE_DURATION, "SetByCaller.CCImmuneDuration",
                                "SetByCaller duration (seconds) fed to UMythicGE_CCImmune at apply time (per-tier ImmuneSeconds)");
 

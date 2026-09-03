@@ -111,7 +111,22 @@ void UMythicAttributeSet_Life::AppendHitTags(const FGameplayEffectContextHandle 
         if (MythicCtx->IsCriticalHit()) {
             OutTags.AddTag(GAS_HIT_CRITICAL);
         }
+        OutTags.AppendTags(MythicCtx->GetHitTags());
     }
+}
+
+namespace {
+// The first rune hit tag on a context. Combat text styles by it; an untagged hit reads as an empty tag.
+FGameplayTag ResolveRunePresentationTag(const FMythicGameplayEffectContext *MythicCtx) {
+    if (MythicCtx) {
+        for (const FGameplayTag &HitTag : MythicCtx->GetHitTags()) {
+            if (HitTag.MatchesTag(GAS_HIT_RUNE)) {
+                return HitTag;
+            }
+        }
+    }
+    return FGameplayTag();
+}
 }
 
 void UMythicAttributeSet_Life::SendEventToInstigator(const FGameplayEffectModCallbackData &Data, AActor *Instigator, UAbilitySystemComponent *InstigatorASC,
@@ -171,10 +186,13 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
         SetHealth(NewHealth);
         const float AppliedHealthDamage = ResolveAppliedHealthDamage(HealthBeforeAttributeChange, NewHealth);
 
-        if (ComputeOutOfHealthLatch(GetHealth()) && !bOutOfHealth && !bInDeathPreHook
-            && ASC && ASC->IsOwnerActorAuthoritative()) {
+        const bool bLethalHit = ComputeOutOfHealthLatch(GetHealth()) && !bOutOfHealth;
+        if (bLethalHit && !bInDeathPreHook && ASC && ASC->IsOwnerActorAuthoritative()) {
             TGuardValue<bool> ReentryGuard(bInDeathPreHook, true);
             SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DEATH_PRE, DamageDone);
+        }
+        if (bLethalHit) {
+            ConsumeDeathHandled();
         }
 
         if (ComputeOutOfHealthLatch(GetHealth()) && !bOutOfHealth) {
@@ -187,6 +205,7 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
         const float RawShieldAbsorbed = MythicCtx ? MythicCtx->GetShieldAbsorbed() : 0.0f;
         const float ShieldAbsorbed = ResolveAppliedShieldDamage(RawShieldAbsorbed);
         const float TotalDealt = DamageDone + ShieldAbsorbed;
+        const FGameplayTag PresentationTag = ResolveRunePresentationTag(MythicCtx);
 
         if (TotalDealt > 0.0f) {
             const bool bAuthoritative = ASC && ASC->IsOwnerActorAuthoritative();
@@ -214,6 +233,7 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
                     : (Instigator ? EMythicCombatTextOrigin::DirectDamage
                                   : EMythicCombatTextOrigin::EnvironmentalDamage);
                 CombatText.bCritical = !StatusDefinition && MythicCtx && MythicCtx->IsCriticalHit();
+                CombatText.PresentationTag = PresentationTag;
                 RouteResolvedCombatText(CombatText, InstigatorASC, ASC);
             }
 
@@ -226,6 +246,7 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
                     : FVector::ZeroVector;
                 ShieldText.Magnitude = ShieldAbsorbed;
                 ShieldText.Origin = EMythicCombatTextOrigin::ShieldAbsorption;
+                ShieldText.PresentationTag = PresentationTag;
                 RouteResolvedCombatText(ShieldText, InstigatorASC, ASC);
             }
 
@@ -305,11 +326,22 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
     }
     else if (Data.EvaluatedData.Attribute == GetHealthAttribute()) {
         SetHealth(FMath::Clamp(GetHealth(), 0.0f, GetMaxHealth()));
+        const float HealthRemoved = FMath::Max(0.0f, HealthBeforeAttributeChange - GetHealth());
+
+        // Fall damage and hazards write Health directly, so they get the same last word a damage hit does.
+        const bool bLethalHit = ComputeOutOfHealthLatch(GetHealth()) && !bOutOfHealth;
+        if (bLethalHit && !bInDeathPreHook && ASC && ASC->IsOwnerActorAuthoritative()) {
+            TGuardValue<bool> ReentryGuard(bInDeathPreHook, true);
+            SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DEATH_PRE, HealthRemoved);
+        }
+        if (bLethalHit) {
+            ConsumeDeathHandled();
+        }
 
         if (ComputeOutOfHealthLatch(GetHealth()) && !bOutOfHealth) {
             bOutOfHealth = true;
             if (ASC && ASC->IsOwnerActorAuthoritative()) {
-                SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DEATH, FMath::Max(0.0f, HealthBeforeAttributeChange - GetHealth()));
+                SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DEATH, HealthRemoved);
             }
         }
         else if (bOutOfHealth && !ComputeOutOfHealthLatch(GetHealth())) {
@@ -336,6 +368,17 @@ void UMythicAttributeSet_Life::ResetForRespawn() {
 
 void UMythicAttributeSet_Life::RefreshOutOfHealthLatch() {
     bOutOfHealth = ComputeOutOfHealthLatch(GetHealth());
+}
+
+bool UMythicAttributeSet_Life::ConsumeDeathHandled() {
+    UAbilitySystemComponent *ASC = GetOwningAbilitySystemComponent();
+    if (!ASC || !ASC->IsOwnerActorAuthoritative() || !ASC->HasMatchingGameplayTag(GAS_PIPELINE_DEATH_HANDLED)) {
+        return false;
+    }
+    SetHealth(FMath::Max(GetHealth(), 1.0f));
+    RefreshOutOfHealthLatch();
+    UMythicLifeComponent::SetReplicatedStateTag(ASC, GAS_PIPELINE_DEATH_HANDLED, false);
+    return true;
 }
 
 bool UMythicAttributeSet_Life::ComputeOutOfHealthLatch(float NewHealth) {

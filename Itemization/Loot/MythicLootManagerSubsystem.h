@@ -4,10 +4,15 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "MythicLootManagerSubsystem.generated.h"
 
+class APlayerController;
 class IInventoryProviderInterface;
 class UMythicItemInstance;
 class UMythicInventoryComponent;
 class UItemDefinition;
+struct FLootTierBonus;
+
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnMythicPreLootRoll, APlayerController *, FLootTierBonus &);
+
 UCLASS()
 class MYTHIC_API UMythicLootManagerSubsystem : public UGameInstanceSubsystem {
     GENERATED_BODY()
@@ -51,6 +56,12 @@ private:
     void UpdateWorldItemFXTimer();
 
 public:
+    /**
+     * Server. Raised once per crediting controller before a slain enemy's tables roll, after the enemy tier and
+     * quantity find are in the bonus; a listener edits the bonus in place. Quest, chest and bounty loot never raise it.
+     */
+    FOnMythicPreLootRoll OnPreLootRoll;
+
     /** Creates a server-authoritative item instance for the specified recipient and item level. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Loot")
     UMythicItemInstance *Create(UItemDefinition *item_def, int32 quantity_if_stackable, AController *TargetRecipient, int32 level);

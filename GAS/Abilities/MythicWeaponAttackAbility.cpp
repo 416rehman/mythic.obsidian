@@ -1099,6 +1099,36 @@ void UMythicWeaponAttackAbility::IntersectWithCanonicalTargetHits(
     NormalizeUniqueTargetHits(OutHits, AvatarActor, SourceDomain);
 }
 
+bool UMythicWeaponAttackAbility::MakeHarvestStruckEvent(
+    const FMythicHarvestResult &Result, AActor *Striker, AActor *ResourceActor,
+    FGameplayEventData &OutEvent) {
+    if (!Result.WasAccepted()) {
+        return false;
+    }
+    OutEvent = FGameplayEventData();
+    OutEvent.EventTag = GAS_EVENT_HARVEST_STRUCK;
+    OutEvent.Instigator = Striker;
+    OutEvent.Target = ResourceActor;
+    OutEvent.EventMagnitude =
+        static_cast<float>(Result.AppliedWork.ToWorkUnits());
+    if (Result.Outcome == EMythicHarvestOutcome::Completed) {
+        OutEvent.InstigatorTags.AddTag(HARVEST_FELLED);
+    }
+    return true;
+}
+
+bool UMythicWeaponAttackAbility::RaiseHarvestStruck(
+    UAbilitySystemComponent *StrikerAbilitySystem, AActor *Striker,
+    AActor *ResourceActor, const FMythicHarvestResult &Result) {
+    FGameplayEventData Event;
+    if (!StrikerAbilitySystem
+        || !MakeHarvestStruckEvent(Result, Striker, ResourceActor, Event)) {
+        return false;
+    }
+    StrikerAbilitySystem->HandleGameplayEvent(GAS_EVENT_HARVEST_STRUCK, &Event);
+    return true;
+}
+
 void UMythicWeaponAttackAbility::HandleHitEvent(FGameplayEventData HitEvent) {
     if (!IsActive()
         || !TryConsumeExpectedHitEvent(AuthorizedHitSamples, this, HitEvent,
@@ -1129,6 +1159,7 @@ void UMythicWeaponAttackAbility::HandleHitEvent(FGameplayEventData HitEvent) {
     TArray<FHitResult> CombatHits;
     CombatHits.Reserve(Hits.Num());
     bool bHarvestAccepted = false;
+    TArray<TPair<AActor *, FMythicHarvestResult>, TInlineAllocator<4>> AcceptedHarvests;
     UWorld *World = GetWorld();
     UMythicHarvestWorldSubsystem *HarvestSubsystem = World
         ? World->GetSubsystem<UMythicHarvestWorldSubsystem>() : nullptr;
@@ -1168,7 +1199,11 @@ void UMythicWeaponAttackAbility::HandleHitEvent(FGameplayEventData HitEvent) {
         Request.AuthoritativeHit = Hit;
         const FMythicHarvestResult HarvestResult =
             HarvestSubsystem->TryApplyHarvest(Request);
-        bHarvestAccepted |= HarvestResult.WasAccepted();
+        if (!HarvestResult.WasAccepted()) {
+            continue;
+        }
+        bHarvestAccepted = true;
+        AcceptedHarvests.Emplace(Resource->GetOwner(), HarvestResult);
     }
 
     if (!CombatHits.IsEmpty()) {
@@ -1177,6 +1212,14 @@ void UMythicWeaponAttackAbility::HandleHitEvent(FGameplayEventData HitEvent) {
         ApplyDamageContainerNative(MythicWeaponDamage::MakeDamageContainer(),
                                    CombatHits, TArray<AActor *>(), -1,
                                    !bHarvestAccepted);
+    }
+
+    // After the swing's wear and damage have settled, so a rune answering a bite never runs inside the harvest
+    // transaction or ahead of the combat dispatch.
+    for (const TPair<AActor *, FMythicHarvestResult> &Accepted : AcceptedHarvests) {
+        RaiseHarvestStruck(GetAbilitySystemComponentFromActorInfo(),
+                           GetAvatarActorFromActorInfo(), Accepted.Key,
+                           Accepted.Value);
     }
 }
 

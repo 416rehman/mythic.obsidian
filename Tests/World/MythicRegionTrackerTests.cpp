@@ -4,8 +4,10 @@
 #include "World/Feedback/MythicRegionTrackerComponent.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    // Not "Mythic.World.RegionTracker": the controller splits names on dots, so a name that is also the parent of
+    // RegionTracker.Notice becomes a branch node and the leaf test under it can never be selected or run.
     FMythicRegionTrackerTest,
-    "Mythic.World.RegionTracker",
+    "Mythic.World.RegionTracker.Announce",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FMythicRegionTrackerTest::RunTest(const FString &Parameters) {

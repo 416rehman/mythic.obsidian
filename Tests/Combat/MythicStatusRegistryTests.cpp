@@ -67,8 +67,11 @@ bool FMythicStatusLibraryTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("library authors at least one status"), Library->Statuses.Num() > 0);
 
     const FString TypePrefix = TEXT("Status.Type.");
+    const FString RunePrefix = TEXT("Status.Rune");
     TSet<FGameplayTag> SeenTypes;
     TArray<FGameplayAttribute> CoveredBuildups;
+    int32 DebuffsChecked = 0;
+    int32 RuneBuffsExempt = 0;
 
     for (const UMythicStatusEffectDefinition *Definition : Library->Statuses) {
         if (!TestNotNull(TEXT("library holds no null status entries"), Definition)) {
@@ -76,8 +79,21 @@ bool FMythicStatusLibraryTest::RunTest(const FString &Parameters) {
         }
         const FString Label = Definition->GetName();
 
+        // Rune buffs share the library so the badge row can draw them, but nothing builds them up, resists them or
+        // lands them on hit, so the debuff-only rules do not apply to them.
+        const bool bRuneBuff = Definition->StatusType.ToString().StartsWith(RunePrefix)
+            || Definition->PresentationCategory == EMythicStatusPresentationCategory::Buff;
+        if (bRuneBuff) {
+            ++RuneBuffsExempt;
+        }
+        else {
+            ++DebuffsChecked;
+        }
+
         TestTrue(*FString::Printf(TEXT("%s has a StatusType tag"), *Label), Definition->StatusType.IsValid());
-        TestTrue(*FString::Printf(TEXT("%s StatusType lives under Status.Type"), *Label), Definition->StatusType.ToString().StartsWith(TypePrefix));
+        if (!bRuneBuff) {
+            TestTrue(*FString::Printf(TEXT("%s StatusType lives under Status.Type"), *Label), Definition->StatusType.ToString().StartsWith(TypePrefix));
+        }
 
         // An unregistered tag still round-trips through the asset but resolves to nothing at runtime, so
         // IsValid() alone passes while the status can never be found. Ask the manager directly.
@@ -89,9 +105,11 @@ bool FMythicStatusLibraryTest::RunTest(const FString &Parameters) {
 
         TestNotNull(*FString::Printf(TEXT("%s has an EffectToApply"), *Label), Definition->EffectToApply.Get());
         TestTrue(*FString::Printf(TEXT("%s has a GrantedStateTag"), *Label), Definition->GrantedStateTag.IsValid());
-        TestTrue(*FString::Printf(TEXT("%s has an OnsetCueTag"), *Label), Definition->OnsetCueTag.IsValid());
-        TestTrue(*FString::Printf(TEXT("%s has a BuildupAttribute"), *Label), Definition->BuildupAttribute.IsValid());
-        TestTrue(*FString::Printf(TEXT("%s has a ResistanceAttribute"), *Label), Definition->ResistanceAttribute.IsValid());
+        if (!bRuneBuff) {
+            TestTrue(*FString::Printf(TEXT("%s has an OnsetCueTag"), *Label), Definition->OnsetCueTag.IsValid());
+            TestTrue(*FString::Printf(TEXT("%s has a BuildupAttribute"), *Label), Definition->BuildupAttribute.IsValid());
+            TestTrue(*FString::Printf(TEXT("%s has a ResistanceAttribute"), *Label), Definition->ResistanceAttribute.IsValid());
+        }
         TestFalse(*FString::Printf(TEXT("%s has a display name"), *Label), Definition->DisplayName.IsEmpty());
         TestFalse(*FString::Printf(TEXT("%s has an icon"), *Label), Definition->Icon.IsNull());
 
@@ -132,6 +150,10 @@ bool FMythicStatusLibraryTest::RunTest(const FString &Parameters) {
         TestTrue(*FString::Printf(TEXT("a status covers the %s the damage pipeline feeds"), *Buildup.GetName()), CoveredBuildups.Contains(Buildup));
     }
 
+    // An exemption that swallowed the debuffs would report the same clean bill as one that matched nothing.
+    AddInfo(FString::Printf(TEXT("%d debuffs checked, %d rune buffs exempt"), DebuffsChecked, RuneBuffsExempt));
+    TestTrue(TEXT("every pipeline debuff went through the full check"), DebuffsChecked >= PipelineBuildups.Num());
+
     return true;
 }
 
@@ -155,11 +177,20 @@ bool FMythicStatusRollableTest::RunTest(const FString &Parameters) {
 
     // A status a player cannot roll for is a status no build can be made of. This is the check that would have
     // caught Poison and Freeze being absent from Affix Definitions while still looking wired up in code.
+    int32 DebuffsChecked = 0;
+    int32 RuneBuffsExempt = 0;
     for (const UMythicStatusEffectDefinition *Definition : Library->Statuses) {
         if (!Definition || !Definition->StatusType.IsValid()) {
             continue;
         }
         const FString TagPath = Definition->StatusType.ToString();
+        // A rune buff is granted by its rune, never rolled onto a weapon.
+        if (TagPath.StartsWith(TEXT("Status.Rune"))
+            || Definition->PresentationCategory == EMythicStatusPresentationCategory::Buff) {
+            ++RuneBuffsExempt;
+            continue;
+        }
+        ++DebuffsChecked;
         int32 Dot = INDEX_NONE;
         const FString Leaf = TagPath.FindLastChar(TCHAR('.'), Dot) ? TagPath.RightChop(Dot + 1) : TagPath;
         const FString ChanceAttribute = FString::Printf(TEXT("Apply%sOnHitChance"), *Leaf);
@@ -167,6 +198,9 @@ bool FMythicStatusRollableTest::RunTest(const FString &Parameters) {
         TestTrue(*FString::Printf(TEXT("%s can be rolled by loot (%s has an embedded affix tier set)"), *Leaf, *ChanceAttribute),
                  RollableAttributes.Contains(ChanceAttribute));
     }
+
+    AddInfo(FString::Printf(TEXT("%d debuffs checked, %d rune buffs exempt"), DebuffsChecked, RuneBuffsExempt));
+    TestTrue(TEXT("the exemption left the debuffs in"), DebuffsChecked > 0);
 
     return true;
 }

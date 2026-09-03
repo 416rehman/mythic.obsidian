@@ -15,6 +15,7 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/Effects/MythicStatusEffectDefinition.h"
 #include "GAS/Effects/MythicStatusRegistry.h"
+#include "GAS/Feedback/MythicTags_FeedbackCues.h"
 #include "GAS/Executions/MythicCombatRoll.h"
 #include "GAS/Executions/MythicDamageApplication.h"
 #include "Settings/MythicDeveloperSettings.h"
@@ -211,6 +212,15 @@ void UMythicGA_Triggered::ActivateAbility(const FGameplayAbilitySpecHandle Handl
         BoundEvents.Add(EventTag, Bound);
     }
 
+    // Being downed and dying both CancelAllAbilities. A passive that ends there loses its bindings until respawn,
+    // which reads as every rune and talent silently switching off. A replaceable group cannot opt out and the base
+    // class refuses with an error, so that case is named here instead of logged as a fault.
+    if (GetActivationGroup() == EMythicAbilityActivationGroup::Exclusive_Replaceable) {
+        UE_LOG(Myth, Warning, TEXT("Runes: %s is Exclusive_Replaceable, so CancelAllAbilities will still end it"), *GetName());
+    } else {
+        SetCanBeCanceled(false);
+    }
+
     // No EndAbility: this stays active for as long as the talent is equipped.
 }
 
@@ -344,6 +354,8 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
         }
         if (bLanded) {
             LastFireTimes.Add(Index, Now);
+            // On the owner, not the recipient: the proc belongs to whoever wears the rune.
+            UMythicStatusRegistry::PlayStatusCue(GetAbilitySystemComponentFromActorInfo(), TAG_GameplayCue_Affix_Proc);
         }
     }
 }

@@ -255,6 +255,20 @@ void UMythicAbilitySystemComponent::Multicast_ExecuteGameplayCue_Implementation(
     ExecuteGameplayCue(CueTag, CueParams);
 }
 
+void UMythicAbilitySystemComponent::ExecuteGameplayCueOwnerOnly(FGameplayTag CueTag, const FGameplayCueParameters &CueParams) {
+    if (!CueTag.IsValid()) {
+        return;
+    }
+
+    if (GetOwnerRole() == ROLE_Authority) {
+        Client_ExecuteGameplayCue(CueTag, CueParams);
+    }
+}
+
+void UMythicAbilitySystemComponent::Client_ExecuteGameplayCue_Implementation(FGameplayTag CueTag, FGameplayCueParameters Parameters) {
+    ExecuteGameplayCue(CueTag, Parameters);
+}
+
 bool UMythicAbilitySystemComponent::IsActivationGroupBlocked(EMythicAbilityActivationGroup Group) const {
     if (!ensureMsgf(IsValidActivationGroup(Group),
                     TEXT("IsActivationGroupBlocked: Invalid activation group [%d]."),

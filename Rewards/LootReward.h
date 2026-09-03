@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "RewardBase.h"
+#include "Rewards/LootScaling.h"
 #include "UObject/ScriptInterface.h"
 #include "LootReward.generated.h"
 
@@ -97,12 +98,20 @@ class MYTHIC_API ULootReward : public URewardBase {
                                       bool isPrivate, FVector SpawnLocation,
                                       UMythicLootManagerSubsystem *
                                       MythicLootManager,
-                                      float RarityFind = 0.0f, float QuantityFind = 0.0f, int32 EnemyTierInt = 0);
+                                      float RarityFind, const FLootTierBonus &TierBonus);
 
 public:
     virtual bool Give(FRewardContext &Context) const override;
 
     static bool ResolveEntryDropChance(float OverrideDropChance, int32 RarityIndex, TConstArrayView<float> RarityWeights, float &OutChance);
+
+    /**
+     * The bonus every table of one credit shares: enemy tier and quantity find, then each listener's say through the
+     * loot manager's OnPreLootRoll. Raised once per crediting controller and only for a slain enemy (EnemyTierInt above
+     * zero); quest, chest and bounty loot roll the plain bonus.
+     */
+    static FLootTierBonus PrepareLootRoll(UMythicLootManagerSubsystem *LootManager, APlayerController *PlayerController, int32 EnemyTierInt,
+                                          float QuantityFind);
 
     /** Source-specific loot tables and private/global-table policy used by this reward. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loot Reward Context")

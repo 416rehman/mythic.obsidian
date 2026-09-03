@@ -3,6 +3,7 @@
 #include "MythicPlayerStatusViewModel.h"
 
 #include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "GAS/Effects/MythicStatusEffectDefinition.h"
 #include "GAS/Effects/MythicStatusRegistry.h"
 #include "AbilitySystemComponent.h"
@@ -10,6 +11,8 @@
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Utility.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/MythicTags_GAS.h"
+#include "GameFramework/Actor.h"
+#include "Progression/Runes/MythicRuneDefinition.h"
 
 void UMythicPlayerStatusViewModel::InitializeForASC(UAbilitySystemComponent *InASC) {
     if (!InASC) {
@@ -46,6 +49,59 @@ void UMythicPlayerStatusViewModel::InitializeForASC(UAbilitySystemComponent *InA
     }
 
     BuildStatusBadges(InASC);
+
+    const AActor *OwnerActor = InASC->GetOwnerActor();
+    BindToRunes(OwnerActor ? OwnerActor->FindComponentByClass<UMythicRuneComponent>() : nullptr);
+}
+
+void UMythicPlayerStatusViewModel::BindToRunes(UMythicRuneComponent *InRunes) {
+    UnbindRunes();
+    Runes = InRunes;
+    if (InRunes) {
+        InRunes->OnRunesChanged.AddUniqueDynamic(this, &UMythicPlayerStatusViewModel::HandleRuneBadgesDirty);
+        InRunes->OnRuneHudStateChanged.AddUniqueDynamic(this, &UMythicPlayerStatusViewModel::HandleRuneBadgesDirty);
+    }
+    RebuildRuneBadges();
+}
+
+void UMythicPlayerStatusViewModel::UnbindRunes() {
+    if (UMythicRuneComponent *R = Runes.Get()) {
+        R->OnRunesChanged.RemoveDynamic(this, &UMythicPlayerStatusViewModel::HandleRuneBadgesDirty);
+        R->OnRuneHudStateChanged.RemoveDynamic(this, &UMythicPlayerStatusViewModel::HandleRuneBadgesDirty);
+    }
+    Runes = nullptr;
+}
+
+void UMythicPlayerStatusViewModel::HandleRuneBadgesDirty() {
+    RebuildRuneBadges();
+}
+
+void UMythicPlayerStatusViewModel::RebuildRuneBadges() {
+    RuneBadges.Reset();
+    if (const UMythicRuneComponent *R = Runes.Get()) {
+        const UWorld *World = R->GetWorld();
+        // Server clocks land as local world seconds so the view compares against the clock it already ticks with.
+        const double Offset = World ? World->GetTimeSeconds() - R->GetServerWorldTimeSeconds() : 0.0;
+        for (const FMythicRuneHudStateItem &Item : R->GetRuneHudStates()) {
+            if (Item.State == EMythicRuneHudState::Hidden) {
+                continue;
+            }
+            const UMythicRuneDefinition *Rune = R->GetRuneInSlot(Item.SlotIndex);
+            if (!Rune) {
+                continue;
+            }
+            FMythicRuneBadgeEntry &Entry = RuneBadges.AddDefaulted_GetRef();
+            Entry.SlotIndex = Item.SlotIndex;
+            Entry.Icon = Rune->GetHudIconOrIcon();
+            Entry.Name = Rune->Name;
+            Entry.State = Item.State;
+            Entry.StartTimeSeconds = Item.ServerStartTimeSeconds + Offset;
+            Entry.EndTimeSeconds = Item.ServerEndTimeSeconds > 0.0 ? Item.ServerEndTimeSeconds + Offset : 0.0;
+            Entry.Stacks = Item.Stacks;
+        }
+        RuneBadges.Sort([](const FMythicRuneBadgeEntry &A, const FMythicRuneBadgeEntry &B) { return A.SlotIndex < B.SlotIndex; });
+    }
+    UE_MVVM_BROADCAST_FIELD_VALUE_CHANGED(RuneBadges);
 }
 
 void UMythicPlayerStatusViewModel::BuildStatusBadges(UAbilitySystemComponent *InASC) {
@@ -190,6 +246,7 @@ void UMythicPlayerStatusViewModel::HandleTagChanged(const FGameplayTag Tag, int3
 }
 
 void UMythicPlayerStatusViewModel::Unbind() {
+    UnbindRunes();
     UAbilitySystemComponent *A = ASC.Get();
     if (!A) {
         return;

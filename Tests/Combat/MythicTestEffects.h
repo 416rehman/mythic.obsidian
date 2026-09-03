@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "GameplayEffect.h"
 #include "GAS/Abilities/MythicGA_Passive.h"
+#include "GAS/Abilities/MythicGA_Triggered.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/MythicTags_GAS.h"
 #include "MythicTestEffects.generated.h"
@@ -45,5 +46,21 @@ public:
         Clause.MagnitudeParameter = GAS_STATE_HEALTH_CRITICAL;
         Clause.Magnitude = 0.4f;
         Passives.Add(Clause);
+    }
+};
+
+/**
+ * A proc ability whose single clause is a class default. A clause written onto the live CDO never reaches the
+ * instance GiveAbility creates, so the only honest fixture is a class that constructs with one. Test-only.
+ */
+UCLASS(NotBlueprintable, Hidden)
+class UMythicTestTriggeredAbility : public UMythicGA_Triggered {
+    GENERATED_BODY()
+
+public:
+    UMythicTestTriggeredAbility() {
+        FMythicTriggerSpec Clause;
+        Clause.TriggerEvent = GAS_EVENT_KILL;
+        Triggers.Add(Clause);
     }
 };

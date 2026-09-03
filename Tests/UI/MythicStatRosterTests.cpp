@@ -54,7 +54,7 @@ bool FMythicStatRosterTest::RunTest(const FString& Parameters) {
     LoadPrimaryAssetsForTest(UMythicAssetManager::StatDefinitionType, Stats);
 
     TestEqual(TEXT("the migrated semantic category roster is exact"), Categories.Num(), 7);
-    TestEqual(TEXT("104 authored rows plus 13 real capacity properties are canonical assets"), Stats.Num(), 117);
+    TestEqual(TEXT("105 authored rows plus 13 real capacity properties are canonical assets"), Stats.Num(), 118);
 
     FMythicStatRegistry Registry;
     TArray<FText> Errors;

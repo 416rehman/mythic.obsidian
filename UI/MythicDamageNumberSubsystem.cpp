@@ -185,7 +185,8 @@ FMythicDamageNumberData *UMythicDamageNumberSubsystem::FindMergeCandidate(
             || Candidate.SourceActor != EventSourceKey
             || Candidate.StatusDefinition.Get() != EventStatus
             || Candidate.Origin != Event.Origin
-            || Candidate.bOutgoingForViewer != Event.bOutgoingForViewer) {
+            || Candidate.bOutgoingForViewer != Event.bOutgoingForViewer
+            || Candidate.PresentationTag != Event.PresentationTag) {
             continue;
         }
 
@@ -206,6 +207,12 @@ void UMythicDamageNumberSubsystem::AddResolvedCombatText(const FMythicResolvedCo
         if (!ShouldPresentResolvedEvent(UserSettings->GetDamageNumberMode(), Event.bOutgoingForViewer)) {
             return;
         }
+    }
+
+    if (Event.Origin == EMythicCombatTextOrigin::Callout) {
+        UE_LOG(LogMythicDamageNumbers, Warning,
+               TEXT("Rejected a callout through the resolved-number path; callouts carry text, use AddCombatText"));
+        return;
     }
 
     const bool bStatusTick = Event.Origin == EMythicCombatTextOrigin::StatusTick;
@@ -241,7 +248,7 @@ void UMythicDamageNumberSubsystem::AddResolvedCombatText(const FMythicResolvedCo
             Existing->TargetOffset = PresentationOffset;
             Existing->bIsCritical |= Event.bCritical && !bStatusTick
                 && Event.Origin != EMythicCombatTextOrigin::Healing;
-            if (Existing->bIsCritical && !bStatusTick) {
+            if (Existing->bIsCritical && !bStatusTick && !Existing->PresentationTag.IsValid()) {
                 Existing->Color = Config ? ResolveColor(Config->CriticalHitColor, FLinearColor::Yellow) : FLinearColor::Yellow;
                 Existing->AnimStyle = Config ? Config->CriticalAnimStyle : EMythicDamageNumberAnimStyle::Bounce;
             }
@@ -265,6 +272,7 @@ void UMythicDamageNumberSubsystem::AddResolvedCombatText(const FMythicResolvedCo
     NewData.bIsCritical = Event.bCritical && !bStatusTick && Event.Origin != EMythicCombatTextOrigin::Healing;
     NewData.bOutgoingForViewer = Event.bOutgoingForViewer;
     NewData.bResolvedEvent = true;
+    NewData.PresentationTag = Event.PresentationTag;
 
     if (bStatusTick) {
         const FLinearColor StatusColor = StatusDefinition->DisplayColor;
@@ -297,6 +305,20 @@ void UMythicDamageNumberSubsystem::AddResolvedCombatText(const FMythicResolvedCo
                             : FLinearColor(0.0f, 1.0f, 0.3f);
         NewData.AnimStyle = Config ? Config->HealAnimStyle : EMythicDamageNumberAnimStyle::Pulse;
     }
+    else if (const FMythicCombatTextStyle *TaggedStyle = FindTaggedStyle(Event.PresentationTag)) {
+        NewData.Color = ResolveColor(TaggedStyle->Color,
+                                     Config ? ResolveColor(Config->DefaultColor, FLinearColor::White) : FLinearColor::White);
+        NewData.AnimStyle = TaggedStyle->AnimStyle;
+        NewData.ScaleMultiplier = FMath::IsFinite(TaggedStyle->ScaleMultiplier)
+                                      ? FMath::Clamp(TaggedStyle->ScaleMultiplier, 0.1f, 3.0f)
+                                      : 1.0f;
+        const float ScaledLifetime = NewData.Lifetime * (FMath::IsFinite(TaggedStyle->LifetimeMultiplier)
+                                                             ? FMath::Clamp(TaggedStyle->LifetimeMultiplier, 0.1f, 3.0f)
+                                                             : 1.0f);
+        if (FMath::IsFinite(ScaledLifetime)) {
+            NewData.Lifetime = FMath::Max(MinimumNumberLifetime, ScaledLifetime);
+        }
+    }
     else if (NewData.bIsCritical) {
         NewData.Color = Config ? ResolveColor(Config->CriticalHitColor, FLinearColor::Yellow) : FLinearColor::Yellow;
         NewData.AnimStyle = Config ? Config->CriticalAnimStyle : EMythicDamageNumberAnimStyle::Bounce;
@@ -310,41 +332,88 @@ void UMythicDamageNumberSubsystem::AddResolvedCombatText(const FMythicResolvedCo
     ActiveDamageNumbers.Add(MoveTemp(NewData));
 }
 
+const FMythicCombatTextStyle *UMythicDamageNumberSubsystem::FindTaggedStyle(const FGameplayTag &PresentationTag) const {
+    if (!Config || !PresentationTag.IsValid()) {
+        return nullptr;
+    }
+    for (FGameplayTag Tag = PresentationTag; Tag.IsValid(); Tag = Tag.RequestDirectParent()) {
+        if (const FMythicCombatTextStyle *Style = Config->TaggedStyles.Find(Tag)) {
+            return Style;
+        }
+    }
+    return nullptr;
+}
+
 void UMythicDamageNumberSubsystem::AddDodgeNumber(FVector WorldLocation) {
     const FLinearColor DodgeColor = Config ? ResolveColor(Config->DodgeColor, FLinearColor::Gray) : FLinearColor::Gray;
     const EMythicDamageNumberAnimStyle DodgeStyle = Config
                                                         ? Config->DodgeAnimStyle
                                                         : EMythicDamageNumberAnimStyle::FloatUpSlow;
-    AddCombatTextInternal(WorldLocation, TEXT("DODGE"), DodgeColor, 1.0f, DodgeStyle);
+    AddCombatTextInternal(WorldLocation, FText::FromString(TEXT("DODGE")), DodgeColor, 1.0f, DodgeStyle,
+                          EMythicCombatTextOrigin::DirectDamage);
 }
 
-void UMythicDamageNumberSubsystem::AddCombatText(FVector WorldLocation, const FString &Text, FLinearColor Color, float Lifetime) {
-    const EMythicDamageNumberAnimStyle DefaultStyle = Config
-                                                          ? Config->DefaultAnimStyle
-                                                          : EMythicDamageNumberAnimStyle::FloatUp;
-    AddCombatTextInternal(WorldLocation, Text, Color, Lifetime, DefaultStyle);
+void UMythicDamageNumberSubsystem::AddCombatText(FVector WorldLocation, const FString &Text, FLinearColor Color,
+                                                 float Lifetime, EMythicCombatTextOrigin Origin) {
+    AddCombatText(WorldLocation, FText::FromString(Text), Color, Lifetime, Origin);
 }
 
-void UMythicDamageNumberSubsystem::AddCombatTextInternal(FVector WorldLocation, const FString &Text,
+void UMythicDamageNumberSubsystem::AddCombatText(FVector WorldLocation, const FText &Text, FLinearColor Color,
+                                                 float Lifetime, EMythicCombatTextOrigin Origin) {
+    EMythicDamageNumberAnimStyle AnimStyle = Config ? Config->DefaultAnimStyle : EMythicDamageNumberAnimStyle::FloatUp;
+    float ScaleMultiplier = 1.0f;
+    float ResolvedLifetime = Lifetime;
+    switch (Origin) {
+    case EMythicCombatTextOrigin::Callout: {
+        const FMythicCombatTextStyle Style = Config ? Config->CalloutStyle : FMythicCombatTextStyle();
+        AnimStyle = Config ? Style.AnimStyle : EMythicDamageNumberAnimStyle::RiseAndSettle;
+        ScaleMultiplier = FMath::IsFinite(Style.ScaleMultiplier) ? FMath::Clamp(Style.ScaleMultiplier, 0.1f, 3.0f) : 1.0f;
+        if (FMath::IsFinite(Style.LifetimeMultiplier)) {
+            ResolvedLifetime = Lifetime * FMath::Clamp(Style.LifetimeMultiplier, 0.1f, 3.0f);
+        }
+    }
+    break;
+    case EMythicCombatTextOrigin::Healing:
+        AnimStyle = Config ? Config->HealAnimStyle : EMythicDamageNumberAnimStyle::Pulse;
+        break;
+    case EMythicCombatTextOrigin::ShieldAbsorption:
+        AnimStyle = Config ? Config->ShieldAbsorptionAnimStyle : EMythicDamageNumberAnimStyle::FloatUp;
+        break;
+    case EMythicCombatTextOrigin::StatusTick:
+        AnimStyle = Config ? Config->StatusAnimStyle : EMythicDamageNumberAnimStyle::Shake;
+        break;
+    default:
+        break;
+    }
+    AddCombatTextInternal(WorldLocation, Text, Color, ResolvedLifetime, AnimStyle, Origin, ScaleMultiplier);
+}
+
+void UMythicDamageNumberSubsystem::AddCombatTextInternal(FVector WorldLocation, const FText &Text,
                                                          FLinearColor Color, float Lifetime,
-                                                         EMythicDamageNumberAnimStyle AnimStyle) {
+                                                         EMythicDamageNumberAnimStyle AnimStyle,
+                                                         EMythicCombatTextOrigin Origin, float ScaleMultiplier) {
     if (!IsFiniteVector(WorldLocation) || !IsFiniteColor(Color) || !FMath::IsFinite(Lifetime) || Lifetime <= 0.0f
-        || Text.IsEmpty() || !GetWorld()) {
+        || Text.IsEmptyOrWhitespace() || !GetWorld()) {
         return;
     }
     CleanupExpired();
     EnforceActiveBudget(1);
     FMythicDamageNumberData NewData;
     NewData.WorldLocation = WorldLocation;
-    NewData.CachedText = FText::FromString(Text);
+    NewData.CachedText = Text;
     NewData.Color = Color;
+    NewData.Origin = Origin;
     NewData.SpawnTime = GetWorld()->GetTimeSeconds();
-    NewData.Lifetime = Lifetime;
+    NewData.Lifetime = FMath::Max(MinimumNumberLifetime, Lifetime);
+    NewData.ScaleMultiplier = ScaleMultiplier;
     NewData.ID = NextID++;
     NewData.bIsCritical = false;
     NewData.AnimStyle = AnimStyle;
 
-    ApplyRandomMotion(NewData);
+    // A callout is one deliberate line above the owner's pawn; scattering it like a hit number makes it read as noise.
+    if (Origin != EMythicCombatTextOrigin::Callout) {
+        ApplyRandomMotion(NewData);
+    }
 
     ActiveDamageNumbers.Add(MoveTemp(NewData));
 }
@@ -501,6 +570,22 @@ FVector2D UMythicDamageNumberSubsystem::CalculateAnimationOffset(const FMythicDa
     case EMythicDamageNumberAnimStyle::Pulse:
         Offset.Y = -Age * BaseVerticalSpeed;
         break;
+
+    case EMythicDamageNumberAnimStyle::RiseAndSettle: {
+        const float RiseHeight = Config && FMath::IsFinite(Config->CalloutRiseHeight)
+                                     ? FMath::Max(0.0f, Config->CalloutRiseHeight)
+                                     : 36.0f;
+        const float SettleSeconds = Config && FMath::IsFinite(Config->CalloutSettleSeconds)
+                                        ? FMath::Max(KINDA_SMALL_NUMBER, Config->CalloutSettleSeconds)
+                                        : 0.35f;
+        const float Overshoot = Config && FMath::IsFinite(Config->CalloutOvershoot)
+                                    ? FMath::Max(0.0f, Config->CalloutOvershoot)
+                                    : 1.7f;
+        const float T = FMath::Clamp(Age / SettleSeconds, 0.0f, 1.0f) - 1.0f;
+        const float Eased = 1.0f + (Overshoot + 1.0f) * T * T * T + Overshoot * T * T;
+        Offset.Y = -RiseHeight * Eased;
+    }
+    break;
     }
 
     return Offset;

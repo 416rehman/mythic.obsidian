@@ -19,11 +19,24 @@
 #include "UI/MythicHUDLayout.h"
 #include "UI/MythicUIStyle.h"
 #include "UI/ViewModels/MythicPlayerStatusViewModel.h"
+#include "UI/Widgets/MythicRuneHudCellWidget.h"
 
 namespace {
 constexpr int32 MaxBindAttempts = 20;
 constexpr float BindRetryInterval = 0.25f;
 constexpr float ChipTickInterval = 1.0f / 30.0f;
+constexpr float RuneTickInterval = 0.1f;
+constexpr int32 RuneCellCount = 4;
+
+// The radial's lit sweep: an Active window drains as it runs out, a cooldown fills as it comes back.
+float RuneProgress(const FMythicRuneBadgeEntry &Entry, double Now) {
+    if (Entry.EndTimeSeconds <= 0.0) {
+        return 0.0f;
+    }
+    const double Span = Entry.EndTimeSeconds - Entry.StartTimeSeconds;
+    const float Remaining = Span > 0.0 ? static_cast<float>(FMath::Clamp((Entry.EndTimeSeconds - Now) / Span, 0.0, 1.0)) : 0.0f;
+    return Entry.State == EMythicRuneHudState::Cooldown ? 1.0f - Remaining : Remaining;
+}
 
 const FName Vitals_Percent(TEXT("Percent"));
 const FName Vitals_ChipPercent(TEXT("ChipPercent"));
@@ -166,6 +179,7 @@ void UMythicPlayerStatusWidget::NativeDestruct() {
     if (const UWorld *World = GetWorld()) {
         World->GetTimerManager().ClearTimer(BindRetryTimer);
         World->GetTimerManager().ClearTimer(ChipTimer);
+        World->GetTimerManager().ClearTimer(RuneTimer);
     }
     if (ViewModel) {
         ViewModel->RemoveAllFieldValueChangedDelegates(this);
@@ -173,6 +187,9 @@ void UMythicPlayerStatusWidget::NativeDestruct() {
     }
     if (UMythicHUDLayout *Layout = HUDLayout.Get()) {
         Layout->UnregisterHUDElement(this);
+        if (RuneRow) {
+            Layout->UnregisterHUDElement(RuneRow);
+        }
     }
     Super::NativeDestruct();
 }
@@ -289,15 +306,22 @@ bool UMythicPlayerStatusWidget::BindToLocalPlayer() {
     ViewModel->AddFieldValueChangedDelegate(FDesc::bInCombat, Delegate);
     ViewModel->AddFieldValueChangedDelegate(FDesc::bExhausted, Delegate);
     ViewModel->AddFieldValueChangedDelegate(FDesc::StatusBadges, Delegate);
+    ViewModel->AddFieldValueChangedDelegate(FDesc::RuneBadges, Delegate);
 
     ViewModel->OnHealthDamaged.AddDynamic(this, &UMythicPlayerStatusWidget::HandleHealthDamaged);
 
     Health.Chip = ViewModel->GetHealthPercent();
     RefreshAll();
+    RefreshRuneBadges();
     return true;
 }
 
 void UMythicPlayerStatusWidget::HandleFieldChanged(UObject *Object, UE::FieldNotification::FFieldId FieldId) {
+    if (FieldId == UMythicPlayerStatusViewModel::FFieldNotificationClassDescriptor::RuneBadges) {
+        RefreshRuneBadges();
+        RefreshSalience();
+        return;
+    }
     RefreshAll();
 }
 
@@ -507,6 +531,110 @@ void UMythicPlayerStatusWidget::ApplyFlag(UWidget *Widget, bool bActive) {
     }
 }
 
+UMythicRuneHudCellWidget *UMythicPlayerStatusWidget::RuneCell(int32 SlotIndex) const {
+    switch (SlotIndex) {
+    case 0:
+        return RuneCell_0;
+    case 1:
+        return RuneCell_1;
+    case 2:
+        return RuneCell_2;
+    case 3:
+        return RuneCell_3;
+    default:
+        return nullptr;
+    }
+}
+
+void UMythicPlayerStatusWidget::RefreshRuneBadges() {
+    if (!ViewModel) {
+        return;
+    }
+    const UWorld *World = GetWorld();
+    const double Now = World ? World->GetTimeSeconds() : 0.0;
+    const TArray<FMythicRuneBadgeEntry> &Badges = ViewModel->GetRuneBadges();
+
+    bool bAnyShown = false;
+    bool bAnyLit = false;
+    bool bAnyPending = false;
+    for (int32 SlotIndex = 0; SlotIndex < RuneCellCount; SlotIndex++) {
+        const FMythicRuneBadgeEntry *Entry =
+            Badges.FindByPredicate([SlotIndex](const FMythicRuneBadgeEntry &Badge) { return Badge.SlotIndex == SlotIndex; });
+        if (Entry) {
+            bAnyShown = true;
+            bAnyLit |= Entry->State == EMythicRuneHudState::Ready || Entry->State == EMythicRuneHudState::Active;
+            bAnyPending |= Entry->EndTimeSeconds > Now;
+        }
+        UMythicRuneHudCellWidget *Cell = RuneCell(SlotIndex);
+        if (!Cell) {
+            continue;
+        }
+        if (Entry) {
+            Cell->SetEntry(*Entry);
+            Cell->SetProgress(RuneProgress(*Entry, Now));
+            Cell->SetVisibility(ESlateVisibility::HitTestInvisible);
+        }
+        else {
+            Cell->Clear();
+            Cell->SetVisibility(ESlateVisibility::Collapsed);
+        }
+    }
+
+    if (RuneRow) {
+        const EMythicHUDSalience Want = bAnyLit ? EMythicHUDSalience::Lit : bAnyShown ? EMythicHUDSalience::Dim : EMythicHUDSalience::Hidden;
+        if (UMythicHUDLayout *Layout = FindHUDLayout()) {
+            Layout->SetElementSalience(RuneRow, Want);
+        }
+        else {
+            ApplyFlag(RuneRow, bAnyShown);
+        }
+    }
+    SetRuneTicking(bAnyPending);
+}
+
+void UMythicPlayerStatusWidget::TickRunes() {
+    const UWorld *World = GetWorld();
+    if (!ViewModel || !World) {
+        SetRuneTicking(false);
+        return;
+    }
+    const double Now = World->GetTimeSeconds();
+    bool bAnyPending = false;
+    for (const FMythicRuneBadgeEntry &Entry : ViewModel->GetRuneBadges()) {
+        if (Entry.EndTimeSeconds <= 0.0) {
+            continue;
+        }
+        if (UMythicRuneHudCellWidget *Cell = RuneCell(Entry.SlotIndex)) {
+            Cell->SetProgress(RuneProgress(Entry, Now));
+        }
+        bAnyPending |= Now < Entry.EndTimeSeconds;
+    }
+    if (!bAnyPending) {
+        SetRuneTicking(false);
+    }
+}
+
+void UMythicPlayerStatusWidget::SetRuneTicking(bool bEnabled) {
+    UWorld *World = GetWorld();
+    if (!World) {
+        return;
+    }
+    if (bEnabled) {
+        if (!World->GetTimerManager().IsTimerActive(RuneTimer)) {
+            World->GetTimerManager().SetTimer(RuneTimer, FTimerDelegate::CreateWeakLambda(this, [this]() { TickRunes(); }),
+                                              RuneTickInterval, true);
+        }
+    }
+    else {
+        World->GetTimerManager().ClearTimer(RuneTimer);
+    }
+    for (int32 SlotIndex = 0; SlotIndex < RuneCellCount; SlotIndex++) {
+        if (UMythicRuneHudCellWidget *Cell = RuneCell(SlotIndex)) {
+            Cell->SetTicking(bEnabled);
+        }
+    }
+}
+
 UMythicHUDLayout *UMythicPlayerStatusWidget::FindHUDLayout() {
     if (UMythicHUDLayout *Cached = HUDLayout.Get()) {
         return Cached;
@@ -544,6 +672,10 @@ void UMythicPlayerStatusWidget::RefreshSalience() {
         Want = EMythicHUDSalience::Lit;
     }
     else if (LowestVital < 0.999f || ViewModel->GetShieldPercent() > 0.001f) {
+        Want = EMythicHUDSalience::Dim;
+    }
+    // The rune row lives inside this widget and lights itself; a hidden parent would take it down too.
+    else if (RuneRow && ViewModel->GetRuneBadges().Num() > 0) {
         Want = EMythicHUDSalience::Dim;
     }
 

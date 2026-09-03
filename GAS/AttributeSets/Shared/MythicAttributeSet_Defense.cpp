@@ -46,6 +46,7 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_Event_ApplyStatus, "Event.ApplyStatus");
 
 UMythicAttributeSet_Defense::UMythicAttributeSet_Defense() {
     InitIncomingDamageMultiplier(1.0f);
+    InitFallDamageTaken(1.0f);
 }
 
 TConstArrayView<FMythicBoundedAttributePair>
@@ -80,7 +81,7 @@ void UMythicAttributeSet_Defense::PreAttributeChange(const FGameplayAttribute &A
     else if (Attribute == GetArmorAttribute()) {
         NewValue = FMath::Max(0.0f, NewValue);
     }
-    else if (Attribute == GetIncomingDamageMultiplierAttribute()) {
+    else if (Attribute == GetIncomingDamageMultiplierAttribute() || Attribute == GetFallDamageTakenAttribute()) {
         NewValue = FMath::Max(0.0f, NewValue);
     }
 }
@@ -328,6 +329,10 @@ void UMythicAttributeSet_Defense::OnRep_IncomingDamageMultiplier(const FGameplay
     GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Defense, IncomingDamageMultiplier, OldIncomingDamageMultiplier);
 }
 
+void UMythicAttributeSet_Defense::OnRep_FallDamageTaken(const FGameplayAttributeData &OldFallDamageTaken) {
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UMythicAttributeSet_Defense, FallDamageTaken, OldFallDamageTaken);
+}
+
 void UMythicAttributeSet_Defense::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
@@ -361,6 +366,7 @@ void UMythicAttributeSet_Defense::GetLifetimeReplicatedProps(TArray<FLifetimePro
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, LifePerHit, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, LifePerKill, COND_OwnerOnly, REPNOTIFY_Always);
     DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, IncomingDamageMultiplier, COND_OwnerOnly, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(UMythicAttributeSet_Defense, FallDamageTaken, COND_OwnerOnly, REPNOTIFY_Always);
 }
 
 float UMythicAttributeSet_Defense::ComputeBuildupThreshold(float ThresholdReduction) {

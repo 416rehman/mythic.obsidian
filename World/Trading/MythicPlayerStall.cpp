@@ -26,59 +26,6 @@
 #include "Engine/World.h"
 #include "Mythic.h"
 
-namespace {
-    int32 StallSumPlayerCurrency(AMythicPlayerController *Player) {
-        int32 Total = 0;
-        if (!Player) {
-            return 0;
-        }
-        for (UMythicInventoryComponent *Inv : Player->GetAllInventoryComponents()) {
-            if (Inv) {
-                Total += Inv->GetTotalCurrency();
-            }
-        }
-        return Total;
-    }
-
-    void StallChargePlayerCurrency(AMythicPlayerController *Player, int32 Amount) {
-        if (!Player || Amount <= 0) {
-            return;
-        }
-        int32 Remaining = Amount;
-        for (UMythicInventoryComponent *Inv : Player->GetAllInventoryComponents()) {
-            if (Remaining <= 0) {
-                break;
-            }
-            if (Inv) {
-                Remaining -= Inv->SpendCurrency(Remaining);
-            }
-        }
-    }
-
-    void StallMintCurrency(UMythicInventoryComponent *Inv, AController *Recipient, int32 Amount, UItemDefinition *CurrencyDef,
-                           UMythicLootManagerSubsystem *Loot) {
-        if (!Inv || !CurrencyDef || !Loot || Amount <= 0) {
-            return;
-        }
-        const int32 Cap = FMath::Max(1, CurrencyDef->StackSizeMax);
-        const int64 MaxChunks = (static_cast<int64>(Amount) + Cap - 1) / Cap + 4;
-        int32 Remaining = Amount;
-        int64 Guard = 0;
-        while (Remaining > 0 && Guard++ < MaxChunks) {
-            const int32 Chunk = FMath::Min(Remaining, Cap);
-            UMythicItemInstance *Coins = Loot->Create(CurrencyDef, Chunk, Recipient, 0);
-            if (!Coins) {
-                break;
-            }
-            Inv->AddItem(Coins, Recipient);
-            Remaining -= Chunk;
-        }
-        if (Remaining > 0) {
-            UE_LOG(Myth, Warning, TEXT("MythicPlayerStall: could not mint %d of %d till coins for the collect"), Remaining, Amount);
-        }
-    }
-}
-
 AMythicPlayerStall::AMythicPlayerStall() {
 }
 
@@ -370,28 +317,21 @@ void AMythicPlayerStall::OnSecondaryInteract_Implementation(AActor *Interactor) 
         Super::OnSecondaryInteract_Implementation(Interactor);
         return;
     }
-    if (TillCoins <= 0 || !CurrencyItemDefinition) {
-        return;
+    UItemDefinition *CurrencyDef = CurrencyItemDefinition;
+    if (!CurrencyDef) {
+        const UMythicDeveloperSettings *Dev = GetDefault<UMythicDeveloperSettings>();
+        CurrencyDef = Dev ? Dev->GetCurrencyItemDefinition() : nullptr;
     }
     AMythicPlayerController *PC = Cast<AMythicPlayerController>(Controller);
-    UGameInstance *GI = GetGameInstance();
-    UMythicLootManagerSubsystem *Loot = GI ? GI->GetSubsystem<UMythicLootManagerSubsystem>() : nullptr;
-    if (!PC || !Loot) {
+    if (TillCoins <= 0 || !CurrencyDef || !PC) {
         return;
     }
-    UMythicInventoryComponent *Target = nullptr;
-    for (UMythicInventoryComponent *Inv : PC->GetAllInventoryComponents()) {
-        if (Inv && Inv->CanAcceptItemType(CurrencyItemDefinition->ItemType)) {
-            Target = Inv;
-            break;
-        }
-    }
-    if (!Target) {
+    // Whatever could not be minted stays in the till instead of vanishing.
+    const int32 Collected = PC->GrantCurrencyOfDefinition(CurrencyDef, TillCoins);
+    if (Collected <= 0) {
         return;
     }
-    const int32 Collected = TillCoins;
-    TillCoins = 0;
-    StallMintCurrency(Target, PC, Collected, CurrencyItemDefinition, Loot);
+    TillCoins -= Collected;
     if (AMythicPlayerState *PS = PC->GetPlayerState<AMythicPlayerState>()) {
         if (UMythicStatLedgerComponent *StatLedger = PS->GetStatLedgerComponent()) {
             StatLedger->RecordStat(STAT_TRADE_PROFIT, Collected);
@@ -435,7 +375,7 @@ FMythicTradePlan AMythicPlayerStall::Server_ExecuteStallPurchase(AMythicPlayerCo
     const float Fair = ComputeFairUnitPrice(Def);
     const float ListedMultiplier = (Def->Value > 0) ? (Fair / static_cast<float>(Def->Value)) * FMath::Max(ListedPriceMultiplier, 0.0f) : 0.0f;
     const FMythicTradePlan Plan = MythicTrade::PlanBuy(Quantity, Def->Value, ListedMultiplier, StockItem->GetStacks(),
-                                                       StallSumPlayerCurrency(Buyer), Target != nullptr);
+                                                       Buyer->GetCarriedCurrency(), Target != nullptr);
     if (Plan.Quantity <= 0) {
         return Plan;
     }
@@ -445,27 +385,38 @@ FMythicTradePlan AMythicPlayerStall::Server_ExecuteStallPurchase(AMythicPlayerCo
         if (!Carried) {
             return Reject;
         }
-        StallChargePlayerCurrency(Buyer, Plan.TotalPrice);
+        if (!Buyer->TryChargeCurrency(Plan.TotalPrice)) {
+            Stock->SetItemInSlot(StallSlotIndex, Carried);
+            Reject.Result = EMythicTradeResult::InsufficientFunds;
+            return Reject;
+        }
         Target->AddItem(Carried, Buyer);
     }
     else {
         const int32 StackCap = FMath::Max(1, Def->StackSizeMax);
         TArray<UMythicItemInstance *, TInlineAllocator<8>> Goods;
+        auto DestroyGoods = [&Goods]() {
+            for (UMythicItemInstance *Made : Goods) {
+                if (Made) {
+                    Made->Destroy();
+                }
+            }
+        };
         for (int32 ToMake = Plan.Quantity; ToMake > 0;) {
             const int32 Chunk = FMath::Min(ToMake, StackCap);
             UMythicItemInstance *G = Loot->Create(Def, Chunk, Buyer, StockItem->GetItemLevel());
             if (!G) {
-                for (UMythicItemInstance *Made : Goods) {
-                    if (Made) {
-                        Made->Destroy();
-                    }
-                }
+                DestroyGoods();
                 return Reject;
             }
             Goods.Add(G);
             ToMake -= Chunk;
         }
-        StallChargePlayerCurrency(Buyer, Plan.TotalPrice);
+        if (!Buyer->TryChargeCurrency(Plan.TotalPrice)) {
+            DestroyGoods();
+            Reject.Result = EMythicTradeResult::InsufficientFunds;
+            return Reject;
+        }
         Stock->ServerRemoveItem(StockItem, Plan.Quantity);
         for (UMythicItemInstance *G : Goods) {
             Target->AddItem(G, Buyer);

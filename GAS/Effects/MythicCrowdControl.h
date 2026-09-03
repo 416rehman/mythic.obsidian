@@ -9,6 +9,7 @@
 
 
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_IMMUNE_HARDCC);
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_IMMUNE_FALLDAMAGE);
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(GAS_SETBYCALLER_CCIMMUNE_DURATION);
 
 // How hard one enemy tier resists repeat crowd control. CC feel is among the most-retuned numbers in an ARPG, so

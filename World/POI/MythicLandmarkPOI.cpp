@@ -9,7 +9,10 @@
 #include "World/POI/MythicTags_POI.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/Feedback/MythicTags_FeedbackCues.h"
+#include "GAS/MythicTags_GAS.h"
 #include "AbilitySystemBlueprintLibrary.h"
+#include "AbilitySystemComponent.h"
+#include "AbilitySystemInterface.h"
 #include "Components/SphereComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Controller.h"
@@ -77,11 +80,27 @@ void AMythicLandmarkPOI::OnDiscoverySphereBeginOverlap(UPrimitiveComponent *, AA
 
     // Credited to whoever walked in. ShouldRegisterDiscovery already rejects a repeat, so this counts each
     // landmark once.
-    if (const AController *Discoverer = Pawn ? Pawn->GetController() : nullptr) {
+    if (AController *Discoverer = Pawn ? Pawn->GetController() : nullptr) {
         if (const AMythicPlayerState *PS = Discoverer->GetPlayerState<AMythicPlayerState>()) {
             if (UMythicStatLedgerComponent *Ledger = PS->GetStatLedgerComponent()) {
                 Ledger->RecordStat(STAT_DISCOVERY);
             }
+        }
+
+        // The same event, on the same ASC, with the same payload shape MythicLocationObjectiveVolume raises, so a
+        // rune or talent keyed on ReachedLocation cannot tell a landmark from an objective.
+        UAbilitySystemComponent *ASC = nullptr;
+        if (const IAbilitySystemInterface *ASI = Cast<IAbilitySystemInterface>(Discoverer)) {
+            ASC = ASI->GetAbilitySystemComponent();
+        }
+        if (ASC) {
+            FGameplayEventData Payload;
+            Payload.EventTag = GAS_EVENT_REACHED_LOCATION;
+            Payload.Instigator = Pawn;
+            Payload.Target = ASC->GetAvatarActor();
+            Payload.TargetTags.AddTag(POITag);
+            Payload.EventMagnitude = 1.0f;
+            ASC->HandleGameplayEvent(GAS_EVENT_REACHED_LOCATION, &Payload);
         }
     }
 

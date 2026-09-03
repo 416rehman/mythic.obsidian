@@ -47,6 +47,7 @@ enum class EMythicTradeResult : uint8;
 class AMythicNPCCharacter;
 
 class UMythicCheatManager;
+class UMythicHUDLayout;
 
 USTRUCT(BlueprintType)
 struct FPlayerStatsSummary {
@@ -414,8 +415,24 @@ public:
      * or HUD widget shows. BlueprintPure because the UI needs it every frame it draws a price, and there was
      * previously no Blueprint-reachable way to ask "how much gold do I have".
      */
-    UFUNCTION(BlueprintPure, Category = "Inventory")
+    UFUNCTION(BlueprintPure, Category = "Mythic|Economy")
     int32 GetCarriedCurrency() const;
+
+    // ---- Wallet (server-authoritative; the one debit and the one mint) ----
+    /**
+     * Charges Amount across every inventory this player owns, or nothing at all: false means the wallet could not
+     * cover it and nothing changed. Zero or less is free and succeeds. A real charge raises GAS.Event.Currency.Spent
+     * on the owner ASC (EventMagnitude = Amount) and a "-N gold" feed line on the owning client.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Mythic|Economy")
+    bool TryChargeCurrency(int32 Amount);
+
+    /** Mints Amount of the project currency into the first inventory that takes it. Returns the amount minted. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Mythic|Economy")
+    int32 GrantCurrency(int32 Amount);
+
+    /** The same mint with an explicit definition, for a vendor or stall that carries its own currency override. */
+    int32 GrantCurrencyOfDefinition(UItemDefinition *CurrencyDef, int32 Amount);
 
     // ---- Vendor RPCs (client-owned PC -> server-authoritative currency-gated trade) ----
     /** Buys stock into the player's inventory after server-side vendor, range, and currency validation. */
@@ -584,6 +601,10 @@ public:
     UFUNCTION(Client, Unreliable, Category = "Combat")
     void ClientShowDodge();
 
+    /** Floats owner-only callout text above the pawn through the damage-number system: a moment, not a number. */
+    UFUNCTION(Client, Unreliable, Category = "Combat")
+    void ClientShowCombatCallout(const FText &Text, FLinearColor Color, float Lifetime);
+
     /** Adds one resolved result to this owning player's server-side, next-frame combat-text batch. */
     void QueueResolvedCombatText(const FMythicResolvedCombatTextEvent &Event);
 
@@ -628,6 +649,17 @@ public:
     /** Raise a HUD notice on this (owning) client. Safe to call from anywhere client-side. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|HUD")
     void RaiseHudNotice(const FMythicHudNotice &Notice);
+
+    /** The server-side way in: the notice lands on this controller's owning client through RaiseHudNotice. */
+    UFUNCTION(Client, Reliable, Category = "Mythic|HUD")
+    void ClientRaiseHudNotice(const FMythicHudNotice &Notice);
+
+    /**
+     * Lights one contextual HUD element by its ContextualElements name on the owning client, the way a found landmark
+     * flares the compass. Unreliable: a lost poke costs one flare, never state.
+     */
+    UFUNCTION(Client, Unreliable, Category = "Mythic|HUD")
+    void ClientPokeHudElement(FName ElementName);
 
     // ---- Open container / vendor ----
     /**
@@ -719,6 +751,11 @@ private:
 
         void Reset() { *this = FPendingContextActionHold(); }
     };
+
+    /** The HUD drawn for this controller on its own machine; null on a server or before the HUD exists. */
+    UMythicHUDLayout *FindLocalHUDLayout();
+
+    TWeakObjectPtr<UMythicHUDLayout> LocalHUDLayout;
 
     void BindContextActionAttention();
     void UnbindContextActionAttention();

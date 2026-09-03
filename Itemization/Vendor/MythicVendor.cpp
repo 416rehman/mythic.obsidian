@@ -46,47 +46,17 @@ namespace {
     int32 SumPlayerCurrency(AMythicPlayerController *Player) {
         return Player ? Player->GetCarriedCurrency() : 0;
     }
-
-    void ChargePlayerCurrency(AMythicPlayerController *Player, int32 Amount) {
-        if (!Player || Amount <= 0) {
-            return;
-        }
-        int32 Remaining = Amount;
-        for (UMythicInventoryComponent *Inv : Player->GetAllInventoryComponents()) {
-            if (Remaining <= 0) {
-                break;
-            }
-            if (Inv) {
-                Remaining -= Inv->SpendCurrency(Remaining);
-            }
-        }
-    }
-
-    void GrantCurrency(UMythicInventoryComponent *Inv, AController *Recipient, int32 Amount, UItemDefinition *CurrencyDef,
-                       UMythicLootManagerSubsystem *Loot) {
-        if (!Inv || !CurrencyDef || !Loot || Amount <= 0) {
-            return;
-        }
-        const int32 Cap = FMath::Max(1, CurrencyDef->StackSizeMax);
-        const int64 MaxChunks = (static_cast<int64>(Amount) + Cap - 1) / Cap + 4;
-        int32 Remaining = Amount;
-        int64 Guard = 0;
-        while (Remaining > 0 && Guard++ < MaxChunks) {
-            const int32 Chunk = FMath::Min(Remaining, Cap);
-            UMythicItemInstance *Coins = Loot->Create(CurrencyDef, Chunk, Recipient, 0);
-            if (!Coins) {
-                break;
-            }
-            Inv->AddItem(Coins, Recipient);
-            Remaining -= Chunk;
-        }
-        if (Remaining > 0) {
-            UE_LOG(Myth, Warning, TEXT("MythicVendor::GrantCurrency could not mint %d of %d currency for the payout"), Remaining, Amount);
-        }
-    }
 }
 
 AMythicVendor::AMythicVendor() {
+}
+
+UItemDefinition *AMythicVendor::ResolveCurrencyItemDefinition() const {
+    if (CurrencyItemDefinition) {
+        return CurrencyItemDefinition;
+    }
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    return Settings ? Settings->GetCurrencyItemDefinition() : nullptr;
 }
 
 void AMythicVendor::BeginPlay() {
@@ -372,7 +342,7 @@ int32 AMythicVendor::GetBuyPriceForSlot(int32 StockSlotIndex, int32 Quantity, AM
 }
 
 int32 AMythicVendor::GetSalePriceForItem(const UMythicItemInstance *Item, int32 Quantity, AMythicPlayerController *Seller) const {
-    if (!CurrencyItemDefinition || !Item) {
+    if (!ResolveCurrencyItemDefinition() || !Item) {
         return 0;
     }
     if (const UItemDefinition *Def = Item->GetItemDefinition()) {
@@ -425,7 +395,11 @@ FMythicTradePlan AMythicVendor::Server_ExecuteBuy(AMythicPlayerController *Buyer
         if (!Carried) {
             return Reject;
         }
-        ChargePlayerCurrency(Buyer, Plan.TotalPrice);
+        if (!Buyer->TryChargeCurrency(Plan.TotalPrice)) {
+            Stock->SetItemInSlot(StockSlotIndex, Carried);
+            Reject.Result = EMythicTradeResult::InsufficientFunds;
+            return Reject;
+        }
         RemoveFromBuyback(Carried);
         Target->AddItem(Carried, Buyer);
         GrantTradingXp(Buyer, Plan.TotalPrice);
@@ -435,22 +409,29 @@ FMythicTradePlan AMythicVendor::Server_ExecuteBuy(AMythicPlayerController *Buyer
     const int32 GoodsLevel = StockItem->GetItemLevel();
     const int32 StackCap = FMath::Max(1, Def->StackSizeMax);
     TArray<UMythicItemInstance *, TInlineAllocator<8>> Goods;
+    auto DestroyGoods = [&Goods]() {
+        for (UMythicItemInstance *Made : Goods) {
+            if (Made) {
+                Made->Destroy();
+            }
+        }
+    };
     for (int32 ToMake = Plan.Quantity; ToMake > 0;) {
         const int32 Chunk = FMath::Min(ToMake, StackCap);
         UMythicItemInstance *G = Loot->Create(Def, Chunk, Buyer, GoodsLevel);
         if (!G) {
-            for (UMythicItemInstance *Made : Goods) {
-                if (Made) {
-                    Made->Destroy();
-                }
-            }
+            DestroyGoods();
             return Reject;
         }
         Goods.Add(G);
         ToMake -= Chunk;
     }
 
-    ChargePlayerCurrency(Buyer, Plan.TotalPrice);
+    if (!Buyer->TryChargeCurrency(Plan.TotalPrice)) {
+        DestroyGoods();
+        Reject.Result = EMythicTradeResult::InsufficientFunds;
+        return Reject;
+    }
 
     Stock->ServerRemoveItem(StockItem, Plan.Quantity);
     for (UMythicItemInstance *G : Goods) {
@@ -485,9 +466,10 @@ FMythicTradePlan AMythicVendor::Server_ExecuteSell(AMythicPlayerController *Sell
 
     const float EffSellRate = ResolveEffectiveSellRate(Seller, Def);
 
+    UItemDefinition *CurrencyDef = ResolveCurrencyItemDefinition();
     const bool bIsCurrency = Def->ItemType.MatchesTag(ITEMIZATION_TYPE_CURRENCY);
     FMythicTradePlan Plan = MythicTrade::PlanSell(Quantity, Item->GetStacks(), Def->Value, EffSellRate,
-                                                  CurrencyItemDefinition != nullptr,
+                                                  CurrencyDef != nullptr,
                                                   PlayerInventory->CanPlayerTakeFromSlot(PlayerSlotIndex), bIsCurrency);
     if (Plan.Quantity <= 0) {
         return Plan;
@@ -527,7 +509,7 @@ FMythicTradePlan AMythicVendor::Server_ExecuteSell(AMythicPlayerController *Sell
         }
     }
 
-    GrantCurrency(PlayerInventory, Seller, Plan.TotalPrice, CurrencyItemDefinition, Loot);
+    Seller->GrantCurrencyOfDefinition(CurrencyDef, Plan.TotalPrice);
     GrantTradingXp(Seller, Plan.TotalPrice);
     RecordSellPressure(Def->ItemType, Plan.Quantity);
     if (bContraband) {
@@ -559,13 +541,13 @@ FMythicTradePlan AMythicVendor::Server_ExecuteDelivery(AMythicPlayerController *
         Reject.Result = EMythicTradeResult::NotSellable;
         return Reject;
     }
-    if (!CurrencyItemDefinition) {
+    UItemDefinition *CurrencyDef = ResolveCurrencyItemDefinition();
+    if (!CurrencyDef) {
         Reject.Result = EMythicTradeResult::VendorCannotPay;
         return Reject;
     }
     UGameInstance *GI = GetGameInstance();
-    UMythicLootManagerSubsystem *Loot = GI ? GI->GetSubsystem<UMythicLootManagerSubsystem>() : nullptr;
-    if (!Loot) {
+    if (!GI) {
         return Reject;
     }
 
@@ -582,7 +564,7 @@ FMythicTradePlan AMythicVendor::Server_ExecuteDelivery(AMythicPlayerController *
     const int32 Payout = FMath::Min(RawPayout, EffectiveBuyCost);
 
     PlayerInventory->ServerRemoveItem(Item, Units);
-    GrantCurrency(PlayerInventory, Deliverer, Payout, CurrencyItemDefinition, Loot);
+    Deliverer->GrantCurrencyOfDefinition(CurrencyDef, Payout);
     GrantTradingXp(Deliverer, Payout);
 
     if (UMythicLivingWorldSubsystem *LWS = GI->GetSubsystem<UMythicLivingWorldSubsystem>()) {
@@ -650,7 +632,10 @@ FMythicTradePlan AMythicVendor::Server_ExecuteRepair(AMythicPlayerController *Pa
         return Plan;
     }
 
-    ChargePlayerCurrency(Payer, Plan.TotalPrice);
+    if (!Payer->TryChargeCurrency(Plan.TotalPrice)) {
+        Reject.Result = EMythicTradeResult::InsufficientFunds;
+        return Reject;
+    }
     const_cast<UDurabilityFragment *>(Dura)->ServerRepair(Plan.Quantity);
     return Plan;
 }
@@ -708,7 +693,10 @@ FMythicTradePlan AMythicVendor::Server_ExecuteRepairAll(AMythicPlayerController 
         return Plan;
     }
 
-    ChargePlayerCurrency(Payer, Plan.TotalPrice);
+    if (!Payer->TryChargeCurrency(Plan.TotalPrice)) {
+        Reject.Result = EMythicTradeResult::InsufficientFunds;
+        return Reject;
+    }
     for (int32 i = 0; i < Plan.Quantity && i < Candidates.Num(); ++i) {
         const_cast<UDurabilityFragment *>(Candidates[i].Dura)->ServerRepair(Candidates[i].RestoreAmount);
     }
@@ -816,7 +804,11 @@ FMythicTradePlan AMythicVendor::Server_ExecuteBuyback(AMythicPlayerController *B
         Reject.Result = EMythicTradeResult::OutOfStock;
         return Reject;
     }
-    ChargePlayerCurrency(Buyer, Price);
+    if (!Buyer->TryChargeCurrency(Price)) {
+        Stock->SetItemInSlot(StockSlot, Carried);
+        Reject.Result = EMythicTradeResult::InsufficientFunds;
+        return Reject;
+    }
     Entry.Instance.Reset();
     Entry.PricePaid = 0;
 

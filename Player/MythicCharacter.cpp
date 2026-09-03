@@ -10,7 +10,19 @@
 #include "Input/MythicInputComponent.h"
 #include "Input/MythicInputConfig.h"
 #include "GAS/MythicAbilitySystemComponent.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
+#include "GAS/Effects/MythicCrowdControl.h"
+#include "GAS/MythicGameplayEffectContext.h"
+#include "GAS/MythicTags_GAS.h"
 #include "GameplayEffect.h"
+
+namespace {
+// A pawn with no Defense set takes plain fall damage; reading the absent attribute would answer 0 and make it immune.
+float ResolveFallDamageTaken(const UAbilitySystemComponent &ASC) {
+    const FGameplayAttribute Attribute = UMythicAttributeSet_Defense::GetFallDamageTakenAttribute();
+    return ASC.HasAttributeSetForAttribute(Attribute) ? FMath::Max(0.0f, ASC.GetNumericAttribute(Attribute)) : 1.0f;
+}
+}
 
 AMythicCharacter::AMythicCharacter() {
     bReplicates = true;
@@ -37,24 +49,34 @@ float AMythicCharacter::ComputeFallDamage(float ImpactSpeed, float SafeSpeed, fl
 void AMythicCharacter::Landed(const FHitResult &Hit) {
     Super::Landed(Hit);
 
-    if (!bEnableFallDamage || !HasAuthority() || !FallDamageEffect) {
+    if (!HasAuthority()) {
         return;
     }
+    UAbilitySystemComponent *ASC = GetAbilitySystemComponent();
     const UCharacterMovementComponent *Move = GetCharacterMovement();
     const float ImpactSpeed = Move ? FMath::Abs(Move->Velocity.Z) : 0.0f;
-    const float Damage = ComputeFallDamage(ImpactSpeed, SafeFallSpeed, FallDamagePerSpeed, MaxFallDamage);
-    if (Damage <= 0.0f) {
+
+    float Damage = 0.0f;
+    if (ASC && bEnableFallDamage && FallDamageEffect) {
+        Damage = ComputeFallDamage(ImpactSpeed, SafeFallSpeed, FallDamagePerSpeed, MaxFallDamage) * ResolveFallDamageTaken(*ASC);
+        if (Damage > 0.0f) {
+            Damage = OnFallDamageComputed(ImpactSpeed, ModifyFallDamage(ImpactSpeed, Damage));
+        }
+    }
+    const bool bPrevented = !ASC || ASC->HasMatchingGameplayTag(GAS_IMMUNE_FALLDAMAGE) || Damage <= 0.0f;
+    OnFallDamageResolved.Broadcast(ImpactSpeed, Damage, bPrevented);
+    if (bPrevented) {
         return;
     }
 
-    UAbilitySystemComponent *ASC = GetAbilitySystemComponent();
-    if (!ASC) {
-        return;
-    }
     FGameplayEffectContextHandle Ctx = ASC->MakeEffectContext();
     Ctx.AddInstigator(this, this);
-    const FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(FallDamageEffect, Damage, Ctx);
+    if (FMythicGameplayEffectContext *MythicCtx = FMythicGameplayEffectContext::ExtractEffectContext(Ctx)) {
+        MythicCtx->AddHitTag(GAS_HIT_FALL);
+    }
+    const FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(FallDamageEffect, 1.0f, Ctx);
     if (Spec.IsValid()) {
+        Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_GENERIC, Damage);
         ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
     }
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "MythicCombatTextTypes.generated.h"
 
 class UMythicStatusEffectDefinition;
@@ -28,6 +29,9 @@ enum class EMythicCombatTextOrigin : uint8 {
 
     /** Restored health. Included so healing can use the same transport when that path is unified. */
     Healing,
+
+    /** Owner-only text called out above the pawn, such as a rune moment. Carries verbatim text, never a magnitude. */
+    Callout,
 };
 
 /**
@@ -71,4 +75,8 @@ struct MYTHIC_API FMythicResolvedCombatTextEvent {
     /** True when this event was routed to the player who dealt it; false for incoming presentation. */
     UPROPERTY(BlueprintReadOnly, Category = "Combat Text")
     bool bOutgoingForViewer = true;
+
+    /** Hit tag that picks a TaggedStyles entry on the client. Empty means untagged; tagged and untagged never merge. */
+    UPROPERTY(BlueprintReadOnly, Category = "Combat Text")
+    FGameplayTag PresentationTag;
 };

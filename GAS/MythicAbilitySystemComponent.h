@@ -67,6 +67,13 @@ public:
     UFUNCTION(BlueprintCallable, Category = "GameplayCue")
     void ExecuteGameplayCueMulticast(FGameplayTag CueTag, const FGameplayCueParameters &CueParams);
 
+    /** Executes a transient gameplay cue on the owning client only; partners never see or hear it. */
+    UFUNCTION(BlueprintCallable, Category = "GameplayCue")
+    void ExecuteGameplayCueOwnerOnly(FGameplayTag CueTag, const FGameplayCueParameters &CueParams);
+
+    UFUNCTION(Client, Unreliable, Category = "GameplayCue")
+    void Client_ExecuteGameplayCue(FGameplayTag CueTag, FGameplayCueParameters Parameters);
+
 protected:
     UFUNCTION(NetMulticast, Unreliable)
     void Multicast_ExecuteGameplayCue(FGameplayTag CueTag, FGameplayCueParameters CueParams);

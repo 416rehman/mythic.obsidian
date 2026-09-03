@@ -31,6 +31,37 @@ enum class EMythicDamageNumberAnimStyle : uint8 {
     Shake UMETA(DisplayName = "Shake"),
 
     Pulse UMETA(DisplayName = "Pulse"),
+
+    /** Rises to a fixed height with a small overshoot, then holds. Callouts use this so they read as a line, not a drifting number. */
+    RiseAndSettle UMETA(DisplayName = "Rise and Settle"),
+};
+
+/** One authored look for a class of combat text: colour, motion, size and how long it lingers. */
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicCombatTextStyle {
+    GENERATED_BODY()
+
+    FMythicCombatTextStyle() = default;
+
+    FMythicCombatTextStyle(const FLinearColor InColor, const EMythicDamageNumberAnimStyle InAnimStyle,
+                           const float InScaleMultiplier, const float InLifetimeMultiplier)
+        : Color(InColor), AnimStyle(InAnimStyle), ScaleMultiplier(InScaleMultiplier),
+          LifetimeMultiplier(InLifetimeMultiplier) {}
+
+    /** Glyph colour for resolved numbers. Callouts carry their own colour from the caller and ignore this. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Style")
+    FLinearColor Color = FLinearColor::White;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Style")
+    EMythicDamageNumberAnimStyle AnimStyle = EMythicDamageNumberAnimStyle::FloatUp;
+
+    /** Multiplies the presentation scale; a critical tagged number still takes the critical scale on top. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Style", meta = (ClampMin = "0.1", ClampMax = "3.0"))
+    float ScaleMultiplier = 1.0f;
+
+    /** Multiplies the base lifetime for resolved numbers, or the caller's lifetime for callouts. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Style", meta = (ClampMin = "0.1", ClampMax = "3.0"))
+    float LifetimeMultiplier = 1.0f;
 };
 
 /** Transient local presentation state for one resolved numeric or textual combat result. */
@@ -94,6 +125,9 @@ struct FMythicDamageNumberData {
 
     UPROPERTY()
     EMythicDamageNumberAnimStyle AnimStyle = EMythicDamageNumberAnimStyle::FloatUp;
+
+    UPROPERTY()
+    FGameplayTag PresentationTag;
 
     bool IsExpired(float CurrentTime) const {
         return (CurrentTime - SpawnTime) >= Lifetime;
@@ -235,6 +269,31 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Styles")
     EMythicDamageNumberAnimStyle DodgeAnimStyle = EMythicDamageNumberAnimStyle::FloatUpSlow;
 
+    /** Look for owner-only callouts such as a rune moment. Colour comes from the caller; motion, size and lifetime from here. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Styles")
+    FMythicCombatTextStyle CalloutStyle = FMythicCombatTextStyle(FLinearColor(1.0f, 0.85f, 0.4f),
+                                                                 EMythicDamageNumberAnimStyle::RiseAndSettle,
+                                                                 1.25f, 1.0f);
+
+    /**
+     * Looks keyed by a resolved event's PresentationTag, checked before the critical branch so a rune-tagged hit keeps
+     * its own colour even when it crits. A tag with no entry falls back to its parents, so one row can cover GAS.Hit.Rune.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Styles")
+    TMap<FGameplayTag, FMythicCombatTextStyle> TaggedStyles;
+
+    /** Screen-space height a Rise and Settle entry climbs before it holds. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Callout", meta = (ClampMin = "0.0", ClampMax = "300.0"))
+    float CalloutRiseHeight = 36.0f;
+
+    /** Seconds a Rise and Settle entry takes to reach its rest height. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Callout", meta = (ClampMin = "0.01", ClampMax = "2.0", Units = "s"))
+    float CalloutSettleSeconds = 0.35f;
+
+    /** Overshoot strength of the settle; 0 eases straight in, larger values bounce past the rest height first. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Callout", meta = (ClampMin = "0.0", ClampMax = "5.0"))
+    float CalloutOvershoot = 1.7f;
+
     /** Whether sufficiently large magnitudes use compact K/M suffixes. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Formatting")
     bool bAbbreviateLargeNumbers = false;
@@ -271,11 +330,17 @@ public:
     void AddResolvedCombatText(const FMythicResolvedCombatTextEvent &Event);
 
     /**
-     * COMBAT-ONLY: float arbitrary combat status text off a world point (e.g. "Shield Broken!", "Winded!", "DODGE").
-     * Non-combat feedback belongs in the UMG/MVVM HUD — this is deliberately not a generic floating-text hatch.
+     * Floats combat text off a world point ("Shield Broken!", "Winded!") or, with Origin Callout, an owner-only line
+     * such as "CHEATED DEATH" that rises and settles in the CalloutStyle look. Text is drawn verbatim. HUD notices,
+     * banners and feed lines still belong in the UMG/MVVM HUD; this is combat-moment feedback only.
      */
     UFUNCTION(BlueprintCallable, Category = "Mythic|DamageNumbers")
-    void AddCombatText(FVector WorldLocation, const FString &Text, FLinearColor Color, float Lifetime = 1.0f);
+    void AddCombatText(FVector WorldLocation, const FString &Text, FLinearColor Color, float Lifetime = 1.0f,
+                       EMythicCombatTextOrigin Origin = EMythicCombatTextOrigin::DirectDamage);
+
+    /** Localised-text form of AddCombatText for callers that already hold an FText, such as a rune callout RPC. */
+    void AddCombatText(FVector WorldLocation, const FText &Text, FLinearColor Color, float Lifetime,
+                       EMythicCombatTextOrigin Origin);
 
     /**
      * Floats a DODGE callout using the configured DodgeColor. The authority dodge path invokes this separately because
@@ -305,6 +370,9 @@ public:
 protected:
     FString FormatMagnitude(float Magnitude) const;
 
+    /** Exact entry first, then each parent tag; null when nothing in TaggedStyles claims the tag. */
+    const FMythicCombatTextStyle *FindTaggedStyle(const FGameplayTag &PresentationTag) const;
+
     FVector2D CalculateAnimationOffset(const FMythicDamageNumberData &Data, float CurrentTime) const;
 
     float CalculateAnimationScale(const FMythicDamageNumberData &Data, float CurrentTime) const;
@@ -318,8 +386,9 @@ protected:
 
     void ApplyRandomMotion(FMythicDamageNumberData &Data) const;
 
-    void AddCombatTextInternal(FVector WorldLocation, const FString &Text, FLinearColor Color, float Lifetime,
-                               EMythicDamageNumberAnimStyle AnimStyle);
+    void AddCombatTextInternal(FVector WorldLocation, const FText &Text, FLinearColor Color, float Lifetime,
+                               EMythicDamageNumberAnimStyle AnimStyle, EMythicCombatTextOrigin Origin,
+                               float ScaleMultiplier = 1.0f);
 
 protected:
     UPROPERTY()
@@ -334,4 +403,6 @@ protected:
     int32 NextID = 0;
 
     FDelegateHandle HUDDrawDelegateHandle;
+
+    friend struct FMythicDamageNumberTestAccess;
 };

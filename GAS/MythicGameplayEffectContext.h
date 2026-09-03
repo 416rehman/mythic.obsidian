@@ -87,6 +87,23 @@ public:
     float GetShieldAbsorbed() const { return ShieldAbsorbed; }
     void SetShieldAbsorbed(float InShieldAbsorbed) { ShieldAbsorbed = InShieldAbsorbed; }
 
+protected:
+    UPROPERTY()
+    float BonusDamageMultiplier = 1.0f;
+
+    UPROPERTY()
+    FGameplayTagContainer HitTags;
+
+public:
+    // A rune's one-shot MORE multiplier on this hit. The execution applies it after the crit multiply and outside
+    // the compose buckets, so it never rides a diminishing curve or the More stack cap.
+    float GetBonusDamageMultiplier() const { return BonusDamageMultiplier; }
+    void SetBonusDamageMultiplier(float Multiplier) { BonusDamageMultiplier = Multiplier; }
+
+    // GAS.Hit.* tags this hit carries into the Dmg.Delivered / Dmg.Received payloads and the combat text.
+    void AddHitTag(const FGameplayTag &Tag) { HitTags.AddTag(Tag); }
+    const FGameplayTagContainer &GetHitTags() const { return HitTags; }
+
     virtual FGameplayEffectContext *Duplicate() const override {
         FMythicGameplayEffectContext *NewContext = new FMythicGameplayEffectContext();
         *NewContext = *this;
@@ -356,6 +373,31 @@ public:
             }
         }
         return false;
+    }
+
+    /** Sets the one-shot MORE multiplier on this hit's damage, applied after the crit multiply. 1 is neutral. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
+    static void SetBonusDamageMultiplier(FGameplayEffectContextHandle Handle, float Multiplier) {
+        if (FMythicGameplayEffectContext *MythicContext = FMythicGameplayEffectContext::ExtractEffectContext(Handle)) {
+            MythicContext->SetBonusDamageMultiplier(Multiplier);
+        }
+    }
+
+    /** Stamps a GAS.Hit.* tag on this hit. Dmg.Delivered / Dmg.Received listeners and the combat text read it. */
+    UFUNCTION(BlueprintCallable, Category = "Mythic|GAS|GameplayEffectContext")
+    static void AddHitTag(FGameplayEffectContextHandle Handle, FGameplayTag Tag) {
+        if (FMythicGameplayEffectContext *MythicContext = FMythicGameplayEffectContext::ExtractEffectContext(Handle)) {
+            MythicContext->AddHitTag(Tag);
+        }
+    }
+
+    /** The one-shot MORE multiplier on this hit. 1 when none was set or the context is not a Mythic one. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|GAS|GameplayEffectContext")
+    static float GetBonusDamageMultiplier(const FGameplayEffectContextHandle &Handle) {
+        if (const FMythicGameplayEffectContext *MythicContext = FMythicGameplayEffectContext::ExtractEffectContext(Handle)) {
+            return MythicContext->GetBonusDamageMultiplier();
+        }
+        return 1.0f;
     }
 };
 

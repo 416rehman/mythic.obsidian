@@ -12,8 +12,13 @@
 #include "Misc/Paths.h"
 #include "UObject/UnrealType.h"
 
+#include "GameplayTagsManager.h"
+#include "InputAction.h"
+#include "Progression/Runes/MythicRuneComponent.h"
 #include "UI/MythicHUDLayout.h"
+#include "UI/Menu/MythicCharacterPageWidget.h"
 #include "UI/Menu/MythicMenuShell.h"
+#include "UI/Menu/MythicRunePickerWidget.h"
 
 namespace {
 /**
@@ -248,6 +253,138 @@ bool FMythicMenuAndInventoryInputContractTest::RunTest(const FString &Parameters
             *FString::Printf(TEXT("%s is mapped once to %s"),
                              *Expected.ActionName.ToString(), *Expected.Key.ToString()),
             CountAuthoredMapping(InventoryContext, Expected.ActionName, Expected.Key), 1);
+    }
+    return true;
+}
+
+namespace {
+// The picker and page keep their authored knobs protected, so the test reads them the way the editor does.
+bool MenuRoute_ReadClassIsSet(const UObject *Object, const FName Name) {
+    const FClassProperty *Property = FindFProperty<FClassProperty>(Object->GetClass(), Name);
+    return Property && Property->GetPropertyValue_InContainer(Object) != nullptr;
+}
+
+FSoftObjectPtr MenuRoute_ReadSoftObject(const UObject *Object, const FName Name) {
+    const FSoftObjectProperty *Property = FindFProperty<FSoftObjectProperty>(Object->GetClass(), Name);
+    return Property ? Property->GetPropertyValue_InContainer(Object) : FSoftObjectPtr();
+}
+
+FGameplayTag MenuRoute_ReadTag(const UObject *Object, const FName Name) {
+    const FStructProperty *Property = FindFProperty<FStructProperty>(Object->GetClass(), Name);
+    if (!Property || Property->Struct != FGameplayTag::StaticStruct()) {
+        return FGameplayTag();
+    }
+    return *Property->ContainerPtrToValuePtr<FGameplayTag>(Object);
+}
+
+int64 MenuRoute_ReadEnumValue(const UObject *Object, const FName Name) {
+    const FProperty *Property = FindFProperty<FProperty>(Object->GetClass(), Name);
+    if (const FEnumProperty *Enum = CastField<FEnumProperty>(Property)) {
+        return Enum->GetUnderlyingProperty()->GetSignedIntPropertyValue(Enum->ContainerPtrToValuePtr<void>(Object));
+    }
+    if (const FByteProperty *Byte = CastField<FByteProperty>(Property)) {
+        return Byte->GetPropertyValue_InContainer(Object);
+    }
+    return -1;
+}
+
+int32 MenuRoute_ReadInt(const UObject *Object, const FName Name) {
+    const FIntProperty *Property = FindFProperty<FIntProperty>(Object->GetClass(), Name);
+    return Property ? Property->GetPropertyValue_InContainer(Object) : INDEX_NONE;
+}
+
+bool MenuRoute_ContextMapsAction(const UInputMappingContext *Context, const UObject *Action) {
+    if (!Context || !Action) {
+        return false;
+    }
+    for (const FEnhancedActionKeyMapping &Mapping : Context->GetMappings()) {
+        if (Mapping.Action.Get() == Action) {
+            return true;
+        }
+    }
+    return false;
+}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicRunePickerContentTest,
+    "Mythic.Content.RunePicker",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicRunePickerContentTest::RunTest(const FString &Parameters) {
+    TArray<const UMythicRunePickerWidget *> Pickers;
+    GatherAuthoredDefaults(Pickers);
+    TArray<const UMythicCharacterPageWidget *> Pages;
+    GatherAuthoredDefaults(Pages);
+    AddInfo(FString::Printf(TEXT("pickers: %d, pages: %d"), Pickers.Num(), Pages.Num()));
+    if (!TestTrue(TEXT("the project has a rune picker to check - an empty scan would pass for the wrong reason"),
+                  Pickers.Num() > 0)) {
+        return false;
+    }
+    if (!TestTrue(TEXT("the project has a character page to check"), Pages.Num() > 0)) {
+        return false;
+    }
+
+    // The page's context is the one the picker's prompts live in: the picker adds none of its own.
+    TArray<const UInputMappingContext *> PageContexts;
+    for (const UMythicCharacterPageWidget *Page : Pages) {
+        if (const UInputMappingContext *Context =
+                Cast<UInputMappingContext>(MenuRoute_ReadSoftObject(Page, TEXT("UIInputContext")).LoadSynchronous())) {
+            PageContexts.Add(Context);
+        }
+    }
+
+    const FGameplayTag ModalLayer = FGameplayTag::RequestGameplayTag(TEXT("UI.Layer.Modal"), false);
+    TestTrue(TEXT("UI.Layer.Modal is a registered tag"), ModalLayer.IsValid());
+
+    for (const UMythicRunePickerWidget *Picker : Pickers) {
+        const FString Where = Picker->GetName();
+        TestTrue(*FString::Printf(TEXT("%s owns Back while it is the active root"), *Where),
+                 IsAuthoredBackHandler(Picker));
+        TestTrue(*FString::Printf(TEXT("%s is modal"), *Where), Picker->IsModal());
+        TestTrue(*FString::Printf(TEXT("%s is pushed onto UI.Layer.Modal"), *Where),
+                 MenuRoute_ReadTag(Picker, TEXT("PickerLayerTag")) == ModalLayer);
+        TestTrue(*FString::Printf(TEXT("%s has a CellClass"), *Where), MenuRoute_ReadClassIsSet(Picker, TEXT("CellClass")));
+        TestTrue(*FString::Printf(TEXT("%s has a SocketClass"), *Where), MenuRoute_ReadClassIsSet(Picker, TEXT("SocketClass")));
+        TestEqual(*FString::Printf(TEXT("%s takes Menu input"), *Where),
+                  MenuRoute_ReadEnumValue(Picker, TEXT("InputConfig")), static_cast<int64>(EMythicWidgetInputMode::Menu));
+
+        const TCHAR *ActionNames[] = { TEXT("PrimaryAction"), TEXT("ActionsAction") };
+        for (const TCHAR *ActionName : ActionNames) {
+            const FSoftObjectPtr Soft = MenuRoute_ReadSoftObject(Picker, ActionName);
+            const UObject *Action = Soft.IsNull() ? nullptr : Soft.LoadSynchronous();
+            TestNotNull(*FString::Printf(TEXT("%s %s is set"), *Where, ActionName), Action);
+            bool bMapped = false;
+            for (const UInputMappingContext *Context : PageContexts) {
+                bMapped |= MenuRoute_ContextMapsAction(Context, Action);
+            }
+            TestTrue(*FString::Printf(TEXT("%s %s is mapped in the character page's input context"), *Where,
+                                      ActionName),
+                     bMapped);
+        }
+    }
+
+    const int32 MaxSlots = GetDefault<UMythicRuneComponent>()->MaxSlots;
+    FGameplayTagContainer Categories = UGameplayTagsManager::Get().RequestGameplayTagChildren(
+        FGameplayTag::RequestGameplayTag(TEXT("Rune.Category"), false));
+    TestTrue(TEXT("Rune.Category has child tags to name"), Categories.Num() > 0);
+
+    for (const UMythicCharacterPageWidget *Page : Pages) {
+        const FString Where = Page->GetName();
+        TestTrue(*FString::Printf(TEXT("%s has a SocketClass"), *Where), MenuRoute_ReadClassIsSet(Page, TEXT("SocketClass")));
+        TestTrue(*FString::Printf(TEXT("%s has a SocketTooltipClass"), *Where),
+                 MenuRoute_ReadClassIsSet(Page, TEXT("SocketTooltipClass")));
+        TestTrue(*FString::Printf(TEXT("%s has a RunePickerClass"), *Where),
+                 MenuRoute_ReadClassIsSet(Page, TEXT("RunePickerClass")));
+        TestEqual(*FString::Printf(TEXT("%s draws one socket per rune slot"), *Where),
+                  MenuRoute_ReadInt(Page, TEXT("SocketCount")), MaxSlots);
+
+        // A category with no colour row draws white, which reads as "no category" on every socket that wears it.
+        for (const FGameplayTag &Category : Categories) {
+            const FMythicRuneCategoryColour *Row = Page->GetRuneCategoryColours().FindByPredicate(
+                [&Category](const FMythicRuneCategoryColour &Entry) { return Entry.Category == Category; });
+            TestNotNull(*FString::Printf(TEXT("%s colours %s"), *Where, *Category.ToString()), Row);
+        }
     }
     return true;
 }

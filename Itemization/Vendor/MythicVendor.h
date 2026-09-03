@@ -84,9 +84,13 @@ public:
 
     float ResolveScarcityMultiplier(const UItemDefinition *Def) const;
 
-    // True iff this vendor can pay out (has a currency definition assigned). UI can hide the Sell tab when false.
+    // True iff this vendor can pay out (a currency definition resolves). UI can hide the Sell tab when false.
     UFUNCTION(BlueprintPure, Category = "Vendor")
-    bool CanVendorBuyFromPlayers() const { return CurrencyItemDefinition != nullptr; }
+    bool CanVendorBuyFromPlayers() const { return ResolveCurrencyItemDefinition() != nullptr; }
+
+    // The currency this vendor pays with: its own override, else the project wallet definition in Mythic settings.
+    UFUNCTION(BlueprintPure, Category = "Vendor")
+    UItemDefinition *ResolveCurrencyItemDefinition() const;
 
     // True iff this vendor offers repair (a blacksmith). UI hides the Repair option when false.
     UFUNCTION(BlueprintPure, Category = "Vendor")
@@ -155,8 +159,8 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vendor", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float SellRate = 0.4f;
 
-    // The currency item this vendor mints to pay sale proceeds (the project "gold" definition). MUST be assigned for
-    // selling; when null this vendor only sells goods (player sells are rejected — honest, never a fake payout).
+    // Optional override of the project wallet definition (UMythicDeveloperSettings::CurrencyItemDefinition) this
+    // vendor mints to pay sale proceeds. With neither assigned the vendor only sells goods (player sells are rejected).
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vendor")
     TObjectPtr<UItemDefinition> CurrencyItemDefinition = nullptr;
 

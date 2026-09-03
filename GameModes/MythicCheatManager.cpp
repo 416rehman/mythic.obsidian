@@ -25,6 +25,14 @@
 #include "Mythic/GAS/MythicTags_GAS.h"
 #include "Mythic/GAS/Effects/MythicStatusRegistry.h"
 #include "Mythic/GAS/Effects/MythicStatusEffectDefinition.h"
+#include "Mythic/Narrative/MythicNarrativeStateComponent.h"
+#include "Mythic/Progression/MythicAchievementComponent.h"
+#include "Mythic/Progression/MythicAchievementDefinition.h"
+#include "Mythic/Progression/MythicAchievementSet.h"
+#include "Mythic/Progression/MythicStatLedgerComponent.h"
+#include "Mythic/Progression/MythicUnlockComponent.h"
+#include "Mythic/Progression/Runes/MythicRuneComponent.h"
+#include "Mythic/Progression/Runes/MythicRuneDefinition.h"
 #include "Mythic/Itemization/Inventory/Fragments/FragmentTypes.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -99,6 +107,7 @@ void UMythicCheatManager::MythHelp() {
     UE_LOG(Myth, Warning, TEXT("--- ATTRIBUTES ---"));
     UE_LOG(Myth, Warning, TEXT("  MythListAttributes                 - List all attributes and values"));
     UE_LOG(Myth, Warning, TEXT("  MythSetAttribute <Name> <Value>    - Set attribute value"));
+    UE_LOG(Myth, Warning, TEXT("  MythSetHealth <Fraction>           - Health to a fraction of max (0-1; above 1 reads as percent)"));
     UE_LOG(Myth, Warning, TEXT("  MythStatus <Name> [0|1]            - Toggle a status tag (Burning, Frozen, ...)"));
     UE_LOG(Myth, Warning, TEXT("  MythClearStatus                    - Clear every status tag"));
     UE_LOG(Myth, Warning, TEXT(""));
@@ -110,6 +119,21 @@ void UMythicCheatManager::MythHelp() {
     UE_LOG(Myth, Warning, TEXT("  MythListSkills                     - Level, ceiling and practice per skill"));
     UE_LOG(Myth, Warning, TEXT("  MythPracticeSkill <Name> [Count]   - Use a skill Count times, the real levelling route"));
     UE_LOG(Myth, Warning, TEXT("  MythLevelSkill <Name> [Levels]     - Hand over levels without the practice"));
+    UE_LOG(Myth, Warning, TEXT(""));
+    UE_LOG(Myth, Warning, TEXT("--- RUNES AND DEEDS (server/standalone only) ---"));
+    UE_LOG(Myth, Warning, TEXT("  MythListRunes                      - Name, deed, earned, worn socket, HUD state, timer, rolls"));
+    UE_LOG(Myth, Warning, TEXT("  MythGiveRune <Name> [Slot]         - Wear a rune (partial match); -1 = first empty socket"));
+    UE_LOG(Myth, Warning, TEXT("  MythRemoveRune <Slot>              - Take the rune out of a socket"));
+    UE_LOG(Myth, Warning, TEXT("  MythMoveRune <From> <To>           - Move a worn rune between sockets"));
+    UE_LOG(Myth, Warning, TEXT("  MythRuneSlots <N>                  - Set open sockets to N; closing one takes its rune out"));
+    UE_LOG(Myth, Warning, TEXT("  MythUnlockAllRunes                 - Earn every deed the rune library gates on"));
+    UE_LOG(Myth, Warning, TEXT("  MythUnlockAllRuneSlots             - Open every socket"));
+    UE_LOG(Myth, Warning, TEXT("  MythRuneHud                        - Per socket: HUD state, seconds left, stacks"));
+    UE_LOG(Myth, Warning, TEXT("  MythRuneRolls                      - Each worn rune's rolled numbers against their ranges"));
+    UE_LOG(Myth, Warning, TEXT("  MythGiveDeed <Achievement>         - Earn a deed through its real stat chain"));
+    UE_LOG(Myth, Warning, TEXT("  MythClearDeed <Achievement>        - Forget a deed; drops runes that needed it"));
+    UE_LOG(Myth, Warning, TEXT("  MythRecordStat <Stat.Tag> [Delta]  - Add to a progression counter"));
+    UE_LOG(Myth, Warning, TEXT("  MythSetSeason <Season>             - Spring, Summer, Autumn or Winter"));
     UE_LOG(Myth, Warning, TEXT(""));
     UE_LOG(Myth, Warning, TEXT("--- LIVING WORLD ---"));
     UE_LOG(Myth, Warning, TEXT("  MythLivingWorldStatus              - System status (thread, fabric, factions, territory)"));
@@ -1696,6 +1720,31 @@ void UMythicCheatManager::MythReviveSelf() {
     UE_LOG(Myth, Warning, TEXT(">>> ReviveSelf: revived"));
 }
 
+void UMythicCheatManager::MythSetHealth(float Fraction) {
+    APlayerController *PC = GetOuterAPlayerController();
+    APawn *Pawn = PC ? PC->GetPawn() : nullptr;
+    if (!Pawn) {
+        UE_LOG(Myth, Error, TEXT(">>> MythSetHealth: no pawn"));
+        return;
+    }
+    if (!Pawn->HasAuthority()) {
+        UE_LOG(Myth, Error, TEXT(">>> MythSetHealth needs authority - run it on the server or in standalone"));
+        return;
+    }
+    UMythicLifeComponent *Life = UMythicLifeComponent::FindHealthComponent(Pawn);
+    if (!Life || !Life->IsInitialized()) {
+        UE_LOG(Myth, Error, TEXT(">>> MythSetHealth: pawn has no initialised LifeComponent"));
+        return;
+    }
+    if (!FMath::IsFinite(Fraction)) {
+        UE_LOG(Myth, Error, TEXT(">>> MythSetHealth: '%f' is not a number"), Fraction);
+        return;
+    }
+    const float Clamped = FMath::Clamp(Fraction > 1.0f ? Fraction / 100.0f : Fraction, 0.0f, 1.0f);
+    Life->ServerSetHealthFraction(Clamped);
+    UE_LOG(Myth, Warning, TEXT(">>> Health %.1f / %.1f (%.0f%%)"), Life->GetHealth(), Life->GetMaxHealth(), Clamped * 100.0f);
+}
+
 void UMythicCheatManager::MythAdvanceWorldTier() {
     APlayerController *PC = GetOuterAPlayerController();
     UWorld *World = PC ? PC->GetWorld() : nullptr;
@@ -1877,4 +1926,540 @@ void UMythicCheatManager::MythGiveTalent(const FString &TalentName) {
     FGameplayAbilitySpec Spec(Match->AbilityDef.Ability, 1, INDEX_NONE, Match);
     ASC->GiveAbility(Spec);
     UE_LOG(Myth, Log, TEXT(">>> Granted %s: %s"), *Match->GetName(), *Match->AbilityDef.RichText.ToString());
+}
+
+namespace {
+AMythicPlayerState *Cheat_PlayerState(APlayerController *PC) {
+    return PC ? Cast<AMythicPlayerState>(PC->PlayerState) : nullptr;
+}
+
+// Rune verbs, deeds and the ledger are all authority-gated, so a client console silently does nothing without this.
+AMythicPlayerState *Cheat_AuthorityPlayerState(APlayerController *PC, const TCHAR *Cheat) {
+    AMythicPlayerState *PS = Cheat_PlayerState(PC);
+    if (!PS) {
+        UE_LOG(Myth, Error, TEXT(">>> No player state"));
+        return nullptr;
+    }
+    if (!PS->HasAuthority()) {
+        UE_LOG(Myth, Error, TEXT(">>> %s needs authority - run it on the server or in standalone"), Cheat);
+        return nullptr;
+    }
+    return PS;
+}
+
+TArray<UMythicRuneDefinition *> Cheat_AllRunes() {
+    FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry &Registry = Module.Get();
+    Registry.SearchAllAssets(true);
+
+    TArray<FAssetData> Assets;
+    Registry.GetAssetsByClass(UMythicRuneDefinition::StaticClass()->GetClassPathName(), Assets);
+
+    TArray<UMythicRuneDefinition *> Out;
+    for (const FAssetData &Asset : Assets) {
+        if (UMythicRuneDefinition *Rune = Cast<UMythicRuneDefinition>(Asset.GetAsset())) {
+            Out.Add(Rune);
+        }
+    }
+    Out.Sort([](const UMythicRuneDefinition &A, const UMythicRuneDefinition &B) { return A.GetName() < B.GetName(); });
+    return Out;
+}
+
+UMythicRuneDefinition *Cheat_FindRune(const FString &Name) {
+    for (UMythicRuneDefinition *Rune : Cheat_AllRunes()) {
+        if (Rune->GetName().Contains(Name) || Rune->Name.ToString().Contains(Name)) {
+            return Rune;
+        }
+    }
+    UE_LOG(Myth, Error, TEXT(">>> No rune matching '%s'. MythListRunes for the list."), *Name);
+    return nullptr;
+}
+
+int32 Cheat_WornSlot(const UMythicRuneComponent *Runes, const UMythicRuneDefinition *Rune) {
+    const FSoftObjectPath Path(Rune);
+    const TArray<TSoftObjectPtr<UMythicRuneDefinition>> &Worn = Runes->GetEquippedRunes();
+    for (int32 Slot = 0; Slot < Worn.Num(); Slot++) {
+        if (Worn[Slot].ToSoftObjectPath() == Path) {
+            return Slot;
+        }
+    }
+    return INDEX_NONE;
+}
+
+// The same three axes HandleTriggerEvent gathers, so "open now" here is what the clause will see.
+FGameplayTagContainer Cheat_WorldTags(const APlayerController *PC) {
+    FGameplayTagContainer Tags;
+    const UGameInstance *GI = PC ? PC->GetGameInstance() : nullptr;
+    if (const UMythicEnvironmentSubsystem *Env = GI ? GI->GetSubsystem<UMythicEnvironmentSubsystem>() : nullptr) {
+        Tags.AddTag(Env->GetWeather());
+        Tags.AddTag(Env->GetDayTimeTag());
+        Tags.AddTag(Env->GetSeasonTag());
+    }
+    return Tags;
+}
+
+// A v2 rune has no authored gate to print; what it has is a HUD cell, a timer and its rolls. All three come off the
+// live rune component, so this reads what the player's screen is reading.
+FString Cheat_RuneStateSummary(const UMythicRuneComponent *Runes, const UMythicRuneDefinition *Rune, int32 Slot) {
+    const FSoftObjectPath Path(Rune);
+    const FMythicRuneRollSet *Set = Runes->GetRuneRolls().FindByPredicate([&Path](const FMythicRuneRollSet &Candidate) {
+        return Candidate.Rune.ToSoftObjectPath() == Path;
+    });
+    const FString Rolls = FString::Printf(TEXT("%d of %d rolled"), Set ? Set->Values.Num() : 0, Rune->Parameters.Num());
+    if (Slot == INDEX_NONE) {
+        return FString::Printf(TEXT("%-9s %-9s %s"), TEXT("-"), TEXT("-"), *Rolls);
+    }
+
+    const float Remaining = Runes->GetRuneHudRemainingSeconds(Slot);
+    return FString::Printf(TEXT("%-9s %-9s %s"),
+                           *StaticEnum<EMythicRuneHudState>()->GetNameStringByValue(static_cast<int64>(Runes->GetRuneHudState(Slot))),
+                           Remaining > 0.0f ? *FString::Printf(TEXT("%.1fs left"), Remaining) : TEXT("-"), *Rolls);
+}
+
+UMythicAchievementSet *Cheat_AchievementSet() {
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    UMythicAchievementSet *Set = Settings && !Settings->DefaultAchievementSet.IsNull()
+                                     ? Settings->DefaultAchievementSet.LoadSynchronous()
+                                     : nullptr;
+    if (!Set) {
+        UE_LOG(Myth, Error, TEXT(">>> No DefaultAchievementSet in Project Settings > Mythic"));
+    }
+    return Set;
+}
+
+UMythicAchievementDefinition *Cheat_FindAchievement(const FString &Name) {
+    UMythicAchievementSet *Set = Cheat_AchievementSet();
+    if (!Set) {
+        return nullptr;
+    }
+    for (UMythicAchievementDefinition *Def : Set->Achievements) {
+        if (Def && (Def->GetName().Contains(Name) || Def->DisplayName.ToString().Contains(Name)
+                    || Def->AchievementTag.ToString().Contains(Name))) {
+            return Def;
+        }
+    }
+    UE_LOG(Myth, Error, TEXT(">>> No achievement matching '%s'. Known:"), *Name);
+    for (const UMythicAchievementDefinition *Def : Set->Achievements) {
+        if (Def) {
+            UE_LOG(Myth, Warning, TEXT("      %-24s %s"), *Def->GetName(), *Def->AchievementTag.ToString());
+        }
+    }
+    return nullptr;
+}
+}
+
+void UMythicCheatManager::MythListRunes() {
+    APlayerController *PC = GetOuterAPlayerController();
+    const AMythicPlayerState *PS = Cheat_PlayerState(PC);
+    const UMythicRuneComponent *Runes = PS ? PS->GetRuneComponent() : nullptr;
+    if (!Runes) {
+        UE_LOG(Myth, Error, TEXT(">>> No rune component"));
+        return;
+    }
+
+    const FGameplayTagContainer WorldTags = Cheat_WorldTags(PC);
+    const TArray<UMythicRuneDefinition *> All = Cheat_AllRunes();
+    UE_LOG(Myth, Warning, TEXT(">>> %d runes, %d of %d sockets open, world: %s"), All.Num(), Runes->GetUnlockedSlots(),
+           Runes->MaxSlots, *WorldTags.ToStringSimple());
+    for (const UMythicRuneDefinition *Rune : All) {
+        const int32 Slot = Cheat_WornSlot(Runes, Rune);
+        UE_LOG(Myth, Warning, TEXT("    %-24s %-22s %-8s %-10s %s"), *Rune->GetName(),
+               *Rune->RequiredTag.ToString(), Runes->IsRuneUnlocked(Rune) ? TEXT("earned") : TEXT("locked"),
+               Slot == INDEX_NONE ? TEXT("-") : *FString::Printf(TEXT("socket %d"), Slot),
+               *Cheat_RuneStateSummary(Runes, Rune, Slot));
+    }
+}
+
+void UMythicCheatManager::MythGiveRune(const FString &Name, int32 Slot) {
+    AMythicPlayerState *PS = Cheat_AuthorityPlayerState(GetOuterAPlayerController(), TEXT("MythGiveRune"));
+    UMythicRuneComponent *Runes = PS ? PS->GetRuneComponent() : nullptr;
+    if (!Runes) {
+        return;
+    }
+    UMythicRuneDefinition *Rune = Cheat_FindRune(Name);
+    if (!Rune) {
+        return;
+    }
+
+    if (Slot < 0) {
+        for (int32 Index = 0; Index < Runes->GetUnlockedSlots(); Index++) {
+            if (!Runes->GetRuneInSlot(Index)) {
+                Slot = Index;
+                break;
+            }
+        }
+        if (Slot < 0) {
+            UE_LOG(Myth, Error, TEXT(">>> Every open socket is worn. Name a socket, MythRemoveRune one, or MythRuneSlots more"));
+            return;
+        }
+    }
+
+    int32 OtherSlot = INDEX_NONE;
+    const EMythicRuneRefusal Reason = Runes->CanEquipRune(Slot, Rune, OtherSlot);
+    Runes->ServerEquipRune(Slot, Rune);
+    if (Reason == EMythicRuneRefusal::None) {
+        UE_LOG(Myth, Log, TEXT(">>> %s worn in socket %d"), *Rune->GetName(), Slot);
+    }
+    else {
+        UE_LOG(Myth, Error, TEXT(">>> %s refused for socket %d: %s"), *Rune->GetName(), Slot,
+               *UMythicRuneComponent::DescribeRefusal(Reason, OtherSlot).ToString());
+    }
+}
+
+void UMythicCheatManager::MythRemoveRune(int32 Slot) {
+    AMythicPlayerState *PS = Cheat_AuthorityPlayerState(GetOuterAPlayerController(), TEXT("MythRemoveRune"));
+    UMythicRuneComponent *Runes = PS ? PS->GetRuneComponent() : nullptr;
+    if (!Runes) {
+        return;
+    }
+    const UMythicRuneDefinition *Worn = Runes->GetRuneInSlot(Slot);
+    if (!Worn) {
+        UE_LOG(Myth, Warning, TEXT(">>> Socket %d holds nothing"), Slot);
+        return;
+    }
+    Runes->ServerUnequipRune(Slot);
+    UE_LOG(Myth, Log, TEXT(">>> %s taken out of socket %d"), *Worn->GetName(), Slot);
+}
+
+void UMythicCheatManager::MythMoveRune(int32 From, int32 To) {
+    AMythicPlayerState *PS = Cheat_AuthorityPlayerState(GetOuterAPlayerController(), TEXT("MythMoveRune"));
+    UMythicRuneComponent *Runes = PS ? PS->GetRuneComponent() : nullptr;
+    if (!Runes) {
+        return;
+    }
+    const UMythicRuneDefinition *Worn = Runes->GetRuneInSlot(From);
+    Runes->ServerMoveRune(From, To);
+    if (Worn && From != To && Runes->GetRuneInSlot(To) == Worn && !Runes->GetRuneInSlot(From)) {
+        UE_LOG(Myth, Log, TEXT(">>> %s moved from socket %d to %d"), *Worn->GetName(), From, To);
+    }
+    else {
+        UE_LOG(Myth, Error, TEXT(">>> Move %d -> %d refused; see the Runes: line above"), From, To);
+    }
+}
+
+void UMythicCheatManager::MythRuneSlots(int32 Count) {
+    AMythicPlayerState *PS = Cheat_AuthorityPlayerState(GetOuterAPlayerController(), TEXT("MythRuneSlots"));
+    UMythicRuneComponent *Runes = PS ? PS->GetRuneComponent() : nullptr;
+    if (!Runes) {
+        return;
+    }
+    const int32 Target = FMath::Clamp(Count, 1, Runes->MaxSlots);
+    while (Runes->GetUnlockedSlots() < Target) {
+        const int32 Before = Runes->GetUnlockedSlots();
+        Runes->GrantSlot();
+        if (Runes->GetUnlockedSlots() == Before) {
+            break;
+        }
+    }
+    while (Runes->GetUnlockedSlots() > Target) {
+        const int32 Before = Runes->GetUnlockedSlots();
+        Runes->RevokeSlot();
+        if (Runes->GetUnlockedSlots() == Before) {
+            break;
+        }
+        UE_LOG(Myth, Log, TEXT(">>> socket %d closed"), Before - 1);
+    }
+    UE_LOG(Myth, Log, TEXT(">>> %d of %d sockets open"), Runes->GetUnlockedSlots(), Runes->MaxSlots);
+}
+
+void UMythicCheatManager::MythRuneHud() {
+    const AMythicPlayerState *PS = Cheat_PlayerState(GetOuterAPlayerController());
+    const UMythicRuneComponent *Runes = PS ? PS->GetRuneComponent() : nullptr;
+    if (!Runes) {
+        UE_LOG(Myth, Error, TEXT(">>> No rune component"));
+        return;
+    }
+    const UEnum *States = StaticEnum<EMythicRuneHudState>();
+    const TArray<FMythicRuneHudStateItem> &Rows = Runes->GetRuneHudStates();
+    UE_LOG(Myth, Warning, TEXT(">>> %d of %d sockets open, %d HUD rows, server clock %.1fs"), Runes->GetUnlockedSlots(),
+           Runes->MaxSlots, Rows.Num(), Runes->GetServerWorldTimeSeconds());
+    for (int32 Slot = 0; Slot < Runes->GetUnlockedSlots(); Slot++) {
+        const UMythicRuneDefinition *Rune = Runes->GetRuneInSlot(Slot);
+        const FMythicRuneHudStateItem *Row = Rows.FindByPredicate([Slot](const FMythicRuneHudStateItem &Item) {
+            return Item.SlotIndex == Slot;
+        });
+        UE_LOG(Myth, Warning, TEXT("    socket %d  %-24s %-9s %6.1fs left  x%d"), Slot, Rune ? *Rune->GetName() : TEXT("-"),
+               *States->GetNameStringByValue(static_cast<int64>(Runes->GetRuneHudState(Slot))),
+               Runes->GetRuneHudRemainingSeconds(Slot), Row ? Row->Stacks : 0);
+    }
+}
+
+void UMythicCheatManager::MythRuneRolls() {
+    const AMythicPlayerState *PS = Cheat_PlayerState(GetOuterAPlayerController());
+    const UMythicRuneComponent *Runes = PS ? PS->GetRuneComponent() : nullptr;
+    if (!Runes) {
+        UE_LOG(Myth, Error, TEXT(">>> No rune component"));
+        return;
+    }
+
+    const TArray<FMythicRuneRollSet> &Sets = Runes->GetRuneRolls();
+    UE_LOG(Myth, Warning, TEXT(">>> %d roll sets, %d of %d sockets open"), Sets.Num(), Runes->GetUnlockedSlots(),
+           Runes->MaxSlots);
+    for (const FMythicRuneRollSet &Set : Sets) {
+        const UMythicRuneDefinition *Rune = Set.Rune.LoadSynchronous();
+        if (!Rune) {
+            UE_LOG(Myth, Error, TEXT("    %s: definition missing, %d values orphaned"), *Set.Rune.ToString(), Set.Values.Num());
+            continue;
+        }
+        const int32 Slot = Runes->FindSlotOfRune(Rune);
+        UE_LOG(Myth, Warning, TEXT(">>> %-24s %-10s %d of %d parameters rolled"), *Rune->GetName(),
+               Slot == INDEX_NONE ? TEXT("not worn") : *FString::Printf(TEXT("socket %d"), Slot), Set.Values.Num(),
+               Rune->Parameters.Num());
+        for (const FMythicRuneRollValue &Roll : Set.Values) {
+            const FRollDefinition *Range = Rune->Parameters.Find(Roll.Parameter);
+            const FString RangeText = Range
+                                          ? FString::Printf(TEXT("[%g-%g]%s"), Range->Min, Range->Max,
+                                                            Range->bWholeNumber ? TEXT(" whole") : TEXT(""))
+                                          : FString(TEXT("not in Parameters"));
+            UE_LOG(Myth, Warning, TEXT("    %-36s %-12g %s"), *Roll.Parameter.ToString(), Roll.Value, *RangeText);
+        }
+        for (const TPair<FGameplayTag, FRollDefinition> &Param : Rune->Parameters) {
+            const bool bRolled = Set.Values.ContainsByPredicate(
+                [&Param](const FMythicRuneRollValue &Roll) { return Roll.Parameter == Param.Key; });
+            if (!bRolled) {
+                UE_LOG(Myth, Warning, TEXT("    %-36s unrolled, reads midpoint %g of [%g-%g]"), *Param.Key.ToString(),
+                       Rune->GetParameterMidpoint(Param.Key, 0.0f), Param.Value.Min, Param.Value.Max);
+            }
+        }
+    }
+
+    for (int32 Slot = 0; Slot < Runes->GetUnlockedSlots(); Slot++) {
+        const UMythicRuneDefinition *Rune = Runes->GetRuneInSlot(Slot);
+        if (!Rune || Rune->Parameters.IsEmpty()) {
+            continue;
+        }
+        const FSoftObjectPath Path(Rune);
+        const bool bHasSet = Sets.ContainsByPredicate(
+            [&Path](const FMythicRuneRollSet &Set) { return Set.Rune.ToSoftObjectPath() == Path; });
+        if (!bHasSet) {
+            UE_LOG(Myth, Error, TEXT(">>> socket %d %s has %d parameters and no roll set; ReadRolled falls back to midpoints"),
+                   Slot, *Rune->GetName(), Rune->Parameters.Num());
+        }
+    }
+    if (Sets.IsEmpty()) {
+        UE_LOG(Myth, Warning, TEXT(">>> Nothing rolled yet; MythGiveRune <Name> rolls at first socket"));
+    }
+}
+
+void UMythicCheatManager::MythGiveDeed(const FString &AchievementName) {
+    AMythicPlayerState *PS = Cheat_AuthorityPlayerState(GetOuterAPlayerController(), TEXT("MythGiveDeed"));
+    if (!PS) {
+        return;
+    }
+    const UMythicAchievementDefinition *Def = Cheat_FindAchievement(AchievementName);
+    if (!Def) {
+        return;
+    }
+    Cheat_GrantDeed(PS, Def, true);
+}
+
+bool UMythicCheatManager::Cheat_GrantDeed(AMythicPlayerState *PS, const UMythicAchievementDefinition *Def, bool bVerbose) {
+    if (!PS || !Def) {
+        return false;
+    }
+    UMythicStatLedgerComponent *Ledger = PS->GetStatLedgerComponent();
+    UMythicNarrativeStateComponent *Narrative = PS->GetNarrativeState();
+    const UMythicAchievementComponent *Achievements = PS->GetAchievementComponent();
+    if (!Ledger || !Narrative || !Achievements) {
+        UE_LOG(Myth, Error, TEXT(">>> Player state is missing a progression ledger"));
+        return false;
+    }
+    if (Achievements->IsAchievementUnlocked(Def->AchievementTag)) {
+        if (bVerbose) {
+            UE_LOG(Myth, Warning, TEXT(">>> %s is already earned"), *Def->AchievementTag.ToString());
+        }
+        return true;
+    }
+
+    // Counters and story tags are pushed through their real writers so the whole chain fires: counter ->
+    // achievement -> story tag -> unlock rule -> socket. A loose tag would satisfy the rune gate and open nothing.
+    for (const FMythicStatRequirement &Req : Def->Condition.StatRequirements) {
+        if (!Req.StatTag.IsValid()) {
+            continue;
+        }
+        const int64 Current = Req.bHierarchical ? Ledger->GetCounterRollup(Req.StatTag) : Ledger->GetCounter(Req.StatTag);
+        const int64 Delta = FMath::Max<int64>(0, Req.MinValue - Current);
+        if (Delta > 0) {
+            Ledger->RecordStat(Req.StatTag, Delta);
+        }
+        if (bVerbose) {
+            UE_LOG(Myth, Log, TEXT(">>> %s %lld -> %lld (needs %lld)"), *Req.StatTag.ToString(), Current, Current + Delta, Req.MinValue);
+        }
+    }
+    for (const FGameplayTag &Tag : Def->Condition.TagCondition.RequireAll) {
+        if (!Narrative->HasStoryTag(Tag)) {
+            Narrative->ServerSetStoryTag(Tag);
+            if (bVerbose) {
+                UE_LOG(Myth, Log, TEXT(">>> story tag %s set"), *Tag.ToString());
+            }
+        }
+    }
+    const FGameplayTagContainer &AnyOf = Def->Condition.TagCondition.RequireAny;
+    if (!AnyOf.IsEmpty() && !Narrative->HasAny(AnyOf) && !Achievements->GetUnlockedAchievements().HasAny(AnyOf)) {
+        Narrative->ServerSetStoryTag(AnyOf.First());
+        if (bVerbose) {
+            UE_LOG(Myth, Log, TEXT(">>> story tag %s set"), *AnyOf.First().ToString());
+        }
+    }
+
+    const bool bEarned = Achievements->IsAchievementUnlocked(Def->AchievementTag);
+    if (bEarned) {
+        if (bVerbose) {
+            UE_LOG(Myth, Log, TEXT(">>> %s earned"), *Def->AchievementTag.ToString());
+        }
+    }
+    else {
+        UE_LOG(Myth, Error, TEXT(">>> %s still locked after its requirements were met; check its BlockAny clause"),
+               *Def->AchievementTag.ToString());
+    }
+    return bEarned;
+}
+
+void UMythicCheatManager::MythUnlockAllRunes() {
+    AMythicPlayerState *PS = Cheat_AuthorityPlayerState(GetOuterAPlayerController(), TEXT("MythUnlockAllRunes"));
+    UMythicRuneComponent *Runes = PS ? PS->GetRuneComponent() : nullptr;
+    if (!Runes) {
+        return;
+    }
+
+    const TArray<UMythicRuneDefinition *> All = Cheat_AllRunes();
+    FGameplayTagContainer Granted;
+    int32 Unlocked = 0;
+    int32 Failed = 0;
+    for (const UMythicRuneDefinition *Rune : All) {
+        const FGameplayTag Deed = Rune->RequiredTag;
+        if (Runes->IsRuneUnlocked(Rune)) {
+            ++Unlocked;
+            continue;
+        }
+        if (!Granted.HasTagExact(Deed)) {
+            // Through the real chain so the deed also opens whatever sockets and titles it gates.
+            if (const UMythicAchievementDefinition *Def = Cheat_FindAchievement(Deed.ToString())) {
+                Cheat_GrantDeed(PS, Def, false);
+            }
+            else if (UMythicNarrativeStateComponent *Narrative = PS->GetNarrativeState()) {
+                UE_LOG(Myth, Warning, TEXT(">>> %s has no achievement definition; setting it as a story tag instead"),
+                       *Deed.ToString());
+                Narrative->ServerSetStoryTag(Deed);
+            }
+            Granted.AddTag(Deed);
+        }
+        if (Runes->IsRuneUnlocked(Rune)) {
+            ++Unlocked;
+        }
+        else {
+            ++Failed;
+            UE_LOG(Myth, Error, TEXT(">>> %s is still locked behind %s"), *Rune->GetName(), *Deed.ToString());
+        }
+    }
+    UE_LOG(Myth, Warning, TEXT(">>> %d of %d runes unlocked from %d deeds%s"), Unlocked, All.Num(), Granted.Num(),
+           Failed > 0 ? TEXT(" (see the errors above)") : TEXT(""));
+}
+
+void UMythicCheatManager::MythUnlockAllRuneSlots() {
+    AMythicPlayerState *PS = Cheat_AuthorityPlayerState(GetOuterAPlayerController(), TEXT("MythUnlockAllRuneSlots"));
+    UMythicRuneComponent *Runes = PS ? PS->GetRuneComponent() : nullptr;
+    if (!Runes) {
+        return;
+    }
+    while (Runes->GetUnlockedSlots() < Runes->MaxSlots) {
+        const int32 Before = Runes->GetUnlockedSlots();
+        Runes->GrantSlot();
+        if (Runes->GetUnlockedSlots() == Before) {
+            UE_LOG(Myth, Error, TEXT(">>> socket %d refused to open; stopping at %d"), Before, Before);
+            break;
+        }
+    }
+    UE_LOG(Myth, Warning, TEXT(">>> %d of %d sockets open"), Runes->GetUnlockedSlots(), Runes->MaxSlots);
+}
+
+void UMythicCheatManager::MythClearDeed(const FString &AchievementName) {
+    AMythicPlayerState *PS = Cheat_AuthorityPlayerState(GetOuterAPlayerController(), TEXT("MythClearDeed"));
+    if (!PS) {
+        return;
+    }
+    const UMythicAchievementDefinition *Def = Cheat_FindAchievement(AchievementName);
+    if (!Def) {
+        return;
+    }
+    UMythicAchievementComponent *Achievements = PS->GetAchievementComponent();
+    UMythicNarrativeStateComponent *Narrative = PS->GetNarrativeState();
+    UMythicRuneComponent *Runes = PS->GetRuneComponent();
+    if (!Achievements || !Narrative || !Runes) {
+        UE_LOG(Myth, Error, TEXT(">>> Player state is missing a progression ledger"));
+        return;
+    }
+
+    FGameplayTagContainer Remaining = Achievements->GetUnlockedAchievements();
+    Remaining.RemoveTag(Def->AchievementTag);
+    Achievements->RestoreUnlockedAchievements(Remaining);
+    Narrative->ServerClearStoryTag(Def->AchievementTag);
+
+    // Re-restoring the worn set drops any rune whose deed just went, the same way a reload would.
+    const TArray<TSoftObjectPtr<UMythicRuneDefinition>> Worn = Runes->GetEquippedRunes();
+    Runes->RestoreRunes(Worn, Runes->GetUnlockedSlots());
+
+    UE_LOG(Myth, Log, TEXT(">>> %s cleared from achievements and story tags"), *Def->AchievementTag.ToString());
+    if (const UMythicUnlockComponent *Unlocks = PS->GetUnlockComponent()) {
+        for (const FGameplayTag &Rule : Unlocks->GetAppliedUnlockRules()) {
+            UE_LOG(Myth, Warning, TEXT(">>> %s stays applied; unlock rules latch once and never re-check"), *Rule.ToString());
+        }
+    }
+}
+
+void UMythicCheatManager::MythRecordStat(const FString &StatTag, int32 Delta) {
+    AMythicPlayerState *PS = Cheat_AuthorityPlayerState(GetOuterAPlayerController(), TEXT("MythRecordStat"));
+    UMythicStatLedgerComponent *Ledger = PS ? PS->GetStatLedgerComponent() : nullptr;
+    if (!Ledger) {
+        return;
+    }
+    const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*StatTag), false);
+    if (!Tag.IsValid()) {
+        UE_LOG(Myth, Error, TEXT(">>> '%s' is not a registered tag"), *StatTag);
+        return;
+    }
+    Ledger->RecordStat(Tag, Delta);
+    UE_LOG(Myth, Log, TEXT(">>> %s is now %lld"), *Tag.ToString(), Ledger->GetCounter(Tag));
+}
+
+void UMythicCheatManager::MythSetSeason(const FString &Season) {
+    APlayerController *PC = GetOuterAPlayerController();
+    if (!PC) {
+        return;
+    }
+    UMythicEnvironmentSubsystem *EnvSys = PC->GetGameInstance()->GetSubsystem<UMythicEnvironmentSubsystem>();
+    AMythicEnvironmentController *Controller = EnvSys ? EnvSys->GetEnvironmentController() : nullptr;
+    if (!Controller) {
+        UE_LOG(Myth, Error, TEXT(">>> No Environment Controller"));
+        return;
+    }
+    if (!Controller->HasAuthority()) {
+        UE_LOG(Myth, Error, TEXT(">>> MythSetSeason needs authority - run it on the server or in standalone"));
+        return;
+    }
+
+    // First month of each season as MonthAsSeason reads them; Winter wraps to December.
+    int32 Month = 0;
+    if (Season.Equals(TEXT("Spring"), ESearchCase::IgnoreCase)) {
+        Month = 3;
+    }
+    else if (Season.Equals(TEXT("Summer"), ESearchCase::IgnoreCase)) {
+        Month = 6;
+    }
+    else if (Season.Equals(TEXT("Autumn"), ESearchCase::IgnoreCase)) {
+        Month = 9;
+    }
+    else if (Season.Equals(TEXT("Winter"), ESearchCase::IgnoreCase)) {
+        Month = 12;
+    }
+    else {
+        UE_LOG(Myth, Error, TEXT(">>> Unknown season '%s'. Spring, Summer, Autumn or Winter"), *Season);
+        return;
+    }
+
+    const FDateTime Current = Controller->GetDateTime();
+    const FDateTime NewTime(Current.GetYear(), Month, 1, Current.GetHour(), Current.GetMinute());
+    Controller->SetTime(NewTime);
+    UE_LOG(Myth, Warning, TEXT(">>> Season set to %s (%s), now %s"), *Season, *NewTime.ToString(),
+           *EnvSys->GetSeasonTag().ToString());
 }

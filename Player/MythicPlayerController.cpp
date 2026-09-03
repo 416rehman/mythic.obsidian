@@ -39,7 +39,9 @@
 #include "AI/Cognition/CognitiveBrainComponent.h"
 #include "AI/Party/PartySubsystem.h"
 #include "UI/MythicDamageNumberSubsystem.h"
+#include "UI/MythicHUDLayout.h"
 #include "UI/Inventory/MythicInventoryInteractionCoordinator.h"
+#include "UObject/UObjectIterator.h"
 #include "World/Harvesting/MythicHarvestToolTypeDefinition.h"
 #include "Itemization/Inventory/ItemDefinition.h"
 #include "Itemization/Inventory/Fragments/Passive/YieldQualityFragment.h"
@@ -1785,6 +1787,91 @@ int32 AMythicPlayerController::GetCarriedCurrency() const {
     return Total;
 }
 
+bool AMythicPlayerController::TryChargeCurrency(int32 Amount) {
+    if (!HasAuthority()) {
+        return false;
+    }
+    if (Amount <= 0) {
+        return true;
+    }
+    if (!MythicCurrency::CanAfford(GetCarriedCurrency(), Amount)) {
+        return false;
+    }
+
+    int32 Remaining = Amount;
+    for (UMythicInventoryComponent *Inv : GetAllInventoryComponents()) {
+        if (Remaining <= 0) {
+            break;
+        }
+        if (Inv) {
+            Remaining -= Inv->SpendCurrency(Remaining);
+        }
+    }
+    ensureAlwaysMsgf(Remaining == 0, TEXT("Prevalidated currency debit of %d was short by %d."), Amount, Remaining);
+    const int32 Charged = Amount - Remaining;
+    if (Charged <= 0) {
+        return false;
+    }
+
+    if (UAbilitySystemComponent *ASC = GetAbilitySystemComponent()) {
+        FGameplayEventData Payload;
+        Payload.EventTag = GAS_EVENT_CURRENCY_SPENT;
+        Payload.Instigator = GetPawn();
+        Payload.Target = ASC->GetAvatarActor();
+        Payload.EventMagnitude = static_cast<float>(Charged);
+        ASC->HandleGameplayEvent(GAS_EVENT_CURRENCY_SPENT, &Payload);
+    }
+
+    FMythicHudNotice Notice;
+    Notice.Kind = EMythicNoticeKind::Combat;
+    Notice.Text = FText::Format(NSLOCTEXT("Mythic", "CurrencySpent", "-{0} gold"), FText::AsNumber(Charged));
+    Notice.Accent = FLinearColor(0.85f, 0.70f, 0.30f);
+    ClientRaiseHudNotice(Notice);
+    return Remaining == 0;
+}
+
+int32 AMythicPlayerController::GrantCurrency(int32 Amount) {
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    return GrantCurrencyOfDefinition(Settings ? Settings->GetCurrencyItemDefinition() : nullptr, Amount);
+}
+
+int32 AMythicPlayerController::GrantCurrencyOfDefinition(UItemDefinition *CurrencyDef, int32 Amount) {
+    if (!HasAuthority() || !CurrencyDef || Amount <= 0) {
+        return 0;
+    }
+    UGameInstance *GI = GetGameInstance();
+    UMythicLootManagerSubsystem *Loot = GI ? GI->GetSubsystem<UMythicLootManagerSubsystem>() : nullptr;
+    if (!Loot) {
+        return 0;
+    }
+    UMythicInventoryComponent *Target = nullptr;
+    for (UMythicInventoryComponent *Inv : GetAllInventoryComponents()) {
+        if (Inv && Inv->CanAcceptItemType(CurrencyDef->ItemType)) {
+            Target = Inv;
+            break;
+        }
+    }
+    if (!Target) {
+        return 0;
+    }
+
+    const int32 Cap = FMath::Max(1, CurrencyDef->StackSizeMax);
+    int32 Remaining = Amount;
+    while (Remaining > 0) {
+        const int32 Chunk = FMath::Min(Remaining, Cap);
+        UMythicItemInstance *Coins = Loot->Create(CurrencyDef, Chunk, this, 0);
+        if (!Coins) {
+            break;
+        }
+        Target->AddItem(Coins, this);
+        Remaining -= Chunk;
+    }
+    if (Remaining > 0) {
+        UE_LOG(Myth, Warning, TEXT("%s could not mint %d of %d currency"), *GetNameSafe(this), Remaining, Amount);
+    }
+    return Amount - Remaining;
+}
+
 
 bool AMythicPlayerController::ServerVendorBuy_Validate(AMythicVendor *Vendor, int32 StockSlotIndex, int32 Quantity) {
     return Vendor != nullptr && StockSlotIndex >= 0 && Quantity > 0;
@@ -2970,6 +3057,36 @@ void AMythicPlayerController::RaiseHudNotice(const FMythicHudNotice &Notice) {
     OnHudNotice.Broadcast(Notice);
 }
 
+void AMythicPlayerController::ClientRaiseHudNotice_Implementation(const FMythicHudNotice &Notice) {
+    RaiseHudNotice(Notice);
+}
+
+void AMythicPlayerController::ClientPokeHudElement_Implementation(FName ElementName) {
+    if (ElementName.IsNone()) {
+        return;
+    }
+    if (UMythicHUDLayout *Layout = FindLocalHUDLayout()) {
+        Layout->PokeElementByName(ElementName);
+    }
+}
+
+UMythicHUDLayout *AMythicPlayerController::FindLocalHUDLayout() {
+    if (UMythicHUDLayout *Cached = LocalHUDLayout.Get()) {
+        return Cached;
+    }
+    if (!IsLocalController()) {
+        return nullptr;
+    }
+    for (TObjectIterator<UMythicHUDLayout> It; It; ++It) {
+        UMythicHUDLayout *Layout = *It;
+        if (IsValid(Layout) && !Layout->HasAnyFlags(RF_ClassDefaultObject) && Layout->GetOwningPlayer() == this) {
+            LocalHUDLayout = Layout;
+            return Layout;
+        }
+    }
+    return nullptr;
+}
+
 void AMythicPlayerController::ClientNotifyLootPickup_Implementation(const FText &ItemName, int32 Quantity, FLinearColor RarityColor) {
     FMythicHudNotice Notice;
     Notice.Kind = EMythicNoticeKind::Loot;
@@ -3180,6 +3297,21 @@ void AMythicPlayerController::ClientReceiveResolvedCombatTextBatch_Implementatio
                     3.0f, Event.bCritical ? 1.0f : 0.75f);
             }
         }
+    }
+}
+
+void AMythicPlayerController::ClientShowCombatCallout_Implementation(const FText &Text, FLinearColor Color, float Lifetime) {
+    const APawn *AvatarPawn = GetPawn();
+    if (!AvatarPawn || Text.IsEmpty()) {
+        return;
+    }
+    UWorld *World = AvatarPawn->GetWorld();
+    if (!World) {
+        return;
+    }
+    if (UMythicDamageNumberSubsystem *DamageNumbers = World->GetSubsystem<UMythicDamageNumberSubsystem>()) {
+        const FVector Loc = AvatarPawn->GetActorLocation() + FVector(0.0f, 0.0f, 90.0f);
+        DamageNumbers->AddCombatText(Loc, Text, Color, Lifetime, EMythicCombatTextOrigin::Callout);
     }
 }
 
@@ -3497,19 +3629,9 @@ void AMythicPlayerController::ServerRerollItemAffixes_Implementation(UMythicItem
                                                        Settings->RerollCostPerLevelFraction, Settings->RerollCostPerRarityFraction);
     }
 
-    TArray<UMythicInventoryComponent *> CurrencyInventories;
-    if (RerollCost > 0) {
-        int32 Wallet = 0;
-        CurrencyInventories = GetAllInventoryComponents();
-        for (const UMythicInventoryComponent *Inv : CurrencyInventories) {
-            if (Inv) {
-                Wallet += Inv->GetTotalCurrency();
-            }
-        }
-        if (!MythicCurrency::CanAfford(Wallet, RerollCost)) {
-            ClientNotifyTradeResult(EMythicTradeResult::InsufficientFunds);
-            return;
-        }
+    if (!MythicCurrency::CanAfford(GetCarriedCurrency(), RerollCost)) {
+        ClientNotifyTradeResult(EMythicTradeResult::InsufficientFunds);
+        return;
     }
 
     // The affix component publishes snapshots only after its complete equipped-stat transaction succeeds. Charge
@@ -3518,20 +3640,8 @@ void AMythicPlayerController::ServerRerollItemAffixes_Implementation(UMythicItem
         return;
     }
 
-    if (RerollCost > 0) {
-        int32 Remaining = RerollCost;
-        for (UMythicInventoryComponent *Inv : CurrencyInventories) {
-            if (Remaining <= 0) {
-                break;
-            }
-            if (Inv) {
-                Remaining -= Inv->SpendCurrency(Remaining);
-            }
-        }
-        ensureAlwaysMsgf(Remaining == 0,
-                         TEXT("Reroll committed but the prevalidated currency debit was short by %d."),
-                         Remaining);
-    }
+    const bool bCharged = TryChargeCurrency(RerollCost);
+    ensureAlwaysMsgf(bCharged, TEXT("Reroll committed but the prevalidated currency debit of %d failed."), RerollCost);
 }
 
 bool AMythicPlayerController::IsWithinStationRange(float DistSq, float RangeSq) {

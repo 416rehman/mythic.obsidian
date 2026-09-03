@@ -6,6 +6,7 @@
 #include "AttributeSet.h"
 #include "MVVMViewModelBase.h"
 #include "GameplayTagContainer.h"
+#include "Progression/Runes/MythicRuneComponent.h"
 #include "MythicPlayerStatusViewModel.generated.h"
 
 class UAbilitySystemComponent;
@@ -48,6 +49,34 @@ struct MYTHIC_API FMythicStatusBadgeEntry {
     // Progress toward the status landing, 0..1, so a badge can fill before the status hits.
     UPROPERTY(BlueprintReadOnly, Category = "Status")
     float BuildupFraction = 0.0f;
+};
+
+/** One worn rune with something to show: its icon and the state the server published for it. */
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicRuneBadgeEntry {
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Rune")
+    int32 SlotIndex = INDEX_NONE;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Rune")
+    TSoftObjectPtr<UTexture2D> Icon;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Rune")
+    FText Name;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Rune")
+    EMythicRuneHudState State = EMythicRuneHudState::Hidden;
+
+    // Local world seconds, so a view compares against the clock it already ticks with. End is 0 when nothing is timed.
+    UPROPERTY(BlueprintReadOnly, Category = "Rune")
+    double StartTimeSeconds = 0.0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Rune")
+    double EndTimeSeconds = 0.0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Rune")
+    int32 Stacks = 0;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMythicHealthDamaged, float, Delta, float, NewPercent);
@@ -96,6 +125,19 @@ public:
 
     const TArray<FMythicStatusBadgeEntry> &GetStatusBadges() const { return StatusBadges; }
 
+    /**
+     * Every worn rune the server has given a state other than Hidden, in socket order. Rebuilt only when the
+     * sockets or their published states change, never per frame.
+     */
+    UPROPERTY(BlueprintReadOnly, FieldNotify, Getter = GetRuneBadges, meta = (AllowPrivateAccess))
+    TArray<FMythicRuneBadgeEntry> RuneBadges;
+
+    const TArray<FMythicRuneBadgeEntry> &GetRuneBadges() const { return RuneBadges; }
+
+    // InitializeForASC follows the rune component on the ASC's owner; call this when the sockets live elsewhere.
+    UFUNCTION(BlueprintCallable, Category = "Mythic|HUD")
+    void BindToRunes(UMythicRuneComponent *InRunes);
+
     void SetHealthPercent(float V);
     float GetHealthPercent() const { return HealthPercent; }
     void SetStaminaPercent(float V);
@@ -139,7 +181,13 @@ private:
     TArray<FGameplayAttribute> BadgeBoundAttributes;
     void Unbind();
 
+    UFUNCTION()
+    void HandleRuneBadgesDirty();
+    void RebuildRuneBadges();
+    void UnbindRunes();
+
     TWeakObjectPtr<UAbilitySystemComponent> ASC;
+    TWeakObjectPtr<UMythicRuneComponent> Runes;
 
     float CurHealth = 0.0f, MaxHealthV = 1.0f;
     float CurStamina = 0.0f, MaxStaminaV = 1.0f;

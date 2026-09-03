@@ -6,6 +6,8 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_DOWNED, "GAS.State.Downed", "Co-op down
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_INCOMBAT, "GAS.State.InCombat", "The entity was damaged recently");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_SPRINTING, "GAS.State.Sprinting", "The entity is sprinting");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_EXHAUSTED, "GAS.State.Exhausted", "Winded: out of stamina from sprinting — the sprint speed bonus is suppressed until stamina recovers");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_MOVING, "GAS.State.Moving",
+                               "Replicated: the pawn is travelling across the ground; drops after StillGraceSeconds without motion");
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_HEALTH, "GAS.State.Health", "Parent of the health bands an entity currently sits in");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_STATE_HEALTH_CRITICAL, "GAS.State.Health.Critical", "At death's door");
@@ -55,12 +57,27 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_PRE, "GAS.Event.Dmg.Pre", "Event ca
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_DELIVERED, "GAS.Event.Dmg.Delivered", "Event called when owner deals damage to another entity");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_HIT_CRITICAL, "GAS.Hit.Critical",
                                "Rides on a damage event when the hit was critical, so a talent can gate on one");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_HIT_RUNE, "GAS.Hit.Rune", "Parent of the hit tags a rune stamps on an outgoing hit");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_HIT_RUNE_FIRSTSTRIKE, "GAS.Hit.Rune.FirstStrike",
+                               "Rides on a damage event when a first-strike rune empowered the hit");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_HIT_RUNE_RIPOSTE, "GAS.Hit.Rune.Riposte",
+                               "Rides on the counter-hit a parry returns to the attacker (Riposte)");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_HIT_RUNE_SLAM, "GAS.Hit.Rune.Slam",
+                               "Rides on the ground-slam hit a heavy landing deals (Ridgebreaker)");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_HIT_RUNE_DEBT, "GAS.Hit.Rune.Debt",
+                               "Rides on the owed wounds that land at once when the ember goes out (Last Ember)");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_HIT_RUNE_TOLL, "GAS.Hit.Rune.Toll",
+                               "Rides on the health a harvest swing costs its owner (Ironbark Pact)");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_HIT_FALL, "GAS.Hit.Fall",
+                               "Rides on fall damage so its number, Dmg.Received and PreDeath know the source");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DMG_RECEIVED, "GAS.Event.Dmg.Received", "Event called when owner receives damage from another entity");
 
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DEATH_PRE, "GAS.Event.Death.Pre",
+// PreDeath/PostDeath must never sit under GAS.Event.Death: HandleGameplayEvent walks parent tags when it looks for
+// event-triggered abilities, so a child tag would activate every ability triggered by the death event itself.
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DEATH_PRE, "GAS.Event.PreDeath",
                                "First event in the death pipeline, i.e. a talent could give owner 'GAS_PIPELINE_DEATH_HANDLED' tag");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DEATH, "GAS.Event.Death", "Event called when owner dies");
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DEATH_POST, "GAS.Event.Death.Post",
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_DEATH_POST, "GAS.Event.PostDeath",
                                "Last event in the death pipeline, i.e. a talent could remove 'GAS_PIPELINE_DEATH_HANDLED' tag from owner");
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_KILL, "GAS.Event.Kill", "Event called when owner kills another entity");
@@ -88,6 +105,14 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ITEM_USED, "GAS.Event.Item.Used",
                                "Fired server-side on a player's ASC when they USE/consume an item (the generic consumable ability). EventMagnitude = quantity; TargetTags carries the item's ItemType. Drives 'use N <type>' objectives (distinct from 'collect N').");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_ITEM_EQUIPPED, "GAS.Event.Item.Equipped",
                                "Fired server-side on a player's ASC on the first genuine weapon equip (per-item SaveGame marker suppresses save-restore re-fires). TargetTags carries the item's ItemType. Drives 'equip N <type>' objectives.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_MOVED, "GAS.Event.Moved",
+                               "Fired server-side on a player's ASC as they travel. EventMagnitude = centimetres accrued since the previous raise.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_CURRENCY_SPENT, "GAS.Event.Currency.Spent",
+                               "Fired server-side on a player's ASC when currency is charged. EventMagnitude = amount charged.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(GAS_EVENT_HARVEST_STRUCK, "GAS.Event.Harvest.Struck",
+                               "Fired server-side on the striker's ASC after an accepted harvest swing. EventMagnitude = work units applied; Target = the resource actor; InstigatorTags carry Harvest.Felled when the node fell.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(HARVEST_FELLED, "Harvest.Felled",
+                               "Rides in the InstigatorTags of Harvest.Struck when that swing brought the node down");
 
 UE_DEFINE_GAMEPLAY_TAG(GAMEPLAYCUE_ABILITY_HEAL_ACTIVATED, "GameplayCue.Ability.Heal.Activated");
 UE_DEFINE_GAMEPLAY_TAG(GAMEPLAYCUE_ABILITY_HEAL_RECEIVED, "GameplayCue.Ability.Heal.Received");

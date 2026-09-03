@@ -12,9 +12,18 @@
 #include "Progression/Runes/MythicRuneComponent.h"
 #include "Progression/Runes/MythicRuneDefinition.h"
 #include "UI/Menu/MythicRunePickerWidget.h"
+#include "UI/Menu/MythicRuneSocketWidget.h"
+#include "UI/ViewModels/MythicRuneDescriber.h"
 #include "UI/Inventory/MythicSocketRowWidget.h"
 #include "UI/Widgets/MythicSectionHeader.h"
 #include "UI/MythicUIStyle.h"
+#include "Components/RichTextBlock.h"
+#include "Components/TextBlock.h"
+#include "Engine/Texture2D.h"
+#include "Mythic/Mythic.h"
+#include "Progression/MythicAchievementSet.h"
+#include "Progression/MythicUnlockRuleSet.h"
+#include "Settings/MythicDeveloperSettings.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "CommonButtonBase.h"
@@ -66,6 +75,26 @@ const FName Char_Percent(TEXT("Percent"));
 const FName Char_ChipPercent(TEXT("ChipPercent"));
 const FName Char_FillStart(TEXT("FillColorStart"));
 const FName Char_FillEnd(TEXT("FillColorEnd"));
+
+/** The words of a rich-text line with every <Style> and </> dropped, for a block that cannot draw markup. */
+FText CharacterPage_PlainText(const FText &Rich) {
+    const FString Source = Rich.ToString();
+    FString Plain;
+    Plain.Reserve(Source.Len());
+    bool bInTag = false;
+    for (const TCHAR Char : Source) {
+        if (Char == TEXT('<')) {
+            bInTag = true;
+        }
+        else if (Char == TEXT('>') && bInTag) {
+            bInTag = false;
+        }
+        else if (!bInTag) {
+            Plain.AppendChar(Char);
+        }
+    }
+    return FText::FromString(Plain);
+}
 }
 
 void UMythicInventoryActionClickProxy::HandleClicked() {
@@ -77,6 +106,9 @@ void UMythicInventoryActionClickProxy::HandleClicked() {
 void UMythicCharacterPageWidget::NativeConstruct() {
     // Pool before Super: activation can fire inside it, and a refresh must find these already built.
     BuildBagChrome();
+    if (!RunePicker && RunePickerClass && GetOwningLocalPlayer()) {
+        RunePicker = CreateWidget<UMythicRunePickerWidget>(GetOwningPlayer(), RunePickerClass);
+    }
 
     Super::NativeConstruct();
     BuildInventoryInteractionChrome();
@@ -236,8 +268,11 @@ void UMythicCharacterPageWidget::NativeOnActivated() {
     }
     BindInventoryInputs();
     BindProgression();
+    BindRunes();
     RefreshHeader();
     BuildSockets();
+    // Whatever changed while the page was away is state to record, not a landing to replay on entry.
+    bSocketsDrawn = false;
     RefreshSockets();
     RestoreSelectionByGuid();
     RefreshInventoryActionBar();
@@ -251,6 +286,12 @@ void UMythicCharacterPageWidget::NativeOnActivated() {
 }
 
 UWidget *UMythicCharacterPageWidget::NativeGetDesiredFocusTarget() const {
+    // The picker hands focus back to the socket it was opened from, not to whatever the bag last selected.
+    if (UMythicRuneSocketWidget *Socket = GetSocketWidget(LastOpenedSocket)) {
+        if (UWidget *Hit = Socket->GetFocusWidget()) {
+            return Hit;
+        }
+    }
     if (const UItemSlotVM *Selected = GetSelectedSlot()) {
         for (const TWeakObjectPtr<UListViewBase> &WeakList : BoundSlotLists) {
             if (UListView *List = Cast<UListView>(WeakList.Get())) {
@@ -274,6 +315,9 @@ void UMythicCharacterPageWidget::FocusInitialSlot() {
     // Rebind against the now-populated lists and derive the authoritative VM from the first physical slot.
     BindSlotSelection();
     BindBagViewModel();
+    // A client's PlayerState can arrive after activation; a second bind is a no-op on the host.
+    BindRunes();
+    RefreshSockets();
     if (BoundInventoryVM.IsValid()) {
         RestoreSelectionByGuid();
     }
@@ -564,6 +608,7 @@ void UMythicCharacterPageWidget::NativeOnDeactivated() {
     UnbindSlotSelection();
     ReturnInventory();
     UnbindProgression();
+    UnbindRunes();
     Super::NativeOnDeactivated();
 }
 
@@ -578,6 +623,7 @@ void UMythicCharacterPageWidget::NativeDestruct() {
     UnbindSlotSelection();
     ReturnInventory();
     UnbindProgression();
+    UnbindRunes();
     Super::NativeDestruct();
 }
 
@@ -698,6 +744,7 @@ void UMythicCharacterPageWidget::HandleSlotSelectionChanged(UObject *Item) {
     if (!SlotVM || bSynchronizingSelection) {
         return;
     }
+    LastOpenedSocket = INDEX_NONE;
 
     UListViewBase *SourceList = FindListSelecting(Item);
     if (!SourceList) {
@@ -1377,6 +1424,11 @@ void UMythicCharacterPageWidget::HandlePrimaryInventoryAction() {
 void UMythicCharacterPageWidget::HandleInventoryActionsAction() {
     if (InventoryPageState == EInventoryPageState::MoveTarget) {
         CloseInventoryModal(true);
+        return;
+    }
+    // The same key that opens an item's actions unequips a focused, filled socket.
+    if (InventoryPageState == EInventoryPageState::Browsing && FocusedSocket != INDEX_NONE) {
+        HandleSocketAltPressed(FocusedSocket);
         return;
     }
     if (InventoryPageState == EInventoryPageState::Browsing && GetSelectedSlot()) {
@@ -2542,110 +2594,179 @@ void UMythicCharacterPageWidget::CycleBagCategory(int32 Direction) {
 }
 
 void UMythicCharacterPageWidget::BuildSockets() {
-    if (!SocketStrip || Sockets.Num() > 0) {
+    if (!SocketStrip || Sockets.Num() > 0 || !GetOwningPlayer()) {
         return;
     }
+    if (!SocketClass) {
+        UE_LOG(Myth, Warning, TEXT("Runes: %s has no SocketClass; the socket strip stays empty."), *GetName());
+        return;
+    }
+    const UMythicUIStyleSettings &Style = FMythicUIStyle::Get();
 
-    if (SocketHeaderClass && GetOwningPlayer()) {
-        if (UMythicSectionHeader *Header =
-                CreateWidget<UMythicSectionHeader>(GetOwningPlayer(), SocketHeaderClass)) {
-            Header->SetHeader(NSLOCTEXT("Mythic", "SocketStripHeading", "Runes"), FText::GetEmpty(), nullptr);
-            Header->SetVisibility(ESlateVisibility::HitTestInvisible);
-            SocketStrip->AddChild(Header);
+    if (SocketHeaderClass) {
+        SocketHeader = CreateWidget<UMythicSectionHeader>(GetOwningPlayer(), SocketHeaderClass);
+        if (SocketHeader) {
+            SocketHeader->SetHeader(NSLOCTEXT("Mythic", "SocketStripHeading", "Runes"), SocketCountText(),
+                                    SocketEmblem.LoadSynchronous());
+            SocketHeader->SetVisibility(ESlateVisibility::HitTestInvisible);
+            UPanelWidget *HeaderHome = SocketHeaderHost ? SocketHeaderHost.Get() : SocketStrip.Get();
+            if (UHorizontalBoxSlot *HeaderSlot = Cast<UHorizontalBoxSlot>(HeaderHome->AddChild(SocketHeader))) {
+                HeaderSlot->SetVerticalAlignment(VAlign_Center);
+                HeaderSlot->SetPadding(FMargin(0.0f, 0.0f, Style.SpaceL, 0.0f));
+            }
+            else if (UVerticalBoxSlot *StackSlot = Cast<UVerticalBoxSlot>(SocketHeader->Slot)) {
+                StackSlot->SetHorizontalAlignment(HAlign_Fill);
+                StackSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, Style.SectionHeadingGap));
+            }
         }
     }
-    // Through the catalogue, not a hardcoded path: a moved or renamed material becomes a missing element
-    // plus a log line here, instead of silently loading nothing.
-    const UMythicUIKit *Kit = UMythicUIKit::Get();
 
     for (int32 i = 0; i < FMath::Clamp(SocketCount, 1, 8); ++i) {
+        UMythicRuneSocketWidget *Widget = CreateWidget<UMythicRuneSocketWidget>(GetOwningPlayer(), SocketClass);
+        if (!Widget) {
+            continue;
+        }
         FMythicRuneSocket Socket;
         Socket.SlotIndex = i;
+        Socket.Widget = Widget;
+        Widget->SetSlotIndex(i);
+        Widget->SetInteractive(true);
+        Widget->OnPressed.AddUniqueDynamic(this, &UMythicCharacterPageWidget::HandleSocketPressed);
+        Widget->OnAltPressed.AddUniqueDynamic(this, &UMythicCharacterPageWidget::HandleSocketAltPressed);
+        Widget->OnFocusChanged.AddUniqueDynamic(this, &UMythicCharacterPageWidget::HandleSocketFocusChanged);
+        Widget->OnHoverChanged.AddUniqueDynamic(this, &UMythicCharacterPageWidget::HandleSocketHoverChanged);
 
-        UOverlay *Stack = WidgetTree->ConstructWidget<UOverlay>();
-
-        Socket.Well = WidgetTree->ConstructWidget<UImage>();
-        if (Kit) {
-            Socket.Well->SetBrush(
-                Kit->MakeBrush(TEXT("SlotTex.Round"), EMythicUIState::Normal, FVector2D(64.0, 64.0)));
-        }
-        Socket.Well->SetVisibility(ESlateVisibility::HitTestInvisible);
-        Stack->AddChildToOverlay(Socket.Well);
-
-        Socket.Mark = WidgetTree->ConstructWidget<UImage>();
-        Socket.Mark->SetVisibility(ESlateVisibility::Collapsed);
-        if (UOverlaySlot *MarkSlot = Cast<UOverlaySlot>(Stack->AddChildToOverlay(Socket.Mark))) {
-            MarkSlot->SetHorizontalAlignment(HAlign_Center);
-            MarkSlot->SetVerticalAlignment(VAlign_Center);
-            MarkSlot->SetPadding(FMargin(14.0f));
+        if (SocketTooltipClass) {
+            Socket.Tip = CreateWidget<UUserWidget>(Widget, SocketTooltipClass);
+            if (Socket.Tip) {
+                Widget->SetToolTip(Socket.Tip);
+            }
         }
 
-        UButton *Hit = WidgetTree->ConstructWidget<UButton>();
-        FButtonStyle Clear;
-        Clear.Normal.DrawAs = ESlateBrushDrawType::NoDrawType;
-        Clear.Hovered.DrawAs = ESlateBrushDrawType::NoDrawType;
-        Clear.Pressed.DrawAs = ESlateBrushDrawType::NoDrawType;
-        Clear.Disabled.DrawAs = ESlateBrushDrawType::NoDrawType;
-        Hit->SetStyle(Clear);
-        if (UOverlaySlot *HitSlot = Cast<UOverlaySlot>(Stack->AddChildToOverlay(Hit))) {
-            HitSlot->SetHorizontalAlignment(HAlign_Fill);
-            HitSlot->SetVerticalAlignment(VAlign_Fill);
+        if (UHorizontalBoxSlot *CellSlot = Cast<UHorizontalBoxSlot>(SocketStrip->AddChild(Widget))) {
+            CellSlot->SetVerticalAlignment(VAlign_Center);
+            CellSlot->SetPadding(FMargin(i == 0 ? 0.0f : Style.SpaceM, 0.0f, 0.0f, 0.0f));
         }
-
-        Socket.Proxy = NewObject<UMythicRuneSocketClickProxy>(this);
-        Socket.Proxy->Page = this;
-        Socket.Proxy->SlotIndex = i;
-        RuneSocketClickProxies.Add(Socket.Proxy);
-        Hit->OnClicked.AddDynamic(Socket.Proxy, &UMythicRuneSocketClickProxy::HandleClicked);
-
-        Socket.Button = Stack;
-        SocketStrip->AddChild(Stack);
         Sockets.Add(Socket);
     }
+    bSocketsDrawn = false;
     RefreshSockets();
 }
 
 void UMythicCharacterPageWidget::RefreshSockets() {
-    const UMythicRuneComponent *Runes = nullptr;
-    if (const APlayerController *PC = GetOwningPlayer()) {
-        if (const AMythicPlayerState *PS = PC->GetPlayerState<AMythicPlayerState>()) {
-            Runes = PS->GetRuneComponent();
-        }
-    }
-    const UMythicUIKit *Kit = UMythicUIKit::Get();
+    const UMythicRuneComponent *Runes = FindRuneComponent();
 
     for (FMythicRuneSocket &Socket : Sockets) {
+        if (!Socket.Widget) {
+            continue;
+        }
         const bool bUnlocked = Runes && Runes->IsSlotUnlocked(Socket.SlotIndex);
         const UMythicRuneDefinition *Worn = Runes ? Runes->GetRuneInSlot(Socket.SlotIndex) : nullptr;
+        const FSoftObjectPath Now = Worn ? FSoftObjectPath(Worn) : FSoftObjectPath();
 
-        // Three states a player can tell apart at a glance: a socket they have not earned, an earned one
-        // standing empty, and one that is filled. Four identical rings say none of that.
-        if (Socket.Well && Kit) {
-            const EMythicUIState WellState = !bUnlocked ? EMythicUIState::Disabled
-                                             : Worn     ? EMythicUIState::Selected
-                                                        : EMythicUIState::Normal;
-            Socket.Well->SetBrush(Kit->MakeBrush(TEXT("SlotTex.Round"), WellState, FVector2D(64.0, 64.0)));
-        }
+        const EMythicRuneSocketState State = !bUnlocked ? EMythicRuneSocketState::Sealed
+                                             : Worn      ? EMythicRuneSocketState::Filled
+                                                         : EMythicRuneSocketState::Empty;
+        Socket.Widget->SetState(State, Worn ? ResolveRuneIcon(Worn) : nullptr, RuneCategoryColour(Worn));
 
-        if (Socket.Mark) {
-            UTexture2D *Icon = Worn ? Worn->Icon.LoadSynchronous() : nullptr;
-            if (Icon) {
-                Socket.Mark->SetBrushFromTexture(Icon, true);
-                Socket.Mark->SetColorAndOpacity(RuneCategoryColour(Worn));
-                Socket.Mark->SetVisibility(ESlateVisibility::HitTestInvisible);
+        // The delegate carries no payload, so the motion keys off what changed since the last draw. Host and
+        // client both go through here, so both see the same landing.
+        if (bSocketsDrawn) {
+            if (bUnlocked && !Socket.bLastUnlocked) {
+                Socket.Widget->PlayUnseal();
             }
-            else {
-                Socket.Mark->SetVisibility(ESlateVisibility::Collapsed);
+            if (Now != Socket.LastDrawn) {
+                if (Now.IsValid()) {
+                    Socket.Widget->PlayLand();
+                }
+                else if (Socket.LastDrawn.IsValid()) {
+                    Socket.Widget->PlayUnland();
+                }
             }
         }
+        Socket.LastDrawn = Now;
+        Socket.bLastUnlocked = bUnlocked;
 
-        // A socket that cannot be filled yet must not answer a click, or the player learns the control lies.
-        if (Socket.Button) {
-            Socket.Button->SetVisibility(bUnlocked ? ESlateVisibility::Visible
-                                                   : ESlateVisibility::HitTestInvisible);
-            Socket.Button->SetRenderOpacity(bUnlocked ? 1.0f : 0.4f);
+        FText Line;
+        switch (State) {
+        case EMythicRuneSocketState::Sealed: {
+            FText Deed;
+            Line = SealedSocketLine(Socket.SlotIndex, Deed);
+            break;
+        }
+        case EMythicRuneSocketState::Empty:
+            Line = NSLOCTEXT("Mythic", "SocketEmptyTip", "Empty socket - choose a rune");
+            break;
+        case EMythicRuneSocketState::Filled:
+            Line = FText::Format(NSLOCTEXT("Mythic", "SocketFilledTip", "{0}\n{1}"), Worn->Name,
+                                 UMythicRuneDescriber::DescribeBehaviour(Worn, Runes));
+            break;
+        }
+        SetSocketTip(Socket, Line);
+    }
+    bSocketsDrawn = Sockets.Num() > 0;
+
+    if (FocusedSocket == INDEX_NONE) {
+        RestoreSocketHeader();
+    }
+}
+
+void UMythicCharacterPageWidget::SetSocketTip(const FMythicRuneSocket &Socket, const FText &Line) {
+    if (!Socket.Tip) {
+        return;
+    }
+    UWidget *Target = Socket.Tip->GetWidgetFromName(SocketTooltipTextName);
+    if (URichTextBlock *Rich = Cast<URichTextBlock>(Target)) {
+        Rich->SetText(Line);
+    }
+    else if (UTextBlock *Text = Cast<UTextBlock>(Target)) {
+        // A plain block would print the <Roll> markup the describer emits, so it gets the words alone.
+        Text->SetText(CharacterPage_PlainText(Line));
+    }
+}
+
+FText UMythicCharacterPageWidget::SealedSocketLine(int32 SlotIndex, FText &OutDeedName) const {
+    const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>();
+    const UMythicUnlockRuleSet *Rules = Settings ? Settings->DefaultUnlockRuleSet.LoadSynchronous() : nullptr;
+    const UMythicAchievementSet *Deeds = Settings ? Settings->DefaultAchievementSet.LoadSynchronous() : nullptr;
+    return UMythicRuneDescriber::DescribeSealedSocket(SlotIndex, Rules, Deeds, OutDeedName);
+}
+
+UTexture2D *UMythicCharacterPageWidget::ResolveRuneIcon(const UMythicRuneDefinition *Rune) const {
+    if (!Rune) {
+        return nullptr;
+    }
+    if (RunePicker) {
+        if (UTexture2D *Preloaded = RunePicker->FindPreloadedIcon(Rune)) {
+            return Preloaded;
         }
     }
+    return Rune->Icon.LoadSynchronous();
+}
+
+FText UMythicCharacterPageWidget::SocketCountText() const {
+    const UMythicRuneComponent *Runes = FindRuneComponent();
+    const int32 Open = Runes ? Runes->GetUnlockedSlots() : 0;
+    int32 WornCount = 0;
+    for (int32 SocketIndex = 0; SocketIndex < Open; ++SocketIndex) {
+        WornCount += Runes->GetRuneInSlot(SocketIndex) ? 1 : 0;
+    }
+    return FText::Format(NSLOCTEXT("Mythic", "SocketCount", "{0} / {1} sockets"), FText::AsNumber(WornCount),
+                         FText::AsNumber(Open));
+}
+
+void UMythicCharacterPageWidget::SetSocketHeaderTrailing(const FText &Trailing) {
+    if (SocketHeader) {
+        SocketHeader->SetHeader(NSLOCTEXT("Mythic", "SocketStripHeading", "Runes"), Trailing,
+                                SocketEmblem.LoadSynchronous());
+    }
+}
+
+void UMythicCharacterPageWidget::RestoreSocketHeader() {
+    if (const UWorld *World = GetWorld()) {
+        World->GetTimerManager().ClearTimer(RefusalNoticeTimer);
+    }
+    SetSocketHeaderTrailing(SocketCountText());
 }
 
 FLinearColor UMythicCharacterPageWidget::RuneCategoryColour(const UMythicRuneDefinition *Rune) const {
@@ -2659,38 +2780,115 @@ FLinearColor UMythicCharacterPageWidget::RuneCategoryColour(const UMythicRuneDef
     return FLinearColor::White;
 }
 
-void UMythicRuneSocketClickProxy::HandleClicked() {
-    if (UMythicCharacterPageWidget *P = Page.Get()) {
-        P->OpenSocketPicker(SlotIndex);
+UMythicRuneSocketWidget *UMythicCharacterPageWidget::GetSocketWidget(int32 SlotIndex) const {
+    return Sockets.IsValidIndex(SlotIndex) ? Sockets[SlotIndex].Widget.Get() : nullptr;
+}
+
+UMythicRuneComponent *UMythicCharacterPageWidget::FindRuneComponent() const {
+    const APlayerController *PC = GetOwningPlayer();
+    const AMythicPlayerState *PS = PC ? PC->GetPlayerState<AMythicPlayerState>() : nullptr;
+    return PS ? PS->GetRuneComponent() : nullptr;
+}
+
+void UMythicCharacterPageWidget::BindRunes() {
+    UMythicRuneComponent *Runes = FindRuneComponent();
+    if (!Runes) {
+        return;
+    }
+    if (BoundRunes.IsValid() && BoundRunes.Get() != Runes) {
+        UnbindRunes();
+    }
+    Runes->OnRunesChanged.AddUniqueDynamic(this, &UMythicCharacterPageWidget::HandleRunesChanged);
+    Runes->OnRuneRefused.AddUniqueDynamic(this, &UMythicCharacterPageWidget::HandleRuneRefused);
+    BoundRunes = Runes;
+}
+
+void UMythicCharacterPageWidget::UnbindRunes() {
+    if (UMythicRuneComponent *Runes = BoundRunes.Get()) {
+        Runes->OnRunesChanged.RemoveDynamic(this, &UMythicCharacterPageWidget::HandleRunesChanged);
+        Runes->OnRuneRefused.RemoveDynamic(this, &UMythicCharacterPageWidget::HandleRuneRefused);
+    }
+    BoundRunes.Reset();
+    if (const UWorld *World = GetWorld()) {
+        World->GetTimerManager().ClearTimer(RefusalNoticeTimer);
+    }
+}
+
+void UMythicCharacterPageWidget::HandleRunesChanged() {
+    RefreshSockets();
+}
+
+void UMythicCharacterPageWidget::HandleRuneRefused(int32 SlotIndex, EMythicRuneRefusal Reason) {
+    if (UMythicRuneSocketWidget *Socket = GetSocketWidget(SlotIndex)) {
+        Socket->PlayRefuse();
+    }
+    SetSocketHeaderTrailing(UMythicRuneComponent::DescribeRefusal(Reason, INDEX_NONE));
+    if (const UWorld *World = GetWorld()) {
+        World->GetTimerManager().SetTimer(
+            RefusalNoticeTimer,
+            FTimerDelegate::CreateUObject(this, &UMythicCharacterPageWidget::RestoreSocketHeader),
+            RefusalNoticeSeconds, false);
+    }
+}
+
+void UMythicCharacterPageWidget::HandleSocketPressed(int32 SlotIndex) {
+    UMythicRuneSocketWidget *Socket = GetSocketWidget(SlotIndex);
+    if (!Socket) {
+        return;
+    }
+    // A sealed socket answers the click with the deed that opens it, never with silence.
+    if (Socket->GetState() == EMythicRuneSocketState::Sealed) {
+        Socket->PlayRefuse();
+        FText Deed;
+        SealedSocketLine(SlotIndex, Deed);
+        SetSocketHeaderTrailing(FText::Format(NSLOCTEXT("Mythic", "SocketSealedTrailing", "Sealed - earn {0}"), Deed));
+        return;
+    }
+    LastOpenedSocket = SlotIndex;
+    OpenSocketPicker(SlotIndex);
+}
+
+void UMythicCharacterPageWidget::HandleSocketAltPressed(int32 SlotIndex) {
+    UMythicRuneSocketWidget *Socket = GetSocketWidget(SlotIndex);
+    UMythicRuneComponent *Runes = FindRuneComponent();
+    if (!Socket || !Runes || Socket->GetState() != EMythicRuneSocketState::Filled) {
+        return;
+    }
+    // A request, not the decision: the strip redraws from OnRunesChanged when the server answers.
+    Runes->ServerUnequipRune(SlotIndex);
+}
+
+void UMythicCharacterPageWidget::HandleSocketFocusChanged(int32 SlotIndex, bool bOn) {
+    if (bOn) {
+        FocusedSocket = SlotIndex;
+    }
+    else if (FocusedSocket == SlotIndex) {
+        FocusedSocket = INDEX_NONE;
+    }
+    HandleSocketHoverChanged(SlotIndex, bOn);
+}
+
+void UMythicCharacterPageWidget::HandleSocketHoverChanged(int32 SlotIndex, bool bOn) {
+    UMythicRuneSocketWidget *Socket = GetSocketWidget(SlotIndex);
+    if (!Socket) {
+        return;
+    }
+    // Tooltips are mouse-only, so the header trailing is how a pad reads the deed behind a sealed socket.
+    if (bOn && Socket->GetState() == EMythicRuneSocketState::Sealed) {
+        FText Deed;
+        SealedSocketLine(SlotIndex, Deed);
+        SetSocketHeaderTrailing(FText::Format(NSLOCTEXT("Mythic", "SocketSealedTrailing", "Sealed - earn {0}"), Deed));
+        return;
+    }
+    if (!bOn && !RefusalNoticeTimer.IsValid()) {
+        RestoreSocketHeader();
     }
 }
 
 void UMythicCharacterPageWidget::OpenSocketPicker(int32 SlotIndex) {
-    if (!RunePickerClass) {
-        UE_LOG(Myth, Warning, TEXT("CharacterPage: socket %d has no rune picker class assigned."), SlotIndex);
-        return;
-    }
-    const UMythicRuneComponent *Runes = nullptr;
-    if (const APlayerController *PC = GetOwningPlayer()) {
-        if (const AMythicPlayerState *PS = PC->GetPlayerState<AMythicPlayerState>()) {
-            Runes = PS->GetRuneComponent();
-        }
-    }
-    if (!Runes || !Runes->IsSlotUnlocked(SlotIndex)) {
-        return;
-    }
-
-    // One picker for the page's lifetime, re-pointed at the chosen socket. Creating a widget per click is a
-    // frame spike, and the pool of one is all this needs.
     if (!RunePicker) {
-        RunePicker = CreateWidget<UMythicRunePickerWidget>(GetOwningPlayer(), RunePickerClass);
-        if (!RunePicker) {
-            return;
-        }
+        UE_LOG(Myth, Warning, TEXT("Runes: socket %d has no rune picker to open."), SlotIndex);
+        return;
     }
     RunePicker->OpenForSlot(SlotIndex, this);
-}
-
-void UMythicCharacterPageWidget::NotifyRunesChanged() {
-    RefreshSockets();
 }

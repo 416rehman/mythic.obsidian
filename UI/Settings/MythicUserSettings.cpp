@@ -418,12 +418,26 @@ void UMythicUserSettings::ApplyVibration() const {
 }
 
 
+bool UMythicUserSettings::GetClampedPropertyRange(const FName PropertyName, float &OutMin, float &OutMax,
+                                                 float &OutDefault) {
+    if (PropertyName == GET_MEMBER_NAME_CHECKED(UMythicUserSettings, UIScale)) {
+        OutMin = MinUIScale;
+        OutMax = MaxUIScale;
+        OutDefault = DefaultUIScale;
+        return true;
+    }
+    return false;
+}
+
 void UMythicUserSettings::SetUIScale(float Scale) {
-    UIScale = FMath::Clamp(Scale, 0.8f, 1.25f);
+    UIScale = FMath::Clamp(Scale, MinUIScale, MaxUIScale);
     ApplyInterfaceSettings();
 }
 
-void UMythicUserSettings::ApplyInterfaceSettings() const {
+void UMythicUserSettings::ApplyInterfaceSettings() {
+    // Clamped here rather than only in the setter: the settings catalog reaches this property through
+    // reflection, which never passes SetUIScale, and a stale ini can hold anything at all.
+    UIScale = FMath::Clamp(UIScale, MinUIScale, MaxUIScale);
     GetMutableDefault<UUserInterfaceSettings>()->ApplicationScale = UIScale;
     OnInterfaceChanged.Broadcast();
 }
@@ -587,7 +601,7 @@ void UMythicUserSettings::SetToDefaults() {
     GamepadDeadzoneLeft = 0.15f;
     GamepadDeadzoneRight = 0.15f;
     VibrationScale = 1.0f;
-    UIScale = 1.0f;
+    UIScale = DefaultUIScale;
     HUDOpacity = 1.0f;
     DamageNumberMode = 1;
     DamageNumberScale = 1.0f;

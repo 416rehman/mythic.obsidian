@@ -1,6 +1,7 @@
 #include "MythicGameplayEffectContext.h"
 
 #include "Engine/HitResult.h"
+#include "Engine/NetSerialization.h"
 
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
@@ -20,6 +21,13 @@ namespace UE::Net {
 #endif
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(MythicGameplayEffectContext)
+
+namespace {
+// Wire format for the rune multiplier: signed, +-1024x, steps of about 1e-4. Clients only present it; the server has
+// already dealt the exact damage.
+constexpr int32 BonusDamageMultiplierNetMax = 1024;
+constexpr uint32 BonusDamageMultiplierNetBits = 24;
+}
 
 FMythicGameplayEffectContext *FMythicGameplayEffectContext::ExtractEffectContext(struct FGameplayEffectContextHandle Handle) {
     FGameplayEffectContext *BaseEffectContext = Handle.Get();
@@ -66,6 +74,7 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         REP_IsDodged,
         REP_ApplierPlayerKey,
         REP_ShieldAbsorbed,
+        REP_RuneHit,
         REP_MAX
     };
     static_assert(REP_MAX <= 32, "FMythicGameplayEffectContext replication flags must fit in RepBits");
@@ -131,6 +140,9 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         if (ShieldAbsorbed > 0.0f) {
             RepBits |= 1 << REP_ShieldAbsorbed;
         }
+        if (BonusDamageMultiplier != 1.0f || !HitTags.IsEmpty()) {
+            RepBits |= 1 << REP_RuneHit;
+        }
     }
 
     Ar.SerializeBits(&RepBits, REP_MAX);
@@ -156,6 +168,8 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         bDodged = false;
         ApplierPlayerKey.Reset();
         ShieldAbsorbed = 0.0f;
+        BonusDamageMultiplier = 1.0f;
+        HitTags.Reset();
     }
 
     if (RepBits & (1 << REP_Instigator)) {
@@ -225,6 +239,17 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
     }
     if (RepBits & (1 << REP_ShieldAbsorbed)) {
         Ar << ShieldAbsorbed;
+    }
+    if (RepBits & (1 << REP_RuneHit)) {
+        if (Ar.IsSaving()) {
+            WriteFixedCompressedFloat<BonusDamageMultiplierNetMax, BonusDamageMultiplierNetBits>(BonusDamageMultiplier, Ar);
+        }
+        else {
+            ReadFixedCompressedFloat<BonusDamageMultiplierNetMax, BonusDamageMultiplierNetBits>(BonusDamageMultiplier, Ar);
+        }
+        bool bHitTagsSuccess = true;
+        HitTags.NetSerialize(Ar, Map, bHitTagsSuccess);
+        bSuccess &= bHitTagsSuccess;
     }
 
     if (Ar.IsLoading()) {

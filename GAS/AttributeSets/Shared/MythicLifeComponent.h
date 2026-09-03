@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/EngineTypes.h"
 #include "GameplayEffectExtension.h"
 #include "MythicAttributeSet_Life.h"
 #include "Components/GameFrameworkComponent.h"
@@ -13,6 +14,7 @@
 
 class UMythicAbilitySystemComponent;
 class APawn;
+class ACharacter;
 class AMythicCorpse;
 
 UCLASS(Blueprintable, BlueprintType)
@@ -32,6 +34,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FMythicHealthChanged, float, New, 
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMythicOnDeath, AActor*, DeadActor);
 DECLARE_MULTICAST_DELEGATE_OneParam(FMythicNativeLifeEvent, AActor *);
+DECLARE_MULTICAST_DELEGATE(FOnMythicStillBegan);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnMythicFallDepthSampled, float /*Metres*/);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class MYTHIC_API UMythicLifeComponent : public UGameFrameworkComponent {
@@ -204,6 +208,35 @@ public:
     // configured ReviveHealthFraction (which clears the out-of-health latch). No-op if not downed / off authority.
     UFUNCTION(BlueprintCallable, Category = "Mythic|Health")
     void ServerReviveFromDowned();
+
+    // SERVER: sets Health to a [0,1] fraction of MaxHealth and re-derives the death latch. The one health write a
+    // Blueprint rune may make: SetNumericAttributeBase alone leaves the latch set and every later hit zeroed.
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Mythic|Health")
+    void ServerSetHealthFraction(float Fraction);
+
+    // Centimetres of ground travel since the owner was last still. Server-side; a client reads GAS.State.Moving.
+    UFUNCTION(BlueprintPure, Category = "Mythic|Movement")
+    float GetDistanceSinceStill() const { return DistanceSinceStill; }
+
+    // Seconds the owner has been under the moving threshold. 0 while moving. Server-side.
+    UFUNCTION(BlueprintPure, Category = "Mythic|Movement")
+    float GetSecondsStill() const { return SecondsStill; }
+
+    // Metres dropped from the top of the current fall. Read live, so a landing listener sees the whole drop while
+    // the movement mode is still Falling; 0 once the owner is back on the ground. Server-side.
+    UFUNCTION(BlueprintPure, Category = "Mythic|Movement")
+    float GetFallDepthMetres() const;
+
+    // SERVER: credits travel a rune earned another way (a dash, a threaded evade) to the odometer and raises
+    // GAS.Event.Moved with it, so distance listeners see it as ordinary ground covered.
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Mythic|Movement")
+    void AddDistanceSinceStill(float Centimetres);
+
+    // SERVER: the first sample under the moving threshold after travel, before the still grace resolves. Once per stop.
+    FOnMythicStillBegan OnStillBegan;
+
+    // SERVER: every sample while the owner is falling, carrying GetFallDepthMetres.
+    FOnMythicFallDepthSampled OnFallDepthSampled;
 
     static bool CanReviveTarget(bool bTargetDowned, bool bReviverDowned);
 
@@ -382,11 +415,31 @@ protected:
     void SpawnDeathStakeGravestone(class AController *PlayerController, AActor *DeadActor);
 
     void EnterDownedState(AActor *Killer);
+    void LeaveDownedState();
 
     bool IsOwnerRevivablePlayer() const;
 
     void ApplyRegen();
     FTimerHandle RegenTimerHandle;
+
+    // SERVER, players only: one timer publishes GAS.State.Moving and GAS.Event.Moved so movement runes never tick.
+    void StartMovementSampling();
+    void SampleMovement();
+    void RaiseMovedEvent(float Centimetres) const;
+    void ResetMovementSampling();
+    // The movement-mode change is the exact edge; the sampler only confirms it in case the pawn was already airborne.
+    UFUNCTION()
+    void HandleMovementModeChanged(ACharacter *Character, EMovementMode PrevMovementMode, uint8 PreviousCustomMode);
+    void LatchFallState(bool bFalling, float Z);
+    FTimerHandle MovementSampleTimerHandle;
+    FVector LastSampledLocation = FVector::ZeroVector;
+    bool bHasSampledLocation = false;
+    bool bMovingTagActive = false;
+    bool bStillBeganRaised = false;
+    float DistanceSinceStill = 0.0f;
+    float SecondsStill = 0.0f;
+    bool bFallTracked = false;
+    float FallStartZ = 0.0f;
 
     virtual void HandleHealthChanged(AActor *DamageInstigator, AActor *DamageCauser, const FGameplayEffectSpec *DamageEffectSpec, float DamageMagnitude,
                                      float OldValue, float NewValue);

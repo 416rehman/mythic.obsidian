@@ -2,6 +2,7 @@
 #include "AI/MythicTags_AI.h"
 
 #include "GAS/MythicAbilityTagRelationshipMapping.h"
+#include "Itemization/Inventory/ItemDefinition.h"
 
 UMythicDeveloperSettings::UMythicDeveloperSettings() {
     // Seeded with the ladder that used to be a switch in C++, plus the item level each tier now grants.
@@ -32,6 +33,13 @@ UMythicDeveloperSettings::UMythicDeveloperSettings() {
     // The two families a player takes straight out of the world. Overridable in Project Settings.
     GatheredItemTypes.AddTag(FGameplayTag::RequestGameplayTag(FName("Itemization.Type.Farming"), false));
     GatheredItemTypes.AddTag(FGameplayTag::RequestGameplayTag(FName("Itemization.Type.Mining"), false));
+
+    CurrencyItemDefinition = TSoftObjectPtr<UItemDefinition>(
+        FSoftObjectPath(TEXT("/Game/Mythic/Itemization/ItemDefinitions/Currency/Gold.Gold")));
+}
+
+UItemDefinition *UMythicDeveloperSettings::GetCurrencyItemDefinition() const {
+    return CurrencyItemDefinition.IsNull() ? nullptr : CurrencyItemDefinition.LoadSynchronous();
 }
 
 UMythicAbilityTagRelationshipMapping *UMythicDeveloperSettings::GetAbilityTagRelationshipMapping() const {
@@ -68,5 +76,8 @@ void UMythicDeveloperSettings::GetStartupAssetPaths(TArray<FSoftObjectPath> &Out
     }
     if (!ActiveItemizationRuleset.IsNull()) {
         OutPaths.Add(ActiveItemizationRuleset.ToSoftObjectPath());
+    }
+    if (!CurrencyItemDefinition.IsNull()) {
+        OutPaths.Add(CurrencyItemDefinition.ToSoftObjectPath());
     }
 }

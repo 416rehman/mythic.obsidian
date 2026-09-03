@@ -3,6 +3,7 @@
 
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "GameplayEffect.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
 #include "GAS/MythicTags_GAS.h"
 #include "GameModes/Attributes/WorldAttributes.h"
@@ -132,6 +133,25 @@ UMythicCombatSettings::UMythicCombatSettings() {
     ResolveStamina.ResolveHalfPoint = 40.0f;
 
     EnlightenProficiencyBonus = 0.5f;
+
+    MovementSampleIntervalSeconds = 0.2f;
+    MovingSpeedThresholdCmPerSec = 10.0f;
+    StillGraceSeconds = 1.0f;
+
+    RuneCalloutLifetimeSeconds = 1.6f;
+    RuneGuardShieldMultiple = 10.0f;
+    RuneSlamMaxBonusMetres = 10.0f;
+    RuneCueThrottleSeconds = 0.5f;
+    RuneFlashSeconds = 1.0f;
+    RuneWhiffFlashSeconds = 0.5f;
+    FeatherfallCalloutFraction = 0.5f;
+    RuneGuardMaxShieldEffect = TSoftClassPtr<UGameplayEffect>(
+        FSoftObjectPath(TEXT("/Game/Mythic/GAS/Effects/Runes/GE_Rune_Guard_MaxShield.GE_Rune_Guard_MaxShield_C")));
+    RuneGuardShieldEffect = TSoftClassPtr<UGameplayEffect>(
+        FSoftObjectPath(TEXT("/Game/Mythic/GAS/Effects/Runes/GE_Rune_Guard_Shield.GE_Rune_Guard_Shield_C")));
+    RuneSelfDamageEffect = TSoftClassPtr<UGameplayEffect>(
+        FSoftObjectPath(TEXT("/Game/Mythic/GAS/Effects/Runes/GE_Rune_SelfDamage.GE_Rune_SelfDamage_C")));
+    RuneHealEffect = TSoftClassPtr<UGameplayEffect>(FSoftObjectPath(TEXT("/Game/Mythic/GAS/Effects/GE_InstantHeal.GE_InstantHeal_C")));
 }
 
 namespace MythicCombat {

@@ -324,11 +324,28 @@ public:
     void ApplyVibration() const;
 
 
+    /**
+     * The one range every writer of UI scale answers to.
+     *
+     * The catalog row authors its slider against these and the setter clamps against them, so a player
+     * cannot drag to a value the clamp then quietly refuses. 0.75 is the floor because a crowded page has
+     * to be shrinkable; above 1.25 the action bar stops fitting.
+     */
+    static constexpr float MinUIScale = 0.75f;
+    static constexpr float MaxUIScale = 1.25f;
+    static constexpr float DefaultUIScale = 1.0f;
+
+    /**
+     * Slider bounds for a property whose setter clamps, so catalog validation can reject a row that
+     * offers values the clamp would refuse. False for a property with no clamp of its own.
+     */
+    static bool GetClampedPropertyRange(FName PropertyName, float &OutMin, float &OutMax, float &OutDefault);
+
     /** Returns the user-interface scale multiplier. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetUIScale() const { return UIScale; }
 
-    /** Sets and applies the user-interface scale multiplier. */
+    /** Sets and applies the user-interface scale multiplier, clamped to the shared UI-scale range. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void SetUIScale(float Scale);
 
@@ -560,7 +577,7 @@ private:
 
     // ---- Interface ----
     UPROPERTY(Config)
-    float UIScale = 1.0f;
+    float UIScale = DefaultUIScale;
 
     UPROPERTY(Config)
     float HUDOpacity = 1.0f;
@@ -603,7 +620,7 @@ private:
     UPROPERTY(Config)
     bool bReducedNameplateMotion = false;
 
-    void ApplyInterfaceSettings() const;
+    void ApplyInterfaceSettings();
 
     static void PushCVar(const TCHAR *Name, int32 Value);
     static void PushCVar(const TCHAR *Name, float Value);

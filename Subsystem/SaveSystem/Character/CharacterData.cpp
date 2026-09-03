@@ -151,8 +151,9 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
                 OutData.EquippedRunes.Add(Rune.ToSoftObjectPath());
             }
             OutData.UnlockedRuneSlots = RuneComp->GetUnlockedSlots();
-            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d rune sockets (%d open)"),
-                   OutData.EquippedRunes.Num(), OutData.UnlockedRuneSlots);
+            OutData.RuneRolls = RuneComp->GetRuneRolls();
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d rune sockets (%d open, %d roll sets)"),
+                   OutData.EquippedRunes.Num(), OutData.UnlockedRuneSlots, OutData.RuneRolls.Num());
         }
 
         if (const UMythicSkillComponent *SkillComp = MythPS->GetSkillComponent()) {
@@ -470,6 +471,11 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
         // Last, after the story/achievement/unlock ledgers above: IsRuneUnlocked reads all three, so a rune gated on a
         // deed the player has actually earned would otherwise be dropped as unearned.
         UMythicRuneComponent *RuneComp = MythPS->GetRuneComponent();
+        if (RuneComp) {
+            // Before the sockets: a re-granted rune reads its numbers as it activates.
+            RuneComp->RestoreRuneRolls(InData.RuneRolls);
+            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d rune roll sets"), InData.RuneRolls.Num());
+        }
         if (RuneComp && InData.UnlockedRuneSlots > 0) {
             TArray<TSoftObjectPtr<UMythicRuneDefinition>> SavedRunes;
             SavedRunes.Reserve(InData.EquippedRunes.Num());

@@ -14,6 +14,8 @@
 #include "GAS/Combat/MythicCombatThreatAssessment.h"
 #include "MythicCombatSettings.generated.h"
 
+class UGameplayEffect;
+
 /**
  * The whole Resolve to MaxStamina derivation, as three numbers instead of three literals buried in an attribute
  * callback. MaxStamina = Base + BonusCeiling * Resolve / (Resolve + HalfPoint): a hyperbola that pays half the
@@ -221,6 +223,74 @@ public:
      */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.01", ClampMax = "1.0"))
     float MinSpeedScale = 0.1f;
+
+    /**
+     * How often the server samples a player pawn for the moving signal, in seconds. Movement runes read
+     * GAS.State.Moving and GAS.Event.Moved instead of ticking, so this one timer is the whole cost of the feature.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.05", Units = "s"))
+    float MovementSampleIntervalSeconds;
+
+    /** Ground speed a pawn must exceed to count as moving, in cm/s. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0"))
+    float MovingSpeedThresholdCmPerSec;
+
+    /**
+     * How long a pawn stays under the threshold before GAS.State.Moving drops and the distance odometer resets.
+     * A pause shorter than this is still one journey, so a stutter-step never resets a distance rune.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0", Units = "s"))
+    float StillGraceSeconds;
+
+    /** How long a rune's callout stays above the pawn, in seconds. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Runes", meta = (ClampMin = "0.1", Units = "s"))
+    float RuneCalloutLifetimeSeconds;
+
+    /**
+     * Multiple of MaxHealth a rune guard raises Shield by while it holds. Sized so no single hit can exceed it; the
+     * number is never shown to a player.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Runes", meta = (ClampMin = "1.0"))
+    float RuneGuardShieldMultiple;
+
+    /** Most metres of fall past its threshold a slam rune is paid for, so a cliff dive has a ceiling. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Runes", meta = (ClampMin = "0.0"))
+    float RuneSlamMaxBonusMetres;
+
+    /** Least time between two plays of the same cue from one rune, in seconds, so a clink can never spam. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Runes", meta = (ClampMin = "0.0", Units = "s"))
+    float RuneCueThrottleSeconds;
+
+    /** How long a rune's success flash holds its badge lit, in seconds. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Runes", meta = (ClampMin = "0.0", Units = "s"))
+    float RuneFlashSeconds;
+
+    /** How long a rune's miss readout dims its badge, in seconds. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Runes", meta = (ClampMin = "0.0", Units = "s"))
+    float RuneWhiffFlashSeconds;
+
+    /** Fraction of MaxHealth a prevented fall must have been worth before Featherfall calls it out. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Runes", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FeatherfallCalloutFraction;
+
+    /**
+     * Duration effect that adds SetByCaller.Generic to MaxShield for SetByCaller.Duration seconds. A rune guard applies
+     * it before the Shield effect so the Shield add is not clamped against the old ceiling.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Runes")
+    TSoftClassPtr<UGameplayEffect> RuneGuardMaxShieldEffect;
+
+    /** Duration effect that adds SetByCaller.Generic to Shield for SetByCaller.Duration seconds. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Runes")
+    TSoftClassPtr<UGameplayEffect> RuneGuardShieldEffect;
+
+    /** Instant effect that adds SetByCaller.Generic to the Damage meta attribute, so a rune's self-wound runs the pipeline. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Runes")
+    TSoftClassPtr<UGameplayEffect> RuneSelfDamageEffect;
+
+    /** Instant effect that adds SetByCaller.Generic to the Healing meta attribute. */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Runes")
+    TSoftClassPtr<UGameplayEffect> RuneHealEffect;
 
     /**
      * Post-mitigation floor under any hit that was not negated outright, in damage points. It is what stops a

@@ -2,6 +2,7 @@
 #include "UI/Settings/MythicSettingDefinition.h"
 
 #include "UI/Settings/MythicSettingAccess.h"
+#include "UI/Settings/MythicUserSettings.h"
 
 #if WITH_EDITOR
 #include "Misc/DataValidation.h"
@@ -125,6 +126,24 @@ EDataValidationResult UMythicSettingsCatalog::IsDataValid(FDataValidationContext
         if (Def.Control == EMythicSettingControl::Slider && Def.MaxValue <= Def.MinValue) {
             Context.AddError(FText::Format(
                 LOCTEXT("SliderRange", "'{0}' is a Slider whose Max is not above its Min."), Named));
+            Result = EDataValidationResult::Invalid;
+        }
+
+        // A slider that offers what the setter's clamp refuses leaves the handle stuck short of the end
+        // it just travelled to, and Reset lands somewhere the row never claimed was the default.
+        float ClampMin = 0.0f;
+        float ClampMax = 0.0f;
+        float ClampDefault = 0.0f;
+        if (Def.Control == EMythicSettingControl::Slider && Def.Source == EMythicSettingSource::Property &&
+            UMythicUserSettings::GetClampedPropertyRange(Def.SourceName, ClampMin, ClampMax, ClampDefault) &&
+            (!FMath::IsNearlyEqual(Def.MinValue, ClampMin, 0.001f) ||
+             !FMath::IsNearlyEqual(Def.MaxValue, ClampMax, 0.001f) ||
+             !FMath::IsNearlyEqual(Def.DefaultValue, ClampDefault, 0.001f))) {
+            Context.AddError(FText::Format(
+                LOCTEXT("SliderClampMismatch",
+                        "'{0}' authors {1}..{2} default {3}, but '{4}' is clamped to {5}..{6} default {7}."),
+                Named, Def.MinValue, Def.MaxValue, Def.DefaultValue,
+                FText::FromString(Def.SourceName.ToString()), ClampMin, ClampMax, ClampDefault));
             Result = EDataValidationResult::Invalid;
         }
     }

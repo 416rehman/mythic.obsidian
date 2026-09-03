@@ -12,6 +12,9 @@
 #include "Progression/Runes/MythicRuneComponent.h"
 #include "Progression/Runes/MythicRuneDefinition.h"
 #include "Subsystem/SaveSystem/Character/CharacterData.h"
+#include "World/Entity/MythicEntityId.h"
+#include "Tests/GAS/MythicGA_RuneTestTypes.h"
+#include "Tests/Progression/MythicRuneTestTypes.h"
 #include "UObject/UnrealType.h"
 
 namespace {
@@ -43,6 +46,9 @@ bool BuildRuneFixture(FAutomationTestBase &Test, FMythicRuneFixture &Out) {
     if (!Test.TestTrue(TEXT("the owner holds authority"), Out.PlayerState->HasAuthority())) {
         return false;
     }
+    // The character save refuses a player with no canonical identity, which the game assigns on login.
+    Out.PlayerState->AuthoritySetPersistentEntityId(
+        FMythicEntityId::FromAuthorityGuid(EMythicEntityDomain::PlayerCharacter, FGuid::NewGuid()));
     Out.Runes = Out.PlayerState->GetRuneComponent();
     if (!Test.TestNotNull(TEXT("the player state owns a rune component"), Out.Runes)) {
         return false;
@@ -63,7 +69,7 @@ bool BuildRuneFixture(FAutomationTestBase &Test, FMythicRuneFixture &Out) {
 
 UMythicRuneDefinition *MakeRune(const FGameplayTag RequiredTag) {
     UMythicRuneDefinition *Rune = NewObject<UMythicRuneDefinition>();
-    Rune->Ability = UGameplayAbility::StaticClass();
+    Rune->Ability = UMythicRuneTestAbility::StaticClass();
     Rune->RequiredTag = RequiredTag;
     return Rune;
 }
@@ -97,6 +103,16 @@ int32 CountGrantedFrom(const UAbilitySystemComponent *ASC, const UMythicRuneDefi
 
 FGameplayTag RegisteredTag(const TCHAR *Name) {
     return FGameplayTag::RequestGameplayTag(FName(Name), false);
+}
+
+// The spec handle a rune's passive was granted under. A move must carry this handle, not mint a new one.
+FGameplayAbilitySpecHandle HandleGrantedFrom(const UAbilitySystemComponent *ASC, const UMythicRuneDefinition *Rune) {
+    for (const FGameplayAbilitySpec &Spec : ASC->GetActivatableAbilities()) {
+        if (!Spec.PendingRemove && Spec.SourceObject.Get() == Rune) {
+            return Spec.Handle;
+        }
+    }
+    return FGameplayAbilitySpecHandle();
 }
 
 }
@@ -321,15 +337,19 @@ bool FMythicRunePayloadRequiredTest::RunTest(const FString &Parameters) {
     UMythicRuneDefinition *Inert = NewObject<UMythicRuneDefinition>();
     TestFalse(TEXT("a rune with no ability has no payload"), Inert->HasPayload());
 
+    UMythicRuneDefinition *WrongBase = NewObject<UMythicRuneDefinition>();
+    WrongBase->Ability = UGameplayAbility::StaticClass();
+    TestFalse(TEXT("an ability that is not a rune is no payload either"), WrongBase->HasPayload());
+
     Runes->ServerEquipRune(0, Inert);
     TestNull(TEXT("an inert rune never occupies a socket"), Runes->GetRuneInSlot(0));
 
     Runes->ServerEquipRune(0, nullptr);
     TestNull(TEXT("nor does nothing at all"), Runes->GetRuneInSlot(0));
 
-    // The denominator: the same socket, same call, a rune that does carry an ability.
+    // The denominator: the same socket, same call, a rune that does carry a rune ability.
     UMythicRuneDefinition *Carrying = MakeRune(FGameplayTag());
-    TestTrue(TEXT("a rune with an ability has a payload"), Carrying->HasPayload());
+    TestTrue(TEXT("a rune whose ability is a UMythicGA_Rune has a payload"), Carrying->HasPayload());
     Runes->ServerEquipRune(0, Carrying);
     TestTrue(TEXT("and it equips"), Runes->GetRuneInSlot(0) == Carrying);
 
@@ -677,5 +697,270 @@ bool FMythicRuneSaveMigrationTest::RunTest(const FString &Parameters) {
 
     TestEqual(TEXT("an invalid entry is ignored rather than counted"),
               Migration::RuneSlotsFromAppliedRules({FGameplayTag(), Slot2}), 2);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicRuneMoveTest,
+    "Mythic.Progression.Runes.Move",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicRuneMoveTest::RunTest(const FString &Parameters) {
+    FMythicRuneFixture Fixture;
+    const bool bReady = BuildRuneFixture(*this, Fixture);
+    ON_SCOPE_EXIT {
+        if (Fixture.GameInstance) {
+            Fixture.GameInstance->Shutdown();
+        }
+    };
+    if (!bReady) {
+        return false;
+    }
+    UMythicRuneComponent *Runes = Fixture.Runes;
+    if (!TestTrue(TEXT("the authored MaxSlots leaves a shut socket beyond two open ones"), Runes->MaxSlots >= 3)) {
+        return false;
+    }
+    Runes->GrantSlot();
+    if (!TestEqual(TEXT("two sockets are open"), Runes->GetUnlockedSlots(), 2)) {
+        return false;
+    }
+
+    UMythicRuneDefinition *Moved = MakeRune(FGameplayTag());
+    Runes->ServerEquipRune(0, Moved);
+    if (!TestTrue(TEXT("the rune took the first socket"), Runes->GetRuneInSlot(0) == Moved)) {
+        return false;
+    }
+    const FGameplayAbilitySpecHandle Granted = HandleGrantedFrom(Fixture.ASC, Moved);
+    if (!TestTrue(TEXT("the passive was granted under a real handle"), Granted.IsValid())) {
+        return false;
+    }
+
+    // One verb, one destination. A move built from unequip + equip would hand the passive back and mint a new spec.
+    Runes->ServerMoveRune(0, 1);
+    TestNull(TEXT("the source socket is empty"), Runes->GetRuneInSlot(0));
+    TestTrue(TEXT("the destination wears the rune"), Runes->GetRuneInSlot(1) == Moved);
+    TestEqual(TEXT("the passive is still granted exactly once"), CountGrantedFrom(Fixture.ASC, Moved), 1);
+    TestTrue(TEXT("and under the same handle it was granted with"), HandleGrantedFrom(Fixture.ASC, Moved) == Granted);
+
+    // Refusals must not touch either socket: a shut destination, an empty source, a source that is its own target.
+    Runes->ServerMoveRune(1, 2);
+    TestTrue(TEXT("a shut destination leaves the rune where it was"), Runes->GetRuneInSlot(1) == Moved);
+    TestNull(TEXT("and lands nothing in the shut socket"), Runes->GetRuneInSlot(2));
+    Runes->ServerMoveRune(0, 1);
+    TestTrue(TEXT("an empty source moves nothing"), Runes->GetRuneInSlot(1) == Moved);
+    Runes->ServerMoveRune(1, 1);
+    TestTrue(TEXT("a move onto itself changes nothing"), Runes->GetRuneInSlot(1) == Moved);
+    Runes->ServerMoveRune(1, Runes->MaxSlots);
+    Runes->ServerMoveRune(-1, 1);
+    TestTrue(TEXT("an out-of-range socket on either side changes nothing"), Runes->GetRuneInSlot(1) == Moved);
+    TestEqual(TEXT("the strip never grew"), Runes->GetEquippedRunes().Num(), Runes->MaxSlots);
+    TestEqual(TEXT("no refusal re-granted the passive"), CountGrantedFrom(Fixture.ASC, Moved), 1);
+
+    // Moving onto a worn socket replaces what it held, and the replaced passive goes with it.
+    UMythicRuneDefinition *Replaced = MakeRune(FGameplayTag());
+    Runes->ServerEquipRune(0, Replaced);
+    if (!TestEqual(TEXT("the other rune is worn and granted"), CountGrantedFrom(Fixture.ASC, Replaced), 1)) {
+        return false;
+    }
+    Runes->ServerMoveRune(1, 0);
+    TestTrue(TEXT("the moved rune took the worn socket"), Runes->GetRuneInSlot(0) == Moved);
+    TestNull(TEXT("its old socket is empty"), Runes->GetRuneInSlot(1));
+    TestEqual(TEXT("the replaced rune's passive is handed back"), CountGrantedFrom(Fixture.ASC, Replaced), 0);
+    TestEqual(TEXT("the moved rune is still granted once"), CountGrantedFrom(Fixture.ASC, Moved), 1);
+
+    AddInfo(FString::Printf(TEXT("sockets: %d, open: %d, moves attempted: 7, landed: 2"), Runes->MaxSlots,
+                            Runes->GetUnlockedSlots()));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicRuneChangeBroadcastTest,
+    "Mythic.Progression.Runes.ChangeBroadcast",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicRuneChangeBroadcastTest::RunTest(const FString &Parameters) {
+    FMythicRuneFixture Fixture;
+    const bool bReady = BuildRuneFixture(*this, Fixture);
+    ON_SCOPE_EXIT {
+        if (Fixture.GameInstance) {
+            Fixture.GameInstance->Shutdown();
+        }
+    };
+    if (!bReady) {
+        return false;
+    }
+    UMythicRuneComponent *Runes = Fixture.Runes;
+    if (!TestTrue(TEXT("the character can open at least two sockets"), OpenEverySocket(Runes) >= 2)) {
+        return false;
+    }
+
+    // A widget listens the same way: a dynamic delegate into a UFUNCTION. Anything a lambda could hear that this
+    // cannot is a broadcast the UI never sees.
+    UMythicRuneTestListener *Listener = NewObject<UMythicRuneTestListener>(Fixture.GameInstance);
+    Listener->Bind(Runes);
+    int32 ChangesHeard = 0;
+    int32 RefusalsHeard = 0;
+    auto Tally = [&]() {
+        ChangesHeard += Listener->ChangedCount;
+        RefusalsHeard += Listener->RefusedCount;
+        Listener->Reset();
+    };
+
+    UMythicRuneDefinition *Worn = MakeRune(FGameplayTag());
+    Runes->ServerEquipRune(0, Worn);
+    TestEqual(TEXT("an equip broadcasts once"), Listener->ChangedCount, 1);
+    TestEqual(TEXT("and refuses nothing"), Listener->RefusedCount, 0);
+    Tally();
+
+    Runes->ServerEquipRune(1, Worn);
+    TestEqual(TEXT("a refused equip broadcasts no change"), Listener->ChangedCount, 0);
+    TestEqual(TEXT("but does report the refusal"), Listener->RefusedCount, 1);
+    TestEqual(TEXT("for the socket that was asked"), Listener->LastRefusedSlot, 1);
+    TestTrue(TEXT("with the worn-elsewhere reason"), Listener->LastReason == EMythicRuneRefusal::WornElsewhere);
+    Tally();
+
+    Runes->ServerMoveRune(0, 1);
+    TestEqual(TEXT("a move broadcasts once, not once per socket"), Listener->ChangedCount, 1);
+    TestEqual(TEXT("and refuses nothing"), Listener->RefusedCount, 0);
+    Tally();
+
+    Runes->ServerMoveRune(1, 1);
+    TestEqual(TEXT("a refused move broadcasts no change"), Listener->ChangedCount, 0);
+    TestEqual(TEXT("and reports one refusal"), Listener->RefusedCount, 1);
+    Tally();
+
+    Runes->ServerUnequipRune(1);
+    TestEqual(TEXT("an unequip broadcasts once"), Listener->ChangedCount, 1);
+    Runes->ServerUnequipRune(1);
+    TestEqual(TEXT("unequipping an empty socket is silent"), Listener->ChangedCount, 1);
+    TestEqual(TEXT("and is not a refusal"), Listener->RefusedCount, 0);
+    Tally();
+
+    Runes->GrantSlot();
+    TestEqual(TEXT("a slot grant past the ceiling is silent"), Listener->ChangedCount, 0);
+    Tally();
+
+    // A client never runs the verbs. Everything it draws comes from the RepNotify, so the RepNotify must reach the
+    // same listener. Invoked through reflection because that is how replication itself calls it.
+    UFunction *RepNotify = Runes->FindFunction(FName("OnRep_Runes"));
+    if (!TestNotNull(TEXT("the RepNotify is a reflected function"), RepNotify)) {
+        return false;
+    }
+    Runes->ProcessEvent(RepNotify, nullptr);
+    TestEqual(TEXT("the client RepNotify broadcasts once"), Listener->ChangedCount, 1);
+    Tally();
+
+    AddInfo(FString::Printf(TEXT("calls: 8, changes heard: %d (expected 4), refusals heard: %d (expected 2)"),
+                            ChangesHeard, RefusalsHeard));
+    TestEqual(TEXT("four calls changed state"), ChangesHeard, 4);
+    TestEqual(TEXT("two calls were refused"), RefusalsHeard, 2);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicRuneRefusalReasonsTest,
+    "Mythic.Progression.Runes.RefusalReasons",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicRuneRefusalReasonsTest::RunTest(const FString &Parameters) {
+    const FGameplayTag UnearnedDeed = RegisteredTag(TEXT("Achievement.Wanderer"));
+    if (!UnearnedDeed.IsValid()) {
+        AddWarning(TEXT("Achievement.Wanderer is not registered in this build; the deed refusal is untested"));
+    }
+
+    FMythicRuneFixture Fixture;
+    const bool bReady = BuildRuneFixture(*this, Fixture);
+    ON_SCOPE_EXIT {
+        if (Fixture.GameInstance) {
+            Fixture.GameInstance->Shutdown();
+        }
+    };
+    if (!bReady) {
+        return false;
+    }
+    UMythicRuneComponent *Runes = Fixture.Runes;
+    if (!TestTrue(TEXT("the authored MaxSlots leaves a shut socket"), Runes->MaxSlots >= 2)) {
+        return false;
+    }
+    UMythicRuneTestListener *Listener = NewObject<UMythicRuneTestListener>(Fixture.GameInstance);
+    Listener->Bind(Runes);
+
+    UMythicRuneDefinition *Free = MakeRune(FGameplayTag());
+    UMythicRuneDefinition *Other = MakeRune(FGameplayTag());
+    UMythicRuneDefinition *Inert = NewObject<UMythicRuneDefinition>();
+    UMythicRuneDefinition *Locked = MakeRune(UnearnedDeed);
+    int32 Exercised = 0;
+
+    // The evaluator and the verb must agree on every reason, or the UI refuses one thing and the server another.
+    auto Expect = [&](const TCHAR *Case, int32 Slot, UMythicRuneDefinition *Rune, EMythicRuneRefusal Reason,
+                      int32 ExpectedOther) {
+        int32 OtherSlot = INDEX_NONE;
+        const EMythicRuneRefusal Evaluated = Runes->CanEquipRune(Slot, Rune, OtherSlot);
+        TestTrue(FString::Printf(TEXT("%s: the evaluator answers %s, not %s"), Case, *UEnum::GetValueAsString(Reason),
+                                 *UEnum::GetValueAsString(Evaluated)),
+                 Evaluated == Reason);
+        TestEqual(FString::Printf(TEXT("%s: the evaluator names the other socket"), Case), OtherSlot, ExpectedOther);
+
+        Listener->Reset();
+        Runes->ServerEquipRune(Slot, Rune);
+        TestEqual(FString::Printf(TEXT("%s: the server refuses once"), Case), Listener->RefusedCount, 1);
+        TestEqual(FString::Printf(TEXT("%s: for the asked socket"), Case), Listener->LastRefusedSlot, Slot);
+        TestTrue(FString::Printf(TEXT("%s: with the same reason"), Case), Listener->LastReason == Reason);
+        TestEqual(FString::Printf(TEXT("%s: and changes nothing"), Case), Listener->ChangedCount, 0);
+        Exercised++;
+    };
+
+    int32 OtherSlot = INDEX_NONE;
+    TestTrue(TEXT("an open socket and an earned rune pass"),
+             Runes->CanEquipRune(0, Free, OtherSlot) == EMythicRuneRefusal::None);
+
+    Expect(TEXT("negative socket"), -1, Free, EMythicRuneRefusal::SlotOutOfRange, INDEX_NONE);
+    Expect(TEXT("socket past the ceiling"), Runes->MaxSlots, Free, EMythicRuneRefusal::SlotOutOfRange, INDEX_NONE);
+    Expect(TEXT("shut socket"), 1, Free, EMythicRuneRefusal::SlotLocked, INDEX_NONE);
+    Expect(TEXT("no rune"), 0, nullptr, EMythicRuneRefusal::NoRune, INDEX_NONE);
+    Expect(TEXT("inert rune"), 0, Inert, EMythicRuneRefusal::NoPayload, INDEX_NONE);
+    if (UnearnedDeed.IsValid()) {
+        Expect(TEXT("unearned deed"), 0, Locked, EMythicRuneRefusal::DeedMissing, INDEX_NONE);
+    }
+
+    Runes->GrantSlot();
+    Runes->ServerEquipRune(0, Free);
+    if (!TestTrue(TEXT("the rune is worn in socket one"), Runes->GetRuneInSlot(0) == Free)) {
+        return false;
+    }
+    Expect(TEXT("same rune, same socket"), 0, Free, EMythicRuneRefusal::AlreadyWornHere, INDEX_NONE);
+    Expect(TEXT("same rune, other socket"), 1, Free, EMythicRuneRefusal::WornElsewhere, 0);
+    TestTrue(TEXT("a different rune still fits the second socket"),
+             Runes->CanEquipRune(1, Other, OtherSlot) == EMythicRuneRefusal::None);
+
+    // A component whose owner carries no ability system has nowhere to grant a passive.
+    AActor *Bare = Fixture.GameInstance->GetWorld()->SpawnActor<AActor>();
+    UMythicRuneComponent *Orphan = NewObject<UMythicRuneComponent>(Bare);
+    Orphan->RegisterComponent();
+    TestTrue(TEXT("no ability system: the evaluator says so"),
+             Orphan->CanEquipRune(0, Free, OtherSlot) == EMythicRuneRefusal::NoAbilitySystem);
+    UMythicRuneTestListener *OrphanListener = NewObject<UMythicRuneTestListener>(Fixture.GameInstance);
+    OrphanListener->Bind(Orphan);
+    Orphan->ServerEquipRune(0, Free);
+    TestTrue(TEXT("no ability system: the server refuses with the same reason"),
+             OrphanListener->LastReason == EMythicRuneRefusal::NoAbilitySystem);
+    TestNull(TEXT("no ability system: nothing lands"), Orphan->GetRuneInSlot(0));
+    Exercised++;
+
+    // Every reason has words, and only success has none.
+    const UEnum *Reasons = StaticEnum<EMythicRuneRefusal>();
+    int32 Described = 0;
+    for (int32 Index = 0; Index < Reasons->NumEnums() - 1; Index++) {
+        const EMythicRuneRefusal Reason = static_cast<EMythicRuneRefusal>(Reasons->GetValueByIndex(Index));
+        const bool bHasText = !UMythicRuneComponent::DescribeRefusal(Reason, 2).IsEmpty();
+        TestEqual(FString::Printf(TEXT("%s has words exactly when it is a refusal"), *Reasons->GetNameStringByIndex(Index)),
+                  bHasText, Reason != EMythicRuneRefusal::None);
+        Described += bHasText ? 1 : 0;
+    }
+    TestTrue(TEXT("the worn-elsewhere text names the socket as players count them"),
+             UMythicRuneComponent::DescribeRefusal(EMythicRuneRefusal::WornElsewhere, 2).ToString().Contains(TEXT("3")));
+
+    AddInfo(FString::Printf(TEXT("reasons: %d, described: %d, exercised through the server: %d"),
+                            Reasons->NumEnums() - 1, Described, Exercised));
     return true;
 }

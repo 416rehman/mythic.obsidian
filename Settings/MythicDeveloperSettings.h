@@ -34,6 +34,7 @@ class UMythicTitleRegistry;
 class UGameplayEffect;
 class AMythicMount;
 class UMythicItemizationRuleset;
+class UItemDefinition;
 
 UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic"))
 class MYTHIC_API UMythicDeveloperSettings : public UDeveloperSettings {
@@ -199,6 +200,17 @@ public:
      *  RerollBaseCost > 0. */
     UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Economy", meta = (ClampMin = "0.0"))
     float RerollCostPerRarityFraction = 0.75f;
+
+    /**
+     * The item stacks the wallet is made of: what AMythicPlayerController::GrantCurrency mints and what a vendor or
+     * stall pays out when it carries no currency override of its own.
+     */
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Economy")
+    TSoftObjectPtr<UItemDefinition> CurrencyItemDefinition;
+
+    /** The loaded wallet definition, or null when none is authored. */
+    UFUNCTION(BlueprintPure, Category = "Mythic|Economy")
+    UItemDefinition *GetCurrencyItemDefinition() const;
 
     /**
      * Co-op down/revive policy. When TRUE, a revivable player taking a lethal blow enters a downed state (bleeds out

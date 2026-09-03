@@ -57,6 +57,39 @@ struct MYTHIC_API FRollDefinition {
     UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category="Itemization")
     bool bWholeNumber = false;
 
+    // Fractional digits the rich text prints the value and its range with. Zero keeps the whole-number reading
+    // every talent has always had; a rune window of 0.35 s needs two.
+    UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category="Presentation", meta=(ClampMin="0", ClampMax="3"))
+    int32 DisplayDecimals = 0;
+
+    // Unit printed after the value (" s", " m", "x"). bIsPercentage prints its % sign first.
+    UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category="Presentation")
+    FText DisplaySuffix;
+
+    // The number as the rich text prints it. At zero decimals the value truncates to an int, which is what talents
+    // have always shown; the unit only follows the rolled value, never the range, matching the % convention.
+    FString FormatForDisplay(float Value, bool bWithUnit) const {
+        const float Shown = bIsPercentage ? Value * 100.0f : Value;
+        FString Number;
+        if (DisplayDecimals > 0) {
+            FNumberFormattingOptions Options;
+            Options.UseGrouping = false;
+            Options.MinimumFractionalDigits = DisplayDecimals;
+            Options.MaximumFractionalDigits = DisplayDecimals;
+            Number = FText::AsNumber(Shown, &Options).ToString();
+        }
+        else {
+            Number = FString::Printf(TEXT("%d"), static_cast<int>(Shown));
+        }
+        if (bWithUnit) {
+            if (bIsPercentage) {
+                Number += TEXT("%");
+            }
+            Number += DisplaySuffix.ToString();
+        }
+        return Number;
+    }
+
     bool Serialize(FArchive &Ar) {
         if (!Ar.IsSaveGame()) {
             return false;
@@ -227,39 +260,29 @@ struct FAbilityDefinition {
     UPROPERTY(BlueprintReadWrite, EditDefaultsOnly, SaveGame)
     FText RichText = FText::FromString("???");
 
-    bool GetRichText(FText &OutRichText, TArray<FRolledTagSpec> &RolledAttributes) {
+    // False when the text is empty, mentions no placeholder for a rolled tag, or rolls a tag it has no range for.
+    bool GetRichText(FText &OutRichText, const TArray<FRolledTagSpec> &RolledAttributes) const {
         if (RichText.IsEmpty()) {
             return false;
         }
 
-        FText SourceString = FText::FromString(RichText.ToString());
+        FString Source = RichText.ToString();
 
-        for (auto &AttributeRoll : RolledAttributes) {
-            FText ToReplace = FText::FromString(FString::Printf(TEXT("<#%s>"), *AttributeRoll.Tag.ToString()));
-
-            if (SourceString.ToString().Contains(ToReplace.ToString())) {
-                auto RollDef = this->ParameterRolls[AttributeRoll.Tag];
-                float AttributeValue = AttributeRoll.Value;
-                float MinValue = RollDef.Min;
-                float MaxValue = RollDef.Max;
-
-                if (RollDef.bIsPercentage) {
-                    AttributeValue *= 100.0f;
-                    MinValue *= 100.0f;
-                    MaxValue *= 100.0f;
-                }
-
-                FText Replacement = FText::FromString(FString::Printf(
-                    TEXT("<Roll>%d%hs</><Context>[%d-%d]</>"), static_cast<int>(AttributeValue), RollDef.bIsPercentage ? "%" : "", static_cast<int>(MinValue),
-                    static_cast<int>(MaxValue)));
-                SourceString = FText::FromString(SourceString.ToString().Replace(*ToReplace.ToString(), *Replacement.ToString()));
-            }
-            else {
+        for (const FRolledTagSpec &AttributeRoll : RolledAttributes) {
+            const FString ToReplace = FString::Printf(TEXT("<#%s>"), *AttributeRoll.Tag.ToString());
+            const FRollDefinition *RollDef = ParameterRolls.Find(AttributeRoll.Tag);
+            if (!RollDef || !Source.Contains(ToReplace)) {
                 return false;
             }
+
+            const FString Replacement = FString::Printf(TEXT("<Roll>%s</><Context>[%s-%s]</>"),
+                                                        *RollDef->FormatForDisplay(AttributeRoll.Value, true),
+                                                        *RollDef->FormatForDisplay(RollDef->Min, false),
+                                                        *RollDef->FormatForDisplay(RollDef->Max, false));
+            Source = Source.Replace(*ToReplace, *Replacement);
         }
 
-        OutRichText = SourceString;
+        OutRichText = FText::FromString(Source);
         return true;
     }
 

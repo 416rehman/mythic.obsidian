@@ -24,6 +24,9 @@ bool FMythicStatusEffectTest::RunTest(const FString &Parameters) {
         return false;
     }
 
+    int32 InflictedChecked = 0;
+    int32 RuneBuffsExempt = 0;
+
     for (const UMythicStatusEffectDefinition *Definition : Library->Statuses) {
         if (!Definition) {
             continue;
@@ -34,23 +37,39 @@ bool FMythicStatusEffectTest::RunTest(const FString &Parameters) {
             continue;
         }
 
-        // A status the player wears has to expire on its own. Instant cannot be "on" you, and Infinite never lifts.
-        TestTrue(*FString::Printf(TEXT("%s lasts for a duration"), *Label),
-                 Effect->DurationPolicy == EGameplayEffectDurationType::HasDuration);
-        float DurationSeconds = 0.0f;
-        if (Effect->DurationMagnitude.GetStaticMagnitudeIfPossible(1.0f, DurationSeconds)) {
-            TestTrue(*FString::Printf(TEXT("%s lasts a non-zero time"), *Label), DurationSeconds > 0.0f);
+        // A rune buff shares the library so the badge row can draw it, but the rune owns its lifetime and removes it
+        // on the edge that ends it, so the inflicted-status timing rules below do not describe it. Same exemption as
+        // Mythic.Combat.StatusRegistry, or the two audits disagree about the same asset.
+        const bool bRuneBuff = Definition->StatusType.ToString().StartsWith(TEXT("Status.Rune"))
+            || Definition->PresentationCategory == EMythicStatusPresentationCategory::Buff;
+        bRuneBuff ? ++RuneBuffsExempt : ++InflictedChecked;
+
+        if (!bRuneBuff) {
+            // A status the player wears has to expire on its own. Instant cannot be "on" you, and Infinite never lifts.
+            TestTrue(*FString::Printf(TEXT("%s lasts for a duration"), *Label),
+                     Effect->DurationPolicy == EGameplayEffectDurationType::HasDuration);
+            float DurationSeconds = 0.0f;
+            if (Effect->DurationMagnitude.GetStaticMagnitudeIfPossible(1.0f, DurationSeconds)) {
+                TestTrue(*FString::Printf(TEXT("%s lasts a non-zero time"), *Label), DurationSeconds > 0.0f);
+            }
+
+            // A damage-over-time needs a tick, or the modifier lands once and the status is a flat hit wearing a timer.
+            if (Effect->Modifiers.Num() > 0) {
+                TestTrue(*FString::Printf(TEXT("%s ticks, since it modifies an attribute over time"), *Label),
+                         Effect->Period.GetValueAtLevel(0.0f) > 0.0f);
+                TestFalse(*FString::Printf(TEXT("%s does not tick on application, so the first tick is a beat later"), *Label),
+                          Effect->bExecutePeriodicEffectOnApplication);
+            }
+        }
+        else {
+            // A rune buff never expires on a timer, so an Instant one would apply and vanish with nothing worn.
+            TestTrue(*FString::Printf(TEXT("%s is worn rather than applied once"), *Label),
+                     Effect->DurationPolicy != EGameplayEffectDurationType::Instant);
         }
 
-        // A damage-over-time needs a tick, or the modifier lands once and the status is a flat hit wearing a timer.
-        if (Effect->Modifiers.Num() > 0) {
-            TestTrue(*FString::Printf(TEXT("%s ticks, since it modifies an attribute over time"), *Label),
-                     Effect->Period.GetValueAtLevel(0.0f) > 0.0f);
-            TestFalse(*FString::Printf(TEXT("%s does not tick on application, so the first tick is a beat later"), *Label),
-                      Effect->bExecutePeriodicEffectOnApplication);
-            for (const FGameplayModifierInfo &Mod : Effect->Modifiers) {
-                TestTrue(*FString::Printf(TEXT("%s modifies an attribute that exists"), *Label), Mod.Attribute.IsValid());
-            }
+        // Whatever it modifies, it has to be a real attribute: a stale one silently modifies nothing.
+        for (const FGameplayModifierInfo &Mod : Effect->Modifiers) {
+            TestTrue(*FString::Printf(TEXT("%s modifies an attribute that exists"), *Label), Mod.Attribute.IsValid());
         }
 
         // What the definition claims it grants has to be what the effect really grants, or every reader of the tag
@@ -61,6 +80,10 @@ bool FMythicStatusEffectTest::RunTest(const FString &Parameters) {
                      TagComponent->GetConfiguredTargetTagChanges().CombinedTags.HasTagExact(Definition->GrantedStateTag));
         }
     }
+
+    // An exemption that swallowed the inflicted statuses would report the same clean bill as one that matched nothing.
+    AddInfo(FString::Printf(TEXT("%d inflicted statuses checked, %d rune buffs exempt"), InflictedChecked, RuneBuffsExempt));
+    TestTrue(TEXT("inflicted statuses still went through the timing rules"), InflictedChecked > 0);
 
     // The threshold is authored, so this asserts the relationship to the settings rather than the old literals.
     const UMythicCombatSettings *CombatSettings = GetDefault<UMythicCombatSettings>();

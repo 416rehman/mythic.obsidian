@@ -10,6 +10,9 @@ struct FLootTierBonus {
     int32 GuaranteedMinRarity = 0;
 
     float FractionalDropChance = 0.0f;
+
+    /** Scales the final drop count of every table this credit rolls; 0 pays nothing. A rule switch a rune flips, not a stat. */
+    float DropCountScale = 1.0f;
 };
 
 struct FMythicLootScaling {
@@ -39,5 +42,13 @@ struct FMythicLootScaling {
         Bonus.FractionalDropChance = FMath::Frac(SafeQuantityFind);
 
         return Bonus;
+    }
+
+    /** Drops one table pays: its own roll plus the guaranteed and fractional extras, then the scale. */
+    static int32 ResolveDropCount(int32 BaseCount, const FLootTierBonus &Bonus, float FractionalRoll) {
+        const int32 FractionalExtra =
+            (Bonus.FractionalDropChance > 0.0f && FractionalRoll < Bonus.FractionalDropChance) ? 1 : 0;
+        const int32 Count = FMath::Max(0, BaseCount) + FMath::Max(0, Bonus.ExtraDropCount) + FractionalExtra;
+        return FMath::FloorToInt(static_cast<float>(Count) * FMath::Max(0.0f, Bonus.DropCountScale));
     }
 };
