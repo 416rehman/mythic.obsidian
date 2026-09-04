@@ -18,7 +18,9 @@ struct FMythicMovedValue {
     float PreMoveDefault;
 };
 
-// The twelve GameState baseline values plus the two ceilings that were literals in the clamp calls.
+// The twelve GameState baseline values plus the floor that was a literal in the clamp calls.
+// MaxAttackSpeedPlayRate deliberately left this table: it no longer keeps its pre-move default, so a row
+// here would assert 0 == 0 and prove nothing. Its authored value is asserted on purpose below.
 TArray<FMythicMovedValue> MovedValues(const UMythicCombatSettings &Settings) {
     return {
         {TEXT("MinChipDamage"), Settings.MinChipDamage, 1.0f},
@@ -28,7 +30,6 @@ TArray<FMythicMovedValue> MovedValues(const UMythicCombatSettings &Settings) {
         {TEXT("FortifyDamageReduction"), Settings.FortifyDamageReduction, 0.25f},
         {TEXT("EnlightenProficiencyBonus"), Settings.EnlightenProficiencyBonus, 0.5f},
         {TEXT("MinAttackSpeedPlayRate"), Settings.MinAttackSpeedPlayRate, 0.8f},
-        {TEXT("MaxAttackSpeedPlayRate"), Settings.MaxAttackSpeedPlayRate, 1.4f},
         {TEXT("StatusBuildupPerProc"), Settings.StatusBuildupPerProc, 25.0f},
         {TEXT("MaxDodgeChance"), Settings.MaxDodgeChance, 0.75f},
         {TEXT("ProbabilitySoftCap"), Settings.ProbabilitySoftCap, 0.5f},
@@ -109,8 +110,19 @@ bool FMythicCombatSettingsInvariantsTest::RunTest(const FString &Parameters) {
 
     TestTrue(TEXT("the attack-speed play-rate floor is a positive rate"),
              Settings.MinAttackSpeedPlayRate > 0.0f);
-    TestTrue(TEXT("the attack-speed play-rate band is ordered"),
-             Settings.MinAttackSpeedPlayRate <= Settings.MaxAttackSpeedPlayRate);
+    // Exactly zero is the authored "no ceiling"; any other value has to sit above the floor to be a band at all.
+    TestTrue(TEXT("the attack-speed play-rate band is ordered, or uncapped"),
+             Settings.MaxAttackSpeedPlayRate == 0.0f
+             || Settings.MinAttackSpeedPlayRate <= Settings.MaxAttackSpeedPlayRate);
+    TestEqual(TEXT("attack speed ships with no ceiling, so stacking it never stops paying"),
+              Settings.MaxAttackSpeedPlayRate, 0.0f);
+    // Carried over from the moved-defaults table this value deliberately left, so leaving it stops proving less.
+    const FFloatProperty *CeilingProperty = FindFProperty<FFloatProperty>(
+        UMythicCombatSettings::StaticClass(), TEXT("MaxAttackSpeedPlayRate"));
+    if (TestNotNull(TEXT("MaxAttackSpeedPlayRate is a reflected float on the settings class"), CeilingProperty)) {
+        TestTrue(TEXT("MaxAttackSpeedPlayRate is config-backed and designer-editable"),
+                 CeilingProperty->HasAllPropertyFlags(CPF_Config | CPF_Edit));
+    }
 
     const FMythicNamedValue Ceilings[] = {
         {TEXT("MaxDodgeChance"), Settings.MaxDodgeChance},

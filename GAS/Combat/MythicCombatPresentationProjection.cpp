@@ -6,6 +6,7 @@
 #include "AI/NPCs/MythicNPCCharacter.h"
 #include "GAS/Combat/MythicEntityCombatPresentationComponent.h"
 #include "GAS/Combat/MythicWeaponOffenseProjection.h"
+#include "GAS/Abilities/MythicGameplayAbility.h"
 #include "GAS/Abilities/MythicWeaponAttackAbility.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
@@ -170,13 +171,12 @@ FMythicCombatPresentationProjectionRules::BuildAuthorityPressureSnapshot(
     const float AttackSpeedBonus = ReadCombatAttribute(
         AbilitySystem,
         UMythicAttributeSet_Offense::GetAttackSpeedAttribute());
-    const float MinimumPlayRate = Settings
-        ? FMath::Max(0.01f, Settings->MinAttackSpeedPlayRate) : 0.80f;
-    const float MaximumPlayRate = Settings
-        ? FMath::Max(MinimumPlayRate, Settings->MaxAttackSpeedPlayRate)
-        : 1.40f;
-    const float PlayRate = FMath::Clamp(
-        1.0f + AttackSpeedBonus, MinimumPlayRate, MaximumPlayRate);
+    // The shared rule owns the band, including the no-ceiling case; a second copy here would drift from the
+    // swing the player actually gets.
+    const float PlayRate = UMythicGameplayAbility::ComputeAttackSpeedPlayRate(
+        AttackSpeedBonus,
+        Settings ? Settings->MinAttackSpeedPlayRate : 0.80f,
+        Settings ? Settings->MaxAttackSpeedPlayRate : 0.0f);
     Snapshot.AttacksPerSecond =
         ResolveBasicAttacksPerSecond(AbilitySystem, Settings) * PlayRate;
     const float RawCriticalHitChance = ReadCombatAttribute(

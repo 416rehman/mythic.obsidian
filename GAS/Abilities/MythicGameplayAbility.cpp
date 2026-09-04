@@ -746,7 +746,15 @@ FName UMythicGameplayAbility::SelectAttackMontageSection(
 
 float UMythicGameplayAbility::ComputeAttackSpeedPlayRate(float AttackSpeedBonus, float MinRate, float MaxRate) {
     const float Floor = FMath::Max(KINDA_SMALL_NUMBER, MinRate);
-    return FMath::Clamp(1.0f + AttackSpeedBonus, Floor, FMath::Max(Floor, MaxRate));
+    // FMath::Clamp returns the ceiling for a NaN input, so the old ceiling was this path's only sanitiser.
+    // Without a ceiling nothing else bounds Offense.AttackSpeed, and a NaN rate stalls PlayMontageAndWait forever.
+    if (!FMath::IsFinite(AttackSpeedBonus)) {
+        return Floor;
+    }
+    const float Rate = FMath::Max(Floor, 1.0f + AttackSpeedBonus);
+    // Exactly zero is the authored "no ceiling". Any other non-positive value is corrupt rather than deliberate,
+    // and still repairs to the floor the way an inverted band always has.
+    return MaxRate == 0.0f ? Rate : FMath::Min(Rate, FMath::Max(Floor, MaxRate));
 }
 
 FGameplayTagContainer UMythicGameplayAbility::BuildAbilityContextTags() const {

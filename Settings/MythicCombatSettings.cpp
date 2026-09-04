@@ -117,7 +117,9 @@ UMythicCombatSettings::UMythicCombatSettings() {
     FortifyDamageReduction = 0.25f;
 
     MinAttackSpeedPlayRate = 0.8f;
-    MaxAttackSpeedPlayRate = 1.4f;
+    // No ceiling: attack speed is the one offense multiplier with no diminishing curve, so a cap here was the
+    // only thing bounding it, and 1.4 made every point past +40% worthless.
+    MaxAttackSpeedPlayRate = 0.0f;
 
     StatusBuildupPerProc = 25.0f;
     MaxStatusResistance = 1.0f;

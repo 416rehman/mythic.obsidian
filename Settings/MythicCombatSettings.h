@@ -323,10 +323,11 @@ public:
     float MinAttackSpeedPlayRate;
 
     /**
-     * Fastest an attack montage may play, as a unitless rate multiplier. This is also the reachable ceiling item
-     * validation projects attack-speed affix rolls against, so raising it widens what a weapon roll can be worth.
+     * Fastest an attack montage may play, as a unitless rate multiplier. Exactly zero means no ceiling, so attack
+     * speed keeps paying however far a build stacks it; any positive value is the reachable ceiling item validation
+     * projects attack-speed affix rolls against, so raising it widens what a weapon roll can be worth.
      */
-    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Attack Speed", meta = (ClampMin = "1.0"))
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Attack Speed", meta = (ClampMin = "0.0"))
     float MaxAttackSpeedPlayRate;
 
     /**

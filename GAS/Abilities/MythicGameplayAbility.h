@@ -165,7 +165,8 @@ public:
     FName SelectAttackMontageSection(const UAttackFragment *AttackFragment) const;
 
     // AttackSpeed is a bonus fraction over the normal rate. Never returns zero: a stalled montage never
-    // completes, so PlayMontageAndWait would hang the ability forever.
+    // completes, so PlayMontageAndWait would hang the ability forever. A MaxRate of exactly zero means no
+    // ceiling, so attack speed keeps paying however far a build stacks it.
     static float ComputeAttackSpeedPlayRate(float AttackSpeedBonus, float MinRate, float MaxRate);
 
     /** Returns the Mythic player controller from the current ability actor info, or null for a non-player owner. */
