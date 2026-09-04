@@ -285,7 +285,6 @@ void UMythicCompassWidget::BuildPools() {
     }
 
     Strip->SetVisibility(ESlateVisibility::HitTestInvisible);
-    Strip->ForceVolatile(true);
 }
 
 FMythicCompassTick &UMythicCompassWidget::GetOrCreateTick(TArray<FMythicCompassTick> &Pool, UMaterialInterface *Brush,
@@ -470,6 +469,15 @@ void UMythicCompassWidget::NativeTick(const FGeometry &MyGeometry, float InDelta
     }
     const float ViewYaw = ViewRotation.Yaw;
     const float ViewBearing = Compass_YawToBearing(ViewYaw);
+
+    const bool bViewMoved = !FMath::IsNearlyEqual(ViewYaw, LastStripYaw, 0.01f)
+        || !ViewLocation.Equals(LastStripViewLocation, 1.0f);
+    LastStripYaw = ViewYaw;
+    LastStripViewLocation = ViewLocation;
+    if (bViewMoved != bStripVolatile) {
+        bStripVolatile = bViewMoved;
+        Strip->ForceVolatile(bViewMoved);
+    }
 
     if (RodMID) {
         RodMID->SetScalarParameterValue(Compass_YawParam, ViewBearing);

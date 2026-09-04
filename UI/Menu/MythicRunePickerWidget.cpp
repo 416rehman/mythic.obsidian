@@ -968,6 +968,10 @@ bool UMythicRunePickerWidget::IsCellUnlocked(int32 CellIndex) const {
     return CellState.IsValidIndex(CellIndex) && CellState[CellIndex].bUnlocked;
 }
 
+bool UMythicRunePickerWidget::IsCellClear(int32 CellIndex) const {
+    return CellState.IsValidIndex(CellIndex) && CellState[CellIndex].bClear;
+}
+
 EMythicRuneWorn UMythicRunePickerWidget::GetCellWorn(int32 CellIndex) const {
     return CellState.IsValidIndex(CellIndex) ? CellState[CellIndex].Worn : EMythicRuneWorn::None;
 }

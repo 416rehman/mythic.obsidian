@@ -172,6 +172,7 @@ private:
     void BindIfVisible();
     void Unbind();
     void HandleFieldChanged(UObject *Object, UE::FieldNotification::FFieldId FieldId);
+    void ScheduleRebuild();
     void Rebuild();
 
     FMythicStatRowWidgets &GetOrCreateRow(int32 Index);
@@ -220,4 +221,8 @@ private:
     bool bCollapseInitialized = false;
 
     bool bBound = false;
+
+    // The view model publishes Sections, Summaries and ModifiedStatCount back to back, so an
+    // uncoalesced handler rebuilds the whole sheet two or three times for one attribute change.
+    bool bRebuildScheduled = false;
 };

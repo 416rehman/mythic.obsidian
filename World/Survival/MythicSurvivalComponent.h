@@ -11,6 +11,28 @@ class UGameplayEffect;
 class UAbilitySystemComponent;
 class UMythicAttributeSet_Survival;
 
+/**
+ * One survival status bit and the effect that carries it. Reflected so the GC can see the effect class: an
+ * unreflected TSubclassOf survives in the editor only because the asset registry holds the class, and dangles in
+ * -game after the first collection.
+ */
+USTRUCT()
+struct FMythicMappedSurvivalStatus {
+    GENERATED_BODY()
+
+    UPROPERTY()
+    uint8 Bit = 0;
+
+    UPROPERTY()
+    TSubclassOf<UGameplayEffect> Effect = nullptr;
+
+    UPROPERTY()
+    FText Name;
+
+    UPROPERTY()
+    FGameplayTag TermTag;
+};
+
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class MYTHIC_API UMythicSurvivalComponent : public UActorComponent {
     GENERATED_BODY()
@@ -35,13 +57,8 @@ private:
 
     void NotifyStatus(const FText &StatusName, bool bOnset) const;
 
-    struct FMappedStatus {
-        uint8 Bit = 0;
-        TSubclassOf<UGameplayEffect> Effect = nullptr;
-        FText Name;
-        FGameplayTag TermTag;
-    };
-    TArray<FMappedStatus> MappedStatuses;
+    UPROPERTY(Transient)
+    TArray<FMythicMappedSurvivalStatus> MappedStatuses;
 
     FTimerHandle SurvivalTimerHandle;
 

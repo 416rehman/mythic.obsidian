@@ -26,6 +26,7 @@ void FMythicStatRegistry::Reset() {
     StatsById.Reset();
     StatsByTag.Reset();
     StatsByAttribute.Reset();
+    StatsByCategory.Reset();
     OrderedStats.Reset();
     bBuilt = false;
 }
@@ -193,6 +194,12 @@ bool FMythicStatRegistry::Build(TConstArrayView<UMythicStatCategoryDefinition*> 
     StatsByTag = MoveTemp(CandidateStatsByTag);
     StatsByAttribute = MoveTemp(CandidateStatsByAttribute);
     OrderedStats = MoveTemp(CandidateOrderedStats);
+
+    // OrderedStats is already sorted category-major, so bucketing preserves each category's sheet order.
+    for (const UMythicStatDefinition* Stat : OrderedStats) {
+        StatsByCategory.FindOrAdd(Stat->Category.GetPrimaryAssetId()).Add(Stat);
+    }
+
     bBuilt = true;
     return true;
 }
@@ -228,4 +235,10 @@ void FMythicStatRegistry::GetAllCategories(TArray<const UMythicStatCategoryDefin
 
 void FMythicStatRegistry::GetAllStatDefinitions(TArray<const UMythicStatDefinition*>& OutStats) const {
     OutStats = OrderedStats;
+}
+
+TConstArrayView<const UMythicStatDefinition*> FMythicStatRegistry::GetStatsInCategory(
+    const FPrimaryAssetId& CategoryId) const {
+    const TArray<const UMythicStatDefinition*>* Found = StatsByCategory.Find(CategoryId);
+    return Found ? TConstArrayView<const UMythicStatDefinition*>(*Found) : TConstArrayView<const UMythicStatDefinition*>();
 }

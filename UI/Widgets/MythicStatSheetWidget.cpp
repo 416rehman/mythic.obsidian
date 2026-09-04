@@ -19,6 +19,8 @@
 #include "Components/TextBlock.h"
 #include "CommonTextBlock.h"
 #include "Engine/Texture2D.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 #include "UI/MythicUIKit.h"
 #include "UI/MythicUIStyle.h"
 #include "GameFramework/PlayerController.h"
@@ -176,7 +178,25 @@ void UMythicStatSheetWidget::Unbind() {
 }
 
 void UMythicStatSheetWidget::HandleFieldChanged(UObject *Object, UE::FieldNotification::FFieldId FieldId) {
-    Rebuild();
+    ScheduleRebuild();
+}
+
+void UMythicStatSheetWidget::ScheduleRebuild() {
+    if (bRebuildScheduled) {
+        return;
+    }
+    UWorld *World = GetWorld();
+    if (!World) {
+        Rebuild();
+        return;
+    }
+    bRebuildScheduled = true;
+    World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]() {
+        bRebuildScheduled = false;
+        if (bBound) {
+            Rebuild();
+        }
+    }));
 }
 
 FMythicStatRowWidgets &UMythicStatSheetWidget::GetOrCreateRow(int32 Index) {

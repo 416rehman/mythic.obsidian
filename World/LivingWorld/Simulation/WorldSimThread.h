@@ -69,6 +69,9 @@ public:
     static bool ShouldFactionSchism(float InternalDivergence, float IdeologyThreshold, bool bGeographicallyFragmented,
                                     int32 Population, int32 MinSchismPopulation);
 
+    /** A schism moves population off the parent before the child registers, so a full table must veto it first. */
+    static bool CanSplinterRegister(int32 RegisteredCount, int32 MaxFactions);
+
     static float DriftTowardClamped(float Current, float Target, float Rate);
 
 private:

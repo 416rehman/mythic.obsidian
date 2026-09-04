@@ -177,6 +177,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "HUD")
     void PokeElementByName(FName WidgetName);
 
+    /** Name lookup that descends into child user widgets, which GetWidgetFromName does not. */
+    UWidget *FindNamedWidgetDeep(FName WidgetName) const;
+
 protected:
     void HandleMenuAction();
     void HandleInspectEntityAction();

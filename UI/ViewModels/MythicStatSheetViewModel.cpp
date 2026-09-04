@@ -247,9 +247,7 @@ void UMythicStatSheetViewModel::Rebuild() {
     }
 
     TArray<const UMythicStatCategoryDefinition*> Categories;
-    TArray<const UMythicStatDefinition*> Definitions;
     StatRegistry->GetAllCategories(Categories);
-    StatRegistry->GetAllStatDefinitions(Definitions);
 
     int32 ModifiedCount = 0;
     TArray<FMythicStatSection> NewSections;
@@ -265,9 +263,8 @@ void UMythicStatSheetViewModel::Rebuild() {
         Section.CategoryTag = Category->CategoryTag;
         Section.Style = Category->Style;
 
-        for (const UMythicStatDefinition* Definition : Definitions) {
-            if (!Definition || Definition->Category.GetPrimaryAssetId() != Category->GetPrimaryAssetId()
-                || !AbilitySystem->HasAttributeSetForAttribute(Definition->Attribute)) {
+        for (const UMythicStatDefinition* Definition : StatRegistry->GetStatsInCategory(Category->GetPrimaryAssetId())) {
+            if (!Definition || !AbilitySystem->HasAttributeSetForAttribute(Definition->Attribute)) {
                 continue;
             }
 

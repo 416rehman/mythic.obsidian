@@ -473,6 +473,10 @@ bool FMythicWorldSimThread::ShouldFactionSchism(float InternalDivergence, float 
     return bDestabilized && Population >= MinSchismPopulation * 2;
 }
 
+bool FMythicWorldSimThread::CanSplinterRegister(int32 RegisteredCount, int32 MaxFactions) {
+    return RegisteredCount >= 0 && MaxFactions > 0 && RegisteredCount < MaxFactions;
+}
+
 int32 FMythicWorldSimThread::ComputeCappedSpawnPopulation(int32 CurrentPop, int32 CellCount, int32 SpawnRatePerCell, int32 PopulationPerCell) {
     const int32 Growth = CellCount * SpawnRatePerCell;
     const int32 Capacity = CellCount * PopulationPerCell;
@@ -826,8 +830,12 @@ void FMythicWorldSimThread::TickFactionEvolution() {
             }
         }
 
-        if (ShouldFactionSchism(InternalDivergence, Settings->SchismIdeologyThreshold, bGeographicSchism,
-                                F->Population, Settings->MinSchismPopulation)) {
+        // The split below moves population, cells and reserves off the parent before the child is registered.
+        // Registering fails once the table is full, so without this the parent is halved every tick forever.
+        const bool bCanRegisterChild = CanSplinterRegister(FactionDB->GetRegisteredCount(), FactionDB->GetMaxFactions());
+
+        if (bCanRegisterChild && ShouldFactionSchism(InternalDivergence, Settings->SchismIdeologyThreshold, bGeographicSchism,
+                                                     F->Population, Settings->MinSchismPopulation)) {
             FMythicFactionData NewFaction;
 
             const int32 NewIndex = FactionDB->GetRegisteredCount();

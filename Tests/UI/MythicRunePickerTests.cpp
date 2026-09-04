@@ -145,6 +145,9 @@ bool FMythicRunePickerFocusTest::RunTest(const FString &Parameters) {
     // Re-targeting sorts; a change of state alone never moves a cell.
     Picker->SelectSocket(0);
 
+    // The leading tile clears the socket rather than wearing a rune, so it is neither earned nor locked.
+    int32 ClearCells = 0;
+    int32 FirstRuneCell = INDEX_NONE;
     int32 LockedCells = 0;
     int32 UnlockedCells = 0;
     for (int32 i = 0; i < CellCount; ++i) {
@@ -152,28 +155,45 @@ bool FMythicRunePickerFocusTest::RunTest(const FString &Parameters) {
         if (!TestNotNull(*FString::Printf(TEXT("cell %d exists"), i), Cell)) {
             continue;
         }
+        if (Picker->IsCellClear(i)) {
+            ++ClearCells;
+            TestNull(*FString::Printf(TEXT("clear cell %d holds no rune"), i), Picker->GetCellRune(i));
+            TestTrue(*FString::Printf(TEXT("clear cell %d is enabled"), i), Cell->GetIsEnabled());
+            continue;
+        }
+        if (FirstRuneCell == INDEX_NONE) {
+            FirstRuneCell = i;
+        }
         const bool bUnlocked = Picker->IsCellUnlocked(i);
         (bUnlocked ? UnlockedCells : LockedCells)++;
         // A locked rune stays reachable by hover and pad focus; only the verb is withheld.
         TestTrue(*FString::Printf(TEXT("cell %d (%s) is enabled"), i, bUnlocked ? TEXT("earned") : TEXT("locked")),
                  Cell->GetIsEnabled());
     }
-    AddInfo(FString::Printf(TEXT("earned: %d, locked: %d"), UnlockedCells, LockedCells));
+    AddInfo(FString::Printf(TEXT("clear: %d, earned: %d, locked: %d"), ClearCells, UnlockedCells, LockedCells));
+    TestEqual(TEXT("exactly one clear tile leads the grid"), ClearCells, 1);
+    TestEqual(TEXT("the clear tile is the first cell"), Picker->IsCellClear(0), true);
     TestEqual(TEXT("exactly one rune reads as earned"), UnlockedCells, 1);
-    TestTrue(TEXT("the earned rune sorts ahead of the locked ones"), Picker->GetCellRune(0) == Earned);
+    if (!TestTrue(TEXT("a rune cell follows the clear tile"), FirstRuneCell != INDEX_NONE)) {
+        return false;
+    }
+    TestTrue(TEXT("the earned rune sorts ahead of the locked ones"), Picker->GetCellRune(FirstRuneCell) == Earned);
 
     UWidget *Target = Picker->GetDesiredFocusTarget();
-    UMythicRunePickerCellWidget *EarnedCell = Picker->GetCellWidget(0);
+    UMythicRunePickerCellWidget *EarnedCell = Picker->GetCellWidget(FirstRuneCell);
     UWidget *EarnedHit = EarnedCell ? EarnedCell->GetFocusWidget() : nullptr;
     // A cell with no Hit would pass every focus assertion below by never being a candidate.
     if (!TestNotNull(TEXT("the earned cell exposes a focusable Hit"), EarnedHit)) {
         return false;
     }
     TestTrue(TEXT("with nothing worn, focus lands on the first earned rune"), Target == EarnedHit);
-    for (int32 i = 1; i < CellCount; ++i) {
+    for (int32 i = 0; i < CellCount; ++i) {
+        if (i == FirstRuneCell) {
+            continue;
+        }
         UMythicRunePickerCellWidget *Cell = Picker->GetCellWidget(i);
         UWidget *Hit = Cell ? Cell->GetFocusWidget() : nullptr;
-        TestFalse(*FString::Printf(TEXT("focus never opens on locked cell %d"), i), Hit && Target == Hit);
+        TestFalse(*FString::Printf(TEXT("focus never opens on cell %d"), i), Hit && Target == Hit);
     }
 
     // Worn-here wins over first-earned, and the redraw that reports it must not move the cell under focus.
@@ -181,8 +201,8 @@ bool FMythicRunePickerFocusTest::RunTest(const FString &Parameters) {
     if (!TestTrue(TEXT("the earned rune is worn in socket one"), Fixture.Runes->GetRuneInSlot(0) == Earned)) {
         return false;
     }
-    TestTrue(TEXT("the worn rune keeps its cell"), Picker->GetCellRune(0) == Earned);
-    TestTrue(TEXT("the worn cell reads as worn here"), Picker->GetCellWorn(0) == EMythicRuneWorn::Here);
+    TestTrue(TEXT("the worn rune keeps its cell"), Picker->GetCellRune(FirstRuneCell) == Earned);
+    TestTrue(TEXT("the worn cell reads as worn here"), Picker->GetCellWorn(FirstRuneCell) == EMythicRuneWorn::Here);
     TestTrue(TEXT("with a rune worn here, focus lands on its cell"), Picker->GetDesiredFocusTarget() == EarnedHit);
 
     Picker->Close();

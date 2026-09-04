@@ -73,6 +73,9 @@ public:
 
     bool IsCellUnlocked(int32 CellIndex) const;
 
+    /** True for the leading tile that wears nothing and empties the socket. It holds no rune by design. */
+    bool IsCellClear(int32 CellIndex) const;
+
     EMythicRuneWorn GetCellWorn(int32 CellIndex) const;
 
 protected:

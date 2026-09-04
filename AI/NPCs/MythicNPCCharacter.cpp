@@ -14,6 +14,7 @@
 #include "GAS/Abilities/MythicGameplayAbility.h"
 #include "GAS/Effects/MythicEnemyScaling.h"
 #include "Settings/MythicCombatSettings.h"
+#include "Settings/MythicAgentDetailSettings.h"
 #include "AI/MythicTags_AI.h"
 #include "GAS/MythicTags_GAS.h"
 #include "AI/MonsterAffixes/MonsterAffixPool.h"
@@ -866,6 +867,20 @@ AMythicNPCCharacter::AMythicNPCCharacter() {
     AIControllerClass = AMythicNPCAIController::StaticClass();
     AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 
+    // ACharacter defaults bUseControllerRotationYaw to true, so AAIController::Tick rotates the pawn through
+    // APawn::FaceRotation. That write does not replay during movement re-simulation, and on any pawn whose Blueprint
+    // also sets bOrientRotationToMovement the two fight every frame: FaceRotation snaps yaw to the control rotation
+    // and PhysicsRotation turns it straight back toward velocity. Taking facing from the movement component instead
+    // leaves one authority, inside PerformMovement.
+    bUseControllerRotationYaw = false;
+    bUseControllerRotationPitch = false;
+    bUseControllerRotationRoll = false;
+
+    if (UCharacterMovementComponent *CMC = GetCharacterMovement()) {
+        // Blueprints that set bOrientRotationToMovement still win: PhysicsRotation checks that flag first.
+        CMC->bUseControllerDesiredRotation = true;
+    }
+
     if (UCapsuleComponent *Capsule = GetCapsuleComponent()) {
         Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
     }
@@ -1410,6 +1425,15 @@ void AMythicNPCCharacter::PossessedBy(AController *NewController) {
 
 void AMythicNPCCharacter::BeginPlay() {
     Super::BeginPlay();
+
+    const UMythicAgentDetailSettings *AgentDetail = GetDefault<UMythicAgentDetailSettings>();
+    const FMythicAgentRotationConfig &Rotation = AgentDetail->NPCRotation;
+    bUseControllerRotationYaw = !Rotation.bRotateInMovementComponent;
+    if (UCharacterMovementComponent *CMC = GetCharacterMovement()) {
+        CMC->bUseControllerDesiredRotation = Rotation.bRotateInMovementComponent;
+        CMC->RotationRate = UMythicAgentDetailSettings::MakeRotationRate(Rotation);
+        CMC->bAlwaysCheckFloor = AgentDetail->NPCFloor.bAlwaysCheckFloor;
+    }
 
     InitializeASC();
     ConfigureEntityPresentationAnchor();

@@ -95,6 +95,12 @@ struct FMythicNameplateLayerTestAccess {
         const UMythicNameplateLayer &Layer) {
         return Layer.ActionRailInstance;
     }
+
+    static UMythicNameplateWidget *GetPooledWidget(
+        const UMythicNameplateLayer &Layer, const int32 Index) {
+        return Layer.PooledWidgets.IsValidIndex(Index)
+            ? Layer.PooledWidgets[Index] : nullptr;
+    }
 };
 
 struct FMythicNameplateWidgetTestAccess {
@@ -329,6 +335,72 @@ bool FMythicNameplateResidentOnlyIconContractTest::RunTest(
     Widget->ResetForPool();
     TestTrue(TEXT("pool release clears the previous status identity tint"),
              Icon->GetColorAndOpacity().Equals(FLinearColor::White));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicNameplatePlacementVisibilityBandTest,
+    "Mythic.UI.Nameplate.Pool.PlacementStaysOutOfHitTestAndPrepass",
+    EAutomationTestFlags_ApplicationContextMask
+        | EAutomationTestFlags::ProductFilter)
+
+bool FMythicNameplatePlacementVisibilityBandTest::RunTest(
+    const FString &Parameters) {
+    FScopedNameplatePoolWorld ScopedWorld;
+    UWorld *World = ScopedWorld.Get();
+    if (!TestNotNull(TEXT("authority game world exists"), World)) {
+        return false;
+    }
+    UMythicEntityPresentationRegistry *Registry =
+        World->GetSubsystem<UMythicEntityPresentationRegistry>();
+    if (!TestNotNull(TEXT("presentation registry exists"), Registry)) {
+        return false;
+    }
+    const FMythicEntityPresentationInstance Instance =
+        Registry->AllocateAuthorityInstance(MakeNameplatePoolEntityId(42));
+    if (!TestTrue(TEXT("authority allocated an exact instance"),
+                  Instance.IsValid())) {
+        return false;
+    }
+
+    UMythicNameplateLayer *Layer = NewObject<UMythicNameplateLayer>();
+    FMythicNameplateLayerTestAccess::SeedPrewarmedRenderers(*Layer);
+
+    FMythicNameplateProjection Projection;
+    Projection.Instance = Instance;
+    Projection.DisclosureTier = EMythicNameplateDisclosureTier::Focus;
+    Projection.VisualFamily = EMythicNameplateVisualFamily::Combat;
+    Projection.AttentionState = EMythicNameplateAttentionState::Focused;
+    Projection.ResolvedName = FText::FromString(TEXT("Band Target"));
+
+    if (!TestTrue(TEXT("the projection claims a pooled renderer"),
+                  Layer->ApplyProjection(Projection, FVector2D::ZeroVector,
+                                         1.0f, 1.0f))) {
+        return false;
+    }
+    UMythicNameplateWidget *Widget =
+        FMythicNameplateLayerTestAccess::GetPooledWidget(*Layer, 0);
+    if (!Widget) {
+        AddError(TEXT("pooled renderer missing after a successful claim"));
+        return false;
+    }
+
+    // A nameplate carries no interactive child, so it must take itself and its whole subtree out
+    // of the hit-test grid. SelfHitTestInvisible would still insert every child, every frame.
+    TestEqual(TEXT("a shown nameplate keeps its subtree out of the hit-test grid"),
+              static_cast<int32>(Widget->GetVisibility()),
+              static_cast<int32>(ESlateVisibility::HitTestInvisible));
+
+    Layer->UpdateProjectionPlacement(Instance, FVector2D::ZeroVector, 0.0f, 1.0f);
+    // Hidden still walks to every leaf during Slate pre-pass to compute geometry; Collapsed does not.
+    TestEqual(TEXT("a fully faded nameplate leaves the pre-pass entirely"),
+              static_cast<int32>(Widget->GetVisibility()),
+              static_cast<int32>(ESlateVisibility::Collapsed));
+
+    Layer->UpdateProjectionPlacement(Instance, FVector2D::ZeroVector, 1.0f, 1.0f);
+    TestEqual(TEXT("fading back in restores the hit-test-invisible band"),
+              static_cast<int32>(Widget->GetVisibility()),
+              static_cast<int32>(ESlateVisibility::HitTestInvisible));
     return true;
 }
 

@@ -19,6 +19,7 @@
 #include "UI/ViewModels/MythicStatSheetViewModel.h"
 
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_StatRegistryTestCategory, "Stat.Category.RegistryTest");
+UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_StatRegistryTestCategoryB, "Stat.Category.RegistryTestB");
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_StatRegistryTestCurrent, "Stat.Attribute.RegistryTestCurrent");
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_StatRegistryTestCapacity, "Stat.Attribute.RegistryTestCapacity");
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_StatRegistryTestDuplicate, "Stat.Attribute.RegistryTestDuplicate");
@@ -44,14 +45,17 @@ public:
     }
 };
 
-UMythicStatCategoryDefinition* MakeCategory(const FScopedStatTestStringTable& Texts) {
+UMythicStatCategoryDefinition* MakeCategory(const FScopedStatTestStringTable& Texts,
+                                            const TCHAR* ObjectName = TEXT("DA_TestStatCategory"),
+                                            FGameplayTag CategoryTag = TAG_StatRegistryTestCategory,
+                                            int32 SheetOrder = 10) {
     UMythicStatCategoryDefinition* Category =
-        NewObject<UMythicStatCategoryDefinition>(GetTransientPackage(), TEXT("DA_TestStatCategory"));
-    Category->DeveloperName = TEXT("RegistryTest");
+        NewObject<UMythicStatCategoryDefinition>(GetTransientPackage(), FName(ObjectName));
+    Category->DeveloperName = FName(ObjectName);
     Category->DesignerPurpose = TEXT("Focused registry automation fixture.");
-    Category->CategoryTag = TAG_StatRegistryTestCategory;
-    Category->DisplayName = Texts.Add(TEXT("Category"), TEXT("Registry Test"));
-    Category->SheetOrder = 10;
+    Category->CategoryTag = CategoryTag;
+    Category->DisplayName = Texts.Add(ObjectName, TEXT("Registry Test"));
+    Category->SheetOrder = SheetOrder;
     return Category;
 }
 
@@ -114,6 +118,57 @@ bool FMythicStatRegistryResolutionTest::RunTest(const FString& Parameters) {
     TArray<const UMythicStatDefinition*> Ordered;
     Registry.GetAllStatDefinitions(Ordered);
     TestTrue(TEXT("sheet order, not input/load order, is canonical"), Ordered[0] == Current);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMythicStatRegistryCategoryIndexTest,
+    "Mythic.Stats.Registry.CategoryIndex",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicStatRegistryCategoryIndexTest::RunTest(const FString& Parameters) {
+    FScopedStatTestStringTable Texts;
+    UMythicStatCategoryDefinition* First = MakeCategory(Texts);
+    UMythicStatCategoryDefinition* Second =
+        MakeCategory(Texts, TEXT("DA_TestStatCategoryB"), TAG_StatRegistryTestCategoryB, 20);
+
+    UMythicStatDefinition* Health = MakeStat(
+        Texts, TEXT("Health"), TAG_StatRegistryTestCurrent,
+        UMythicAttributeSet_Life::GetHealthAttribute(), 20, First);
+    UMythicStatDefinition* MaxHealth = MakeStat(
+        Texts, TEXT("MaxHealth"), TAG_StatRegistryTestCapacity,
+        UMythicAttributeSet_Life::GetMaxHealthAttribute(), 10, First);
+    UMythicStatDefinition* Armor = MakeStat(
+        Texts, TEXT("Armor"), TAG_StatRegistryTestArmor,
+        UMythicAttributeSet_Defense::GetArmorAttribute(), 10, Second);
+
+    TArray<UMythicStatCategoryDefinition*> Categories{First, Second};
+    TArray<UMythicStatDefinition*> Stats{Health, Armor, MaxHealth};
+    TArray<FText> Errors;
+    FMythicStatRegistry Registry;
+    if (!TestTrue(TEXT("the two-category closure builds"), Registry.Build(Categories, Stats, Errors))) {
+        for (const FText& Error : Errors) {
+            AddError(Error.ToString());
+        }
+        return false;
+    }
+
+    const TConstArrayView<const UMythicStatDefinition*> FirstStats =
+        Registry.GetStatsInCategory(First->GetPrimaryAssetId());
+    const TConstArrayView<const UMythicStatDefinition*> SecondStats =
+        Registry.GetStatsInCategory(Second->GetPrimaryAssetId());
+
+    TestEqual(TEXT("the index is category-scoped, not the whole roster"), FirstStats.Num(), 2);
+    TestEqual(TEXT("the second category keeps only its own stat"), SecondStats.Num(), 1);
+    if (FirstStats.Num() == 2) {
+        TestTrue(TEXT("the index preserves sheet order within a category"),
+                 FirstStats[0] == MaxHealth && FirstStats[1] == Health);
+    }
+    if (SecondStats.Num() == 1) {
+        TestTrue(TEXT("armor belongs to the second category"), SecondStats[0] == Armor);
+    }
+    TestEqual(TEXT("an unknown category yields an empty view, never the full roster"),
+              Registry.GetStatsInCategory(FPrimaryAssetId()).Num(), 0);
     return true;
 }
 

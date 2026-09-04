@@ -180,6 +180,12 @@ private:
 
     float SinceMarkerRefresh = 0.0f;
     float LastViewportScale = -1.0f;
+
+    // The strip only moves when the view does. Staying volatile while the player stands still would
+    // repaint every bead and letter each frame for an image that never changes.
+    float LastStripYaw = MAX_flt;
+    FVector LastStripViewLocation = FVector(MAX_flt);
+    bool bStripVolatile = false;
     bool bPoolsBuilt = false;
     bool bBoundToWarMap = false;
     bool bLastDigitsLit = false;

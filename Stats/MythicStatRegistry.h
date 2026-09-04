@@ -39,6 +39,13 @@ public:
     void GetAllCategories(TArray<const UMythicStatCategoryDefinition*>& OutCategories) const;
     void GetAllStatDefinitions(TArray<const UMythicStatDefinition*>& OutStats) const;
 
+    /**
+     * The stats belonging to one category, already in sheet order. Callers that render a category must use
+     * this rather than filtering every stat per category: the filter costs a soft-pointer GetPrimaryAssetId
+     * per stat per category, which is the whole cost of a stat-sheet rebuild.
+     */
+    TConstArrayView<const UMythicStatDefinition*> GetStatsInCategory(const FPrimaryAssetId& CategoryId) const;
+
 private:
     TMap<FPrimaryAssetId, const UMythicStatCategoryDefinition*> CategoriesById;
     TMap<FGameplayTag, const UMythicStatCategoryDefinition*> CategoriesByTag;
@@ -47,6 +54,7 @@ private:
     TMap<FPrimaryAssetId, const UMythicStatDefinition*> StatsById;
     TMap<FGameplayTag, const UMythicStatDefinition*> StatsByTag;
     TMap<FGameplayAttribute, const UMythicStatDefinition*> StatsByAttribute;
+    TMap<FPrimaryAssetId, TArray<const UMythicStatDefinition*>> StatsByCategory;
     TArray<const UMythicStatDefinition*> OrderedStats;
 
     bool bBuilt = false;

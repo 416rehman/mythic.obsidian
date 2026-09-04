@@ -224,13 +224,14 @@ bool FMythicStatCounterReachabilityTest::RunTest(const FString &Parameters) {
     };
 
     // Stat sheet identities that exist only as native fixtures declared by Tests/Stats/MythicStatRegistryTests.cpp.
-    // That test builds its definitions as transient objects, so no asset ever claims these five.
+    // That test builds its definitions as transient objects, so no asset ever claims these six.
     const TSet<FString> FixtureIdentities = {
         TEXT("Stat.Attribute.RegistryTestArmor"),
         TEXT("Stat.Attribute.RegistryTestCapacity"),
         TEXT("Stat.Attribute.RegistryTestCurrent"),
         TEXT("Stat.Attribute.RegistryTestDuplicate"),
         TEXT("Stat.Category.RegistryTest"),
+        TEXT("Stat.Category.RegistryTestB"),
     };
 
     // A counter can be produced from AUTHORED DATA rather than a RecordStat call site, and a scan over source

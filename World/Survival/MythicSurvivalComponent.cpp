@@ -45,7 +45,7 @@ void UMythicSurvivalComponent::BeginPlay() {
 
     MappedStatuses.Reset();
     auto AddMapped = [this](uint8 Bit, const TSoftClassPtr<UGameplayEffect> &Soft, const FText &Name, const FGameplayTag &Term) {
-        FMappedStatus M;
+        FMythicMappedSurvivalStatus M;
         M.Bit = Bit;
         M.Effect = Soft.IsNull() ? nullptr : Soft.LoadSynchronous();
         M.Name = Name;
@@ -163,7 +163,7 @@ void UMythicSurvivalComponent::ApplyStatusDiff(UAbilitySystemComponent *ASC, uin
         HandlesOwnerASC = ASC;
     }
 
-    for (const FMappedStatus &Mapped : MappedStatuses) {
+    for (const FMythicMappedSurvivalStatus &Mapped : MappedStatuses) {
         const bool bNowActive = (NewMask & Mapped.Bit) != 0;
         const bool bWasActive = ActiveStatusHandles.Contains(Mapped.Bit);
 

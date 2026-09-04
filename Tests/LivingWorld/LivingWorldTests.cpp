@@ -1299,6 +1299,14 @@ bool FMythicFactionSchismTriggerTest::RunTest(const FString &Parameters) {
     TestTrue(TEXT("pop exactly 2x threshold → schism"), W::ShouldFactionSchism(0.9f, 0.5f, false, 60, 30));
     TestFalse(TEXT("divergence == threshold (strict >) → no schism"), W::ShouldFactionSchism(0.5f, 0.5f, false, 100, 30));
 
+    // The split moves population off the parent before the child registers, so a full table has to veto the
+    // schism outright. Letting it proceed and fail at RegisterFaction destroys half the parent every tick.
+    TestTrue(TEXT("room left → splinter may register"), W::CanSplinterRegister(19, 20));
+    TestFalse(TEXT("table full → splinter vetoed"), W::CanSplinterRegister(20, 20));
+    TestFalse(TEXT("over capacity → splinter vetoed"), W::CanSplinterRegister(21, 20));
+    TestFalse(TEXT("no capacity configured → splinter vetoed"), W::CanSplinterRegister(0, 0));
+    TestTrue(TEXT("empty table → splinter may register"), W::CanSplinterRegister(0, 20));
+
     return true;
 }
 

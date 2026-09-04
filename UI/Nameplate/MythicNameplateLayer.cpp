@@ -128,8 +128,8 @@ bool UMythicNameplateLayer::ApplyProjection(
         RenderPreferences, PresentationAlpha);
     Widget->SetRenderOpacity(ResolvedAlpha);
     Widget->SetVisibility(ResolvedAlpha > 0.0f
-        ? ESlateVisibility::SelfHitTestInvisible
-        : ESlateVisibility::Hidden);
+        ? ESlateVisibility::HitTestInvisible
+        : ESlateVisibility::Collapsed);
     Widget->NotifyProjectionChanged();
     return true;
 }
@@ -159,8 +159,8 @@ bool UMythicNameplateLayer::UpdateProjectionPlacement(
         RenderPreferences, PresentationAlpha);
     Widget->SetRenderOpacity(ResolvedAlpha);
     Widget->SetVisibility(ResolvedAlpha > 0.0f
-        ? ESlateVisibility::SelfHitTestInvisible
-        : ESlateVisibility::Hidden);
+        ? ESlateVisibility::HitTestInvisible
+        : ESlateVisibility::Collapsed);
     return true;
 }
 
@@ -187,8 +187,8 @@ bool UMythicNameplateLayer::ApplyActionRailProjection(
         RenderPreferences, PresentationAlpha);
     ActionRailWidget->SetRenderOpacity(ResolvedAlpha);
     ActionRailWidget->SetVisibility(ResolvedAlpha > 0.0f
-        ? ESlateVisibility::SelfHitTestInvisible
-        : ESlateVisibility::Hidden);
+        ? ESlateVisibility::HitTestInvisible
+        : ESlateVisibility::Collapsed);
     return true;
 }
 
@@ -218,8 +218,8 @@ bool UMythicNameplateLayer::UpdateActionRailPlacement(
         RenderPreferences, PresentationAlpha);
     ActionRailWidget->SetRenderOpacity(ResolvedAlpha);
     ActionRailWidget->SetVisibility(ResolvedAlpha > 0.0f
-        ? ESlateVisibility::SelfHitTestInvisible
-        : ESlateVisibility::Hidden);
+        ? ESlateVisibility::HitTestInvisible
+        : ESlateVisibility::Collapsed);
     return true;
 }
 

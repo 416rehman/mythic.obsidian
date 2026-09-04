@@ -2,6 +2,7 @@
 
 #include "MythicHUDLayout.h"
 
+#include "Blueprint/WidgetTree.h"
 #include "CommonUIExtensions.h"
 #include "PrimaryGameLayout.h"
 #include "Widgets/CommonActivatableWidgetContainer.h"
@@ -171,7 +172,7 @@ void UMythicHUDLayout::BindContextualElements() {
         if (Binding.WidgetName.IsNone()) {
             continue;
         }
-        UWidget *Widget = GetWidgetFromName(Binding.WidgetName);
+        UWidget *Widget = FindNamedWidgetDeep(Binding.WidgetName);
         if (!Widget) {
             UE_LOG(LogTemp, Warning, TEXT("MythicHUDLayout: contextual element '%s' not found in %s"),
                    *Binding.WidgetName.ToString(), *GetName());
@@ -256,7 +257,42 @@ void UMythicHUDLayout::PokeElement(UWidget *Element) {
 }
 
 void UMythicHUDLayout::PokeElementByName(FName WidgetName) {
-    PokeElement(GetWidgetFromName(WidgetName));
+    PokeElement(FindNamedWidgetDeep(WidgetName));
+}
+
+UWidget *UMythicHUDLayout::FindNamedWidgetDeep(FName WidgetName) const {
+    if (WidgetName.IsNone()) {
+        return nullptr;
+    }
+    if (UWidget *Direct = const_cast<UMythicHUDLayout *>(this)->GetWidgetFromName(WidgetName)) {
+        return Direct;
+    }
+    // Elements the HUD fades by name usually live inside a child user widget (RuneRow inside WBP_PlayerStatus),
+    // and GetWidgetFromName only searches this Blueprint's own tree.
+    UWidget *Found = nullptr;
+    TArray<const UUserWidget *> Pending;
+    Pending.Add(this);
+    while (Pending.Num() > 0 && !Found) {
+        const UUserWidget *Owner = Pending.Pop(EAllowShrinking::No);
+        if (!Owner || !Owner->WidgetTree) {
+            continue;
+        }
+        Owner->WidgetTree->ForEachWidget([&](UWidget *Child) {
+            if (Found || !Child) {
+                return;
+            }
+            if (UUserWidget *Nested = Cast<UUserWidget>(Child)) {
+                if (Nested->WidgetTree) {
+                    if (UWidget *Hit = Nested->WidgetTree->FindWidget(WidgetName)) {
+                        Found = Hit;
+                        return;
+                    }
+                }
+                Pending.Add(Nested);
+            }
+        });
+    }
+    return Found;
 }
 
 UMythicHUDLayout::FMythicHUDElementState *UMythicHUDLayout::FindElementState(const UWidget *Element) {
