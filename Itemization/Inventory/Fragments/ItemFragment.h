@@ -41,8 +41,14 @@ class MYTHIC_API UItemFragment : public UMythicReplicatedObject {
 
 protected:
     /** Live owning item instance assigned when the fragment is instanced; null on immutable definition templates. */
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item Fragment")
+    UPROPERTY(ReplicatedUsing=OnRep_ParentItemInstance, BlueprintReadOnly, Category = "Item Fragment")
     UMythicItemInstance *ParentItemInstance;
+
+    UFUNCTION() void OnRep_ParentItemInstance() {
+        if (IsValid(ParentItemInstance) && ParentItemInstance->ContainsFragment(this)) {
+            ParentItemInstance->NotifyReplicatedItemState();
+        }
+    }
 
 public:
     virtual void OnInstanced(UMythicItemInstance *Instance) {

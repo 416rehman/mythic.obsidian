@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "AITypes.h"
 #include "NiagaraSystem.h"
 #include "Components/ActorComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -30,6 +31,16 @@ class MYTHIC_API UMythicNavigationComponent : public UActorComponent {
     float AvoidingObstacleSince;
 
     TArray<uint32> BindHandles;
+    TWeakObjectPtr<APawn> CommandPawn;
+    TWeakObjectPtr<class UPathFollowingComponent> CommandPath;
+    FAIRequestID CommandRequest;
+    FDelegateHandle CommandFinished;
+    TWeakObjectPtr<APawn> DestinationPressPawn;
+    bool bDestinationPressActive=false;
+    void BeginDestinationPress(bool bTouch);
+    bool CanAcceptNavigationInput() const;
+    void IssueDestinationCommand(FVector Destination);
+    void ClearDestinationCommand(bool bAbort);
 
     UPROPERTY()
     ACharacter *CachedPlayerCharacter;
@@ -45,6 +56,10 @@ class MYTHIC_API UMythicNavigationComponent : public UActorComponent {
 
 public:
     UMythicNavigationComponent();
+    /** Current segment direction only for this pawn's still-active, locally issued path command. */
+    UFUNCTION(BlueprintPure,Category="Mythic Navigation")
+    bool TryGetCurrentCommandDirection(const APawn* Pawn,FVector& Direction) const;
+    void CancelDestinationCommand();
     void CachePlayerInteractionSphere();
     void CachePlayerObstacleCapsule();
     void CacheAndPrepareCharacter(APawn *owningPawn);
@@ -117,10 +132,12 @@ protected:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
     void OnInputStarted();
-    void CacheLocationUnderCursor();
+    bool CacheLocationUnderCursor();
     void OnSetDestinationTriggered();
     void OnSetDestinationReleased();
+    void OnDestinationInputCanceled();
     void OnTouchTriggered();
+    void OnTouchStarted();
     void OnTouchReleased();
     bool HandleMoveToDestinationActor();
 

@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "RewardBase.h"
 #include "Rewards/LootScaling.h"
+#include "Itemization/Loot/MythicLootCreditContext.h"
 #include "UObject/ScriptInterface.h"
 #include "LootReward.generated.h"
 
@@ -68,6 +69,7 @@ struct FLootTableOverride {
 USTRUCT(BlueprintType, Blueprintable)
 struct FLootRewardContext : public FRewardContext {
     GENERATED_BODY()
+    FMythicLootCreditContext Credit;
 
     /** Optional destination inventory; absent or full inventories cause generated items to become world drops. */
     UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess=true))
@@ -111,7 +113,7 @@ public:
      * zero); quest, chest and bounty loot roll the plain bonus.
      */
     static FLootTierBonus PrepareLootRoll(UMythicLootManagerSubsystem *LootManager, APlayerController *PlayerController, int32 EnemyTierInt,
-                                          float QuantityFind);
+                                          float QuantityFind, const FMythicLootCreditContext* Credit = nullptr);
 
     /** Source-specific loot tables and private/global-table policy used by this reward. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loot Reward Context")

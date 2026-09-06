@@ -60,7 +60,7 @@ void UMythicEscapeMenuWidget::NativeConstruct() {
         }
         AddEntry(EMythicEscapeAction::Quit, NSLOCTEXT("Mythic", "EscQuit", "Quit to Desktop"));
 
-        OnActivated().AddWeakLambda(this, [this]() { FocusFirstRow(); });
+        OnActivated().AddWeakLambda(this, [this]() { ContentReturnFocus.Reset(); FocusFirstRow(); });
     }
 
     Super::NativeConstruct();
@@ -72,11 +72,17 @@ void UMythicEscapeMenuWidget::NativeConstruct() {
 
 void UMythicEscapeMenuWidget::FocusFirstRow() {
     if (UWidget *Target = NativeGetDesiredFocusTarget()) {
-        Target->SetFocus();
+        if (APlayerController *Player = GetOwningPlayer()) Target->SetUserFocus(Player);
     }
 }
 
 UWidget *UMythicEscapeMenuWidget::NativeGetDesiredFocusTarget() const {
+    if (ContentStack && ContentStack->GetNumWidgets() > 0) return nullptr;
+    if (UWidget *ReturnTarget = ContentReturnFocus.Get(); ReturnTarget
+        && ReturnTarget->GetOwningPlayer() == GetOwningPlayer()
+        && ReturnTarget->GetIsEnabled() && ReturnTarget->IsVisible()) {
+        return ReturnTarget;
+    }
     for (const FMythicEscapeEntry &Entry : Entries) {
         if (Entry.Button && Entry.Button->GetVisibility() != ESlateVisibility::Collapsed) {
             return Entry.Button;
@@ -113,6 +119,8 @@ void UMythicEscapeMenuWidget::AddEntry(EMythicEscapeAction Action, const FText &
 
 void UMythicEscapeMenuWidget::HandleStackTransition() {
     const bool bPageOpen = ContentStack && ContentStack->GetNumWidgets() > 0;
+    const bool bReturningToPlate = bHadContentPage && !bPageOpen;
+    bHadContentPage = bPageOpen;
 
     /**
      * BOTH halves have to move together.
@@ -128,6 +136,10 @@ void UMythicEscapeMenuWidget::HandleStackTransition() {
     if (PausePlate) {
         PausePlate->SetVisibility(bPageOpen ? ESlateVisibility::Collapsed
                                             : ESlateVisibility::SelfHitTestInvisible);
+    }
+    if (bReturningToPlate && IsActivated()) {
+        // Only CommonUI's current leaf handles this request. Another modal or client keeps its focus.
+        RequestRefreshFocus();
     }
 }
 
@@ -148,6 +160,13 @@ void UMythicEscapeMenuWidget::RunAction(EMythicEscapeAction Action) {
              */
             // Into this menu's own stack, so the menu stays active and keeps owning input.
             if (ContentStack && SettingsScreenClass) {
+                ContentReturnFocus.Reset();
+                for (const FMythicEscapeEntry &Entry : Entries) {
+                    if (Entry.Proxy && Entry.Proxy->Action == EMythicEscapeAction::Settings) {
+                        ContentReturnFocus = Entry.Button;
+                        break;
+                    }
+                }
                 ContentStack->AddWidget(SettingsScreenClass);
                 HandleStackTransition();
                 break;

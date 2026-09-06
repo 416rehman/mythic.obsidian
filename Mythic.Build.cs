@@ -33,6 +33,7 @@ public class Mythic : ModuleRules
 			"GameplayTags",
 			"GameplayTasks",
 			"GameplayAbilities",
+			"GameplayCameras",
 			"AIModule",
 			"ModularGameplay",
 			"ModularGameplayActors",

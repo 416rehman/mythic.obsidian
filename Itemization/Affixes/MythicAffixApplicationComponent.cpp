@@ -1,4 +1,5 @@
 #include "Itemization/Affixes/MythicAffixApplicationComponent.h"
+#include "GAS/Abilities/MythicAbilityActionTypes.h"
 
 #include "AbilitySystemInterface.h"
 #include "AbilitySystemComponent.h"
@@ -450,7 +451,7 @@ UMythicAffixApplicationComponent::BuildAuthoritativeCandidateSet(
         const FMythicAffixEquipmentSlotOverride &Override = SlotOverrides[OverrideIndex];
         if (!Override.Inventory || Override.SlotIndex < 0
             || !Override.Inventory->GetAllSlots().IsValidIndex(Override.SlotIndex)
-            || !Override.Inventory->GetAllSlots()[Override.SlotIndex].IsGearSlot()) {
+            || !Override.Inventory->GetAllSlots()[Override.SlotIndex].AppliesEquipmentEffects()) {
             return EAuthoritativeCollectionResult::InvalidSourcesExcluded;
         }
         for (int32 PriorIndex = 0; PriorIndex < OverrideIndex; ++PriorIndex) {
@@ -480,7 +481,7 @@ UMythicAffixApplicationComponent::BuildAuthoritativeCandidateSet(
                     break;
                 }
             }
-            if (!Slot.IsGearSlot()) {
+            if (!Slot.AppliesEquipmentEffects()) {
                 Item = nullptr;
             }
             if (!Item) {
@@ -785,7 +786,7 @@ bool UMythicAffixApplicationComponent::ValidateCandidate(FMythicAppliedAffixStat
         ? GameInstance->GetSubsystem<UMythicItemizationDataRegistrySubsystem>() : nullptr;
     const FPrimaryAssetId DefinitionId = Candidate.Snapshot.AffixDefinition.GetPrimaryAssetId();
     const UMythicAffixDefinition *Definition = Registry ? Registry->FindAffix(DefinitionId) : nullptr;
-    if (!Definition || !MythicAffix::IsSupportedModifierOp(Definition->ModifierOp)) {
+    if (!Definition || !Definition->Application.IsValid() || !MythicAffix::IsSupportedModifierOp(Definition->ModifierOp)) {
         return false;
     }
     const UMythicStatDefinition *Stat = Registry->FindStat(Definition->TargetStat.GetPrimaryAssetId());
@@ -795,7 +796,10 @@ bool UMythicAffixApplicationComponent::ValidateCandidate(FMythicAppliedAffixStat
             && FMath::IsNearlyZero(Candidate.Snapshot.Magnitude))) {
         return false;
     }
+    if (Definition->Application.Scope==EMythicAffixApplicationScope::Action && !FMythicAbilityActionSource::IsSupportedStat(Stat->Attribute)) return false;
     Candidate.TargetStatTag = Stat->StatTag;
+    Candidate.TargetAttribute=Stat->Attribute; Candidate.Application=Definition->Application;
+    Candidate.SourceItemTags=Candidate.SourceItem.IsValid() ? Candidate.SourceItem->GetItemTags() : FGameplayTagContainer();
     Candidate.StackingGroup = Definition->GetEffectiveStackingGroup();
     Candidate.StackingRule = Definition->StackingRule;
     Candidate.ConflictGroups = Definition->ConflictGroups;
@@ -935,7 +939,9 @@ bool UMythicAffixApplicationComponent::ComputeDesiredActiveRolls(
             return false;
         }
     }
-    return ComputeStackingWinners(Candidates, OutActiveRolls);
+    TMap<FGuid,FMythicAppliedAffixState> PermanentCandidates;
+    for (const auto& Pair:Candidates) if (Pair.Value.Application.Scope==EMythicAffixApplicationScope::Permanent) PermanentCandidates.Add(Pair.Key,Pair.Value);
+    return ComputeStackingWinners(PermanentCandidates, OutActiveRolls);
 }
 
 bool UMythicAffixApplicationComponent::ComputeStackingWinners(
@@ -1388,4 +1394,48 @@ bool UMythicAffixApplicationComponent::IsBetterHighestCandidate(
         return GuidLexicalLess(Candidate.SourceItemGuid, Incumbent.SourceItemGuid);
     }
     return GuidLexicalLess(Candidate.RollGuid, Incumbent.RollGuid);
+}
+
+
+bool UMythicAffixApplicationComponent::CaptureActionAffixState(FMythicActionAffixSnapshot& Out) const {
+    Out={};
+    if (!HasServerAuthority() || !AbilitySystemComponent || bApplicationQuarantined || bReconciliationInProgress || bAuthoritativeEnumerationInProgress) return false;
+    Out.Candidates=Ledger;
+    for (auto& Pair:Out.Candidates) {
+        auto& Candidate=Pair.Value; Candidate.SourceItem.Reset();
+        if (Out.NonEquipmentBases.Contains(Candidate.TargetAttribute)) continue;
+        if (!Candidate.TargetAttribute.IsValid() || !AbilitySystemComponent->HasAttributeSetForAttribute(Candidate.TargetAttribute)) { Out={}; return false; }
+        float NonEquipment=0,Equipment=0;
+        const float ActualBase=AbilitySystemComponent->GetNumericAttributeBase(Candidate.TargetAttribute);
+        if (GetPermanentStatLayerValues(Candidate.TargetAttribute,NonEquipment,Equipment)) {
+            const float Tolerance=UE_KINDA_SMALL_NUMBER*FMath::Max3(1.0f,FMath::Abs(ActualBase),FMath::Abs(Equipment));
+            if (!FMath::IsFinite(ActualBase) || !FMath::IsNearlyEqual(ActualBase,Equipment,Tolerance)) { Out={}; return false; }
+        } else NonEquipment=ActualBase;
+        if (!FMath::IsFinite(NonEquipment)) { Out={}; return false; }
+        Out.NonEquipmentBases.Add(Candidate.TargetAttribute,NonEquipment);
+    }
+    return true;
+}
+
+bool UMythicAffixApplicationComponent::ResolveActionEquipmentBases(const FMythicActionAffixSnapshot& Snapshot,
+    const FGameplayTagContainer& ActionFacets,const FGameplayTagContainer& AbilityFacets,const FGameplayTagContainer& SourceState,
+    TMap<FGameplayAttribute,float>& OutBases) {
+    OutBases.Reset(); TMap<FGuid,FMythicAppliedAffixState> Eligible;
+    for (const auto& Pair:Snapshot.Candidates) if (Pair.Value.Application.Matches(ActionFacets,AbilityFacets,SourceState,Pair.Value.SourceItemTags)) Eligible.Add(Pair.Key,Pair.Value);
+    TSet<FGuid> Winners; if (!ComputeStackingWinners(Eligible,Winners)) return false;
+    TMap<FGameplayAttribute,TArray<FMythicPermanentStatContribution>> Contributions;
+    for (const auto& Winner:Winners) {
+        const auto& Candidate=Eligible.FindChecked(Winner);
+        if (!Candidate.TargetAttribute.IsValid() || !Snapshot.NonEquipmentBases.Contains(Candidate.TargetAttribute)) return false;
+        FMythicPermanentStatContribution Contribution; Contribution.SourceGuid=Candidate.RollGuid; Contribution.Attribute=Candidate.TargetAttribute;
+        Contribution.ModifierOp=Candidate.ModifierOp; Contribution.Magnitude=Candidate.Magnitude;
+        Contributions.FindOrAdd(Candidate.TargetAttribute).Add(Contribution);
+    }
+    for (const auto& Base:Snapshot.NonEquipmentBases) {
+        float Resolved=0; const auto* Rows=Contributions.Find(Base.Key);
+        const TArray<FMythicPermanentStatContribution> Empty;
+        if (!FMythicPermanentStatLedger::Compose(Base.Value,Rows ? *Rows : Empty,Resolved)) { OutBases.Reset(); return false; }
+        OutBases.Add(Base.Key,Resolved);
+    }
+    return true;
 }

@@ -16,9 +16,8 @@ enum class EMythicInventorySlotDomain : uint8 {
     Carried,
 
     /**
-     * Equipped gear - armor, accessories, the combat weapon, and each harvesting tool in its own slot. Occupying the
-     * slot is the whole of being equipped: the item is never wielded or selected, and slot membership alone owns its
-     * active lifecycle and equipment-affix state.
+     * Loadout placement - armor, accessories, weapon, tools and passive quick-pouch storage. The group's explicit
+     * equipment-effect policy owns active lifecycle and affix state; passive storage grants neither.
      */
     Equipment,
 };
@@ -57,11 +56,15 @@ struct FInventorySlotGroup {
     int32 DisplayOrder = 0;
 
     /**
-     * Typed gameplay domain shared by every slot in this group. Equipment is active for as long as it occupies the
-     * slot; Carried is inactive storage.
+     * Typed placement domain shared by every slot in this group. Equipment may opt out of worn effects below;
+     * Carried is always inactive storage.
      */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Group")
     EMythicInventorySlotDomain SlotDomain = EMythicInventorySlotDomain::Carried;
+
+    /** False for passive storage displayed in the loadout, such as a quick pouch. Current profile, never save data. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Group")
+    bool bAppliesEquipmentEffects = true;
 
     /** Whether player-authored transactions may remove items from this group. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Group")

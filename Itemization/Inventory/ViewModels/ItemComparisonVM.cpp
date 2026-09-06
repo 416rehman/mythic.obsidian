@@ -165,7 +165,7 @@ static void BuildComparableStats(const UItemTooltipVM *Tooltip, TArray<FMythicCo
             DurabilityPresentation);
     }
     for (const FAffixDisplayData &Affix : Tooltip->GetAffixes()) {
-        if (Affix.bOwnedByWeaponAttackPresentation) {
+        if (Affix.bOwnedByWeaponAttackPresentation || Affix.ViewData.ApplicationScope != EMythicAffixApplicationScope::Permanent) {
             continue;
         }
         for (const FMythicAffixValueViewData &Value : Affix.ViewData.Values) {
@@ -205,7 +205,7 @@ UItemComparisonVM *UItemComparisonVM::CreateComparison(UObject *Outer, UMythicIt
     const FGameplayTagContainer &Whitelist = TargetEntry.SlotDefinition
         ? TargetEntry.SlotDefinition->WhitelistedItemTypes
         : FGameplayTagContainer::EmptyContainer;
-    if (!TargetEntry.IsGearSlot() || !TargetEntry.SlotDefinition
+    if (!TargetEntry.AppliesEquipmentEffects() || !TargetEntry.SlotDefinition
         || (!Whitelist.IsEmpty() && !InspectedProbe.HasAny(Whitelist))) {
         return nullptr;
     }

@@ -39,6 +39,9 @@ bool FMythicPlayerLoadoutDomainContentTest::RunTest(const FString & /*Parameters
             TestEqual(*FString::Printf(TEXT("%s declares the Equipment domain"), *GroupName.ToString()),
                       static_cast<int32>(Pair.Value.SlotDomain),
                       static_cast<int32>(EMythicInventorySlotDomain::Equipment));
+            const bool bExpectedEffects=GroupName!=FName(TEXT("Inventory.Group.Equipment.QuickPouch"));
+            TestEqual(*FString::Printf(TEXT("%s has the shipped worn-effect policy"),*GroupName.ToString()),
+                      Pair.Value.bAppliesEquipmentEffects,bExpectedEffects);
             continue;
         }
         ++CarriedGroupsSeen;

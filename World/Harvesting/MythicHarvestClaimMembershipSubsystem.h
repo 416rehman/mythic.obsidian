@@ -39,6 +39,10 @@ class MYTHIC_API UMythicHarvestClaimMembershipSubsystem final
 
 public:
     virtual bool ShouldCreateSubsystem(UObject *Outer) const override;
+    /** Authority writers use one globally ordered revision stream; zero remains invalid. */
+    uint64 GetLatestRosterRevision() const { return HighestAppliedRosterRevision; }
+    /** Emitted only after a complete accepted roster replacement/tombstone is installed. */
+    FSimpleMulticastDelegate OnMembershipChanged;
 
     /**
      * Atomically replaces one party incarnation's authoritative membership when RosterRevision is newer than every

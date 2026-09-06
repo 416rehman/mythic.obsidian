@@ -96,6 +96,7 @@ public:
 
 
     EMythicAbilityActivationPolicy GetActivationPolicy() const { return ActivationPolicy; }
+    bool ShouldCancelOnInputInterrupted() const { return bCancelOnInputInterrupted; }
     EMythicAbilityActivationGroup GetActivationGroup() const { return ActivationGroup; }
 
     /** Returns whether this active ability may transition to the requested local activation group. */
@@ -180,6 +181,10 @@ public:
     // Defines how this ability is meant to activate.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Ability Activation")
     EMythicAbilityActivationPolicy ActivationPolicy;
+
+    /** Holds/previews stop on focus loss or menu capture. Independent deployed work can persist. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Ability Activation")
+    bool bCancelOnInputInterrupted = false;
 
     // Defines the relationship between this ability activating and other abilities activating.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Ability Activation")

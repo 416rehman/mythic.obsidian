@@ -263,7 +263,7 @@ protected:
 
     void ApplySelfEffect();
 
-    void ApplyStatus(const TArray<FHitResult> &Hits, AActor *Instigator, const FGameplayTag &Status, float Chance) const;
+    void ApplyStatus(const TArray<FHitResult> &Hits, AActor *Instigator, const FGameplayTag &Status, float Chance, float DurationOverride = 0) const;
 
     // Marks both specs as skill-delivered so the damage execution's BonusSkillDamage gate can see them.
     static void MarkSpecAsSkill(FMythicDamageContainerSpec &Spec);
@@ -277,7 +277,7 @@ protected:
     UFUNCTION()
     void OnSkillFinished();
 
-private:
+protected:
     const class UMythicAttributeSet_Offense *GetOffenseSet() const;
 
     float GetSkillDurationBonus() const;

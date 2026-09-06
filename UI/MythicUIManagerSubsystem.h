@@ -12,6 +12,7 @@
 #include "MythicUIManagerSubsystem.generated.h"
 
 class UPrimaryGameLayout;
+class UCommonActivatableWidgetContainerBase;
 class FSubsystemCollectionBase;
 class UObject;
 
@@ -70,6 +71,10 @@ public:
     // To remove the widget, call RemoveWidgetInstanceFromLayer.
     UFUNCTION(BlueprintCallable, Category = "Mythic UI Manager")
     void AddWidgetInstanceToLayer(FGameplayTag LayerName, const APlayerController *Controller, UCommonActivatableWidget *Widget);
+
+    /** Exact-local-player native attachment. Output is set before activation callbacks for scoped cleanup. */
+    bool TryAddWidgetInstanceToPlayerLayer(FGameplayTag LayerName, const APlayerController* Controller,
+        UCommonActivatableWidget* Widget,TWeakObjectPtr<UCommonActivatableWidgetContainerBase>& AttachedLayer);
 
     // Remove a widget instance from the given layer. This will only work if the layer is registered with the primary layout.
     // Will call the Deactivate method on the widget instance.

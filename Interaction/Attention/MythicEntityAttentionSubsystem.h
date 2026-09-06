@@ -69,6 +69,8 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Entity Attention")
     void SetHardTarget(FMythicEntityPresentationInstance Instance);
+    /** Releases only the caller's previously published target; a different owner's override survives. */
+    void ClearHardTargetIfMatches(const FMythicEntityPresentationInstance& Expected);
 
     /**
      * Sets the deliberate dossier-inspect subject and requests an immediate bounded pass. Passing an invalid or stale

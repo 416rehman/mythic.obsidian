@@ -6,6 +6,18 @@
 #include "NativeGameplayTags.h"
 #include "GAS/MythicTags_GAS.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
+#include "Itemization/Inventory/Fragments/ActionableItemFragment.h"
+
+namespace {
+UMythicItemInstance* StackCostSource(const UMythicGameplayAbility* Ability) {
+    if (!Ability) return nullptr;
+    if (auto* Fragment=Cast<UActionableItemFragment>(Ability->GetCurrentSourceObject())) {
+        auto* Item=Fragment->GetOwningItemInstance();
+        return IsValid(Item) && Item->ContainsFragment(Fragment) ? Item : nullptr;
+    }
+    return Cast<UMythicItemInstance>(Ability->GetCurrentSourceObject());
+}
+}
 
 UMythicAbilityCost_ItemTagStack::UMythicAbilityCost_ItemTagStack() {
     Quantity.SetValue(1.0f);
@@ -18,7 +30,7 @@ bool UMythicAbilityCost_ItemTagStack::CheckCost(const UMythicGameplayAbility *Ab
         return false;
     }
 
-    auto ItemInstance = Cast<UMythicItemInstance>(Ability->GetCurrentSourceObject());
+    auto ItemInstance = StackCostSource(Ability);
     if (!ItemInstance) {
         return false;
     }
@@ -44,7 +56,7 @@ void UMythicAbilityCost_ItemTagStack::ApplyCost(const UMythicGameplayAbility *Ab
     if (!Ability) {
         return;
     }
-    auto ItemInstance = Cast<UMythicItemInstance>(Ability->GetCurrentSourceObject());
+    auto ItemInstance = StackCostSource(Ability);
     if (!ItemInstance) {
         return;
     }

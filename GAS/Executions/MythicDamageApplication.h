@@ -10,6 +10,8 @@ class MYTHIC_API UMythicDamageApplication : public UGameplayEffectExecutionCalcu
     GENERATED_BODY()
 public:
     UMythicDamageApplication();
+    void CaptureActionAttributes(const UAbilitySystemComponent* ASC,struct FMythicAbilityActionSource& Out) const;
+    bool IsSourceAttribute(const FGameplayAttribute& Attribute) const;
 
     static bool ShouldNegateFriendlyFire(bool bSourceIsPlayer, bool bTargetIsPlayer, bool bSameActor, bool bFriendlyFireEnabled);
 

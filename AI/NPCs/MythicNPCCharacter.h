@@ -546,6 +546,11 @@ public:
     friend struct FMythicDirectEntityPresentationTestAccess;
 
 private:
+    // Authority-only actor lifetime state. A body claimed by a manager or pool can
+    // never become a new direct entity through the deferred BeginPlay fallback.
+    enum class EPresentationLifecycle : uint8 { AwaitingDirectFallback, Pooled, Managed };
+    EPresentationLifecycle PresentationLifecycle = EPresentationLifecycle::AwaitingDirectFallback;
+
     void ConfigureEntityPresentationAnchor();
     void TryActivateDirectEntityPresentation();
 

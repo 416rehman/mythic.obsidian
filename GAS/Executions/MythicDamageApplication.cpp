@@ -1,6 +1,9 @@
 
 
 #include "MythicDamageApplication.h"
+#include "MythicDamageCalculation.h"
+#include "GAS/MythicStatContribution.h"
+#include "AbilitySystemComponent.h"
 
 #include "Mythic.h"
 #include "GAS/MythicGameplayEffectContext.h"
@@ -209,6 +212,25 @@ UMythicDamageApplication::UMythicDamageApplication() {
     }
 }
 
+bool UMythicDamageApplication::IsSourceAttribute(const FGameplayAttribute& Attribute) const {
+    return RelevantAttributesToCapture.ContainsByPredicate([&](const auto& Capture) { return Capture.AttributeSource==EGameplayEffectAttributeCaptureSource::Source && Capture.AttributeToCapture==Attribute; });
+}
+
+void UMythicDamageApplication::CaptureActionAttributes(const UAbilitySystemComponent* ASC,FMythicAbilityActionSource& Out) const {
+    if (!ASC) return;
+    Out.RetainEffectDefinitions(ASC);
+    for (const auto& Capture:RelevantAttributesToCapture) {
+        if (Capture.AttributeSource!=EGameplayEffectAttributeCaptureSource::Source || Out.Stats.Contains(Capture.AttributeToCapture)) continue;
+        const float Value=ASC->HasAttributeSetForAttribute(Capture.AttributeToCapture) ? ASC->GetNumericAttribute(Capture.AttributeToCapture) : 0;
+        Out.Stats.Add(Capture.AttributeToCapture,FMath::IsFinite(Value) ? Value : 0);
+        if (ASC->HasAttributeSetForAttribute(Capture.AttributeToCapture)) {
+            FGameplayEffectAttributeCaptureSpec Sealed(FGameplayEffectAttributeCaptureDefinition(Capture.AttributeToCapture,EGameplayEffectAttributeCaptureSource::Source,true));
+            const_cast<UAbilitySystemComponent*>(ASC)->CaptureAttributeForGameplayEffect(Sealed);
+            Out.Captures.Add(Capture.AttributeToCapture,Sealed);
+        }
+    }
+}
+
 void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCustomExecutionParameters &ExecutionParams,
                                                       FGameplayEffectCustomExecutionOutput &OutExecutionOutput) const {
     Super::Execute_Implementation(ExecutionParams, OutExecutionOutput);
@@ -229,6 +251,9 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         return;
     }
 
+    if (MythicContext->ActionSnapshot && (!MythicContext->ActionSnapshot->Source || !FMath::IsFinite(MythicContext->ActionShare) || MythicContext->ActionShare<=0 || MythicContext->ActionShare>1)) {
+        MarkDamageExecutionAborted(OutExecutionOutput); return;
+    }
     auto SourceASC = ExecutionParams.GetSourceAbilitySystemComponent();
     auto TargetASC = ExecutionParams.GetTargetAbilitySystemComponent();
     if (!SourceASC || !TargetASC) {
@@ -252,50 +277,69 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         }
     }
 
-    const FGameplayTagContainer *SourceTags = Spec->CapturedSourceTags.GetAggregatedTags();
+    FGameplayTagContainer ActionEvaluationTags;
+    const FGameplayTagContainer* SourceStateTags=Spec->CapturedSourceTags.GetAggregatedTags();
+    if (MythicContext->ActionSnapshot && MythicContext->ActionSnapshot->Source) {
+        SourceStateTags=&MythicContext->ActionSnapshot->Source->StateTags;
+        ActionEvaluationTags=*SourceStateTags;
+        ActionEvaluationTags.AppendTags(MythicContext->ActionFacets);
+        ActionEvaluationTags.AddTag(GAS_ABILITY_TYPE_SKILL);
+    }
+    const FGameplayTagContainer *SourceTags = MythicContext->ActionSnapshot ? &ActionEvaluationTags : SourceStateTags;
     const FGameplayTagContainer *TargetTags = Spec->CapturedTargetTags.GetAggregatedTags();
+    if (MythicContext->ActionSnapshot) UMythicDamageCalculation::ResolveActionIntents(*MythicContext,TargetTags);
 
     FAggregatorEvaluateParameters EvaluateParameters;
     EvaluateParameters.SourceTags = SourceTags;
     EvaluateParameters.TargetTags = TargetTags;
+    // Authoritative source attributes are sealed once at commit; defenses still evaluate on the recipient.
+    const auto CaptureMagnitude=[&](const FGameplayEffectAttributeCaptureDefinition& Capture,const FAggregatorEvaluateParameters& Evaluation,float& Out) {
+        if (MythicContext->ActionSnapshot && MythicContext->ActionSnapshot->Source
+            && Capture.AttributeSource==EGameplayEffectAttributeCaptureSource::Source) {
+            const auto& Source=*MythicContext->ActionSnapshot->Source;
+            const auto& Tags=Evaluation.SourceTags ? *Evaluation.SourceTags : Source.StateTags;
+            return Source.EvaluateStat(Capture.AttributeToCapture,Tags,Evaluation.TargetTags,Out);
+        }
+        return ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Capture,Evaluation,Out);
+    };
 
     const UWorld *World = TargetASC ? TargetASC->GetWorld() : nullptr;
     const AMythicGameState *GS = World ? World->GetGameState<AMythicGameState>() : nullptr;
     const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
 
     float Power = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().Power, EvaluateParameters, Power);
+    CaptureMagnitude(MythicDamageApplicationStatics().Power, EvaluateParameters, Power);
     float DmgPerHit = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().DamagePerHit, EvaluateParameters, DmgPerHit);
+    CaptureMagnitude(MythicDamageApplicationStatics().DamagePerHit, EvaluateParameters, DmgPerHit);
     float CriticalHitDamage = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().CriticalHitDamage, EvaluateParameters, CriticalHitDamage);
+    CaptureMagnitude(MythicDamageApplicationStatics().CriticalHitDamage, EvaluateParameters, CriticalHitDamage);
     float BonusSkillDamage = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().BonusSkillDamage, EvaluateParameters, BonusSkillDamage);
+    CaptureMagnitude(MythicDamageApplicationStatics().BonusSkillDamage, EvaluateParameters, BonusSkillDamage);
     float BonusSwordDamage = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().BonusSwordDamage, EvaluateParameters, BonusSwordDamage);
+    CaptureMagnitude(MythicDamageApplicationStatics().BonusSwordDamage, EvaluateParameters, BonusSwordDamage);
     float BonusAxeDamage = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().BonusAxeDamage, EvaluateParameters, BonusAxeDamage);
+    CaptureMagnitude(MythicDamageApplicationStatics().BonusAxeDamage, EvaluateParameters, BonusAxeDamage);
     float BonusDaggerDamage = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().BonusDaggerDamage, EvaluateParameters, BonusDaggerDamage);
+    CaptureMagnitude(MythicDamageApplicationStatics().BonusDaggerDamage, EvaluateParameters, BonusDaggerDamage);
     float BonusSickleDamage = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().BonusSickleDamage, EvaluateParameters, BonusSickleDamage);
+    CaptureMagnitude(MythicDamageApplicationStatics().BonusSickleDamage, EvaluateParameters, BonusSickleDamage);
     float BonusSpearDamage = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().BonusSpearDamage, EvaluateParameters, BonusSpearDamage);
+    CaptureMagnitude(MythicDamageApplicationStatics().BonusSpearDamage, EvaluateParameters, BonusSpearDamage);
     float BonusHammerDamage = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().BonusHammerDamage, EvaluateParameters, BonusHammerDamage);
+    CaptureMagnitude(MythicDamageApplicationStatics().BonusHammerDamage, EvaluateParameters, BonusHammerDamage);
     float IncreasedDamageToEnemiesUnderStatusEffects = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().IncreasedDamageToEnemiesUnderStatusEffects, EvaluateParameters,
+    CaptureMagnitude(MythicDamageApplicationStatics().IncreasedDamageToEnemiesUnderStatusEffects, EvaluateParameters,
                                                                IncreasedDamageToEnemiesUnderStatusEffects);
     float BonusDamageToSuperiorEnemies = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().BonusDamageToSuperiorEnemies, EvaluateParameters,
+    CaptureMagnitude(MythicDamageApplicationStatics().BonusDamageToSuperiorEnemies, EvaluateParameters,
                                                                BonusDamageToSuperiorEnemies);
     float OutgoingDamageMultiplier = 1.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().OutgoingDamageMultiplier, EvaluateParameters,
+    CaptureMagnitude(MythicDamageApplicationStatics().OutgoingDamageMultiplier, EvaluateParameters,
                                                                OutgoingDamageMultiplier);
     OutgoingDamageMultiplier = FMath::Max(0.0f, OutgoingDamageMultiplier);
 
     float IncomingDamageMultiplier = 1.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().IncomingDamageMultiplier, EvaluateParameters,
+    CaptureMagnitude(MythicDamageApplicationStatics().IncomingDamageMultiplier, EvaluateParameters,
                                                                IncomingDamageMultiplier);
     IncomingDamageMultiplier = FMath::Max(0.0f, IncomingDamageMultiplier);
 
@@ -312,6 +356,18 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
      * that assumption. The coefficient is not a literal here, and it passes the same diminishing curve as every
      * other stacked stat.
     */
+    float FinalDamage=0;
+    if (MythicContext->ActionSnapshot) {
+        FinalDamage=MythicContext->ActionSnapshot->RolledDamage;
+        if (MythicContext->ActionSnapshot->bScaleWithPrimaryStats) {
+            const auto& Source=*MythicContext->ActionSnapshot->Source;
+            FinalDamage=FMythicStatContributionRules::ApplyToBase(Settings->StatContributions.Contributions,
+                UMythicAttributeSet_Offense::GetDamagePerHitAttribute(),FinalDamage,[&](const FGameplayAttribute& Attribute) {
+                    float Value=0; Source.EvaluateStat(Attribute,*SourceTags,TargetTags,Value); return Value;
+                });
+        }
+        FinalDamage*=MythicContext->ActionShare;
+    } else {
     FMythicWeaponDamageProjection WeaponDamage;
     FGameplayTagContainer AttackSourceTags;
     const UAttackFragment *ExactAttackSource = Cast<UAttackFragment>(
@@ -389,7 +445,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
                TEXT("DamageApplication:: invalid DamagePerHit, primary-stat contribution, or weapon damage range configuration"));
         return;
     }
-    float FinalDamage = FMath::FRandRange(
+    FinalDamage = FMath::FRandRange(
         WeaponDamage.EffectiveMinimumDamage,
         WeaponDamage.EffectiveMaximumDamage);
     UE_LOG(Myth, Verbose,
@@ -404,6 +460,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
            WeaponDamage.PrimaryStatBonusFraction * 100.0f,
            *WeaponDamage.WeaponClassTag.ToString(),
            WeaponDamage.WeaponClassBonusMultiplier);
+    }
     // Every damage-affecting fraction below is a stacked 0.0-based bonus, so each rides its authored diminishing
     // curve before it multiplies. A stat with no curve passes through unchanged, so this is a no-op until one is
     // authored - the curves in UMythicCombatSettings::StatDiminishing are the brake, not this call.
@@ -429,8 +486,8 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     {
         float StatusMult = 1.0f;
         if (SourceTags) {
-            if (SourceTags->HasTag(GAS_BUFF_RAGE)) { StatusMult *= (1.0f + Settings->RageDamageBonus); }
-            if (SourceTags->HasTag(GAS_DEBUFF_WEAKENED)) { StatusMult *= UMythicStatusRegistry::GetControlReductionMultiplier(SourceASC, GAS_DEBUFF_WEAKENED, Settings->WeakenedDamagePenalty); }
+            if (SourceStateTags->HasTag(GAS_BUFF_RAGE)) { StatusMult *= (1.0f + Settings->RageDamageBonus); }
+            if (SourceStateTags->HasTag(GAS_DEBUFF_WEAKENED)) { StatusMult *= MythicContext->ActionSnapshot ? MythicContext->ActionSnapshot->Source->ControlDamageMultiplier : UMythicStatusRegistry::GetControlReductionMultiplier(SourceASC, GAS_DEBUFF_WEAKENED, Settings->WeakenedDamagePenalty); }
         }
         if (TargetTags) {
             if (TargetTags->HasTag(GAS_DEBUFF_TERRIFIED)) { StatusMult *= UMythicStatusRegistry::GetControlBonusMultiplier(TargetASC, GAS_DEBUFF_TERRIFIED, Settings->TerrifiedDamageBonus); }
@@ -446,9 +503,9 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
                                                                 IncreasedDamageToEnemiesUnderStatusEffects));
     }
 
-    if (SourceTags && DebuffParent.IsValid() && SourceTags->HasTag(DebuffParent)) {
+    if (SourceStateTags && DebuffParent.IsValid() && SourceStateTags->HasTag(DebuffParent)) {
         float DecreasedDamageFromEnemiesUnderStatusEffects = 0.0f;
-        ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(MythicDamageApplicationStatics().DecreasedDamageFromEnemiesUnderStatusEffects,
+        CaptureMagnitude(MythicDamageApplicationStatics().DecreasedDamageFromEnemiesUnderStatusEffects,
                                                                    EvaluateParameters, DecreasedDamageFromEnemiesUnderStatusEffects);
         if (DecreasedDamageFromEnemiesUnderStatusEffects > 0.0f) {
             FinalDamage = FMath::Max(0.0f, FinalDamage * FMath::Max(0.0f, 1.0f - DecreasedDamageFromEnemiesUnderStatusEffects));
@@ -487,13 +544,13 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
             float SumIncreased = 0.0f;
             for (const FGameplayEffectAttributeCaptureDefinition &Def : IncreasedComposeCaptures) {
                 float Value = 0.0f;
-                ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Def, EvaluateParameters, Value);
+                CaptureMagnitude(Def, EvaluateParameters, Value);
                 SumIncreased += Value;
             }
             TArray<float, TInlineAllocator<8>> MoreMultipliers;
             for (const FGameplayEffectAttributeCaptureDefinition &Def : MoreComposeCaptures) {
                 float Value = 0.0f;
-                ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Def, EvaluateParameters, Value);
+                CaptureMagnitude(Def, EvaluateParameters, Value);
                 MoreMultipliers.Add(Value);
             }
             FinalDamage = FMath::Max(0.0f, FMythicDamageComposer::ComposeDamage(FinalDamage, SumIncreased, MoreMultipliers, ComposeCfg.MoreStackCap));
@@ -516,7 +573,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
             if (ResolvedWeatherTag.IsValid()) {
                 FGameplayTagContainer HitDamageTags;
                 if (SourceTags) {
-                    HitDamageTags.AppendTags(*SourceTags);
+                    HitDamageTags.AppendTags(MythicContext->ActionSnapshot ? MythicContext->ActionFacets : *SourceTags);
                 }
                 if (MythicContext->IsBurn()) { HitDamageTags.AddTag(GAS_DEBUFF_BURNING); }
                 if (MythicContext->IsBleed()) { HitDamageTags.AddTag(GAS_DEBUFF_BLEEDING); }
@@ -560,11 +617,14 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         return;
     }
 
+    MythicContext->ResolvedDamage.bAccepted=true;
+    MythicContext->ResolvedDamage.Attempted=FinalDamage;
     float DodgeChance = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.DodgeChance, EvaluateParameters, DodgeChance);
+    CaptureMagnitude(Statics.DodgeChance, EvaluateParameters, DodgeChance);
     DodgeChance = MythicCombat::ClampProbability(DodgeChance, Settings->MaxDodgeChance);
     if (MythicCombat::RollSucceeds(DodgeChance, FMath::FRand())) {
         MythicContext->SetDodged(true);
+        MythicContext->ResolvedDamage.bDodged=true;
         MarkDamageExecutionAborted(OutExecutionOutput);
         UE_LOG(Myth, Log, TEXT("DamageApplication:: Attack DODGED (chance %.2f)"), DodgeChance);
         if (const APawn *VictimPawn = TargetASC ? Cast<APawn>(TargetASC->GetAvatarActor()) : nullptr) {
@@ -599,7 +659,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
             return false;
         }
         float Resist = 0.0f;
-        ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(ResistDef, EvaluateParameters, Resist);
+        CaptureMagnitude(ResistDef, EvaluateParameters, Resist);
         // Total resistance would make the status structurally impossible - no proc lands and no buildup accrues -
         // so the authored ceiling keeps a stacked resist build very strong rather than absolutely immune.
         Resist = MythicCombat::ClampProbability(Resist, Settings->MaxStatusResistance);
@@ -631,7 +691,7 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
 
 
     float Armor = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.Armor, EvaluateParameters, Armor);
+    CaptureMagnitude(Statics.Armor, EvaluateParameters, Armor);
     Armor = FMath::Max(0.0f, Armor);
     float MitigationFraction = 0.0f;
     if (GS) {
@@ -640,10 +700,10 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
         }
     }
     FinalDamage *= (1.0f - MitigationFraction);
-    FinalDamage = ApplyChipFloor(FinalDamage, Settings->MinChipDamage);
+    FinalDamage = ApplyChipFloor(FinalDamage, Settings->MinChipDamage * (MythicContext->ActionSnapshot ? MythicContext->ActionShare : 1.0f));
 
     float Shield = 0.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.Shield, EvaluateParameters, Shield);
+    CaptureMagnitude(Statics.Shield, EvaluateParameters, Shield);
     Shield = FMath::Max(0.0f, Shield);
     const float ToShield = FMath::Min(Shield, FinalDamage);
     const float ToHealth = FinalDamage - ToShield;
@@ -652,6 +712,8 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
            MitigationFraction, Armor, ToShield, ToHealth);
 
     if (ToShield > 0.0f) {
+        MythicContext->OwnedShieldAbsorption.Reset();
+        if (auto* ShieldASC=Cast<UMythicAbilitySystemComponent>(ExecutionParams.GetTargetAbilitySystemComponent())) ShieldASC->BeginOwnedShieldDamage();
         OutExecutionOutput.AddOutputModifier(FGameplayModifierEvaluatedData(
             UMythicAttributeSet_Defense::GetShieldAttribute(), EGameplayModOp::Additive, -ToShield));
     }
@@ -664,8 +726,8 @@ void UMythicDamageApplication::Execute_Implementation(const FGameplayEffectCusto
     }
 
     float BuildupMultiplier = 1.0f;
-    ExecutionParams.AttemptCalculateCapturedAttributeMagnitude(Statics.StatusBuildupMultiplier, EvaluateParameters, BuildupMultiplier);
-    const float StatusBuildupPerProc = ComputeBuildupPerProc(Settings->StatusBuildupPerProc, BuildupMultiplier);
+    CaptureMagnitude(Statics.StatusBuildupMultiplier, EvaluateParameters, BuildupMultiplier);
+    const float StatusBuildupPerProc = ComputeBuildupPerProc(Settings->StatusBuildupPerProc, BuildupMultiplier) * (MythicContext->ActionSnapshot ? MythicContext->ActionShare : 1.0f);
     auto AddBuildup = [&](bool bProcSurvived, const FGameplayAttribute &BuildupAttr) {
         if (bProcSurvived) {
             OutExecutionOutput.AddOutputModifier(FGameplayModifierEvaluatedData(

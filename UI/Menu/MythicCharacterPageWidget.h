@@ -34,6 +34,9 @@ class UMythicInventoryInteractionCoordinator;
 class UMythicItemDetailsWidget;
 class UMythicRuneDefinition;
 class UMythicRunePickerWidget;
+class UMythicAbilityPickerWidget;
+class UMythicSkillComponent;
+class UMythicControlGlyph;
 class UMythicRuneSocketWidget;
 class UMythicSectionHeader;
 class UOverlay;
@@ -111,6 +114,9 @@ class MYTHIC_API UMythicCharacterPageWidget : public UMythicActivatableWidget {
 
 public:
     void OpenSocketPicker(int32 SlotIndex);
+    UFUNCTION() void OpenAbilityPicker(int32 SlotIndex);
+    UFUNCTION() void RefreshAbilitySockets();
+    void FocusAbilitySocket(int32 SlotIndex);
 
     /** Closes the character page's active inventory modal; browsing declines so the menu shell handles Back. */
     virtual bool TryHandleNestedBackAction() override;
@@ -347,6 +353,9 @@ protected:
     /** The rune library, opened against whichever socket was clicked. */
     UPROPERTY(EditDefaultsOnly, Category = "Mythic|Runes")
     TSubclassOf<class UMythicRunePickerWidget> RunePickerClass;
+    UPROPERTY(EditDefaultsOnly, Category="Mythic|Abilities") TSubclassOf<UMythicAbilityPickerWidget> AbilityPickerClass;
+    UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UPanelWidget> AbilityHeaderHost;
+    UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UPanelWidget> AbilitySocketStrip;
 
     /** Host that receives the persistent item-details widget for the selected physical item. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
@@ -457,6 +466,14 @@ private:
     /** One picker for the page's lifetime. Creating a widget per click is a frame spike. */
     UPROPERTY()
     TObjectPtr<UMythicRunePickerWidget> RunePicker;
+    UPROPERTY() TObjectPtr<UMythicAbilityPickerWidget> AbilityPicker;
+    UPROPERTY() TArray<TObjectPtr<UMythicRuneSocketWidget>> AbilitySockets;
+    UPROPERTY() TArray<TObjectPtr<UMythicControlGlyph>> AbilityGlyphs;
+    UPROPERTY() TObjectPtr<UMythicSectionHeader> AbilityHeader;
+    TWeakObjectPtr<UMythicSkillComponent> BoundSkills;
+    int32 LastOpenedAbilitySocket = INDEX_NONE;
+    void BuildAbilitySockets();
+    void UnbindSkills();
 
     /** The socket row inside the details card, cached when the card is built. */
     UPROPERTY()

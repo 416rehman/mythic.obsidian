@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "AttributeSet.h"
+#include "GameplayEffectTypes.h"
 #include "GameplayTagContainer.h"
 #include "Itemization/Inventory/Fragments/FragmentTypes.h"
 #include "Itemization/MythicDataAsset.h"
@@ -51,7 +52,10 @@ public:
 
     /** Applies a canonical status directly to a target, bypassing buildup while retaining cues and reactions. */
     UFUNCTION(BlueprintCallable, Category = "Status", meta = (DefaultToSelf = "Instigator"))
-    static bool ApplyStatusToActor(AActor *Target, FGameplayTag StatusType, AActor *Instigator);
+    static bool ApplyStatusToActor(AActor *Target, FGameplayTag StatusType, AActor *Instigator, float DurationOverride = 0);
+
+    /** Native reactive producers retain activation/depth without changing the existing Blueprint call surface. */
+    static bool ApplyStatusToActorWithContext(AActor* Target,FGameplayTag StatusType,AActor* Instigator,float DurationOverride,const FGameplayEffectContextHandle& SourceContext);
 
     /**
      * Resolves the ASC that owns an applied status stack. Player/NPC sources retain their gameplay ASC; an ASC-less
@@ -61,7 +65,7 @@ public:
     static UAbilitySystemComponent *ResolveStatusEffectSourceASC(AActor *Instigator, UAbilitySystemComponent *TargetASC);
 
     /** Applies an already-resolved status to an ASC. Returns false when the status has no effect authored. */
-    static bool ApplyStatusEffect(UAbilitySystemComponent *TargetASC, const UMythicStatusEffectDefinition *Definition, AActor *Instigator, AActor *Causer);
+    static bool ApplyStatusEffect(UAbilitySystemComponent *TargetASC, const UMythicStatusEffectDefinition *Definition, AActor *Instigator, AActor *Causer, float DurationOverride = 0, const FGameplayEffectContextHandle& SourceContext = {});
 
     // Plays a cue on the target through the Mythic ASC multicast path. No-op for an unset tag.
     static void PlayStatusCue(UAbilitySystemComponent *TargetASC, const FGameplayTag &CueTag);
@@ -80,9 +84,9 @@ public:
      * 1.0-based and read bare, a Bonus* stat is 0.0-based and read as (1 + x). Passing one to the other is off by
      * exactly one, in a direction nothing would catch.
      */
-    static float ResolveApplierMultiplier(const AActor *Instigator, const FGameplayAttribute &Attribute);
+    static float ResolveApplierMultiplier(const AActor *Instigator, const FGameplayAttribute &Attribute, const FGameplayEffectContextHandle& SourceContext = {});
 
-    static float ResolveApplierBonus(const AActor *Instigator, const FGameplayAttribute &Attribute);
+    static float ResolveApplierBonus(const AActor *Instigator, const FGameplayAttribute &Attribute, const FGameplayEffectContextHandle& SourceContext = {});
 
     /**
      * How much the applier's Power lifts a status's base damage, through the same authored contribution a weapon
@@ -90,7 +94,7 @@ public:
      * their authored band. This is what keeps a damage-over-time build's ticks scaling with the character instead
      * of dealing the same few points at level 200.
      */
-    static float ResolveApplierPowerMultiplier(const AActor *Instigator);
+    static float ResolveApplierPowerMultiplier(const AActor *Instigator, const FGameplayEffectContextHandle& SourceContext = {});
 
     /**
      * The combined strength of every active control-status handle of one kind on a target. Each handle carries the
@@ -102,7 +106,7 @@ public:
     static float GetControlBonusMultiplier(const UAbilitySystemComponent *TargetASC, FGameplayTag StateTag, float FallbackMagnitude);
 
     // Shared by both: the applier's raw stat value, or a sentinel when there is no stat to read.
-    static bool TryReadApplierStat(const AActor *Instigator, const FGameplayAttribute &Attribute, float &OutRaw);
+    static bool TryReadApplierStat(const AActor *Instigator, const FGameplayAttribute &Attribute, float &OutRaw, const FGameplayEffectContextHandle& SourceContext = {});
 
     /**
      * The status's own band, or the global baseline when it authors none, scaled by everything the applier brings.

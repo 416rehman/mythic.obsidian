@@ -9,6 +9,8 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(INPUT_ACTION_ABILITY_4, "Input.Action.Ability4", 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(INPUT_ACTION_ULTIMATE, "Input.Action.Ultimate", "Ultimate ability");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(INPUT_ACTION_SKILL_Q, "Input.Action.SkillQ", "Active skill slot Q (equippable skill loadout)");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(INPUT_ACTION_SKILL_E, "Input.Action.SkillE", "Active skill slot E (equippable skill loadout)");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(INPUT_ACTION_SKILL_R, "Input.Action.SkillR", "Active skill slot R (equippable skill loadout)");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(INPUT_ACTION_SKILL_T, "Input.Action.SkillT", "Active skill slot T (equippable skill loadout)");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(INPUT_ACTION_INTERACT, "Input.Action.Interact", "Interact with world");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(INPUT_ACTION_DODGE, "Input.Action.Dodge", "Dodge/roll");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(INPUT_ACTION_BLOCK, "Input.Action.Block", "Block/shield");

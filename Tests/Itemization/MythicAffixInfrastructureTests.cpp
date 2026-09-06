@@ -8,6 +8,10 @@
 #include "GameFramework/Actor.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/MythicAbilitySystemComponent.h"
+#include "GAS/Abilities/MythicAbilityActionTypes.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "GAS/MythicTags_GAS.h"
+#include "Tests/Progression/MythicAbilityWorldFixture.h"
 #include "Internationalization/StringTableRegistry.h"
 #include "Itemization/Affixes/MythicAffixApplicationComponent.h"
 #include "Itemization/Affixes/MythicAffixDefinition.h"
@@ -362,4 +366,56 @@ bool FMythicAffixPermanentApplicationRollbackTest::RunTest(const FString &Parame
     return true;
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicActionAffixEligibilityTest,"Mythic.Itemization.Affixes.ActionEligibilityAndComposition",EAutomationTestFlags_ApplicationContextMask|EAutomationTestFlags::ProductFilter)
+bool FMythicActionAffixEligibilityTest::RunTest(const FString&) {
+    const auto Melee=FGameplayTag::RequestGameplayTag(TEXT("Ability.Action.Reach.Melee"));
+    const auto Ranged=FGameplayTag::RequestGameplayTag(TEXT("Ability.Action.Reach.Ranged"));
+    const auto Fire=FGameplayTag::RequestGameplayTag(TEXT("Ability.Action.Element.Fire"));
+    const auto Power=UMythicAttributeSet_Offense::GetPowerAttribute();
+    FMythicActionAffixSnapshot Snapshot; Snapshot.NonEquipmentBases.Add(Power,100);
+    const FGuid Item(1,2,3,4);
+    auto Add=[&](int32 Id,float Value,FGameplayTagQuery Query) {
+        auto State=MakeRankedState(FGuid(Id,0,0,0),Item,EMythicAffixStackingRule::HighestOverall,Value);
+        State.TargetAttribute=Power;
+        if (!Query.IsEmpty()) { State.Application.Scope=EMythicAffixApplicationScope::Action; State.Application.ActionQuery=Query; }
+        Snapshot.Candidates.Add(State.RollGuid,State);
+    };
+    Add(1,3,{}); Add(2,5,FGameplayTagQuery::MakeQuery_MatchTag(Melee)); Add(3,9,FGameplayTagQuery::MakeQuery_MatchTag(Ranged));
+    FGameplayTagContainer WholeAbility; WholeAbility.AddTag(Melee); WholeAbility.AddTag(Ranged);
+    Add(4,99,FGameplayTagQuery::MakeQuery_MatchAllTags(WholeAbility));
+    TMap<FGameplayAttribute,float> MeleeBases,RangedBases;
+    TestTrue(TEXT("melee equipment resolves"),UMythicAffixApplicationComponent::ResolveActionEquipmentBases(Snapshot,Melee.GetSingleTagContainer(),WholeAbility,{},MeleeBases));
+    TestTrue(TEXT("ranged equipment resolves"),UMythicAffixApplicationComponent::ResolveActionEquipmentBases(Snapshot,Ranged.GetSingleTagContainer(),WholeAbility,{},RangedBases));
+    TestEqual(TEXT("ineligible strongest affixes never suppress melee"),MeleeBases.FindRef(Power),105.0f);
+    TestEqual(TEXT("ranged action selects its own strongest eligible affix"),RangedBases.FindRef(Power),109.0f);
+    auto FireOnly=Snapshot.Candidates.FindChecked(FGuid(4,0,0,0)); FireOnly.Application.ActionQuery=FGameplayTagQuery::MakeQuery_MatchTag(Fire);
+    Snapshot.Candidates[FireOnly.RollGuid]=FireOnly;
+    TestTrue(TEXT("source state is a separate query domain"),UMythicAffixApplicationComponent::ResolveActionEquipmentBases(Snapshot,Melee.GetSingleTagContainer(),WholeAbility,Fire.GetSingleTagContainer(),MeleeBases));
+    TestEqual(TEXT("fire on the source cannot turn a contact action into fire"),MeleeBases.FindRef(Power),105.0f);
+    auto* Game=NewObject<UGameInstance>(GEngine); Game->InitializeStandalone(); ON_SCOPE_EXIT { DestroyOwnedAbilityTestWorld(Game); };
+    auto* Actor=Game->GetWorld()->SpawnActor<AActor>(); auto* ASC=NewObject<UMythicAbilitySystemComponent>(Actor);
+    Actor->AddInstanceComponent(ASC); ASC->RegisterComponent(); ASC->InitAbilityActorInfo(Actor,Actor);
+    ASC->AddAttributeSetSubobject(NewObject<UMythicAttributeSet_Offense>(Actor)); ASC->SetNumericAttributeBase(Power,103);
+    auto* Effect=NewObject<UGameplayEffect>(); Effect->DurationPolicy=EGameplayEffectDurationType::Infinite;
+    auto& Mod=Effect->Modifiers.AddDefaulted_GetRef(); Mod.Attribute=Power; Mod.ModifierOp=EGameplayModOp::Multiplicitive;
+    Mod.ModifierMagnitude=FGameplayEffectModifierMagnitude(FScalableFloat(2));
+    ASC->ApplyGameplayEffectToSelf(Effect,1,ASC->MakeEffectContext());
+    int32 Changes=0; const auto Listener=ASC->GetGameplayAttributeValueChangeDelegate(Power).AddLambda([&](const FOnAttributeChangeData&){++Changes;});
+    const int32 EffectCount=ASC->GetActiveEffects(FGameplayEffectQuery()).Num();
+    float MeleeValue=0,RangedValue=0;
+    TestTrue(TEXT("GAS evaluates recomposed melee base without mutation"),FMythicAbilityActionSource::CaptureStat(ASC,Power,{},MeleeBases,MeleeValue));
+    TestTrue(TEXT("GAS evaluates recomposed ranged base without mutation"),FMythicAbilityActionSource::CaptureStat(ASC,Power,{},RangedBases,RangedValue));
+    TestEqual(TEXT("temporary multiplication applies above melee equipment"),MeleeValue,210.0f);
+    TestEqual(TEXT("temporary multiplication applies above ranged equipment"),RangedValue,218.0f);
+    TestEqual(TEXT("live equipment base is untouched"),ASC->GetNumericAttributeBase(Power),103.0f);
+    TestEqual(TEXT("live aggregate is untouched"),ASC->GetNumericAttribute(Power),206.0f);
+    TestEqual(TEXT("snapshot evaluation emitted no attribute change"),Changes,0);
+    TestEqual(TEXT("snapshot evaluation added no gameplay effect"),ASC->GetActiveEffects(FGameplayEffectQuery()).Num(),EffectCount);
+    ASC->GetGameplayAttributeValueChangeDelegate(Power).Remove(Listener);
+    TestTrue(TEXT("power feeds authored action damage"),FMythicAbilityActionSource::IsSupportedStat(Power));
+    TestFalse(TEXT("health/armor-only strength is not an action source stat"),FMythicAbilityActionSource::IsSupportedStat(UMythicAttributeSet_Defense::GetStrengthAttribute()));
+    TestFalse(TEXT("weapon rolls cannot replace ability action damage"),FMythicAbilityActionSource::IsSupportedStat(UMythicAttributeSet_Offense::GetDamagePerHitAttribute()));
+    return true;
+}
 #endif

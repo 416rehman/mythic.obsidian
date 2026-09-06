@@ -251,3 +251,16 @@ void UMythicAchievementComponent::RestoreUnlockedAchievements(const FGameplayTag
     }
     UnlockedAchievements = Saved;
 }
+
+void UMythicAchievementComponent::ReconcileSatisfiedAchievements() {
+    const AActor* Owner=GetOwner();
+    if (bIsRestoring || !Owner || !Owner->HasAuthority() || !ResolvePC()) return;
+    ResolveSet();
+    if (!bIndexBuilt) BuildIndex();
+    // Use the existing trigger index: an empty/manual-only definition must not
+    // become an automatic reward merely because a character was loaded.
+    for (const auto& Row:ExactStatIndex) PendingIndices.Append(Row.Value);
+    for (const auto& Row:HierStatIndex) PendingIndices.Append(Row.Value);
+    for (const auto& Row:TagTriggerIndex) PendingIndices.Append(Row.Value);
+    DrainPending();
+}

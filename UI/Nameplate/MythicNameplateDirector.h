@@ -115,6 +115,11 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Entity Inspect")
     bool OpenFocusedEntityInspect();
 
+    /** A fresh Inspect command closes its current local dossier, or opens the canonical focused dossier. */
+    bool ToggleFocusedEntityInspect();
+    /** A stale page cannot clear a newer local viewer's inspection. */
+    bool CloseEntityInspectForPage(UMythicEntityInspectPage* ExpectedPage);
+
     /** Closes the local Inspect page and releases its attention override without changing learned knowledge. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Entity Inspect")
     void CloseEntityInspect();

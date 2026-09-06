@@ -106,6 +106,7 @@ void AMythicCharacter::OnRep_PlayerState() {
 }
 
 void AMythicCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) {
+    Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
     OnMythicMovementModeChange.Broadcast(PrevMovementMode, PreviousCustomMode);
 }
 
@@ -123,10 +124,17 @@ void AMythicCharacter::SetupPlayerInputComponent(UInputComponent *PlayerInputCom
         return;
     }
 
-    TArray<uint32> BindHandles;
-    MythicIC->BindAbilityActions(InputConfig, this, &ThisClass::Input_AbilityInputTagPressed, &ThisClass::Input_AbilityInputTagReleased, BindHandles);
+    if (BoundAbilityInputComponent.IsValid()) BoundAbilityInputComponent->RemoveBinds(AbilityInputBindHandles);
+    if (auto* ASC=Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponent())) ASC->ClearAbilityInput();
+    BoundAbilityInputComponent=MythicIC;
+    if (const auto* PC=Cast<AMythicPlayerController>(GetController()); !PC || !PC->ControlsComponent)
+        MythicIC->BindAbilityActions(InputConfig, this, &ThisClass::Input_AbilityInputTagPressed, &ThisClass::Input_AbilityInputTagReleased, &ThisClass::Input_AbilityInputTagCanceled, AbilityInputBindHandles);
 
-    UE_LOG(Myth, Log, TEXT("SetupPlayerInputComponent: Bound %d Ability Actions"), BindHandles.Num());
+    UE_LOG(Myth, Log, TEXT("SetupPlayerInputComponent: Bound %d Ability Actions"), AbilityInputBindHandles.Num());
+}
+
+void AMythicCharacter::Input_AbilityInputTagCanceled(FGameplayTag InputTag) {
+    if (auto* ASC=Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponent())) ASC->AbilityInputTagCanceled(InputTag);
 }
 
 void AMythicCharacter::Input_AbilityInputTagPressed(FGameplayTag InputTag) {
@@ -205,4 +213,10 @@ void AMythicCharacter::RemoveLocalEquipmentMesh(EInventorySlotType Slot) {
             FoundMeshComp->DestroyComponent();
         }
     }
+}
+
+void AMythicCharacter::GatherAbilityPoseMeshes(TArray<USkeletalMeshComponent*>& Out) const {
+    Out.Reset();
+    if (GetMesh()) Out.Add(GetMesh());
+    for (const auto& Pair:EquippedVisualMeshes) if (IsValid(Pair.Value) && Pair.Value->IsVisible() && !Pair.Value->bHiddenInGame) Out.AddUnique(Pair.Value);
 }

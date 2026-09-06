@@ -141,6 +141,8 @@ struct FAffixDisplayData {
 
     bool operator==(const FAffixDisplayData& Other) const {
         return ViewData.RollGuid == Other.ViewData.RollGuid &&
+               ViewData.ApplicationScope == Other.ViewData.ApplicationScope &&
+               ViewData.Description.EqualTo(Other.ViewData.Description) &&
                StatTag == Other.StatTag &&
                AttributeName.EqualTo(Other.AttributeName) &&
                FMath::IsNearlyEqual(Value, Other.Value) &&

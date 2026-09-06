@@ -32,10 +32,14 @@ bool ULootReward::ResolveEntryDropChance(float OverrideDropChance, int32 RarityI
 }
 
 FLootTierBonus ULootReward::PrepareLootRoll(UMythicLootManagerSubsystem *LootManager, APlayerController *PlayerController, const int32 EnemyTierInt,
-                                            const float QuantityFind) {
+                                            const float QuantityFind,const FMythicLootCreditContext* Credit) {
     FLootTierBonus Bonus = FMythicLootScaling::ComputeTierLootBonus(EnemyTierInt, QuantityFind);
     if (LootManager && EnemyTierInt > 0) {
         LootManager->OnPreLootRoll.Broadcast(PlayerController, Bonus);
+    }
+    if (LootManager && Credit && Credit->IsGenuineEnemyDeath() && Credit->CreditedTo.Get()==PlayerController) {
+        LootManager->OnAbilityLootCredit.Broadcast(*Credit,Bonus);
+        Bonus.AbilityDropScale = FMath::Clamp(Bonus.AbilityDropScale,1.0f,1.25f);
     }
     return Bonus;
 }
@@ -85,7 +89,7 @@ bool ULootReward::Give(FRewardContext &Context) const {
     bool bQuantityFindFound = false;
     const float RarityFind = ASC->GetGameplayAttributeValue(UMythicAttributeSet_Utility::GetItemRarityFindAttribute(), bRarityFindFound);
     const float QuantityFind = ASC->GetGameplayAttributeValue(UMythicAttributeSet_Utility::GetItemQuantityFindAttribute(), bQuantityFindFound);
-    const FLootTierBonus TierBonus = PrepareLootRoll(MythicLootManager, PlayerController, LootContext->EnemyTierInt, QuantityFind);
+    const FLootTierBonus TierBonus = PrepareLootRoll(MythicLootManager, PlayerController, LootContext->EnemyTierInt, QuantityFind,&LootContext->Credit);
 
     for (auto LootTable : OverridenLootSource.LootTables) {
         UE_LOG(Myth, Log, TEXT("LootReward::Give - Using loot source %s"), *LootTable->GetName());
@@ -229,7 +233,7 @@ void ULootReward::RequestLootFromSource(float CommonRate, float RareRate, float 
     }
 
     const int32 NumItemsToDrop = FMythicLootScaling::ResolveDropCount(
-        FMath::RandRange(1, FMath::Min(LootTable->MaxItems, ValidIndices.Num())), TierBonus, FMath::FRand());
+        FMath::RandRange(1, FMath::Min(LootTable->MaxItems, ValidIndices.Num())), TierBonus, FMath::FRand(),FMath::FRand());
     if (NumItemsToDrop <= 0) {
         UE_LOG(Myth, Log, TEXT("LootReward::RequestLootFromSource - The pre-loot roll suppressed every drop from table %s"),
                *LootTable->GetName());

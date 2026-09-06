@@ -1,6 +1,10 @@
 
 
 #include "MythicGameplayAbility.h"
+#include "MythicGA_AbilityWindow.h"
+#include "AI/NPCs/MythicNPCCharacter.h"
+#include "MythicGA_Rune.h"
+#include "Progression/Skills/MythicSkillComponent.h"
 #include "GAS/Abilities/MythicAbilityRollSource.h"
 
 #include "AbilitySystemBlueprintLibrary.h"
@@ -144,6 +148,13 @@ FMythicDamageContainerSpec UMythicGameplayAbility::MakeDamageContainerSpec(const
         }
     }
 
+    const FGameplayTagContainer ContextTags=BuildAbilityContextTags();
+    for (FGameplayEffectSpecHandle* Spec : {&ReturnSpec.DamageCalculationEffectSpec,&ReturnSpec.DamageApplicationEffectSpec}) {
+        if (Spec->IsValid()) {
+            Spec->Data->AppendDynamicAssetTags(ContextTags);
+            Spec->Data->CapturedSourceTags.GetSpecTags().AppendTags(ContextTags);
+        }
+    }
     return ReturnSpec;
 }
 
@@ -582,6 +593,14 @@ FGameplayEffectContextHandle UMythicGameplayAbility::MakeEffectContext(const FGa
     EffectContext->AddInstigator(Instigator, EffectCauser);
     EffectContext->AddSourceObject(SourceObject);
 
+    if (const auto* Window=Cast<UMythicGA_AbilityWindow>(this)) {
+        EffectContext->DamageOrigin=EMythicDamageOrigin::Skill;
+        EffectContext->SourceActivationId=Window->GetWindowActivationId();
+    } else if (IsA<UMythicGA_Skill>()) EffectContext->DamageOrigin=EMythicDamageOrigin::Skill;
+    else if (IsA<UMythicGA_Rune>()) EffectContext->DamageOrigin=EMythicDamageOrigin::Rune;
+    else if (const auto* Attack=Cast<UAttackFragment>(SourceObject); Attack && Attack->GetOwningItemInstance()) EffectContext->DamageOrigin=EMythicDamageOrigin::DirectWeapon;
+    else if (const auto* NPC=Cast<AMythicNPCCharacter>(SourceObject); NPC && NPC==GetAvatarActorFromActorInfo() && NPC->GetAttackAbility()==GetClass()) EffectContext->DamageOrigin=EMythicDamageOrigin::DirectWeapon;
+
     return ContextHandle;
 }
 
@@ -759,6 +778,9 @@ float UMythicGameplayAbility::ComputeAttackSpeedPlayRate(float AttackSpeedBonus,
 
 FGameplayTagContainer UMythicGameplayAbility::BuildAbilityContextTags() const {
     FGameplayTagContainer Out = GetAssetTags();
+    if (const auto* Window=Cast<UMythicGA_AbilityWindow>(this)) Out.AppendTags(Window->GetWindowClassification());
+    else if (const auto* Skill=Cast<UMythicSkillDefinition>(GetCurrentSourceObject())) Out.AppendTags(Skill->ClassificationTags);
+    if (IsA<UMythicGA_Skill>()) Out.AddTag(GAS_ABILITY_TYPE_SKILL);
 
     if (UObject *Src = GetCurrentSourceObject()) {
         if (UItemFragment *SrcFragment = Cast<UItemFragment>(Src)) {

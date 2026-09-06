@@ -35,6 +35,8 @@ class AMythicCharacter_Player : public AMythicCharacter,
 
 public:
     AMythicCharacter_Player();
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Traversal")
+    TObjectPtr<class UMythicTraversalComponent> TraversalComponent;
 
     virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override;
     virtual void InitializeASC() override;

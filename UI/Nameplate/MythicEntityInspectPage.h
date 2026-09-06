@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/EngineBaseTypes.h"
+#include "InputCoreTypes.h"
 #include "UI/MythicActivatableWidget.h"
 #include "UI/Nameplate/MythicEntityInspectTypes.h"
 
@@ -8,6 +10,8 @@
 
 class UMythicEntityInspectViewModel;
 class UTextBlock;
+class UMythicBoundActionButton;
+class FMythicModalInputProcessor;
 
 /** Blueprint-skinnable CommonUI page for a viewer-earned entity dossier. */
 UCLASS(Abstract, BlueprintType, Blueprintable)
@@ -15,6 +19,9 @@ class MYTHIC_API UMythicEntityInspectPage : public UMythicActivatableWidget {
     GENERATED_BODY()
 
 public:
+    UMythicEntityInspectPage(const FObjectInitializer& Initializer);
+    /** Called by the director only after this page owns the sanitized projection and attention handle. */
+    void BeginInspectInputOwnership();
     /** Returns the page-owned viewer-safe Inspect view model. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Entity Inspect")
     UMythicEntityInspectViewModel *GetInspectViewModel() const {
@@ -36,6 +43,10 @@ public:
 protected:
     virtual void NativeOnInitialized() override;
     virtual void NativeDestruct() override;
+    virtual void NativeOnDeactivated() override;
+    virtual bool NativeOnHandleBackAction() override;
+    virtual UWidget* NativeGetDesiredFocusTarget() const override;
+    virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override;
 
     /** Optional localized identity label populated directly from the sanitized Inspect DTO. */
     UPROPERTY(meta = (BindWidgetOptional))
@@ -86,6 +97,12 @@ protected:
     TObjectPtr<UTextBlock> ConnectionsText;
 
 private:
+    void BuildCloseFooter();
+    void StopInspectInput();
+    void RequestInspectClose();
+    bool RouteInspectKey(FKey Key,EInputEvent Event,bool bRepeat);
+    TSharedPtr<FMythicModalInputProcessor> InspectInput;
+    UPROPERTY(Transient) TObjectPtr<UMythicBoundActionButton> CloseButton;
     /** Applies the current sanitized DTO to optional native text bindings before Blueprint presentation hooks run. */
     void RefreshNativeBindings();
 

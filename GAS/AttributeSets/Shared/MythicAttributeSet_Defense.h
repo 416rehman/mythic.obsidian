@@ -10,6 +10,10 @@
 UCLASS()
 class MYTHIC_API UMythicAttributeSet_Defense : public UMythicAttributeSet {
     GENERATED_BODY()
+    friend class UMythicStatusRegistry;
+public:
+    virtual void PostAttributeChange(const FGameplayAttribute& Attribute,float OldValue,float NewValue) override;
+    bool TryAdmitHardCrowdControl(FGameplayTag Status,AActor* Instigator,AActor* Causer);
 
 protected:
     // Reduces incoming damage from same level or lower enemies - Increased by leveling up (i.e level 1 = 1, level 2 = 2, etc.)

@@ -15,6 +15,7 @@
 #include "GAS/MythicAbilitySystemComponent.h"
 #include "GAS/Abilities/MythicAbilityRollSource.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Offense.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 #include "GAS/MythicStatContribution.h"
 #include "GAS/MythicGameplayEffectContext.h"
 #include "Knowledge/MythicCodexComponent.h"
@@ -223,8 +224,16 @@ float UMythicStatusRegistry::RollScaledMagnitude(const FRollDefinition &Range, i
     return FMath::Max(0.0f, Rolled * FMath::Max(0.0f, SourceMultiplier));
 }
 
-bool UMythicStatusRegistry::TryReadApplierStat(const AActor *Instigator, const FGameplayAttribute &Attribute, float &OutRaw) {
+bool UMythicStatusRegistry::TryReadApplierStat(const AActor *Instigator, const FGameplayAttribute &Attribute, float &OutRaw, const FGameplayEffectContextHandle& SourceContext) {
     OutRaw = 0.0f;
+    const auto* Source=FMythicGameplayEffectContext::ExtractEffectContext(SourceContext);
+    if (Source && Source->ActionSnapshot && Source->ActionSnapshot->Source) {
+        FGameplayTagContainer SourceTags=Source->ActionSnapshot->Source->StateTags; SourceTags.AppendTags(Source->ActionFacets); SourceTags.AddTag(GAS_ABILITY_TYPE_SKILL);
+        FGameplayTagContainer TargetTags;
+        const AActor* Target=SourceContext.GetHitResult() ? SourceContext.GetHitResult()->GetActor() : nullptr;
+        if (const auto* TargetASC=UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Target)) TargetASC->GetOwnedGameplayTags(TargetTags);
+        return Source->ActionSnapshot->Source->EvaluateStat(Attribute,SourceTags,&TargetTags,OutRaw);
+    }
     if (!Attribute.IsValid()) {
         return false;
     }
@@ -238,9 +247,9 @@ bool UMythicStatusRegistry::TryReadApplierStat(const AActor *Instigator, const F
     return true;
 }
 
-float UMythicStatusRegistry::ResolveApplierMultiplier(const AActor *Instigator, const FGameplayAttribute &Attribute) {
+float UMythicStatusRegistry::ResolveApplierMultiplier(const AActor *Instigator, const FGameplayAttribute &Attribute, const FGameplayEffectContextHandle& SourceContext) {
     float Raw = 0.0f;
-    if (!TryReadApplierStat(Instigator, Attribute, Raw)) {
+    if (!TryReadApplierStat(Instigator, Attribute, Raw, SourceContext)) {
         return 1.0f;
     }
     const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
@@ -248,9 +257,9 @@ float UMythicStatusRegistry::ResolveApplierMultiplier(const AActor *Instigator, 
                     : FMath::Max(0.0f, Raw);
 }
 
-float UMythicStatusRegistry::ResolveApplierBonus(const AActor *Instigator, const FGameplayAttribute &Attribute) {
+float UMythicStatusRegistry::ResolveApplierBonus(const AActor *Instigator, const FGameplayAttribute &Attribute, const FGameplayEffectContextHandle& SourceContext) {
     float Raw = 0.0f;
-    if (!TryReadApplierStat(Instigator, Attribute, Raw)) {
+    if (!TryReadApplierStat(Instigator, Attribute, Raw, SourceContext)) {
         return 1.0f;
     }
     const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
@@ -258,9 +267,9 @@ float UMythicStatusRegistry::ResolveApplierBonus(const AActor *Instigator, const
                     : 1.0f + FMath::Max(0.0f, Raw);
 }
 
-float UMythicStatusRegistry::ResolveApplierPowerMultiplier(const AActor *Instigator) {
+float UMythicStatusRegistry::ResolveApplierPowerMultiplier(const AActor *Instigator, const FGameplayEffectContextHandle& SourceContext) {
     float Power = 0.0f;
-    if (!TryReadApplierStat(Instigator, UMythicAttributeSet_Offense::GetPowerAttribute(), Power)) {
+    if (!TryReadApplierStat(Instigator, UMythicAttributeSet_Offense::GetPowerAttribute(), Power, SourceContext)) {
         return 1.0f;
     }
     const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
@@ -271,8 +280,8 @@ float UMythicStatusRegistry::ResolveApplierPowerMultiplier(const AActor *Instiga
     // weapon roll does - one curve for a designer to tune, and no second convention for Power to drift against.
     return FMythicStatContributionRules::ApplyToBase(
         Settings->StatContributions.Contributions, UMythicAttributeSet_Offense::GetDamagePerHitAttribute(), 1.0f,
-        [Power](const FGameplayAttribute &Attr) -> float {
-            return Attr == UMythicAttributeSet_Offense::GetPowerAttribute() ? Power : 0.0f;
+        [Instigator,&SourceContext](const FGameplayAttribute &Attr) -> float {
+            float Value=0; TryReadApplierStat(Instigator,Attr,Value,SourceContext); return Value;
         });
 }
 
@@ -406,10 +415,11 @@ UAbilitySystemComponent *UMythicStatusRegistry::ResolveStatusEffectSourceASC(AAc
 }
 
 bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC, const UMythicStatusEffectDefinition *Definition, AActor *Instigator,
-                                               AActor *Causer) {
-    if (!TargetASC || !Definition || !Definition->EffectToApply) {
+                                               AActor *Causer, float DurationOverride, const FGameplayEffectContextHandle& SourceContext) {
+    if (!TargetASC || !TargetASC->IsOwnerActorAuthoritative() || !Definition) {
         return false;
     }
+    if (!Definition->EffectToApply) return false;
 
     AActor *StatusSourceActor = Instigator ? Instigator : Causer;
     UAbilitySystemComponent *SourceASC = ResolveStatusEffectSourceASC(StatusSourceActor, TargetASC);
@@ -429,6 +439,14 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
     AActor *ContextCauser = Causer ? Causer : Instigator;
 
     FGameplayEffectContextHandle Context = SourceASC->MakeEffectContext();
+    if (auto* Mythic=FMythicGameplayEffectContext::ExtractEffectContext(Context)) {
+        Mythic->DamageOrigin=EMythicDamageOrigin::Periodic;
+        if (const auto* Parent=FMythicGameplayEffectContext::ExtractEffectContext(SourceContext)) {
+            Mythic->SourceActivationId=Parent->SourceActivationId;
+            Mythic->ReactionGeneration=Parent->ReactionGeneration;
+        }
+        // Periodic magnitude belongs to this status's SBC snapshot, never the parent action's direct roll.
+    }
     Context.AddInstigator(ContextInstigator, ContextCauser);
     if (Context.GetOriginalInstigatorAbilitySystemComponent() != SourceASC) {
         if (FMythicGameplayEffectContext *MythicContext =
@@ -471,8 +489,8 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
     // a passer-by inflicting the same poison. The global scale is the one knob that moves every status at once, Power
     // keeps the base pacing with the character, and the applier's per-status bonus rewards specialising into it.
     const float DamageScale = (CombatSettings ? CombatSettings->StatusDamageScale : 1.0f)
-        * ResolveApplierPowerMultiplier(Instigator)
-        * ResolveApplierBonus(Instigator, Definition->BonusDamageAttribute);
+        * ResolveApplierPowerMultiplier(Instigator,SourceContext)
+        * ResolveApplierBonus(Instigator, Definition->BonusDamageAttribute,SourceContext);
     const bool bAtStackLimit = StackLimit > 0 && ExistingStackCount >= StackLimit;
     const float NewDamageRoll = bAtStackLimit
                                     ? 0.0f
@@ -487,8 +505,10 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_DAMAGE, Damage);
     }
     const float DurationScale = (CombatSettings ? CombatSettings->StatusDurationScale : 1.0f)
-        * ResolveApplierMultiplier(Instigator, Definition->DurationMultiplierAttribute);
-    const float Duration = RollMagnitudeOrBase(Definition->DurationSeconds, BaseDuration, DurationScale, FMath::FRand());
+        * ResolveApplierMultiplier(Instigator, Definition->DurationMultiplierAttribute,SourceContext);
+    const float Duration = FMath::IsFinite(DurationOverride) && DurationOverride>0
+        ? FMath::Clamp(DurationOverride*DurationScale,0.01f,120.0f)
+        : RollMagnitudeOrBase(Definition->DurationSeconds, BaseDuration, DurationScale, FMath::FRand());
     if (Duration > 0.0f) {
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_DURATION, Duration);
     }
@@ -498,7 +518,7 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
     // nothing regresses before content is tuned. Consumers apply their own bound (a slow can never reach a full stop).
     const bool bControlAuthored = Definition->ControlMagnitude.Min > 0.0f || Definition->ControlMagnitude.Max > 0.0f;
     if (bControlAuthored) {
-        const float ControlScale = ResolveApplierBonus(Instigator, Definition->ControlMagnitudeAttribute);
+        const float ControlScale = ResolveApplierBonus(Instigator, Definition->ControlMagnitudeAttribute,SourceContext);
         const float NewControlRoll = bAtStackLimit
                                          ? 0.0f
                                          : RollMagnitudeOrBase(
@@ -512,18 +532,58 @@ bool UMythicStatusRegistry::ApplyStatusEffect(UAbilitySystemComponent *TargetASC
         Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_STATUS_CONTROL_MAGNITUDE, ControlMag);
     }
 
+    // Validate the complete payload before consuming another status or reserving a control trigger.
+    Spec.Data->CaptureAttributeDataFromTarget(TargetASC);
+    if (!EffectCDO || !EffectCDO->CanApply(TargetASC->GetActiveGameplayEffects(),*Spec.Data.Get())) return false;
+    auto* Defense=const_cast<UMythicAttributeSet_Defense*>(TargetASC->GetSet<UMythicAttributeSet_Defense>());
+    TOptional<FMythicCcTrackState> PreviousControl;
+    if (Definition->bHardCrowdControl) {
+        if (!Defense) return false;
+        if (const auto* Previous=Defense->CcHardTrackStates.Find(Definition->StatusType)) PreviousControl=*Previous;
+        if (!Defense->TryAdmitHardCrowdControl(Definition->StatusType,Instigator,Causer)) return false;
+    }
+    const FMythicStatusReaction* SelectedReaction=nullptr;
+    for (const auto& Reaction:Definition->Reactions) {
+        if (!Reaction.RequiredTargetTag.IsValid() || !TargetASC->HasMatchingGameplayTag(Reaction.RequiredTargetTag)) continue;
+        SelectedReaction=&Reaction; break;
+    }
+    const auto RunReaction=[&]() {
+        if (!SelectedReaction) return;
+        const auto& Reaction=*SelectedReaction;
+        if (Reaction.bConsumeExistingStatus) TargetASC->RemoveActiveEffectsWithGrantedTags(Reaction.RequiredTargetTag.GetSingleTagContainer());
+        if (Reaction.ReactionEventTag.IsValid()) {
+            FGameplayEventData Event; Event.EventTag=Reaction.ReactionEventTag; Event.Instigator=Instigator; Event.Target=TargetASC->GetAvatarActor(); Event.OptionalObject=Definition; Event.ContextHandle=Context;
+            TargetASC->HandleGameplayEvent(Event.EventTag,&Event);
+        }
+        PlayStatusCue(TargetASC,Reaction.ReactionCueTag);
+    };
+    if (SelectedReaction && SelectedReaction->bSuppressStatusApplication) { RunReaction(); return true; }
+    if (auto* MythicASC=Cast<UMythicAbilitySystemComponent>(TargetASC))
+        MythicASC->OnStatusGroupWillApply.Broadcast(Definition,SourceASC);
     const FActiveGameplayEffectHandle AppliedHandle = SourceASC == TargetASC
                                                           ? TargetASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get())
                                                           : SourceASC->ApplyGameplayEffectSpecToTarget(*Spec.Data.Get(), TargetASC);
     if (!AppliedHandle.IsValid()) {
+        if (Definition->bHardCrowdControl && Defense) {
+            if (PreviousControl.IsSet()) Defense->CcHardTrackStates.Add(Definition->StatusType,PreviousControl.GetValue());
+            else Defense->CcHardTrackStates.Remove(Definition->StatusType);
+        }
         return false;
     }
+    RunReaction();
+    FGameplayEventData ApplyEvent; ApplyEvent.EventTag=FGameplayTag::RequestGameplayTag(TEXT("Event.ApplyStatus")); ApplyEvent.Instigator=Instigator;
+    ApplyEvent.Target=TargetASC->GetAvatarActor(); ApplyEvent.EventMagnitude=1; ApplyEvent.OptionalObject=Definition; ApplyEvent.ContextHandle=Context;
+    TargetASC->HandleGameplayEvent(ApplyEvent.EventTag,&ApplyEvent);
     PlayStatusCue(TargetASC, Definition->OnsetCueTag);
     TeachStatusIfNew(TargetASC, Definition);
     return true;
 }
 
-bool UMythicStatusRegistry::ApplyStatusToActor(AActor *Target, FGameplayTag StatusType, AActor *Instigator) {
+bool UMythicStatusRegistry::ApplyStatusToActor(AActor *Target, FGameplayTag StatusType, AActor *Instigator, float DurationOverride) {
+    return ApplyStatusToActorWithContext(Target,StatusType,Instigator,DurationOverride,{});
+}
+
+bool UMythicStatusRegistry::ApplyStatusToActorWithContext(AActor* Target,FGameplayTag StatusType,AActor* Instigator,float DurationOverride,const FGameplayEffectContextHandle& SourceContext) {
     if (!Target || !Target->HasAuthority()) {
         return false;
     }
@@ -539,5 +599,5 @@ bool UMythicStatusRegistry::ApplyStatusToActor(AActor *Target, FGameplayTag Stat
         return false;
     }
     const UMythicStatusEffectDefinition *Definition = Registry->FindStatus(StatusType);
-    return ApplyStatusEffect(TargetASC, Definition, Instigator, Instigator);
+    return ApplyStatusEffect(TargetASC, Definition, Instigator, Instigator, DurationOverride,SourceContext);
 }

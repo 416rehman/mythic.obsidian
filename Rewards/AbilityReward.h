@@ -6,11 +6,15 @@
 #include "Abilities/GameplayAbility.h"
 #include "AbilityReward.generated.h"
 
+class UMythicSkillDefinition;
+
 UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API UAbilityReward : public URewardBase {
     GENERATED_BODY()
 
 public:
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ability")
+    TObjectPtr<UMythicSkillDefinition> SkillDefinition;
     /** Gameplay Ability class permanently granted to the receiving player's Ability System Component. */
     UPROPERTY(EditAnywhere, Blueprintable)
     TSubclassOf<UGameplayAbility> Ability;
@@ -29,6 +33,6 @@ public:
     UFUNCTION(BlueprintCallable)
     static bool GiveAbilityReward(UAbilityReward *Reward, APlayerController *PlayerController) {
         auto Context = FRewardContext(PlayerController);
-        return Reward->Give(Context);
+        return Reward && Reward->Give(Context);
     }
 };

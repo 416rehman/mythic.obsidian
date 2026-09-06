@@ -45,6 +45,10 @@ struct FMythicInventorySlotEntry : public FFastArraySerializerItem {
     UPROPERTY()
     EMythicInventorySlotDomain SlotDomain = EMythicInventorySlotDomain::Carried;
 
+    /** Replicated current-profile policy; Equipment placement alone does not activate passive-storage contents. */
+    UPROPERTY()
+    bool bAppliesEquipmentEffects = true;
+
     UPROPERTY()
     FGameplayTag GroupTag;
 
@@ -66,8 +70,12 @@ struct FMythicInventorySlotEntry : public FFastArraySerializerItem {
     UPROPERTY()
     TObjectPtr<UInventorySlotDefinition> SlotDefinition = nullptr;
 
-    /** True for gear slots - armor, accessories, weapon, tools - whose item is active solely by slot membership. */
+    /** Placement/UI classification; use AppliesEquipmentEffects for gameplay lifecycle and contributions. */
     bool IsGearSlot() const { return SlotDomain == EMythicInventorySlotDomain::Equipment; }
+    bool AppliesEquipmentEffects() const { return IsGearSlot() && bAppliesEquipmentEffects; }
+
+    UPROPERTY(Transient, NotReplicated)
+    bool bClientLastKnownEquipmentEffects = false;
 
     void ClientUpdateActiveState(UMythicInventoryComponent* Owner);
     void ServerUpdateActiveState();
@@ -379,6 +387,12 @@ public:
         FGameplayTag OptionalTypeFilter = FGameplayTag());
 
     /** Executes an identity-checked in-inventory action and reports the quantity consumed by that action. */
+    /** Synchronous consumable effects cannot reenter inventory use, mutation or save. */
+    static bool IsOwnerUseInProgress(const AActor* Owner);
+    static bool IsOwnerMutationFrozen(const AActor* Owner);
+    /** Exact source reservation survives the private final-stack detachment. */
+    static bool IsItemMutationFrozen(const UMythicItemInstance* Item);
+    EMythicInventoryActionResult ExecuteConsumableUse(const FMythicInventorySourceLocator& Source, int32& OutQuantityConsumed);
     EMythicInventoryActionResult TryUseItemInSlot(
         const FMythicInventorySourceLocator &Source,
         int32 &OutQuantityConsumed);
@@ -393,6 +407,10 @@ public:
     bool CanUseItemInSlot(int32 SlotIndex) const;
 
     void NotifyItemInstanceUpdated(int32 SlotIndex, bool bReconcileAffixes = true);
+
+private:
+    /** Only the synchronous reserved-use path may call this after an accepted action. No public mutation bypass. */
+    void SettleReservedConsumableUse(UMythicItemInstance* Item, int32 SlotIndex, int32 ExpectedQuantity);
 
 protected:
     struct FStagedSlotMutation {

@@ -51,6 +51,8 @@ class MYTHIC_API UMythicMenuShell : public UMythicActivatableWidget {
     GENERATED_BODY()
 
 public:
+    /** The opening HUD supplies its configured action; this shell owns it while menu input is active. */
+    void SetMenuToggleAction(FGameplayTag Action);
     /** Open on a specific page. An unknown or locked id falls back to the first available page. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Menu")
     void OpenPage(FName PageId);

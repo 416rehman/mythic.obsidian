@@ -9,9 +9,10 @@
 #include "AttributeReward.h"
 #include "GAS/Progression/MythicRenownReward.h"
 #include "Mythic.h"
+#include "GameFramework/PlayerController.h"
 
 bool FRewardsToGive::Give(APlayerController *PlayerController, bool IsPrivateItem, int32 ItemLevel, FVector SpawnLocation) const {
-    if (!PlayerController) {
+    if (!IsValid(PlayerController) || !PlayerController->HasAuthority()) {
         UE_LOG(Myth, Error, TEXT("FRewardsToGive::Give PlayerController is null"));
         return false;
     }

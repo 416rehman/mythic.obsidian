@@ -1,6 +1,7 @@
+#include "GA_GenericConsumable.h"
+#include "Itemization/Inventory/MythicInventoryComponent.h"
 // Copyright Mythic Games. All Rights Reserved.
 
-#include "GA_GenericConsumable.h"
 #include "Mythic/Mythic.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Itemization/Inventory/Fragments/ActionableItemFragment.h"
@@ -16,30 +17,12 @@ void UGA_GenericConsumable::ActivateAbility(const FGameplayAbilitySpecHandle Han
                                             const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData *TriggerEventData) {
     Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
 
-    if (CommitAbility(Handle, ActorInfo, ActivationInfo)) {
-        if (UActionableItemFragment *Fragment = Cast<UActionableItemFragment>(GetCurrentSourceObject())) {
-            if (UMythicItemInstance *ItemInstance = Fragment->GetOwningItemInstance()) {
-                const UItemDefinition *UsedDef = ItemInstance->GetItemDefinition();
-                Fragment->ExecuteGenericAction(ItemInstance);
-                if (ActorInfo && ActorInfo->PlayerController.IsValid()) {
-                    if (AMythicPlayerController *PC = Cast<AMythicPlayerController>(ActorInfo->PlayerController.Get())) {
-                        PC->NotifyItemUsed(UsedDef, 1);
-                    }
-                }
-            }
-            else {
-                UE_LOG(Myth, Error, TEXT("GA_GenericConsumable: Fragment has no owning MythicItemInstance! SourceObject: %s"),
-                       *GetNameSafe(GetCurrentSourceObject()));
-            }
-        }
-        else {
-            UE_LOG(Myth, Error, TEXT("GA_GenericConsumable: Ability SourceObject is NOT a UActionableItemFragment! Cast Failed. SourceObject: %s"),
-                   *GetNameSafe(GetCurrentSourceObject()));
-        }
-
-        EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+    bool bSucceeded=false;
+    if (ActorInfo && ActorInfo->IsNetAuthority()) if (auto* Fragment=Cast<UActionableItemFragment>(GetCurrentSourceObject())) if (auto* Item=Fragment->GetOwningItemInstance()) if (auto* Inventory=Item->GetInventoryComponent()) {
+        FMythicInventorySourceLocator Source;
+        Source.Inventory=Inventory; Source.SlotIndex=Item->GetSlot(); Source.ExpectedItemGuid=Item->GetItemInstanceGuid(); Source.ExpectedQuantity=Item->GetStacks();
+        int32 Consumed=0;
+        bSucceeded=Inventory->TryUseItemInSlot(Source,Consumed)==EMythicInventoryActionResult::Succeeded;
     }
-    else {
-        EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
-    }
+    EndAbility(Handle,ActorInfo,ActivationInfo,true,!bSucceeded);
 }

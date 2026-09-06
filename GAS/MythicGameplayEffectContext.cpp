@@ -2,6 +2,7 @@
 
 #include "Engine/HitResult.h"
 #include "Engine/NetSerialization.h"
+#include "UObject/CoreNet.h"
 
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
@@ -75,6 +76,8 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         REP_ApplierPlayerKey,
         REP_ShieldAbsorbed,
         REP_RuneHit,
+        REP_Origin,
+        REP_Action,
         REP_MAX
     };
     static_assert(REP_MAX <= 32, "FMythicGameplayEffectContext replication flags must fit in RepBits");
@@ -83,6 +86,8 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
     bOutSuccess = false;
     uint32 RepBits = 0;
     if (Ar.IsSaving()) {
+        if (ActionGroupId.IsValid()) RepBits |= 1 << REP_Action;
+        if (DamageOrigin != EMythicDamageOrigin::Other || SourceActivationId.IsValid() || ReactionGeneration>0) RepBits |= 1 << REP_Origin;
         if (bReplicateInstigator && Instigator.IsValid()) {
             RepBits |= 1 << REP_Instigator;
         }
@@ -252,7 +257,23 @@ bool FMythicGameplayEffectContext::NetSerialize(FArchive &Ar, UPackageMap *Map, 
         bSuccess &= bHitTagsSuccess;
     }
 
+    if (RepBits & (1 << REP_Origin)) {
+        uint8 Origin = static_cast<uint8>(DamageOrigin);
+        Ar.SerializeBits(&Origin,3);
+        Ar << SourceActivationId;
+        Ar.SerializeBits(&ReactionGeneration,3);
+        if (Ar.IsLoading()) { DamageOrigin=Origin<=static_cast<uint8>(EMythicDamageOrigin::Periodic) ? static_cast<EMythicDamageOrigin>(Origin) : EMythicDamageOrigin::Other; ReactionGeneration=FMath::Min<uint8>(ReactionGeneration,4); }
+    } else if (Ar.IsLoading()) { DamageOrigin=EMythicDamageOrigin::Other; SourceActivationId.Invalidate(); ReactionGeneration=0; }
+    if (RepBits & (1 << REP_Action)) {
+        bSuccess &= UPackageMap::StaticSerializeName(Ar,ActionId);
+        Ar << ActionGroupId; Ar << ActionOccurrenceId;
+        bool bTagsSuccess=true; ActionFacets.NetSerialize(Ar,Map,bTagsSuccess); bSuccess &= bTagsSuccess;
+    } else if (Ar.IsLoading()) {
+        ActionId=NAME_None; ActionGroupId.Invalidate(); ActionOccurrenceId.Invalidate(); ActionFacets.Reset();
+    }
     if (Ar.IsLoading()) {
+        ActionSnapshot.Reset(); ActionShare=1; ResolvedDamage={}; IntentOverrideMask=0;
+        OwnedShieldAbsorption.Reset(); ResolvedHealing={};
         AddInstigator(Instigator.Get(), EffectCauser.Get());
     }
 

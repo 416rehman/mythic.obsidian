@@ -12,6 +12,9 @@
 
 AMythicLivingWorldReplicator::AMythicLivingWorldReplicator() {
     bReplicates = true;
+    // Subsystem-owned runtime actor, including creation before level initialization.
+    // It must travel through dynamic actor replication, never a map NetGUID lookup.
+    bNetLoadOnClient = false;
     bAlwaysRelevant = true;
     PrimaryActorTick.bCanEverTick = false;
 

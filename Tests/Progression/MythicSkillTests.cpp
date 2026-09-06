@@ -1,5 +1,6 @@
 
 #include "Misc/AutomationTest.h"
+#include "Tests/Progression/MythicAbilityTestFixture.h"
 
 #include "Abilities/GameplayAbility.h"
 #include "Engine/Engine.h"
@@ -15,6 +16,8 @@
 #include "Subsystem/SaveSystem/Character/CharacterData.h"
 #include "Subsystem/SaveSystem/MythicSaveGame.h"
 #include "UObject/UnrealType.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
 
 namespace {
 
@@ -60,13 +63,16 @@ bool BuildSkillFixture(FAutomationTestBase &Test, FMythicSkillFixture &Out) {
         Out.ASC->RegisterComponent();
     }
     Out.ASC->InitAbilityActorInfo(Out.PlayerState, Out.PlayerState);
+    InitializeAbilityTestPlayer(Out.PlayerState);
     return Test.TestTrue(TEXT("the ability system answers as authority"), Out.ASC->IsOwnerActorAuthoritative());
 }
 
-UMythicSkillDefinition *MakeSkillDef(const FGameplayTag RequiredTag) {
+UMythicSkillDefinition *MakeSkillDef(UMythicSkillComponent* Skills,const FGameplayTag RequiredTag) {
     UMythicSkillDefinition *Skill = NewObject<UMythicSkillDefinition>();
     Skill->Ability = UGameplayAbility::StaticClass();
     Skill->RequiredTag = RequiredTag;
+    Skill->Acquisition=RequiredTag.IsValid() ? EMythicAbilityAcquisition::Prerequisite:EMythicAbilityAcquisition::Starter;
+    RegisterAbilityTestDefinition(Skills,Skill,false);
     return Skill;
 }
 
@@ -143,20 +149,17 @@ bool FMythicSkillSlotGatingTest::RunTest(const FString &Parameters) {
         return false;
     }
 
-    // A fresh character carries one skill and no more. Slot two upward is a deed nobody has done yet.
-    TestEqual(TEXT("a fresh character starts with one slot"), Skills->GetUnlockedSlots(), 1);
+    TestEqual(TEXT("a fresh character has four available sockets"), Skills->GetUnlockedSlots(), UMythicSkillComponent::SlotCount);
     TestTrue(TEXT("slot one is open"), Skills->IsSlotUnlocked(0));
     for (int32 Slot = 1; Slot < Skills->MaxSlots; Slot++) {
-        TestFalse(FString::Printf(TEXT("slot %d is shut until it is earned"), Slot), Skills->IsSlotUnlocked(Slot));
+        TestTrue(FString::Printf(TEXT("slot %d is available without granting a learned ability"), Slot), Skills->IsSlotUnlocked(Slot));
     }
     TestFalse(TEXT("a negative slot is never open"), Skills->IsSlotUnlocked(-1));
 
     Skills->GrantSlot();
-    TestEqual(TEXT("one unlock opens exactly one more slot"), Skills->GetUnlockedSlots(), 2);
+    TestEqual(TEXT("legacy unlocks retain the four-slot baseline"), Skills->GetUnlockedSlots(), UMythicSkillComponent::SlotCount);
     TestTrue(TEXT("the newly granted slot is open"), Skills->IsSlotUnlocked(1));
-    if (Skills->MaxSlots > 2) {
-        TestFalse(TEXT("the slot after it is still shut"), Skills->IsSlotUnlocked(2));
-    }
+    TestFalse(TEXT("legacy unlocks cannot create a fifth socket"), Skills->IsSlotUnlocked(UMythicSkillComponent::SlotCount));
 
     // Rules fire more than once in a long save. The count must stop at the authored ceiling, not run away.
     const int32 Ceiling = Skills->MaxSlots;
@@ -193,14 +196,16 @@ bool FMythicSkillLockedSlotRefusedTest::RunTest(const FString &Parameters) {
     if (!TestTrue(TEXT("the authored MaxSlots leaves a shut slot in range"), Skills->MaxSlots >= 2)) {
         return false;
     }
-    if (!TestEqual(TEXT("a fresh character starts with one slot"), Skills->GetUnlockedSlots(), 1)) {
+    if (!TestEqual(TEXT("a fresh character has four available sockets"), Skills->GetUnlockedSlots(), UMythicSkillComponent::SlotCount)) {
         return false;
     }
 
-    UMythicSkillDefinition *First = MakeSkillDef(FGameplayTag());
-    UMythicSkillDefinition *Second = MakeSkillDef(FGameplayTag());
-
-    // Slot two is a real entry in the bar, just an unearned one. The range check cannot be what refuses it.
+    UMythicSkillDefinition *First = MakeSkillDef(Skills,FGameplayTag());
+    UMythicSkillDefinition *Second = NewObject<UMythicSkillDefinition>();
+    Second->Ability = UGameplayAbility::StaticClass();
+    Second->Acquisition = EMythicAbilityAcquisition::RewardOnly;
+    RegisterAbilityTestDefinition(Skills, Second, false);
+    // Available sockets do not grant learned ownership.
     Skills->ServerEquipSkill(1, Second);
     if (!TestTrue(TEXT("slot two is a real index, so only the lock can refuse it"),
                   Skills->GetEquippedSkills().IsValidIndex(1))) {
@@ -213,7 +218,7 @@ bool FMythicSkillLockedSlotRefusedTest::RunTest(const FString &Parameters) {
     Skills->ServerEquipSkill(0, First);
     TestTrue(TEXT("the open slot takes its skill"), Skills->GetSkillInSlot(0) == First);
 
-    Skills->GrantSlot();
+    Skills->LearnSkill(Second);
     Skills->ServerEquipSkill(1, Second);
     TestTrue(TEXT("the earned slot takes the skill it just refused"), Skills->GetSkillInSlot(1) == Second);
     TestEqual(TEXT("and grants its ability"), CountGrantedSkillSpecs(Fixture.ASC, Second), 1);
@@ -240,7 +245,7 @@ bool FMythicSkillSlotRangeTest::RunTest(const FString &Parameters) {
     UMythicSkillComponent *Skills = Fixture.Skills;
     OpenEverySkillSlot(Skills);
 
-    UMythicSkillDefinition *Bound = MakeSkillDef(FGameplayTag());
+    UMythicSkillDefinition *Bound = MakeSkillDef(Skills,FGameplayTag());
     Skills->ServerEquipSkill(0, Bound);
     const int32 Slots = Skills->GetEquippedSkills().Num();
     if (!TestEqual(TEXT("the slot bar is MaxSlots long"), Slots, Skills->MaxSlots)) {
@@ -289,14 +294,17 @@ bool FMythicSkillDeedGatingTest::RunTest(const FString &Parameters) {
     }
     UMythicSkillComponent *Skills = Fixture.Skills;
 
-    // #46 says the deed may be recorded anywhere, so the ASC's own tags count as proof.
+    // Temporary GAS tags cannot establish durable ownership.
     Fixture.ASC->AddLooseGameplayTag(EarnedDeed);
 
-    UMythicSkillDefinition *Deeded = MakeSkillDef(EarnedDeed);
-    UMythicSkillDefinition *Locked = MakeSkillDef(UnearnedDeed);
-    UMythicSkillDefinition *Free = MakeSkillDef(FGameplayTag());
+    UMythicSkillDefinition *Deeded = MakeSkillDef(Skills,EarnedDeed);
+    UMythicSkillDefinition *Locked = MakeSkillDef(Skills,UnearnedDeed);
+    UMythicSkillDefinition *Free = MakeSkillDef(Skills,FGameplayTag());
 
-    TestTrue(TEXT("a skill whose deed is done is available"), Skills->IsSkillUnlocked(Deeded));
+    TestFalse(TEXT("a temporary GAS tag cannot unlock an ability"),Skills->IsSkillUnlocked(Deeded));
+    Fixture.PlayerState->GetAchievementComponent()->RestoreUnlockedAchievements(EarnedDeed.GetSingleTagContainer());
+    Skills->ReconcilePrerequisites();
+    TestTrue(TEXT("a permanently earned prerequisite unlocks the ability"),Skills->IsSkillUnlocked(Deeded));
     TestFalse(TEXT("a skill whose deed is undone is not"), Skills->IsSkillUnlocked(Locked));
     TestTrue(TEXT("a skill with no required tag needs no deed"), Skills->IsSkillUnlocked(Free));
     TestFalse(TEXT("a null skill is never unlocked"), Skills->IsSkillUnlocked(nullptr));
@@ -360,8 +368,8 @@ bool FMythicSkillAchievementDeedTest::RunTest(const FString &Parameters) {
         TestFalse(TEXT("nor does the unlock ledger"), Unlocks->HasUnlockTag(EarnedDeed));
     }
 
-    UMythicSkillDefinition *Deeded = MakeSkillDef(EarnedDeed);
-    UMythicSkillDefinition *Locked = MakeSkillDef(UnearnedDeed);
+    UMythicSkillDefinition *Deeded = MakeSkillDef(Skills,EarnedDeed);
+    UMythicSkillDefinition *Locked = MakeSkillDef(Skills,UnearnedDeed);
 
     TestTrue(TEXT("a skill earned by an achievement is available"), Skills->IsSkillUnlocked(Deeded));
     TestFalse(TEXT("a skill whose achievement is undone is not"), Skills->IsSkillUnlocked(Locked));
@@ -393,6 +401,8 @@ bool FMythicSkillPayloadRequiredTest::RunTest(const FString &Parameters) {
     const int32 SpecsBefore = CountLiveSkillSpecs(Fixture.ASC);
 
     UMythicSkillDefinition *Inert = NewObject<UMythicSkillDefinition>();
+    RegisterAbilityTestDefinition(Skills,Inert);
+    TestTrue(TEXT("the inert definition is owned and catalogued"),Skills->IsSkillUnlocked(Inert));
     TestFalse(TEXT("a skill with no ability has no payload"), Inert->HasPayload());
 
     Skills->ServerEquipSkill(0, Inert);
@@ -406,7 +416,7 @@ bool FMythicSkillPayloadRequiredTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("the ability system was never asked"), CountLiveSkillSpecs(Fixture.ASC), SpecsBefore);
 
     // The denominator: the same slot, same call, a skill that does carry an ability.
-    UMythicSkillDefinition *Carrying = MakeSkillDef(FGameplayTag());
+    UMythicSkillDefinition *Carrying = MakeSkillDef(Skills,FGameplayTag());
     TestTrue(TEXT("a skill with an ability has a payload"), Carrying->HasPayload());
     Skills->ServerEquipSkill(0, Carrying);
     TestTrue(TEXT("and it equips"), Skills->GetSkillInSlot(0) == Carrying);
@@ -436,7 +446,7 @@ bool FMythicSkillOneSlotEachTest::RunTest(const FString &Parameters) {
         return false;
     }
 
-    UMythicSkillDefinition *Bound = MakeSkillDef(FGameplayTag());
+    UMythicSkillDefinition *Bound = MakeSkillDef(Skills,FGameplayTag());
     Skills->ServerEquipSkill(0, Bound);
     if (!TestTrue(TEXT("the skill took the first slot"), Skills->GetSkillInSlot(0) == Bound)) {
         return false;
@@ -450,7 +460,7 @@ bool FMythicSkillOneSlotEachTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("and it is still granted exactly once"), CountGrantedSkillSpecs(Fixture.ASC, Bound), 1);
 
     // The denominator: a different skill still fits that slot.
-    UMythicSkillDefinition *Other = MakeSkillDef(FGameplayTag());
+    UMythicSkillDefinition *Other = MakeSkillDef(Skills,FGameplayTag());
     Skills->ServerEquipSkill(1, Other);
     TestTrue(TEXT("a different skill fits the second slot"), Skills->GetSkillInSlot(1) == Other);
     TestTrue(TEXT("and the first slot is still its own"), Skills->GetSkillInSlot(0) == Bound);
@@ -485,8 +495,8 @@ bool FMythicSkillAbilityLifetimeTest::RunTest(const FString &Parameters) {
         return false;
     }
 
-    UMythicSkillDefinition *First = MakeSkillDef(FGameplayTag());
-    UMythicSkillDefinition *Second = MakeSkillDef(FGameplayTag());
+    UMythicSkillDefinition *First = MakeSkillDef(Skills,FGameplayTag());
+    UMythicSkillDefinition *Second = MakeSkillDef(Skills,FGameplayTag());
 
     Skills->ServerEquipSkill(0, First);
     if (!TestEqual(TEXT("equipping a skill grants its ability once"), CountGrantedSkillSpecs(Fixture.ASC, First), 1)) {
@@ -556,8 +566,8 @@ bool FMythicSkillInputBindingTest::RunTest(const FString &Parameters) {
         AddWarning(TEXT("Input.Action.SkillQ / SkillE are not registered in this build; the authored defaults are untested"));
     }
 
-    UMythicSkillDefinition *OnQ = MakeSkillDef(FGameplayTag());
-    UMythicSkillDefinition *OnE = MakeSkillDef(FGameplayTag());
+    UMythicSkillDefinition *OnQ = MakeSkillDef(Skills,FGameplayTag());
+    UMythicSkillDefinition *OnE = MakeSkillDef(Skills,FGameplayTag());
     Skills->ServerEquipSkill(0, OnQ);
     Skills->ServerEquipSkill(1, OnE);
 
@@ -586,7 +596,8 @@ bool FMythicSkillInputBindingTest::RunTest(const FString &Parameters) {
              MovedSpec->GetDynamicSpecSourceTags().HasTagExact(SlotOneKey));
     TestFalse(TEXT("and no longer answers the first"), MovedSpec->GetDynamicSpecSourceTags().HasTagExact(SlotZeroKey));
 
-    // The key per slot is authored data. Rewriting the row must rewrite the binding, or a third slot would need code.
+    // Persisted/legacy row tags cannot redirect a canonical socket's GAS identity.
+    // Physical key remaps belong to the local Enhanced Input profile, tested separately.
     const FGameplayTag Rebound = SkillTestTag(TEXT("Input.Action.Ability1"));
     if (Rebound.IsValid() && Rebound != SlotOneKey && Skills->SlotInputTags.IsValidIndex(1)) {
         Skills->SlotInputTags[1] = Rebound;
@@ -594,9 +605,9 @@ bool FMythicSkillInputBindingTest::RunTest(const FString &Parameters) {
         Skills->ServerEquipSkill(1, OnQ);
         const FGameplayAbilitySpec *ReboundSpec = FindGrantedSkillSpec(Fixture.ASC, OnQ);
         if (TestNotNull(TEXT("the rebound slot granted a spec"), ReboundSpec)) {
-            TestTrue(TEXT("the slot's key comes from the authored row, not a constant"),
+            TestFalse(TEXT("a stale row cannot redirect the slot to a foreign action"),
                      ReboundSpec->GetDynamicSpecSourceTags().HasTagExact(Rebound));
-            TestFalse(TEXT("the old key no longer fires it"), ReboundSpec->GetDynamicSpecSourceTags().HasTagExact(SlotOneKey));
+            TestTrue(TEXT("the slot retains its canonical semantic action"), ReboundSpec->GetDynamicSpecSourceTags().HasTagExact(SlotOneKey));
         }
     }
     else {
@@ -627,7 +638,7 @@ bool FMythicSkillSaveFieldsTest::RunTest(const FString &Parameters) {
         return false;
     }
 
-    UMythicSkillDefinition *Bound = MakeSkillDef(FGameplayTag());
+    UMythicSkillDefinition *Bound = MakeSkillDef(Skills,FGameplayTag());
     Skills->ServerEquipSkill(1, Bound);
     if (!TestTrue(TEXT("the skill is bound"), Skills->GetSkillInSlot(1) == Bound)) {
         return false;
@@ -691,8 +702,8 @@ bool FMythicSkillRestoreTest::RunTest(const FString &Parameters) {
     Deeds.AddTag(EarnedDeed);
     Achievements->RestoreUnlockedAchievements(Deeds);
 
-    UMythicSkillDefinition *Deeded = MakeSkillDef(EarnedDeed);
-    UMythicSkillDefinition *Lost = MakeSkillDef(UnearnedDeed);
+    UMythicSkillDefinition *Deeded = MakeSkillDef(Skills,EarnedDeed);
+    UMythicSkillDefinition *Lost = MakeSkillDef(Skills,UnearnedDeed);
 
     // The save as it comes off disk: a bound skill, a skill whose deed this character no longer has, and a slot count
     // from a character who was later given a smaller ceiling.
@@ -730,7 +741,7 @@ bool FMythicSkillRestoreTest::RunTest(const FString &Parameters) {
     Reloaded.Add(Deeded);
     Skills->RestoreSkills(Reloaded, 2);
 
-    TestEqual(TEXT("a saved count below the ceiling is kept, not reset to one"), RawUnlockedSkillSlots(Skills), 2);
+    TestEqual(TEXT("a legacy saved count migrates to four available sockets"), RawUnlockedSkillSlots(Skills), UMythicSkillComponent::SlotCount);
     TestNull(TEXT("an empty slot stays empty"), Skills->GetSkillInSlot(0));
     TestTrue(TEXT("the skill is bound at the slot it was saved in"), Skills->GetSkillInSlot(1) == Deeded);
     TestEqual(TEXT("its ability is still granted exactly once"), CountGrantedSkillSpecs(Fixture.ASC, Deeded), 1);
@@ -738,7 +749,7 @@ bool FMythicSkillRestoreTest::RunTest(const FString &Parameters) {
     // The restored count is what the player grows from; a later unlock adds to it.
     Skills->MaxSlots = Ceiling + 1;
     Skills->GrantSlot();
-    TestEqual(TEXT("a later unlock builds on the restored count"), Skills->GetUnlockedSlots(), 3);
+    TestEqual(TEXT("even stale configuration cannot create a fifth ability slot"), Skills->GetUnlockedSlots(), UMythicSkillComponent::SlotCount);
 
     return true;
 }
@@ -812,7 +823,7 @@ bool FMythicSkillSaveFixupTest::RunTest(const FString &Parameters) {
     RuneEra->CharacterData.UnlockedSkillSlots = 0;
     RuneEra->FixupData();
 
-    TestEqual(TEXT("the earned slot is rebuilt from the applied rule"), RuneEra->CharacterData.UnlockedSkillSlots, 2);
+    TestEqual(TEXT("old slot rewards migrate to the four-slot baseline"), RuneEra->CharacterData.UnlockedSkillSlots, UMythicSkillComponent::SlotCount);
     TestEqual(TEXT("and the save is stamped forward"), RuneEra->CharacterData.DataVersion,
               static_cast<int32>(CurrentCharacterSaveVersion));
 
@@ -823,7 +834,7 @@ bool FMythicSkillSaveFixupTest::RunTest(const FString &Parameters) {
         Ancient->CharacterData.AppliedUnlockRules = {RuneSlot2, SkillSlot2};
         Ancient->FixupData();
         TestEqual(TEXT("an older save still recovers its rune sockets"), Ancient->CharacterData.UnlockedRuneSlots, 2);
-        TestEqual(TEXT("and its skill slots in the same pass"), Ancient->CharacterData.UnlockedSkillSlots, 2);
+        TestEqual(TEXT("and its four skill slots in the same pass"), Ancient->CharacterData.UnlockedSkillSlots, UMythicSkillComponent::SlotCount);
     }
 
     // The version marker has to be read, not merely written. A current save that spent its second slot back down to
@@ -833,14 +844,16 @@ bool FMythicSkillSaveFixupTest::RunTest(const FString &Parameters) {
     Current->CharacterData.AppliedUnlockRules = {SkillSlot2};
     Current->CharacterData.UnlockedSkillSlots = 1;
     Current->FixupData();
-    TestEqual(TEXT("a save already at the current version is left alone"), Current->CharacterData.UnlockedSkillSlots, 1);
+    TestEqual(TEXT("current saves normalize malformed slot counts"), Current->CharacterData.UnlockedSkillSlots, UMythicSkillComponent::SlotCount);
 
     // A brand-new save writes no count, and the restore seam is what treats that as "leave the component alone".
     UMythicSaveGame *Fresh = NewObject<UMythicSaveGame>();
     Fresh->CharacterData.DataVersion = static_cast<int32>(CurrentCharacterSaveVersion);
     Fresh->FixupData();
     TestEqual(TEXT("a fresh save carries no slot count for the restore to apply"),
-              Fresh->CharacterData.UnlockedSkillSlots, 0);
+              Fresh->CharacterData.UnlockedSkillSlots, UMythicSkillComponent::SlotCount);
 
     return true;
 }
+
+#endif

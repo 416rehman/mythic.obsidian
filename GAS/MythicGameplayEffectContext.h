@@ -5,6 +5,8 @@
 #include "GameplayEffectTypes.h"
 #include "MythicAbilitySourceInterface.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
+#include "Abilities/MythicAbilityWindowTypes.h"
+#include "Abilities/MythicAbilityActionTypes.h"
 
 #include "MythicGameplayEffectContext.generated.h"
 
@@ -23,6 +25,15 @@ class UPhysicalMaterial;
     public: \
     bool Is##PropertyName() const { return b##PropertyName; } \
     void Set##PropertyName(bool bIn##PropertyName) { b##PropertyName = bIn##PropertyName; }
+
+// Explicit overrides (for example a guaranteed next crit) remain distinct from the group's random rolls.
+#define MYTHIC_CONTEXT_PROC_PROPERTY(PropertyName,Index) \
+    protected: \
+    UPROPERTY() bool b##PropertyName = false; \
+    public: \
+    bool Is##PropertyName() const { return b##PropertyName; } \
+    void Set##PropertyName(bool Value) { b##PropertyName=Value; IntentOverrideMask |= (1u << Index); } \
+    void SetCalculated##PropertyName(bool Value) { b##PropertyName=Value; }
 
 USTRUCT(BlueprintType, Blueprintable)
 struct FMythicGameplayEffectContext : public FGameplayEffectContext {
@@ -49,23 +60,23 @@ struct FMythicGameplayEffectContext : public FGameplayEffectContext {
     const IMythicAbilitySourceInterface *GetAbilitySource() const;
     const UPhysicalMaterial *GetPhysicalMaterial() const;
 
-    MYTHIC_CONTEXT_BOOL_PROPERTY(CriticalHit)
+    MYTHIC_CONTEXT_PROC_PROPERTY(CriticalHit,0)
 
-    MYTHIC_CONTEXT_BOOL_PROPERTY(Bleed)
+    MYTHIC_CONTEXT_PROC_PROPERTY(Bleed,2)
 
-    MYTHIC_CONTEXT_BOOL_PROPERTY(Burn)
+    MYTHIC_CONTEXT_PROC_PROPERTY(Burn,1)
 
-    MYTHIC_CONTEXT_BOOL_PROPERTY(Poison)
+    MYTHIC_CONTEXT_PROC_PROPERTY(Poison,3)
 
-    MYTHIC_CONTEXT_BOOL_PROPERTY(Stun)
+    MYTHIC_CONTEXT_PROC_PROPERTY(Stun,6)
 
-    MYTHIC_CONTEXT_BOOL_PROPERTY(Slow)
+    MYTHIC_CONTEXT_PROC_PROPERTY(Slow,4)
 
-    MYTHIC_CONTEXT_BOOL_PROPERTY(Weaken)
+    MYTHIC_CONTEXT_PROC_PROPERTY(Weaken,7)
 
-    MYTHIC_CONTEXT_BOOL_PROPERTY(Freeze)
+    MYTHIC_CONTEXT_PROC_PROPERTY(Freeze,5)
 
-    MYTHIC_CONTEXT_BOOL_PROPERTY(Terrify)
+    MYTHIC_CONTEXT_PROC_PROPERTY(Terrify,8)
 
     MYTHIC_CONTEXT_BOOL_PROPERTY(Dodged)
 
@@ -74,6 +85,21 @@ protected:
     FString ApplierPlayerKey;
 
 public:
+    UPROPERTY() EMythicDamageOrigin DamageOrigin = EMythicDamageOrigin::Other;
+    UPROPERTY() FGuid SourceActivationId;
+    UPROPERTY() uint8 ReactionGeneration = 0;
+    UPROPERTY() FName ActionId;
+    UPROPERTY() FGuid ActionGroupId;
+    UPROPERTY() FGuid ActionOccurrenceId;
+    UPROPERTY() FGameplayTagContainer ActionFacets;
+    /** Authoritative work budget and snapshot never travel to clients. */
+    TSharedPtr<const FMythicAbilityActionSnapshot> ActionSnapshot;
+    float ActionShare = 1;
+    FMythicAbilityDamageResult ResolvedDamage;
+    uint16 IntentOverrideMask=0;
+    bool HasIntentOverride(int32 Index) const { return (IntentOverrideMask & (1u << Index))!=0; }
+    FMythicAbilityHealResult ResolvedHealing;
+    TArray<FMythicOwnedShieldAbsorption> OwnedShieldAbsorption;
     const FString &GetApplierPlayerKey() const { return ApplierPlayerKey; }
     void SetApplierPlayerKey(const FString &InApplierPlayerKey) { ApplierPlayerKey = InApplierPlayerKey; }
 
@@ -403,3 +429,4 @@ public:
 
 #undef MYTHIC_CONTEXT_BOOL_SETTER
 #undef MYTHIC_CONTEXT_BOOL_PROPERTY
+#undef MYTHIC_CONTEXT_PROC_PROPERTY

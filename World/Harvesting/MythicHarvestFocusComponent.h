@@ -152,6 +152,8 @@ class MYTHIC_API UMythicHarvestFocusComponent final : public UActorComponent {
 
 public:
     UMythicHarvestFocusComponent();
+    /** Called only by the player's central physical-press owner. */
+    bool TryControlsInteraction();
 
     /**
      * Local focus component owns this read-only snapshot for its player controller; Blueprint may render it without

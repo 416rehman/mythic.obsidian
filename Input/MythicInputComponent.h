@@ -28,9 +28,9 @@ public:
     void BindNativeAction(const UMythicInputConfig *InputConfig, const FGameplayTag &InputTag, ETriggerEvent TriggerEvent, UserClass *Object, FuncType Func,
                           bool bLogIfNotFound);
 
-    template <class UserClass, typename PressedFuncType, typename ReleasedFuncType>
+    template <class UserClass, typename PressedFuncType, typename ReleasedFuncType, typename CanceledFuncType>
     void BindAbilityActions(const UMythicInputConfig *InputConfig, UserClass *Object, PressedFuncType PressedFunc, ReleasedFuncType ReleasedFunc,
-                            TArray<uint32> &BindHandles);
+                            CanceledFuncType CanceledFunc, TArray<uint32> &BindHandles);
 
     void RemoveBinds(TArray<uint32> &BindHandles);
 };
@@ -45,17 +45,22 @@ void UMythicInputComponent::BindNativeAction(const UMythicInputConfig *InputConf
     }
 }
 
-template <class UserClass, typename PressedFuncType, typename ReleasedFuncType>
+template <class UserClass, typename PressedFuncType, typename ReleasedFuncType, typename CanceledFuncType>
 void UMythicInputComponent::BindAbilityActions(const UMythicInputConfig *InputConfig, UserClass *Object, PressedFuncType PressedFunc,
-                                               ReleasedFuncType ReleasedFunc, TArray<uint32> &BindHandles) {
+                                               ReleasedFuncType ReleasedFunc, CanceledFuncType CanceledFunc, TArray<uint32> &BindHandles) {
     check(InputConfig);
 
     for (const FMythicInputAction &Action : InputConfig->AbilityInputActions) {
         if (Action.InputAction && Action.InputTag.IsValid()) {
             if (PressedFunc) {
-                BindHandles.Add(BindAction(Action.InputAction, ETriggerEvent::Triggered, Object, PressedFunc, Action.InputTag).GetHandle());
+                const auto PressEvent=Action.AbilityPressEvent==ETriggerEvent::Started ? ETriggerEvent::Started : ETriggerEvent::Triggered;
+                BindHandles.Add(BindAction(Action.InputAction, PressEvent, Object, PressedFunc, Action.InputTag).GetHandle());
                 UE_LOG(Myth, Log, TEXT("BindAbilityActions: Bound Action %s to Tag %s (Triggered)"), *GetNameSafe(Action.InputAction),
                        *Action.InputTag.ToString());
+            }
+
+            if (CanceledFunc) {
+                BindHandles.Add(BindAction(Action.InputAction, ETriggerEvent::Canceled, Object, CanceledFunc, Action.InputTag).GetHandle());
             }
 
             if (ReleasedFunc) {

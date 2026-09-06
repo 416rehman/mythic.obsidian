@@ -78,7 +78,15 @@ class MYTHIC_API UAttackFragment : public UActionableItemFragment {
     GENERATED_BODY()
 
 public:
-    DECLARE_FRAGMENT(Attack)
+    UAttackFragment();
+    bool IsSecondaryAttack() const;
+    FGameplayTag GetCanonicalInputTag() const;
+    static const UAttackFragment* FindPrimaryOnItem(const UMythicItemInstance* Item);
+    static const UAttackFragment* FindPrimaryOnDefinition(const UItemDefinition* Definition);
+    UFUNCTION(BlueprintPure, Category="Item Fragment")
+    const UAttackFragment* GetAttackFragmentFromInstance(UMythicItemInstance* ItemInstance) { return FindPrimaryOnItem(ItemInstance); }
+    UFUNCTION(BlueprintPure, Category="Item Fragment")
+    static const UAttackFragment* GetAttackFragmentFromDefinition(UItemDefinition* ItemDefinition) { return FindPrimaryOnDefinition(ItemDefinition); }
 
     /**
      * Definition-authored attack configuration replicated to the owning client. It is intentionally excluded from

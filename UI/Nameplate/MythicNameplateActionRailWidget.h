@@ -9,6 +9,7 @@
 
 class UBorder;
 class UMythicInputGlyph;
+class UMythicControlsComponent;
 class UMythicNameplateVisualStyle;
 class USizeBox;
 class UTextBlock;
@@ -20,6 +21,8 @@ class MYTHIC_API UMythicNameplateActionRailWidget : public UUserWidget {
 
 public:
     virtual void NativeOnInitialized() override;
+    virtual void NativeConstruct() override;
+    virtual void NativeDestruct() override;
 
     /** Applies one exact-subject, available-only projection without querying gameplay or rebuilding the widget tree. */
     void ApplyProjection(
@@ -82,6 +85,8 @@ private:
                     FUIActionBindingHandle BindingHandle);
     void ResetEntry(UMythicInputGlyph *Glyph, UTextBlock *Text);
     void RefreshEntries();
+    void HandleInteractionHold(const FMythicEntityPresentationInstance& Subject, FGameplayTag Action, float Progress);
+    TWeakObjectPtr<UMythicControlsComponent> BoundControls;
 
     /** Last exact-subject DTO, retained only so stale placement/release checks remain deterministic. */
     UPROPERTY(Transient)

@@ -1,5 +1,7 @@
 
+#include "Tests/Progression/MythicAbilityWorldFixture.h"
 #include "Misc/AutomationTest.h"
+#include "Tests/Progression/MythicAbilityTestFixture.h"
 
 #include "Abilities/GameplayAbility.h"
 #include "Engine/Engine.h"
@@ -11,6 +13,8 @@
 #include "Progression/Skills/MythicSkillDefinition.h"
 #include "Subsystem/SaveSystem/Character/CharacterData.h"
 #include "Subsystem/SaveSystem/MythicSaveGame.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
 
 namespace {
 
@@ -46,6 +50,7 @@ bool BuildSkillProgressFixture(FAutomationTestBase &Test, FMythicSkillProgressFi
     if (!Out.Skills->IsRegistered()) {
         Out.Skills->RegisterComponent();
     }
+    InitializeAbilityTestPlayer(Out.PlayerState);
     return true;
 }
 
@@ -57,16 +62,17 @@ FMythicSkillModifier MakeModifier(float RadiusDelta, int32 PointCost) {
 }
 
 // No RequiredTag, so nothing but the gate under test can refuse the modifier.
-UMythicSkillDefinition *MakeSkillWithModifiers(std::initializer_list<FMythicSkillModifier> Modifiers) {
+UMythicSkillDefinition *MakeSkillWithModifiers(UMythicSkillComponent* Skills,std::initializer_list<FMythicSkillModifier> Modifiers) {
     UMythicSkillDefinition *Skill = NewObject<UMythicSkillDefinition>();
     Skill->Ability = UGameplayAbility::StaticClass();
     Skill->Modifiers = Modifiers;
+    RegisterAbilityTestDefinition(Skills,Skill);
     return Skill;
 }
 
 // A skill's ceiling is how many modifiers it authors, so a fixture that wants to reach level N has to offer N things
 // to buy. Each row is real and priced at one point, leaving only the gate under test able to refuse it.
-UMythicSkillDefinition *MakeSkillWithNModifiers(int32 Count) {
+UMythicSkillDefinition *MakeSkillWithNModifiers(UMythicSkillComponent* Skills,int32 Count) {
     UMythicSkillDefinition *Skill = NewObject<UMythicSkillDefinition>();
     Skill->Ability = UGameplayAbility::StaticClass();
     for (int32 Index = 0; Index < Count; Index++) {
@@ -75,6 +81,7 @@ UMythicSkillDefinition *MakeSkillWithNModifiers(int32 Count) {
         Modifier.PointCost = 1;
         Skill->Modifiers.Add(Modifier);
     }
+    RegisterAbilityTestDefinition(Skills,Skill);
     return Skill;
 }
 
@@ -100,7 +107,7 @@ bool FMythicSkillLevelGrantsPointTest::RunTest(const FString &Parameters) {
     const bool bReady = BuildSkillProgressFixture(*this, Fixture);
     ON_SCOPE_EXIT {
         if (Fixture.GameInstance) {
-            Fixture.GameInstance->Shutdown();
+            DestroyOwnedAbilityTestWorld(Fixture.GameInstance);
         }
     };
     if (!bReady) {
@@ -113,16 +120,20 @@ bool FMythicSkillLevelGrantsPointTest::RunTest(const FString &Parameters) {
     }
 
     // One thing to buy per level, so the safety clamp is what stops this skill rather than its own content.
-    UMythicSkillDefinition *Skill = MakeSkillWithNModifiers(Ceiling);
+    UMythicSkillDefinition *Skill = MakeSkillWithNModifiers(Skills,Ceiling);
     if (!TestEqual(TEXT("a skill authoring a modifier per level climbs to the clamp"),
                    Skills->GetMaxSkillLevel(Skill), Ceiling)) {
         return false;
     }
 
-    // A skill nobody has touched stores nothing, and still answers for itself.
+    // Learning is durable even before practice or modifier selection.
     TestEqual(TEXT("an untouched skill is level one"), Skills->GetSkillLevel(Skill), 1);
     TestEqual(TEXT("and holds the one point that level granted"), Skills->GetAvailablePoints(Skill), 1);
-    TestEqual(TEXT("and leaves no row behind"), Skills->GetSkillProgress().Num(), 0);
+    TestEqual(TEXT("learning stores one ownership row"), Skills->GetSkillProgress().Num(), 1);
+    TestTrue(TEXT("the saved row records ownership"), Skills->GetSkillProgress()[0].bLearned);
+    TestEqual(TEXT("learning does not fabricate practice"), Skills->GetSkillUses(Skill), 0);
+    Skills->LearnSkill(Skill);
+    TestEqual(TEXT("a repeated reward does not duplicate ownership"), Skills->GetSkillProgress().Num(), 1);
 
     // Every one of the Ceiling-1 level-ups available must move both numbers by exactly one, or the budget drifts.
     for (int32 Expected = 2; Expected <= Ceiling; Expected++) {
@@ -140,7 +151,7 @@ bool FMythicSkillLevelGrantsPointTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("and no point is granted for the refusal"), Skills->GetAvailablePoints(Skill), Ceiling);
 
     // Growth is per skill: one skill's levels must never pay for another's modifiers.
-    UMythicSkillDefinition *Untouched = MakeSkillWithNModifiers(1);
+    UMythicSkillDefinition *Untouched = MakeSkillWithNModifiers(Skills,1);
     TestEqual(TEXT("a second skill is still level one"), Skills->GetSkillLevel(Untouched), 1);
     TestEqual(TEXT("with its own single point"), Skills->GetAvailablePoints(Untouched), 1);
 
@@ -157,7 +168,7 @@ bool FMythicSkillModifierCapacityGateTest::RunTest(const FString &Parameters) {
     const bool bReady = BuildSkillProgressFixture(*this, Fixture);
     ON_SCOPE_EXIT {
         if (Fixture.GameInstance) {
-            Fixture.GameInstance->Shutdown();
+            DestroyOwnedAbilityTestWorld(Fixture.GameInstance);
         }
     };
     if (!bReady) {
@@ -168,7 +179,7 @@ bool FMythicSkillModifierCapacityGateTest::RunTest(const FString &Parameters) {
         return false;
     }
 
-    UMythicSkillDefinition *Skill = MakeSkillWithModifiers({
+    UMythicSkillDefinition *Skill = MakeSkillWithModifiers(Skills,{
         MakeModifier(100.0f, 1), MakeModifier(50.0f, 1), MakeModifier(25.0f, 1)});
     RaiseToLevel(Skills, Skill, 3);
 
@@ -226,7 +237,7 @@ bool FMythicSkillModifierPointGateTest::RunTest(const FString &Parameters) {
     const bool bReady = BuildSkillProgressFixture(*this, Fixture);
     ON_SCOPE_EXIT {
         if (Fixture.GameInstance) {
-            Fixture.GameInstance->Shutdown();
+            DestroyOwnedAbilityTestWorld(Fixture.GameInstance);
         }
     };
     if (!bReady) {
@@ -242,9 +253,10 @@ bool FMythicSkillModifierPointGateTest::RunTest(const FString &Parameters) {
 
     // The ceiling is the modifier count, so the skill has to offer DearCost + 1 things to buy before it can ever
     // hold DearCost + 1 points. The rows past the two under test are never bought.
-    UMythicSkillDefinition *Skill = MakeSkillWithNModifiers(DearCost + 1);
+    UMythicSkillDefinition *Skill = MakeSkillWithNModifiers(Skills,DearCost + 1);
     Skill->Modifiers[0] = MakeModifier(100.0f, DearCost);
     Skill->Modifiers[1] = MakeModifier(50.0f, 1);
+    RegisterAbilityTestDefinition(Skills,Skill);
 
     // Capacity must not be what refuses the buy, or this test would pass with the point gate deleted.
     for (int32 Attempt = 0; Attempt < Skills->MaxModifierCapacity; Attempt++) {
@@ -343,7 +355,7 @@ bool FMythicSkillInertModifierTest::RunTest(const FString &Parameters) {
     const bool bReady = BuildSkillProgressFixture(*this, Fixture);
     ON_SCOPE_EXIT {
         if (Fixture.GameInstance) {
-            Fixture.GameInstance->Shutdown();
+            DestroyOwnedAbilityTestWorld(Fixture.GameInstance);
         }
     };
     if (!bReady) {
@@ -353,10 +365,10 @@ bool FMythicSkillInertModifierTest::RunTest(const FString &Parameters) {
 
     FMythicSkillModifier Inert;
     Inert.PointCost = 1;
-    UMythicSkillDefinition *Skill = MakeSkillWithModifiers({Inert, MakeModifier(100.0f, 1)});
+    UMythicSkillDefinition *Skill = MakeSkillWithModifiers(Skills,{Inert, MakeModifier(100.0f, 1)});
     RaiseToLevel(Skills, Skill, 2);
 
-    AddExpectedError(TEXT("changes nothing"), EAutomationExpectedErrorFlags::Contains, 1);
+    TestEqual(TEXT("the inert choice reports a structured refusal"), Skills->Preflight(EMythicAbilityAction::Modifier,0,Skill,Skill->Modifiers[0].ModifierId,true), EMythicAbilityResult::InvalidModifier);
     Skills->ServerSetModifierActive(Skill, 0, true);
     TestFalse(TEXT("the inert modifier is refused"), Skills->IsModifierActive(Skill, 0));
     TestEqual(TEXT("and costs nothing"), Skills->GetAvailablePoints(Skill), 2);
@@ -377,7 +389,7 @@ bool FMythicSkillProgressRoundTripTest::RunTest(const FString &Parameters) {
     const bool bReady = BuildSkillProgressFixture(*this, Fixture);
     ON_SCOPE_EXIT {
         if (Fixture.GameInstance) {
-            Fixture.GameInstance->Shutdown();
+            DestroyOwnedAbilityTestWorld(Fixture.GameInstance);
         }
     };
     if (!bReady) {
@@ -389,9 +401,9 @@ bool FMythicSkillProgressRoundTripTest::RunTest(const FString &Parameters) {
         return false;
     }
 
-    UMythicSkillDefinition *Built = MakeSkillWithModifiers({
+    UMythicSkillDefinition *Built = MakeSkillWithModifiers(Skills,{
         MakeModifier(100.0f, 1), MakeModifier(50.0f, 1), MakeModifier(25.0f, 1)});
-    UMythicSkillDefinition *Levelled = MakeSkillWithNModifiers(2);
+    UMythicSkillDefinition *Levelled = MakeSkillWithNModifiers(Skills,2);
 
     Skills->GrantModifierCapacity();
     RaiseToLevel(Skills, Built, 3);
@@ -417,14 +429,19 @@ bool FMythicSkillProgressRoundTripTest::RunTest(const FString &Parameters) {
     TestEqual(TEXT("the save is stamped at the current version"), Data.DataVersion,
               static_cast<int32>(CurrentCharacterSaveVersion));
 
-    // Wipe what the live component holds, then load the file back over it.
-    Skills->RestoreSkillProgress({}, 1);
-    if (!TestEqual(TEXT("the wipe emptied the ledger"), Skills->GetSkillProgress().Num(), 0)) {
-        return false;
-    }
-    TestEqual(TEXT("and dropped the capacity to the base"), Skills->GetModifierCapacity(), 1);
-
-    Skills->RestoreSkillProgress(Data.SkillProgress, Data.SkillModifierCapacity);
+    // A second owner in the same isolated world exercises a real restoration, then a repeated load.
+    auto* RestoredPlayer=Fixture.GameInstance->GetWorld()->SpawnActor<AMythicPlayerState>();
+    RestoredPlayer->AuthoritySetPersistentEntityId(Fixture.PlayerState->GetPersistentEntityId());
+    RestoredPlayer->SetPersistentCharacterId(Fixture.PlayerState->GetPersistentCharacterId());
+    RestoredPlayer->GetMythicAbilitySystemComponent()->InitAbilityActorInfo(RestoredPlayer,RestoredPlayer);
+    Skills=RestoredPlayer->GetSkillComponent();
+    Skills->SetRestoring(true);
+    Skills->RestoreSkillProgress(Data.SkillProgress,Data.SkillModifierCapacity);
+    TArray<TSoftObjectPtr<UMythicSkillDefinition>> RestoredSlots;
+    for (const auto& Path:Data.EquippedSkills) RestoredSlots.Add(TSoftObjectPtr<UMythicSkillDefinition>(Path));
+    Skills->RestoreSkills(RestoredSlots,Data.UnlockedSkillSlots);
+    Skills->SetRestoring(false);
+    Skills->RestoreSkillProgress(Data.SkillProgress,Data.SkillModifierCapacity);
 
     TestEqual(TEXT("the capacity comes back"), Skills->GetModifierCapacity(), 2);
     TestEqual(TEXT("the built skill keeps its level"), Skills->GetSkillLevel(Built), 3);
@@ -503,7 +520,7 @@ bool FMythicSkillModifierCapacityMigrationTest::RunTest(const FString &Parameter
     TestEqual(TEXT("and the save is stamped forward"), Old->CharacterData.DataVersion,
               static_cast<int32>(CurrentCharacterSaveVersion));
     TestEqual(TEXT("the name survives the repair"), Old->CharacterData.CharacterName, FString(TEXT("Aldric")));
-    TestEqual(TEXT("so do the ability slots it had earned"), Old->CharacterData.UnlockedSkillSlots, 2);
+    TestEqual(TEXT("the old save receives all four baseline ability sockets"), Old->CharacterData.UnlockedSkillSlots, 4);
     TestEqual(TEXT("and the rune sockets"), Old->CharacterData.UnlockedRuneSlots, 3);
     TestEqual(TEXT("and its story ledger"), Old->CharacterData.StoryTags.Num(), 1);
     TestEqual(TEXT("a save from before modifiers holds no build to lose"), Old->CharacterData.SkillProgress.Num(), 0);
@@ -515,7 +532,7 @@ bool FMythicSkillModifierCapacityMigrationTest::RunTest(const FString &Parameter
         Ancient->CharacterData.AppliedUnlockRules = {RuneSlot2, SkillSlot2, Modifier2};
         Ancient->FixupData();
         TestEqual(TEXT("an older save still recovers its rune sockets"), Ancient->CharacterData.UnlockedRuneSlots, 2);
-        TestEqual(TEXT("and its ability slots"), Ancient->CharacterData.UnlockedSkillSlots, 2);
+        TestEqual(TEXT("and all four baseline ability sockets"), Ancient->CharacterData.UnlockedSkillSlots, 4);
         TestEqual(TEXT("and its modifier capacity in the same pass"), Ancient->CharacterData.SkillModifierCapacity, 2);
     }
 
@@ -537,3 +554,30 @@ bool FMythicSkillModifierCapacityMigrationTest::RunTest(const FString &Parameter
 
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAbilityIndependentMasteryTest,"Mythic.Progression.Skills.IndependentMastery",EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FAbilityIndependentMasteryTest::RunTest(const FString&) {
+    FMythicSkillProgressFixture F;
+    if (!BuildSkillProgressFixture(*this,F)) return false;
+    ON_SCOPE_EXIT { DestroyOwnedAbilityTestWorld(F.GameInstance); };
+    auto* Skill=NewObject<UMythicSkillDefinition>(); Skill->Ability=UGameplayAbility::StaticClass();
+    Skill->bHasMasteryTrack=true; Skill->MasteryUseThresholds={2,5};
+    RegisterAbilityTestDefinition(F.Skills,Skill,true,false);
+    TestEqual(TEXT("zero behavior rows can have three ranks"),F.Skills->GetMaxSkillLevel(Skill),3);
+    for (int32 i=0;i<5;++i) F.Skills->RecordSkillUse(Skill);
+    TestEqual(TEXT("authored cumulative threshold reached"),F.Skills->GetSkillLevel(Skill),3);
+    TestEqual(TEXT("rank is not refinement currency"),F.Skills->GetGrantedPoints(Skill),0);
+    auto M=MakeModifier(25,1); M.ModifierId=TEXT("NewBehavior"); Skill->Modifiers.Add(M);
+    TestEqual(TEXT("adding a behavior cannot change the track"),F.Skills->GetMaxSkillLevel(Skill),3);
+    const auto Saved=F.Skills->GetSkillProgress();
+    Skill->bHasMasteryTrack=false; Skill->MasteryUseThresholds.Reset();
+    F.Skills->RestoreSkillProgress(Saved,1);
+    TestEqual(TEXT("disabled track retains practice for save roundtrip"),F.Skills->GetSkillUses(Skill),5);
+    TestEqual(TEXT("a behavior alone creates no mastery ranks"),F.Skills->GetMaxSkillLevel(Skill),1);
+    Skill->bHasMasteryTrack=true; Skill->MasteryUseThresholds={2,5};
+    F.Skills->RestoreSkillProgress(F.Skills->GetSkillProgress(),1);
+    TestEqual(TEXT("second restore recovers retained rank"),F.Skills->GetSkillLevel(Skill),3);
+    return true;
+}
+
+#endif

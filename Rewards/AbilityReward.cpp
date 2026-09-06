@@ -1,49 +1,24 @@
-
-
 #include "AbilityReward.h"
-
 #include "AbilitySystemComponent.h"
-#include "AbilitySystemGlobals.h"
-#include "Mythic.h"
 #include "GameFramework/PlayerController.h"
+#include "Player/MythicPlayerState.h"
+#include "Progression/Skills/MythicSkillComponent.h"
 
-bool UAbilityReward::Give(FRewardContext &Context) const {
-    auto ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Context.PlayerController);
-    checkf(ASC, TEXT("AbilitySystemComponent is null"));
-
-    if (!Ability) {
-        UE_LOG(Myth, Error, TEXT("Ability is not valid"));
-        return false;
-    }
-
-    auto AbilityClass = this->Ability;
-    checkf(AbilityClass, TEXT("Ability is null in %s"), *this->GetName())
-
-    if (ASC->FindAbilitySpecFromClass(AbilityClass)) {
-        UE_LOG(Myth, Verbose, TEXT("Ability %s already granted; skipping duplicate grant"), *AbilityClass->GetName());
-        return true;
-    }
-
-    auto AbilitySpec = ASC->BuildAbilitySpecFromClass(AbilityClass);
-    auto AbilitySpecHandle = ASC->GiveAbility(AbilitySpec);
-
-    UE_LOG(Myth, Log, TEXT("Gave ability %s"), *AbilityClass->GetName());
-
-    if (this->Activate) {
-        if (ASC->TryActivateAbility(AbilitySpecHandle)) {
-            UE_LOG(Myth, Log, TEXT("Activated ability %s"), *AbilityClass->GetName());
-        }
-        else {
-            UE_LOG(Myth, Error, TEXT("Failed to activate ability %s"), *AbilityClass->GetName());
-        }
-    }
-
+bool UAbilityReward::Give(FRewardContext& Context) const {
+    APlayerController* PC = Context.PlayerController;
+    if (!IsValid(PC) || !PC->HasAuthority() || (SkillDefinition != nullptr) == (Ability != nullptr)) return false;
+    AMythicPlayerState* PS = PC->GetPlayerState<AMythicPlayerState>();
+    if (!PS) return false;
+    if (SkillDefinition) return PS->GetSkillComponent() && PS->GetSkillComponent()->AcceptRewardSkill(SkillDefinition);
+    UAbilitySystemComponent* ASC = PS->GetAbilitySystemComponent();
+    if (!ASC) return false;
+    if (ASC->FindAbilitySpecFromClass(Ability)) return true;
+    const auto Handle = ASC->GiveAbility(FGameplayAbilitySpec(Ability,1,INDEX_NONE,const_cast<UAbilityReward*>(this)));
+    if (!Handle.IsValid()) return false;
+    if (Activate) ASC->TryActivateAbility(Handle);
     return true;
 }
-
 FText UAbilityReward::GetPreviewText() const {
-    if (!Ability) {
-        return FText::GetEmpty();
-    }
-    return FText::FromString(FString::Printf(TEXT("Ability: %s"), *Ability->GetName()));
+    if (SkillDefinition) return FText::Format(NSLOCTEXT("Mythic","LearnAbilityReward","Learn {0}"),SkillDefinition->Name);
+    return Ability ? FText::FromString(Ability->GetName()) : FText::GetEmpty();
 }

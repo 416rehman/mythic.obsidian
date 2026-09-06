@@ -7,6 +7,8 @@
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "InputAction.h"
+#include "Input/MythicControlsComponent.h"
+#include "Player/MythicPlayerController.h"
 #include "Input/CommonUIInputSettings.h"
 #include "Input/UIActionBinding.h"
 #include "Styling/StyleDefaults.h"
@@ -58,7 +60,26 @@ void UMythicInputGlyph::SetHoldProgress(float HeldPercent) {
     }
 }
 
+void UMythicInputGlyph::SetExternalHoldPresentation(bool bEnabled) {
+    if (bExternalHoldPresentation==bEnabled) return;
+    bExternalHoldPresentation=bEnabled; HoldProgress=0.f; RefreshGlyph();
+}
+
+void UMythicInputGlyph::SetExplicitKey(FKey InKey) {
+    bHasExplicitKey=true; ExplicitKey=InKey; RefreshGlyph();
+}
+
+void UMythicInputGlyph::SetDisplayInputType(ECommonInputType Type) {
+    if (DisplayInputType.IsSet() && DisplayInputType.GetValue()==Type) return;
+    DisplayInputType=Type; RefreshGlyph();
+}
+void UMythicInputGlyph::ClearDisplayInputType() {
+    if (!DisplayInputType.IsSet()) return;
+    DisplayInputType.Reset(); RefreshGlyph();
+}
+
 void UMythicInputGlyph::SetEnhancedAction(const UInputAction *InAction) {
+    bHasExplicitKey=false;
     if (EnhancedAction == InAction) {
         return;
     }
@@ -162,6 +183,18 @@ const FText UMythicInputGlyph::GetPaletteCategory() {
 
 void UMythicInputGlyph::Listen(bool bListen) {
     const ULocalPlayer *LocalPlayer = GetOwningLocalPlayer();
+    // Remapping a key does not change the current device or UInputAction. Observe the
+    // completed mapping rebuild so every visible prompt reads the new effective keys.
+    if (MappingSubsystem.IsValid()) {
+        MappingSubsystem->ControlMappingsRebuiltDelegate.RemoveDynamic(this, &ThisClass::HandleControlMappingsRebuilt);
+    }
+    MappingSubsystem.Reset();
+    if (bListen && LocalPlayer) {
+        MappingSubsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>();
+        if (MappingSubsystem.IsValid()) {
+            MappingSubsystem->ControlMappingsRebuiltDelegate.AddUniqueDynamic(this, &ThisClass::HandleControlMappingsRebuilt);
+        }
+    }
     UCommonInputSubsystem *Input = LocalPlayer ? UCommonInputSubsystem::Get(LocalPlayer) : nullptr;
     if (!Input) {
         return;
@@ -176,6 +209,11 @@ void UMythicInputGlyph::Listen(bool bListen) {
         Input->OnInputMethodChangedNative.Remove(InputMethodHandle);
         InputMethodHandle.Reset();
     }
+}
+
+void UMythicInputGlyph::HandleControlMappingsRebuilt() {
+    HoldProgress = 0.0f;
+    RefreshGlyph();
 }
 
 void UMythicInputGlyph::ListenToActionBinding(bool bListen) {
@@ -193,6 +231,7 @@ void UMythicInputGlyph::HandleInputMethodChanged(ECommonInputType NewType) {
 }
 
 bool UMythicInputGlyph::IsCurrentActionHold() const {
+    if (bExternalHoldPresentation) return true;
     const ULocalPlayer *LocalPlayer = GetOwningLocalPlayer();
     const UCommonInputSubsystem *Input = LocalPlayer ? UCommonInputSubsystem::Get(LocalPlayer) : nullptr;
     if (!Input || !BindingHandle.IsValid()) {
@@ -200,7 +239,7 @@ bool UMythicInputGlyph::IsCurrentActionHold() const {
     }
 
     if (const TSharedPtr<FUIActionBinding> Binding = FUIActionBinding::FindBinding(BindingHandle)) {
-        const ECommonInputType InputType = Input->GetCurrentInputType();
+        const ECommonInputType InputType = DisplayInputType.Get(Input->GetCurrentInputType());
         for (const FUIActionKeyMapping &Mapping : Binding->HoldMappings) {
             if (KeyMatchesInputType(Mapping.Key, InputType)) {
                 return true;
@@ -249,6 +288,17 @@ bool UMythicInputGlyph::KeyMatchesInputType(const FKey &Key, ECommonInputType In
 }
 
 void UMythicInputGlyph::GatherKeys(TArray<FKey> &OutKeys) const {
+    if (bHasExplicitKey) { if (ExplicitKey.IsValid()) OutKeys.Add(ExplicitKey); return; }
+    if (ActionTag.IsValid()) if (const auto* PC=Cast<AMythicPlayerController>(GetOwningPlayer()); PC && PC->ControlsComponent) {
+        EMythicControl Control=EMythicControl::Count;
+        if (ActionTag==FGameplayTag::RequestGameplayTag(TEXT("UI.Action.ContextPrimary"),false)) Control=EMythicControl::Interact;
+        else if (ActionTag==FGameplayTag::RequestGameplayTag(TEXT("UI.Action.Menu"),false)) Control=EMythicControl::CharacterMenu;
+        else if (ActionTag==FGameplayTag::RequestGameplayTag(TEXT("UI.Action.InspectEntity"),false)) Control=EMythicControl::Inspect;
+        if (Control!=EMythicControl::Count) {
+            for (bool Pad:{false,true}) { const FKey Key=PC->ControlsComponent->GetEffectiveKey(Control,Pad); if (Key.IsValid()) OutKeys.Add(Key); }
+            return;
+        }
+    }
     if (EnhancedAction) {
         if (const ULocalPlayer *LocalPlayer = GetOwningLocalPlayer()) {
             if (const UEnhancedInputLocalPlayerSubsystem *Enhanced = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>()) {
@@ -320,7 +370,7 @@ void UMythicInputGlyph::RefreshGlyph() {
         return;
     }
 
-    const ECommonInputType InputType = Input->GetCurrentInputType();
+    const ECommonInputType InputType = DisplayInputType.Get(Input->GetCurrentInputType());
     const FName GamepadName = Input->GetCurrentGamepadName();
 
     if (InputType == ECommonInputType::MouseAndKeyboard) {

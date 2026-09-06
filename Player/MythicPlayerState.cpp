@@ -1,4 +1,5 @@
 #include "MythicPlayerState.h"
+#include "Player/MythicSessionPartySubsystem.h"
 
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
 
@@ -134,6 +135,7 @@ void AMythicPlayerState::SetPersistentCharacterId(const FString &InCharacterId) 
             AMythicPlayerController *MythicPC = Cast<AMythicPlayerController>(GetPlayerController());
             Registry->RegisterPlayer(GetCanonicalPlayerKey(), this, MythicPC);
         }
+        if (auto* Parties=World->GetSubsystem<UMythicSessionPartySubsystem>()) Parties->NotifyPlayerReady(this);
     }
 }
 
@@ -150,6 +152,7 @@ bool AMythicPlayerState::AuthoritySetPersistentEntityId(
 
     PersistentEntityId = InEntityId;
     PersistentEntityIdentityReady.Broadcast(PersistentEntityId);
+    if (GetWorld()) if (auto* Parties=GetWorld()->GetSubsystem<UMythicSessionPartySubsystem>()) Parties->NotifyPlayerReady(this);
     return true;
 }
 
@@ -217,6 +220,8 @@ void AMythicPlayerState::BeginPlay() {
 }
 
 void AMythicPlayerState::EndPlay(const EEndPlayReason::Type EndPlayReason) {
+    if (HasAuthority() && GetWorld()) if (auto* Parties=GetWorld()->GetSubsystem<UMythicSessionPartySubsystem>())
+        Parties->UnregisterController(Cast<AMythicPlayerController>(GetPlayerController()));
     if (HasAuthority()) {
         if (UWorld *World = GetWorld()) {
             if (UMythicPlayerRegistrySubsystem *Registry = World->GetSubsystem<UMythicPlayerRegistrySubsystem>()) {

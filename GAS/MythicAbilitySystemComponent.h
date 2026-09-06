@@ -3,13 +3,43 @@
 #include "MythicAbilityTagRelationshipMapping.h"
 #include "Abilities/MythicGameplayAbility.h"
 #include "AttributeSets/MythicAttributeSet.h"
+#include "Abilities/MythicAbilityWindowTypes.h"
+#include "Cues/MythicAbilityPoseRemnant.h"
 #include "MythicAbilitySystemComponent.generated.h"
+
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FMythicOwnedShieldAbsorbed, FGuid, float, const FGameplayEffectContextHandle&);
+DECLARE_MULTICAST_DELEGATE_OneParam(FMythicOwnedShieldRemoved, FGuid);
+class UMythicGA_Skill;
+class UMythicStatusEffectDefinition;
+DECLARE_MULTICAST_DELEGATE_TwoParams(FMythicAbilityMovement, UMythicGA_Skill*, const FVector&);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FMythicStatusGroupWillApply, const UMythicStatusEffectDefinition*, const UAbilitySystemComponent*);
 
 UCLASS(BlueprintType, Blueprintable)
 class MYTHIC_API UMythicAbilitySystemComponent : public UAbilitySystemComponent {
     GENERATED_BODY()
 
 public:
+    virtual void AbilitySpecInputPressed(FGameplayAbilitySpec& Spec) override;
+    virtual void AbilitySpecInputReleased(FGameplayAbilitySpec& Spec) override;
+    void CancelAbilityWindows();
+    int32 AddAbilityGameplayCue(FGameplayTag Tag,const FGameplayCueParameters& Parameters);
+    bool RemoveAbilityGameplayCue(int32 ReplicationId);
+    FGuid GrantOwnedShield(UObject* Source, FGuid ActivationId, FName LocalKey, float Amount, float Duration);
+    bool RemoveOwnedShield(FGuid Handle);
+    float GetOwnedShieldRemaining(FGuid Handle) const;
+    void ReconcileOwnedShields(float ActualShield,float AttributeLoss = 0);
+    void ConsumeOwnedShieldDamage(float Amount, const FGameplayEffectContextHandle& Context);
+    void PublishOwnedShieldDamage(const FGameplayEffectContextHandle& Context);
+    void BeginOwnedShieldDamage() { bProcessingShieldDamage = true; }
+    FMythicOwnedShieldAbsorbed OnOwnedShieldAbsorbed;
+    FMythicOwnedShieldRemoved OnOwnedShieldRemoved;
+    FMythicAbilityMovement OnAbilityMovementStarted;
+    FMythicAbilityMovement OnAbilityMovementEnded;
+    /** Invalidates exact status reservations before canonical applications can invoke GAS callbacks. */
+    FMythicStatusGroupWillApply OnStatusGroupWillApply;
+    /** Local projection invalidation after avatar, grant/removal or input suppression changes. No replicated loadout. */
+    FSimpleMulticastDelegate OnAbilityProjectionChanged;
+    bool CanAcceptAbilityInput() const;
     UPROPERTY()
     TObjectPtr<UMythicAbilityTagRelationshipMapping> AbilityTagRelationshipMapping;
 
@@ -53,6 +83,9 @@ public:
 
     void AbilityInputTagPressed(const FGameplayTag &InputTag);
     void AbilityInputTagReleased(const FGameplayTag &InputTag);
+    void AbilityInputTagCanceled(const FGameplayTag &InputTag);
+    void AbilityInputSpecCanceled(FGameplayAbilitySpecHandle SpecHandle);
+    void SetAbilityInputSuppressed(bool bSuppressed);
 
     /** Queues one already-authorized exact ability spec for the normal input processing lifecycle. */
     void AbilityInputSpecPressed(FGameplayAbilitySpecHandle SpecHandle);
@@ -66,6 +99,8 @@ public:
     /** Executes a transient gameplay cue on every client through the authoritative unreliable multicast path. */
     UFUNCTION(BlueprintCallable, Category = "GameplayCue")
     void ExecuteGameplayCueMulticast(FGameplayTag CueTag, const FGameplayCueParameters &CueParams);
+    /** Native authority-only cosmetic publication; ordered create/cancel for a finite pose lease. */
+    void PublishAbilityPoseRemnant(const FMythicAbilityPoseRemnantEvent& Event,bool bCancel);
 
     /** Executes a transient gameplay cue on the owning client only; partners never see or hear it. */
     UFUNCTION(BlueprintCallable, Category = "GameplayCue")
@@ -75,13 +110,43 @@ public:
     void Client_ExecuteGameplayCue(FGameplayTag CueTag, FGameplayCueParameters Parameters);
 
 protected:
+    struct FOwnedShield {
+        FGuid Handle;
+        TWeakObjectPtr<UObject> Source;
+        FGuid ActivationId;
+        FName LocalKey;
+        float Remaining = 0;
+        double Expiry = 0;
+        uint64 Sequence = 0;
+        FActiveGameplayEffectHandle MaximumEffect;
+        float RemovalClamp = 0;
+    };
+    TArray<FOwnedShield> OwnedShields;
+    FTimerHandle OwnedShieldTimer;
+    uint64 ShieldSequence = 0;
+    bool bWritingOwnedShield = false;
+    bool bProcessingShieldDamage = false;
+    void ScheduleShieldExpiry();
+    void ExpireOwnedShields();
+    bool RemoveOwnedShieldInternal(FGuid Handle,bool bMaximumAlreadyRemoved);
     UFUNCTION(NetMulticast, Unreliable)
     void Multicast_ExecuteGameplayCue(FGameplayTag CueTag, FGameplayCueParameters CueParams);
 
 protected:
-    TArray<FGameplayAbilitySpecHandle> InputPressedSpecHandles;
-
-    TArray<FGameplayAbilitySpecHandle> InputReleasedSpecHandles;
-
+    virtual void OnGiveAbility(FGameplayAbilitySpec& AbilitySpec) override;
+    virtual void OnRemoveAbility(FGameplayAbilitySpec& AbilitySpec) override;
+    UFUNCTION(Server, Reliable)
+    void ServerAbilityInputCanceled(FGameplayAbilitySpecHandle SpecHandle, FPredictionKey ActivationKey);
+    void CancelActiveAbilityInput(FGameplayAbilitySpecHandle SpecHandle, const FPredictionKey* RequiredKey = nullptr);
+    struct FAbilityInputEdge { FGameplayAbilitySpecHandle Handle; bool bPressed = false; uint32 CancelEpoch = 0; };
+    TArray<FAbilityInputEdge> AbilityInputEdges;
+    TMap<FGameplayAbilitySpecHandle,uint32> InputCancelEpochs;
+    TArray<FGameplayAbilitySpecHandle> ProcessingInputOwners;
+    uint32 InputClearEpoch = 0;
+    TMap<FGameplayTag,TArray<FGameplayAbilitySpecHandle>> PressedInputOwners;
     TArray<FGameplayAbilitySpecHandle> InputHeldSpecHandles;
+    bool bAbilityInputSuppressed = false;
+    bool bProcessingAbilityInput = false;
+    bool bClearingAbilityInput = false;
+    bool bInputWasBlocked = false;
 };

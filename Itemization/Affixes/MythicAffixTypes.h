@@ -14,6 +14,29 @@ class UMythicAffixProfile;
 class UMythicAffixRollPolicy;
 class UPackageMap;
 
+UENUM(BlueprintType)
+enum class EMythicAffixApplicationScope : uint8 { Permanent, Action };
+
+/** Independent eligibility domains. Roll-context applicability remains on tier progressions. */
+USTRUCT(BlueprintType)
+struct MYTHIC_API FMythicAffixApplicationRule {
+    GENERATED_BODY()
+    UPROPERTY(EditAnywhere,BlueprintReadOnly) EMythicAffixApplicationScope Scope=EMythicAffixApplicationScope::Permanent;
+    UPROPERTY(EditAnywhere,BlueprintReadOnly) FGameplayTagQuery ActionQuery;
+    UPROPERTY(EditAnywhere,BlueprintReadOnly) FGameplayTagQuery AbilityQuery;
+    UPROPERTY(EditAnywhere,BlueprintReadOnly) FGameplayTagQuery SourceStateQuery;
+    UPROPERTY(EditAnywhere,BlueprintReadOnly) FGameplayTagQuery ItemQuery;
+    bool IsValid() const {
+        return Scope==EMythicAffixApplicationScope::Action || (Scope==EMythicAffixApplicationScope::Permanent
+            && ActionQuery.IsEmpty() && AbilityQuery.IsEmpty() && SourceStateQuery.IsEmpty() && ItemQuery.IsEmpty());
+    }
+    bool Matches(const FGameplayTagContainer& Action,const FGameplayTagContainer& Ability,const FGameplayTagContainer& State,const FGameplayTagContainer& Item) const {
+        return IsValid() && (Scope==EMythicAffixApplicationScope::Permanent ||
+            ((ActionQuery.IsEmpty() || ActionQuery.Matches(Action)) && (AbilityQuery.IsEmpty() || AbilityQuery.Matches(Ability))
+            && (SourceStateQuery.IsEmpty() || SourceStateQuery.Matches(State)) && (ItemQuery.IsEmpty() || ItemQuery.Matches(Item))));
+    }
+};
+
 /** Typed authoring reference to one player-facing Affix Definition asset. */
 USTRUCT(BlueprintType)
 struct MYTHIC_API FMythicAffixDefinitionHandle {

@@ -40,57 +40,67 @@ void UConsumableActionFragment::OnInstanced(UMythicItemInstance *ItemInstance) {
 }
 
 void UConsumableActionFragment::OnClientActionEnd(UMythicItemInstance *ItemInstance) {
-    ServerHandleAction_Implementation(ItemInstance);
+    // Release is not a second request. The inventory/controller or exact granted GAS source owns use.
 }
 
 void UConsumableActionFragment::ServerHandleAction_Implementation(UMythicItemInstance *ItemInstance) {
-    if (!ItemInstance) {
-        UE_LOG(Myth, Error, TEXT("UConsumableActionFragment::OnClientActionEnd: Invalid ItemInstance."));
-        return;
-    }
+    if (!IsValid(ItemInstance) || GetOwningItemInstance()!=ItemInstance || !ItemInstance->ContainsFragment(this)) return;
+    UMythicInventoryComponent* Inventory=ItemInstance->GetInventoryComponent();
+    if (!Inventory) return;
+    FMythicInventorySourceLocator Source;
+    Source.Inventory=Inventory; Source.SlotIndex=ItemInstance->GetSlot();
+    Source.ExpectedItemGuid=ItemInstance->GetItemInstanceGuid(); Source.ExpectedQuantity=ItemInstance->GetStacks();
+    int32 Consumed=0; Inventory->TryUseItemInSlot(Source,Consumed);
+}
 
-    auto ASC = Cast<UMythicAbilitySystemComponent>(
-        UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(ItemInstance->GetInventoryOwner()));
-    if (!ASC) {
-        UE_LOG(Myth, Error, TEXT("UConsumableActionFragment::OnClientActionEnd: Invalid ASC."));
-        return;
-    }
-
-    auto bShouldRemoveItem = true;
-
-    HandleTags(ItemInstance);
-
-    if (this->ConsumableActionConfig.GameplayAbility) {
-        if (this->ConsumableActionConfig.RemoveAbility) {
-            HandleInHandRemoveAbility(ASC);
-        }
-        else {
-            if (HandleGrantAbility(ASC, ItemInstance)) {
-                bShouldRemoveItem = false;
+bool UConsumableActionFragment::ExecuteReservedInventoryAction(UMythicItemInstance* ItemInstance, bool& bConsumeOne) {
+    bConsumeOne=false;
+    if (!ItemInstance || GetOwningItemInstance()!=ItemInstance || !ItemInstance->ContainsFragment(this)
+        || !UMythicInventoryComponent::IsItemMutationFrozen(ItemInstance)) return false;
+    auto* Owner=ItemInstance->GetInventoryOwner();
+    auto* ASC=Owner ? Cast<UMythicAbilitySystemComponent>(UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Owner)):nullptr;
+    if (!Owner || !Owner->HasAuthority() || !ASC) return false;
+    // Prepare every fallible immutable reference before tags, events or ability grants can commit.
+    UClass* AbilityClass=ConsumableActionConfig.GameplayAbility.IsNull() ? nullptr : ConsumableActionConfig.GameplayAbility.LoadSynchronous();
+    if (!ConsumableActionConfig.GameplayAbility.IsNull() && !AbilityClass) return false;
+    bool bAccepted=false, bRetainForGrantedAbility=false;
+    if (AbilityClass) {
+        if (ConsumableActionConfig.RemoveAbility) {
+            if (auto* Spec=ASC->FindAbilitySpecFromClass(AbilityClass)) {
+                const auto Handle=Spec->Handle;
+                ASC->ClearAbility(Handle); bAccepted=true;
             }
+        } else {
+            bRetainForGrantedAbility=HandleGrantAbility(ASC,ItemInstance);
+            bAccepted=bRetainForGrantedAbility;
         }
     }
-
+    if (!ConsumableActionConfig.TagsToAdd.IsEmpty()) {
+        ASC->AddLooseGameplayTags(ConsumableActionConfig.TagsToAdd,1,EGameplayTagReplicationState::TagAndCountToAll);
+        bAccepted=true;
+    }
+    if (!ConsumableActionConfig.TagsToRemove.IsEmpty() && ASC->HasAnyMatchingGameplayTags(ConsumableActionConfig.TagsToRemove)) {
+        ASC->RemoveLooseGameplayTags(ConsumableActionConfig.TagsToRemove,1,EGameplayTagReplicationState::TagAndCountToAll);
+        bAccepted=true;
+    }
     if (ConsumableActionConfig.EventTag.IsValid()) {
-        auto Payload = FGameplayEventData();
-        Payload.EventTag = ConsumableActionConfig.EventTag;
-        Payload.Instigator = ItemInstance->GetInventoryOwner();
-        Payload.OptionalObject = this;
-
-        auto TriggeredAbilities = ASC->HandleGameplayEvent(ConsumableActionConfig.EventTag, &Payload);
-        UE_LOG(Myth, Warning, TEXT("UConsumableFragment: Triggered %d abilities"), TriggeredAbilities);
+        FGameplayEventData Payload; Payload.EventTag=ConsumableActionConfig.EventTag;
+        Payload.Instigator=Owner; Payload.OptionalObject=this;
+        bAccepted |= ASC->HandleGameplayEvent(Payload.EventTag,&Payload)>0;
     }
-    else {
-        UE_LOG(Myth, Error, TEXT("UConsumableFragment::Action: GameplayEvent is invalid"));
-    }
-
-    if (bShouldRemoveItem) {
-        ItemInstance->ConsumeItem(1);
-    }
+    bConsumeOne=bAccepted && !bRetainForGrantedAbility;
+    return bAccepted;
 }
 
 bool UConsumableActionFragment::HandleGrantAbility(UMythicAbilitySystemComponent *ASC, UMythicItemInstance *ItemInstance) {
-    auto AbilityHandle = GrantItemAbility(ASC, ItemInstance, this->ConsumableActionConfig.GameplayAbility.LoadSynchronous());
+    const auto AbilityClass=ConsumableActionConfig.GameplayAbility.LoadSynchronous();
+    if (!ASC || !ItemInstance || !AbilityClass) return false;
+    // A preparation item intentionally survives use. Repeated accepted requests must not duplicate its exact-source spec.
+    for (const FGameplayAbilitySpec& Spec:ASC->GetActivatableAbilities()) {
+        if (!Spec.PendingRemove && !Spec.RemoveAfterActivation && Spec.Ability
+            && Spec.Ability->GetClass()==AbilityClass && Spec.SourceObject.Get()==this) return true;
+    }
+    auto AbilityHandle = GrantItemAbility(ASC, ItemInstance, AbilityClass);
 
     if (!AbilityHandle.IsValid()) {
         UE_LOG(Myth, Error, TEXT("UConsumableActionFragment::HandleGrantAbility: Failed to grant ability."));

@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "MythicCharacter_Player.h"
+#include "Input/MythicTraversalComponent.h"
+#include "GAS/MythicAbilitySystemComponent.h"
 
 #include "MythicPlayerState.h"
 #include "UObject/ConstructorHelpers.h"
@@ -22,6 +24,7 @@ AMythicCharacter_Player::AMythicCharacter_Player() {
     GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 
     LifeComponent = CreateDefaultSubobject<UMythicLifeComponent>(TEXT("LifeComponent"));
+    TraversalComponent=CreateDefaultSubobject<UMythicTraversalComponent>(TEXT("TraversalComponent"));
     EntityPresentationComponent =
         CreateDefaultSubobject<UMythicEntityPresentationComponent>(
             TEXT("EntityPresentationComponent"));
@@ -50,6 +53,7 @@ void AMythicCharacter_Player::InitializeASC() {
             if (HasAuthority() && EntityPresentationComponent) {
                 EntityPresentationComponent->AuthorityBindAbilitySystem(ASC_Ref);
             }
+            if (TraversalComponent) TraversalComponent->InitializeAbilitySystem(Cast<UMythicAbilitySystemComponent>(ASC_Ref));
         }
         return;
     }
@@ -65,6 +69,7 @@ void AMythicCharacter_Player::InitializeASC() {
             if (HasAuthority() && EntityPresentationComponent) {
                 EntityPresentationComponent->AuthorityBindAbilitySystem(ASC_Ref);
             }
+            if (TraversalComponent) TraversalComponent->InitializeAbilitySystem(Cast<UMythicAbilitySystemComponent>(ASC_Ref));
         }
     }
 }

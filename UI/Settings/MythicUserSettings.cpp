@@ -595,6 +595,8 @@ void UMythicUserSettings::SetToDefaults() {
     MaxAnisotropy = 8;
     bMuteWhenUnfocused = true;
     MouseLookSensitivity = 1.0f;
+    bHoldToCrouch = false;
+    bLockYawAssist = false;
     GamepadLookSensitivity = 1.0f;
     VerticalLookScale = 1.0f;
     bInvertLookX = false;

@@ -36,6 +36,8 @@ public:
 
     /** Updates the bottom-to-top visual fill for a live hold action. Values are clamped to the 0..1 range. */
     void SetHoldProgress(float HeldPercent);
+    /** Allows a gameplay input owner to project hold feedback without registering another input consumer. */
+    void SetExternalHoldPresentation(bool bEnabled);
 
     /**
      * Show the key for a GAMEPLAY action — an Enhanced Input action from a mapping context, not a CommonUI menu
@@ -48,6 +50,13 @@ public:
     /** Re-read the key and repaint. Cheap: brush swap only, no layout unless the aspect changed. */
     UFUNCTION(BlueprintCallable, Category = "Mythic|Input")
     void RefreshGlyph();
+
+    /** The controls owner supplies one effective key; platform art and device observers remain shared. */
+    void SetExplicitKey(FKey InKey);
+
+    /** Fixed-device comparison surfaces only. Does not change the player's active device or pad family. */
+    void SetDisplayInputType(ECommonInputType Type);
+    void ClearDisplayInputType();
 
     /** Returns whether the shared glyph has a material and scalar parameter capable of rendering hold progress. */
     bool HasConfiguredHoldPresentation() const {
@@ -78,6 +87,8 @@ private:
     void Listen(bool bListen);
     void ListenToActionBinding(bool bListen);
     void HandleInputMethodChanged(ECommonInputType NewType);
+    UFUNCTION() void HandleControlMappingsRebuilt();
+    TWeakObjectPtr<class UEnhancedInputLocalPlayerSubsystem> MappingSubsystem;
     void RefreshHoldPresentation();
     void UpdateHoldProgressBrushSize(const FVector2D &NewSize);
     bool IsCurrentActionHold() const;
@@ -86,9 +97,13 @@ private:
 
     void GatherKeys(TArray<FKey> &OutKeys) const;
 
+    TOptional<ECommonInputType> DisplayInputType;
+    FKey ExplicitKey;
+    bool bHasExplicitKey = false;
     FUIActionBindingHandle BindingHandle;
     FDelegateHandle InputMethodHandle;
     bool bIsHoldAction = false;
+    bool bExternalHoldPresentation = false;
     float HoldProgress = 0.0f;
 
     UPROPERTY()

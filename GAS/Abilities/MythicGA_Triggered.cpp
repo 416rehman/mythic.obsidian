@@ -1,5 +1,6 @@
 
 #include "MythicGA_Triggered.h"
+#include "GAS/MythicGameplayEffectContext.h"
 
 #include "AbilitySystemComponent.h"
 #include "Engine/OverlapResult.h"
@@ -248,6 +249,7 @@ bool UMythicGA_Triggered::ApplyClauseEffect(const FMythicTriggerSpec &Spec, AAct
     }
 
     FGameplayEffectContextHandle Context = OwnerASC->MakeEffectContext();
+    if (auto* Mythic=FMythicGameplayEffectContext::ExtractEffectContext(Context)) { Mythic->DamageOrigin=EMythicDamageOrigin::Talent; Mythic->ReactionGeneration=IncomingGeneration+1; Mythic->SourceActivationId=IncomingActivation; }
     Context.AddInstigator(Owner, Owner);
 
     const FGameplayEffectSpecHandle EffectSpec = OwnerASC->MakeOutgoingSpec(Spec.EffectToApply, 1.0f, Context);
@@ -267,6 +269,10 @@ bool UMythicGA_Triggered::ApplyClauseEffect(const FMythicTriggerSpec &Spec, AAct
 }
 
 void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, FGameplayTag EventTag) {
+    const auto* Incoming=Payload ? FMythicGameplayEffectContext::ExtractEffectContext(Payload->ContextHandle):nullptr;
+    if (Incoming && Incoming->ReactionGeneration>=4) return;
+    TGuardValue<uint8> Generation(IncomingGeneration,Incoming ? Incoming->ReactionGeneration:0);
+    TGuardValue<FGuid> Activation(IncomingActivation,Incoming ? Incoming->SourceActivationId:FGuid());
     AActor *Owner = GetAvatarActorFromActorInfo();
     if (!Owner || !Owner->HasAuthority()) {
         return;
@@ -278,7 +284,7 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
     // Exactly the three axes the environment subsystem publishes as tags. Gathered once, not per clause.
     FGameplayTagContainer WorldTags;
     if (const UGameInstance *GI = World ? World->GetGameInstance() : nullptr) {
-        if (const UMythicEnvironmentSubsystem *Env = GI->GetSubsystem<UMythicEnvironmentSubsystem>()) {
+        if (const UMythicEnvironmentSubsystem *Env = GI->GetSubsystem<UMythicEnvironmentSubsystem>(); Env && IsValid(Env->GetEnvironmentController())) {
             WorldTags.AddTag(Env->GetWeather());
             WorldTags.AddTag(Env->GetDayTimeTag());
             WorldTags.AddTag(Env->GetSeasonTag());
@@ -293,7 +299,7 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
 
     for (int32 Index = 0; Index < Triggers.Num(); ++Index) {
         const FMythicTriggerSpec &Spec = Triggers[Index];
-        if (Spec.TriggerEvent != EventTag || !HasPayload(Spec)) {
+        if (Spec.TriggerEvent != EventTag || !HasPayload(Spec) || ExecutingClauses.Contains(Index)) {
             continue;
         }
 
@@ -326,7 +332,7 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
 
         // Counted after the gate, so a clause gated on snow counts strikes in snow rather than every swing.
         int32 &Count = EventCounts.FindOrAdd(Index);
-        ++Count;
+        Count=Count==MAX_int32 ? 1:Count+1;
         if (!IsNthEvent(Spec.EveryNthEvent, Count)) {
             continue;
         }
@@ -341,17 +347,30 @@ void UMythicGA_Triggered::HandleTriggerEvent(const FGameplayEventData *Payload, 
         GatherClauseTargets(Spec, Target, Owner, Recipients);
 
         bool bLanded = false;
+        ExecutingClauses.Add(Index);
+        const TOptional<double> PreviousFire=LastFire ? TOptional<double>(*LastFire):TOptional<double>();
+        LastFireTimes.Add(Index,Now);
         for (AActor *Recipient : Recipients) {
             if (Spec.StatusToApply.IsValid()) {
                 const float Survives = SurviveChanceFromResistance(GetStatusResistance(Recipient, Spec.StatusToApply));
                 if (MythicCombat::RollSucceeds(Survives, FMath::FRand())) {
-                    bLanded |= UMythicStatusRegistry::ApplyStatusToActor(Recipient, Spec.StatusToApply, Owner);
+                    const float Duration=ResolveRolledValue(Spec.DurationParameter,Spec.Duration);
+                    // This descendant owns its payload; retain lineage without copying the parent's direct damage snapshot.
+                    auto Context=GetAbilitySystemComponentFromActorInfo()->MakeEffectContext();
+                    if (auto* Mythic=FMythicGameplayEffectContext::ExtractEffectContext(Context)) {
+                        Mythic->DamageOrigin=EMythicDamageOrigin::Talent;
+                        Mythic->ReactionGeneration=IncomingGeneration+1; Mythic->SourceActivationId=IncomingActivation;
+                    }
+                    bLanded |= UMythicStatusRegistry::ApplyStatusToActorWithContext(Recipient,Spec.StatusToApply,Owner,
+                        FMath::IsFinite(Duration) && Duration>0 ? Duration:0,Context);
                 }
             }
             if (Spec.EffectToApply) {
                 bLanded |= ApplyClauseEffect(Spec, Recipient, Owner);
             }
         }
+        ExecutingClauses.Remove(Index);
+        if (!bLanded) { if (PreviousFire.IsSet()) LastFireTimes.Add(Index,PreviousFire.GetValue()); else LastFireTimes.Remove(Index); }
         if (bLanded) {
             LastFireTimes.Add(Index, Now);
             // On the owner, not the recipient: the proc belongs to whoever wears the rune.

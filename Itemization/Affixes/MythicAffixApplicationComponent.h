@@ -74,6 +74,15 @@ struct FMythicAppliedAffixState {
     EMythicStatComparisonDirection ComparisonDirection = EMythicStatComparisonDirection::HigherIsBetter;
     float NeutralValue = 0.0f;
     float Magnitude = 0.0f;
+    FGameplayAttribute TargetAttribute;
+    FMythicAffixApplicationRule Application;
+    FGameplayTagContainer SourceItemTags;
+};
+
+/** Value snapshot includes suppressed candidates; eligibility is evaluated before selecting winners. */
+struct FMythicActionAffixSnapshot {
+    TMap<FGuid,FMythicAppliedAffixState> Candidates;
+    TMap<FGameplayAttribute,float> NonEquipmentBases;
 };
 
 /** Typed, source-addressed permanent progression/reward modifier staged for one atomic ledger transaction. */
@@ -98,6 +107,9 @@ class MYTHIC_API UMythicAffixApplicationComponent : public UActorComponent {
 
 public:
     UMythicAffixApplicationComponent();
+    bool CaptureActionAffixState(FMythicActionAffixSnapshot& Out) const;
+    static bool ResolveActionEquipmentBases(const FMythicActionAffixSnapshot& Snapshot,const FGameplayTagContainer& ActionFacets,
+        const FGameplayTagContainer& AbilityFacets,const FGameplayTagContainer& SourceState,TMap<FGameplayAttribute,float>& OutBases);
 
     /** Adds an entire source batch in one ledger transition; failure restores every previously written GAS base. */
     bool ApplySnapshotsTransactional(UMythicItemInstance *SourceItem,
@@ -297,4 +309,6 @@ private:
 #endif
 
     friend struct FMythicAffixApplicationTestAccessor;
+    friend class FAbilityActionAdmissionTest;
+    friend class FAbilityUtilityActionTest;
 };

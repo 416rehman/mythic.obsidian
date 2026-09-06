@@ -1,4 +1,7 @@
 #include "CharacterData.h"
+#include "Input/MythicQuickUseComponent.h"
+#include "Input/MythicControlsComponent.h"
+#include "Input/MythicTraversalComponent.h"
 #include "Mythic/Mythic.h"
 #include "Mythic/Player/MythicPlayerState.h"
 #include "Mythic/Itemization/InventoryProviderInterface.h"
@@ -52,6 +55,8 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
     APlayerState *PS = nullptr;
     APlayerController *PC = nullptr;
     ResolveCharacterActors(SourceActor, PS, PC);
+    if (UMythicInventoryComponent::IsOwnerUseInProgress(PC ? static_cast<AActor*>(PC):SourceActor)) return false;
+    if (PC) if (auto* Quick=PC->FindComponentByClass<UMythicQuickUseComponent>()) { OutData.SelectedHealingItem=Quick->GetSelected(true); OutData.SelectedUtilityItem=Quick->GetSelected(false); }
     AActor *ProfHost = PC ? static_cast<AActor *>(PC) : SourceActor;
     AActor *InvHost = PC ? static_cast<AActor *>(PC) : SourceActor;
 
@@ -157,11 +162,12 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
         }
 
         if (const UMythicSkillComponent *SkillComp = MythPS->GetSkillComponent()) {
-            for (const TSoftObjectPtr<UMythicSkillDefinition> &Skill : SkillComp->GetEquippedSkills()) {
+            for (const TSoftObjectPtr<UMythicSkillDefinition> &Skill : SkillComp->GetEquippedSkillsForSave()) {
                 OutData.EquippedSkills.Add(Skill.ToSoftObjectPath());
             }
             OutData.UnlockedSkillSlots = SkillComp->GetUnlockedSlots();
             OutData.SkillProgress = SkillComp->GetSkillProgress();
+            OutData.AbilityCooldowns = SkillComp->CaptureAbilityCooldowns();
             OutData.SkillModifierCapacity = SkillComp->GetModifierCapacity();
             UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized %d skill slots (%d open), %d levelled skills (%d modifiers at once)"),
                    OutData.EquippedSkills.Num(), OutData.UnlockedSkillSlots, OutData.SkillProgress.Num(),
@@ -301,6 +307,7 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
     APlayerState *PS = nullptr;
     APlayerController *PC = nullptr;
     ResolveCharacterActors(TargetActor, PS, PC);
+    if (UMythicInventoryComponent::IsOwnerUseInProgress(PC ? static_cast<AActor*>(PC):TargetActor)) return false;
 
     if (!InData.HarvestReceiptLedger.WorldWatermarks.IsEmpty()) {
         UWorld *World = TargetActor->GetWorld();
@@ -323,6 +330,36 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
             }
         }
     }
+    // Transient movement belongs to the pre-restore pawn, never to the saved
+    // transform. Cancel only that owner's native traversal before identity/pose
+    // mutation; a released jump key may still have an admitted mantle in flight.
+    const TWeakObjectPtr<AActor> RestoreTarget(TargetActor);
+    const TWeakObjectPtr<APlayerController> RestoreController(PC);
+    const TWeakObjectPtr<APlayerState> RestoreState(PS);
+    const TWeakObjectPtr<APawn> RestorePawn(PC ? PC->GetPawn() : nullptr);
+    const bool bHadRestorePawn = RestorePawn.IsValid();
+    const auto* InitialMythPS = Cast<AMythicPlayerState>(PS);
+    const FMythicEntityId InitialEntity = InitialMythPS
+        ? InitialMythPS->GetPersistentEntityId() : FMythicEntityId();
+    const auto StillOwnsRestore = [&]() {
+        if (!RestoreTarget.IsValid() || (PS && !RestoreState.IsValid())) return false;
+        if (PC && (!RestoreController.IsValid() || (bHadRestorePawn && !RestorePawn.IsValid()) || PC->PlayerState != RestoreState.Get()
+            || PC->GetPawn() != RestorePawn.Get()
+            || (RestorePawn.IsValid() && RestorePawn->GetController() != PC))) return false;
+        const auto* CurrentMythPS = Cast<AMythicPlayerState>(RestoreState.Get());
+        return !InitialMythPS || (CurrentMythPS && CurrentMythPS->GetPersistentEntityId() == InitialEntity);
+    };
+    if (PC && PC->IsLocalController()) {
+        if (auto* Controls = PC->FindComponentByClass<UMythicControlsComponent>()) Controls->CancelHeldInput();
+    }
+    if (!StillOwnsRestore()) return false;
+    if (auto* Pawn = RestorePawn.Get()) {
+        if (auto* Traversal = Pawn->FindComponentByClass<UMythicTraversalComponent>()) Traversal->CancelTraversal();
+    }
+    // Closing local UI or ending a montage can synchronously change possession
+    // or persistent identity. Do not apply this payload to the replacement owner.
+    if (!StillOwnsRestore()) return false;
+
     AActor *ProfHost = PC ? static_cast<AActor *>(PC) : TargetActor;
     AActor *InvHost = PC ? static_cast<AActor *>(PC) : TargetActor;
 
@@ -374,6 +411,7 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
     if (AMythicPlayerState *MythPS = Cast<AMythicPlayerState>(PS)) {
         UMythicAchievementComponent *AchievementsToRestore = MythPS->GetAchievementComponent();
         UMythicUnlockComponent *UnlocksToRestore = MythPS->GetUnlockComponent();
+        if (UMythicSkillComponent* Skills = MythPS->GetSkillComponent()) Skills->SetRestoring(true);
         if (AchievementsToRestore) {
             AchievementsToRestore->SetRestoring(true);
         }
@@ -490,23 +528,27 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
         // Beside the runes, and for the same reason: IsSkillUnlocked reads the achievement, unlock and story ledgers
         // restored above, so a skill gated on an earned deed would otherwise be dropped as unearned.
         UMythicSkillComponent *SkillComp = MythPS->GetSkillComponent();
-        if (SkillComp && InData.UnlockedSkillSlots > 0) {
+        if (SkillComp) {
+            SkillComp->RestoreSkillProgress(InData.SkillProgress, FMath::Max(1,InData.SkillModifierCapacity));
+            SkillComp->RestoreAbilityCooldowns(InData.AbilityCooldowns);
+        }
+        if (SkillComp) {
             TArray<TSoftObjectPtr<UMythicSkillDefinition>> SavedSkills;
             SavedSkills.Reserve(InData.EquippedSkills.Num());
             for (const FSoftObjectPath &SkillPath : InData.EquippedSkills) {
                 SavedSkills.Emplace(SkillPath);
             }
-            SkillComp->RestoreSkills(SavedSkills, InData.UnlockedSkillSlots);
+            if (InData.DataVersion <= static_cast<int32>(EMythicCharacterSaveVersion::PreCombatControls)) {
+                // Older formats only owned Q/E. Never interpret trailing stale data as newly equipped R/T.
+                SavedSkills.SetNum(FMath::Min(2, SavedSkills.Num()));
+            }
+            SavedSkills.SetNum(UMythicSkillComponent::SlotCount);
+            SkillComp->RestoreSkills(SavedSkills, UMythicSkillComponent::SlotCount);
             UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d skill slots (%d open)"),
                    InData.EquippedSkills.Num(), InData.UnlockedSkillSlots);
         }
 
-        // Growth is keyed on the skill, not the slot, so it restores whether or not the bar above filled.
-        if (SkillComp && InData.SkillModifierCapacity > 0) {
-            SkillComp->RestoreSkillProgress(InData.SkillProgress, InData.SkillModifierCapacity);
-            UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Restored %d levelled skills (%d modifiers at once)"),
-                   InData.SkillProgress.Num(), InData.SkillModifierCapacity);
-        }
+        if (SkillComp) SkillComp->SetRestoring(false);
     }
 
     UMythicStatLedgerComponent *LedgerToGuard = nullptr;
@@ -565,6 +607,14 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
     }
 
 
+    // New deeds can already be satisfied by a mature save. Reconcile only after
+    // every reward-bearing store has loaded, so rewards are not overwritten by
+    // the remaining restore. Persisted deed identities prevent reward replay.
+    if (AMythicPlayerState* MythPS=Cast<AMythicPlayerState>(PS)) {
+        if (auto* Achievements=MythPS->GetAchievementComponent()) Achievements->ReconcileSatisfiedAchievements();
+        if (auto* Skills=MythPS->GetSkillComponent()) Skills->ReconcilePrerequisites();
+    }
     UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Applied character '%s'"), *InData.CharacterName);
+    if (PC) if (auto* Quick=PC->FindComponentByClass<UMythicQuickUseComponent>()) Quick->RestoreSelections(InData.SelectedHealingItem,InData.SelectedUtilityItem);
     return true;
 }

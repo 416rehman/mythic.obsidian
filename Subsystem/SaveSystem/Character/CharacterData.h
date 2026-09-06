@@ -19,6 +19,7 @@
 #include "World/Entity/MythicEntityViewerKnowledgeTypes.h"
 #include "World/Harvesting/MythicHarvestReceiptTypes.h"
 #include "World/Harvesting/MythicHarvestRewardEscrowTypes.h"
+#include "Input/MythicQuickUseComponent.h"
 #include "CharacterData.generated.h"
 
 UENUM(BlueprintType)
@@ -44,6 +45,8 @@ enum class EMythicCharacterSaveVersion : uint8 {
     PreHarvestRewardEscrow,
     PreEntityViewerKnowledge, // Typed-ID learned dossiers were not present before this version.
     PrePlayerEntityIdentity,  // Canonical PlayerCharacter-domain identity was not present before this version.
+    PreAbilityOwnership,
+    PreCombatControls, // Version 22: two active slots and no selected quick-use items.
     LatestVersion,
     VersionPlusOne
 };
@@ -91,13 +94,13 @@ struct FSerializedCharacterData {
 
     // Per-player faction reputation (faction DB index + standing). Persists the otherwise session-only
     // UMythicFactionStandingComponent::Standings so reputation survives a reload. Only valid, non-neutral entries are
-    // stored (FSerializedFactionStandingHelper::ShouldPersist). Empty for pre-FactionStandings saves → no-op on load.
+    // stored (FSerializedFactionStandingHelper::ShouldPersist). Empty for pre-FactionStandings saves â†’ no-op on load.
     UPROPERTY(BlueprintReadWrite)
     TArray<FSerializedFactionStandingData> FactionStandings;
 
     // Per-player narrative story tags (earned Story.*/Choice.*/Outcome.*/Faction.Sided.* tags). Persists the otherwise
     // session-only UMythicNarrativeStateComponent so a reload preserves branching choices. Snapshotted from
-    // GetOwnedTags() on save and reapplied via ServerSetStoryTag on load. Empty for pre-StoryTags saves → no-op on load.
+    // GetOwnedTags() on save and reapplied via ServerSetStoryTag on load. Empty for pre-StoryTags saves â†’ no-op on load.
     UPROPERTY(BlueprintReadWrite)
     TArray<FGameplayTag> StoryTags;
 
@@ -111,31 +114,31 @@ struct FSerializedCharacterData {
     TArray<FMythicStatCounter> StatCounters;
 
     // Per-player unlocked ACHIEVEMENT tags. Persists UMythicAchievementComponent::UnlockedAchievements so a reload keeps
-    // earned achievements (and does NOT re-give their rewards — restore is guarded). The mirrored achievement tags also
+    // earned achievements (and does NOT re-give their rewards â€” restore is guarded). The mirrored achievement tags also
     // live in StoryTags (they are stamped into the narrative ledger on unlock), so branching keys stay consistent. Empty
-    // for pre-achievements saves → no-op on load.
+    // for pre-achievements saves â†’ no-op on load.
     UPROPERTY(BlueprintReadWrite)
     FGameplayTagContainer UnlockedAchievements;
 
     // Per-player granted TITLE/COSMETIC tags (the tag-unlock engine's GrantTitle/GrantCosmetic effects). Persists
-    // UMythicUnlockComponent::GrantedUnlockTags. Empty for pre-unlocks saves → no-op on load.
+    // UMythicUnlockComponent::GrantedUnlockTags. Empty for pre-unlocks saves â†’ no-op on load.
     UPROPERTY(BlueprintReadWrite)
     FGameplayTagContainer GrantedUnlockTags;
 
-    // Stable ids of the unlock rules already applied — so a rule never re-applies (or re-gives its reward) across a
-    // reload. Persists UMythicUnlockComponent::AppliedUnlockRules. Empty for pre-unlocks saves → no-op on load.
+    // Stable ids of the unlock rules already applied â€” so a rule never re-applies (or re-gives its reward) across a
+    // reload. Persists UMythicUnlockComponent::AppliedUnlockRules. Empty for pre-unlocks saves â†’ no-op on load.
     UPROPERTY(BlueprintReadWrite)
     TArray<FGameplayTag> AppliedUnlockRules;
 
     // The player's selected active title (a subset of GrantedUnlockTags). Persists UMythicUnlockComponent::ActiveTitle.
-    // Invalid for pre-unlocks saves → no active title on load.
+    // Invalid for pre-unlocks saves â†’ no active title on load.
     UPROPERTY(BlueprintReadWrite)
     FGameplayTag ActiveTitle;
 
     // Per-player codex bestiary progress (archetype key + kill count + encountered flag). Persists the otherwise
     // session-only UMythicCodexComponent::Bestiary so creature intel tiers survive a reload. Snapshotted from
-    // GetAllBestiaryRecords() on save, restored via RestoreCodex (guarded by bIsRestoring — no re-toast) on load.
-    // Empty for pre-Codex saves → no-op on load. Mirrors the StatCounters save+restore precedent.
+    // GetAllBestiaryRecords() on save, restored via RestoreCodex (guarded by bIsRestoring â€” no re-toast) on load.
+    // Empty for pre-Codex saves â†’ no-op on load. Mirrors the StatCounters save+restore precedent.
     UPROPERTY(BlueprintReadWrite)
     TArray<FMythicBestiaryRecord> CodexBestiary;
 
@@ -145,7 +148,7 @@ struct FSerializedCharacterData {
 
     // Per-player scoped RENOWN values (+ the global aggregate). Persists the otherwise session-only
     // UMythicRenownComponent so long-horizon reputation survives a reload. Keyed on stable scope TAGS (never faction DB
-    // indices). Restored by DIRECT assignment (RestoreRenown) — no tier re-fires, no reward re-gives; the mirrored
+    // indices). Restored by DIRECT assignment (RestoreRenown) â€” no tier re-fires, no reward re-gives; the mirrored
     // Renown.* story tags replay through the StoryTags restore above.
     UPROPERTY(BlueprintReadWrite)
     TArray<FMythicRenownEntry> RenownEntries;
@@ -157,7 +160,7 @@ struct FSerializedCharacterData {
     // session-only UMythicMountRosterComponent so tamed mounts survive a reload. Snapshotted from GetRoster()/
     // GetActiveMountId() on save, restored via RestoreRoster (empty = no-op, so pre-Mounts saves load cleanly; a
     // missing/invalid active id self-heals to the flagged/first record). Mirrors the StatCounters precedent. The
-    // live summoned actor is NOT persisted — a mount is re-materialized from its record by the whistle (stateless).
+    // live summoned actor is NOT persisted â€” a mount is re-materialized from its record by the whistle (stateless).
     UPROPERTY(BlueprintReadWrite)
     TArray<FMythicMountRecord> MountRoster;
 
@@ -190,25 +193,25 @@ struct FSerializedCharacterData {
     UPROPERTY(BlueprintReadWrite)
     TArray<FMythicTradeContract> TradeContracts;
 
-    // Per-player QUEST JOURNAL — every tracked quest (definition soft path + its rolled-up terminal/live state). Persists
+    // Per-player QUEST JOURNAL â€” every tracked quest (definition soft path + its rolled-up terminal/live state). Persists
     // the otherwise session-only UMythicQuestJournalComponent::Quests so a reload preserves the journal UI, keeps
-    // completed arcs completed, and — critically — restores the terminal-state LATCH so ApplyQuestCompleted (rewards/XP/
+    // completed arcs completed, and â€” critically â€” restores the terminal-state LATCH so ApplyQuestCompleted (rewards/XP/
     // loot) is NOT re-run for an already-completed quest. Snapshotted via GetSerializableJournal on save, restored via
     // RestoreQuests (empty = no-op, so pre-QuestJournal saves load cleanly). Mirrors the Objectives block above.
     UPROPERTY(BlueprintReadWrite)
     TArray<FSerializedQuestJournalEntry> QuestJournal;
 
-    // Active storyline (arc) soft paths — the arcs currently being advanced. The runtime carries no separate per-arc
+    // Active storyline (arc) soft paths â€” the arcs currently being advanced. The runtime carries no separate per-arc
     // position (arc progress is implicit in each quest's restored State), so the soft path is the whole persistent record.
     UPROPERTY(BlueprintReadWrite)
     TArray<FSoftObjectPath> ActiveStorylines;
 
-    // Completed storyline (arc) soft paths — arcs whose arc-completion rewards already fired. Restored so a finished arc
+    // Completed storyline (arc) soft paths â€” arcs whose arc-completion rewards already fired. Restored so a finished arc
     // stays finished and never re-grants its arc rewards.
     UPROPERTY(BlueprintReadWrite)
     TArray<FSoftObjectPath> CompletedStorylines;
 
-    // Per-player RUNE SOCKETS — the rune worn in each socket (definition soft path; a null entry is an empty socket, so
+    // Per-player RUNE SOCKETS â€” the rune worn in each socket (definition soft path; a null entry is an empty socket, so
     // the array index is the slot index) plus how many sockets are open. Persists UMythicRuneComponent, whose SaveGame
     // flags are inert here (no component archive targets the PlayerState). Without this a reload strips every rune AND
     // leaves the sockets shut for good, because the GrantPerkSlot rules that opened them are latched in
@@ -222,17 +225,17 @@ struct FSerializedCharacterData {
     UPROPERTY(BlueprintReadWrite)
     int32 UnlockedRuneSlots = 0;
 
-    // Per-player RUNE ROLLS — the numbers rolled for every rune this character has ever socketed, keyed on the
+    // Per-player RUNE ROLLS â€” the numbers rolled for every rune this character has ever socketed, keyed on the
     // definition rather than a socket so a rune keeps its roll while unequipped. Restored through RestoreRuneRolls
     // BEFORE RestoreRunes, because a re-granted rune reads its numbers as it activates. Empty for saves older than
     // rune rolls: RestoreRunes then rolls each worn rune as a first socket, so no version bump is needed.
     UPROPERTY(BlueprintReadWrite)
     TArray<FMythicRuneRollSet> RuneRolls;
 
-    // Per-player SKILL SLOTS — the skill bound to each slot (definition soft path; a null entry is an empty slot, so
+    // Per-player SKILL SLOTS â€” the skill bound to each slot (definition soft path; a null entry is an empty slot, so
     // the array index is the slot index) plus how many slots are open. Persists UMythicSkillComponent, whose SaveGame
     // flags are inert here for the same reason the rune ones are. Restored via RestoreSkills, which re-grants each
-    // skill's ability under that slot's input tag — restoring the array alone would leave filled slots whose keys do
+    // skill's ability under that slot's input tag â€” restoring the array alone would leave filled slots whose keys do
     // nothing. Zero open slots means the count is absent, which FixupData repairs before load.
     UPROPERTY(BlueprintReadWrite)
     TArray<FSoftObjectPath> EquippedSkills;
@@ -240,7 +243,10 @@ struct FSerializedCharacterData {
     UPROPERTY(BlueprintReadWrite)
     int32 UnlockedSkillSlots = 0;
 
-    // Per-player SKILL GROWTH — one row per skill that has been levelled or has a modifier switched on, keyed on the
+    UPROPERTY(BlueprintReadWrite) FMythicQuickUseKey SelectedHealingItem;
+    UPROPERTY(BlueprintReadWrite) FMythicQuickUseKey SelectedUtilityItem;
+
+    // Per-player SKILL GROWTH â€” one row per skill that has been levelled or has a modifier switched on, keyed on the
     // definition rather than a slot so a skill keeps its build while unequipped. Persists UMythicSkillComponent's
     // levels and active modifier indices. Empty for pre-SkillModifiers saves, which is exactly right: every skill
     // reads back at level one with nothing active. Restored via RestoreSkillProgress, which re-runs the capacity and
@@ -248,8 +254,11 @@ struct FSerializedCharacterData {
     UPROPERTY(BlueprintReadWrite)
     TArray<FMythicSkillProgress> SkillProgress;
 
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FMythicAbilityCooldownSave> AbilityCooldowns;
+
     // How many modifiers one skill may carry at once. Zero means the count is absent, which FixupData rebuilds from
-    // the applied Unlock.Rule.SkillModifier* rules before load — the same trap the rune sockets hit, since those
+    // the applied Unlock.Rule.SkillModifier* rules before load â€” the same trap the rune sockets hit, since those
     // rules latch in AppliedUnlockRules and never fire twice.
     UPROPERTY(BlueprintReadWrite)
     int32 SkillModifierCapacity = 0;
@@ -309,7 +318,7 @@ struct MYTHIC_API FMythicCharacterSaveMigration {
      * the same reason the two counts above are: an applied rule is latched and never fires again. One is free; each
      * applied Unlock.Rule.SkillModifier* adds another.
      *
-     * Unlock.Rule.SkillSlot* shares the Unlock.Rule parent and must not be counted here — a loose prefix would hand
+     * Unlock.Rule.SkillSlot* shares the Unlock.Rule parent and must not be counted here â€” a loose prefix would hand
      * out a modifier slot for every ability slot.
      */
     static int32 SkillModifierCapacityFromAppliedRules(TConstArrayView<FGameplayTag> AppliedRules) {

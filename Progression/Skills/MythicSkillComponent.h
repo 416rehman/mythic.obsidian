@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Abilities/GameplayAbilityTypes.h"
+#include "GameplayEffectTypes.h"
 #include "Components/ActorComponent.h"
 #include "GameplayTagContainer.h"
 #include "MythicSkillDefinition.h"
@@ -11,6 +12,16 @@
 #include "MythicSkillComponent.generated.h"
 
 class UAbilitySystemComponent;
+class UMythicAbilityCatalog;
+
+UENUM(BlueprintType)
+enum class EMythicAbilityResult : uint8 {
+    Success, NotReady, InvalidAbility, LockedAbility, InvalidSlot, LockedSlot, MissingInput,
+    EquippedElsewhere, ActiveAbility, InvalidModifier, IncompatibleModifier, Capacity, Points, GrantFailed
+};
+UENUM(BlueprintType)
+enum class EMythicAbilityAction : uint8 { Equip, Unequip, Modifier };
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FMythicAbilityActionResult, FGuid, RequestId, EMythicAbilityResult, Result, int32, Revision);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMythicOnSkillsChanged);
 
@@ -20,12 +31,37 @@ class MYTHIC_API UMythicSkillComponent : public UActorComponent {
 
 public:
     UMythicSkillComponent();
+    static constexpr int32 SlotCount = 4;
+    static FGameplayTag CanonicalSlotInputTag(int32 SlotIndex);
 
-    // How many skills this character can ever have bound at once. Slot one is free; the rest arrive as GrantSkillSlot unlocks.
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Progression|Skills", meta = (ClampMin = "1", ClampMax = "8"))
-    int32 MaxSlots = 2;
+    UFUNCTION(Server, Reliable, BlueprintCallable, Category="Progression|Skills")
+    void ServerRequestAbilityAction(FGuid RequestId, EMythicAbilityAction Action, int32 SlotIndex, UMythicSkillDefinition* Skill, FName ModifierId, bool bActive);
+    UFUNCTION(Client, Reliable) void ClientAbilityActionResult(FGuid RequestId, EMythicAbilityResult Result, int32 Revision);
+    UPROPERTY(BlueprintAssignable) FMythicAbilityActionResult OnActionResult;
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Progression|Skills") bool LearnSkill(UMythicSkillDefinition* Skill, bool bNotify = true);
+    UFUNCTION(BlueprintPure, Category="Progression|Skills") bool IsReady() const;
+    UFUNCTION(BlueprintPure, Category="Progression|Skills") EMythicAbilityResult Preflight(EMythicAbilityAction Action, int32 SlotIndex, const UMythicSkillDefinition* Skill, FName ModifierId, bool bActive) const;
+    UFUNCTION(BlueprintPure, Category="Progression|Skills") float GetCooldownRemaining(const UMythicSkillDefinition* Skill) const;
+    /** Local seconds and actual effect duration for display; called on state changes, not each cosmetic timer beat. */
+    void GetCooldownDisplay(const UMythicSkillDefinition* Skill,float& Remaining,float& Duration) const;
+    UFUNCTION(BlueprintPure, Category="Progression|Skills") static FText DescribeResult(EMythicAbilityResult Result);
+    int32 GetRevision() const { return StateRevision; }
+    bool OwnsGrantedSpec(const UMythicSkillDefinition* Skill, FGameplayAbilitySpecHandle Handle) const;
+    FGameplayTagContainer GetEffectiveClassification(const UMythicSkillDefinition* Skill) const;
+    UMythicAbilityCatalog* GetCatalog() const;
+    TArray<FMythicAbilityCooldownSave> CaptureAbilityCooldowns() const;
+    void RestoreAbilityCooldowns(const TArray<FMythicAbilityCooldownSave>& Saved);
+    bool StartCooldown(UMythicSkillDefinition* Skill, float ResolvedSeconds);
+    void SetRestoring(bool bValue);
+    void RebuildProgressIndex();
+    UFUNCTION() void HandlePermanentTag(FGameplayTag Tag);
+    void ReconcilePrerequisites();
 
-    // The key each slot answers to, index-matched to the slots. Adding a slot is a row here, not a code change.
+    // All four sockets are available; authored rewards grant ability ownership separately.
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "Progression|Skills")
+    int32 MaxSlots = SlotCount;
+
+    // Canonical socket identities, normalized from legacy authored two-entry defaults at startup.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Progression|Skills")
     TArray<FGameplayTag> SlotInputTags;
 
@@ -47,7 +83,7 @@ public:
 
     // SERVER: put Skill in SlotIndex, granting its ability on the owner's ASC under that slot's input tag. Refuses (and
     // says why) for an out-of-range or locked slot, a skill with no ability, a skill whose RequiredTag the player has
-    // not earned, or a skill already bound to another slot. Whatever the slot held is cleared first.
+    // not earned, or a skill already bound to another slot. The new grant succeeds before the previous spec is cleared.
     UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Progression|Skills")
     void ServerEquipSkill(int32 SlotIndex, UMythicSkillDefinition *Skill);
 
@@ -71,8 +107,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Progression|Skills")
     void RecordSkillUse(UMythicSkillDefinition *Skill);
 
-    // The deed may be recorded in any of the four ledgers that can hold one — achievements, unlocks, story tags, or the
-    // owner's ASC — so all four count. A skill with no RequiredTag needs no deed.
+    // Durable learned ownership, granted by an authorized reward or a reconciled permanent prerequisite.
+    // Temporary ASC tags never grant ownership, and absence of a prerequisite does not imply a free ability.
     UFUNCTION(BlueprintPure, Category = "Progression|Skills")
     bool IsSkillUnlocked(const UMythicSkillDefinition *Skill) const;
 
@@ -80,7 +116,7 @@ public:
     bool IsSlotUnlocked(int32 SlotIndex) const;
 
     UFUNCTION(BlueprintPure, Category = "Progression|Skills")
-    int32 GetUnlockedSlots() const { return FMath::Clamp(UnlockedSlots, 0, MaxSlots); }
+    int32 GetUnlockedSlots() const { return FMath::Clamp(UnlockedSlots, 0, SlotCount); }
 
     UFUNCTION(BlueprintPure, Category = "Progression|Skills")
     UMythicSkillDefinition *GetSkillInSlot(int32 SlotIndex) const;
@@ -132,7 +168,10 @@ public:
 
     const TArray<TSoftObjectPtr<UMythicSkillDefinition>> &GetEquippedSkills() const { return EquippedSkills; }
 
-    const TArray<FMythicSkillProgress> &GetSkillProgress() const { return SkillProgress; }
+    TArray<FMythicSkillProgress> GetSkillProgress() const;
+    /** Trusted authority reward intake records earned ownership before catalogue loading completes. No RPC surface. */
+    bool AcceptRewardSkill(UMythicSkillDefinition* Skill);
+    const TArray<TSoftObjectPtr<UMythicSkillDefinition>>& GetEquippedSkillsForSave() const { return bHasPendingEquippedRestore ? PendingEquippedSkills : EquippedSkills; }
 
     // Open the next slot. Called by the GrantSkillSlot unlock effect; clamped to MaxSlots.
     void GrantSlot();
@@ -179,12 +218,12 @@ protected:
     TArray<TSoftObjectPtr<UMythicSkillDefinition>> EquippedSkills;
 
     UPROPERTY(ReplicatedUsing = OnRep_Skills, BlueprintReadOnly, SaveGame, Category = "Progression|Skills")
-    int32 UnlockedSlots = 1;
+    int32 UnlockedSlots = SlotCount;
 
-    // Sparse: a skill earns an entry the first time it is levelled or a modifier is switched on. Absent means level
-    // one with nothing active, which is what a character starts every skill on.
-    UPROPERTY(ReplicatedUsing = OnRep_Skills, BlueprintReadOnly, SaveGame, Category = "Progression|Skills")
-    TArray<FMythicSkillProgress> SkillProgress;
+    // Sparse owner-only rows begin when an ability is learned and retain ownership even without practice.
+    UPROPERTY(Replicated) FMythicSkillProgressArray Progress;
+    UPROPERTY(ReplicatedUsing=OnRep_Skills) bool bStateReady = false;
+    UPROPERTY(ReplicatedUsing=OnRep_Skills) int32 StateRevision = 0;
 
     UPROPERTY(ReplicatedUsing = OnRep_Skills, BlueprintReadOnly, SaveGame, Category = "Progression|Skills")
     int32 ModifierCapacity = 1;
@@ -207,16 +246,39 @@ private:
 
     FMythicSkillProgress &FindOrAddProgress(UMythicSkillDefinition *Skill);
 
-    // Drops the entry once it says nothing a default would not, so an untouched skill leaves no row behind.
-    void PruneProgress(const FSoftObjectPath &SkillPath);
+    // Marks the durable row for delta replication without replacing the entire library.
+    void MarkProgress(const FSoftObjectPath& Path);
+    void Changed();
+    void DeferCatalogueRestore();
+    void HandleDeferredCatalogueReady();
+    bool HasPermanentPrerequisite(const UMythicSkillDefinition* Skill) const;
+    bool HasPermanentFact(FGameplayTag Tag) const;
+    bool IsActive(const UMythicSkillDefinition* Skill) const;
+    bool IsCatalogued(const UMythicSkillDefinition* Skill) const;
+    EMythicAbilityResult ExecuteAction(EMythicAbilityAction Action, int32 Slot, UMythicSkillDefinition* Skill, FName ModifierId, bool bActive);
 
     static int32 PointCostOf(const UMythicSkillDefinition *Skill, int32 ModifierIndex);
 
     // The authored ladder, read back off the settings object rather than held as a constant anywhere in here.
-    static void ResolveUseLadder(TArray<int32> &OutThresholds, float &OutTailGrowth);
+    static void ResolveUseLadder(const UMythicSkillDefinition* Skill, TArray<int32> &OutThresholds, float &OutTailGrowth);
 
     class UMythicStatLedgerComponent *ResolveStatLedger() const;
 
     // Server-only, index-matched to EquippedSkills.
     TArray<FGameplayAbilitySpecHandle> GrantedHandles;
+    TMap<FSoftObjectPath, int32> ProgressIndex;
+    TMap<FGameplayTag, TArray<TWeakObjectPtr<UMythicSkillDefinition>>> PrerequisiteIndex;
+    TSet<FGameplayTag> RefinementPrerequisiteTags;
+    TMap<FSoftObjectPath, double> CooldownExpiries;
+    TMap<FSoftObjectPath, FActiveGameplayEffectHandle> CooldownHandles;
+    UPROPERTY() TArray<FMythicSkillProgress> UnavailableProgress;
+    UPROPERTY() TArray<TSoftObjectPtr<UMythicSkillDefinition>> PendingEquippedSkills;
+    bool bHasPendingEquippedRestore = false;
+    FDelegateHandle PendingCatalogueReadyHandle;
+    bool bPendingProgressMaterialization = false;
+    bool bPendingCooldownMaterialization = false;
+    bool bRestoring = false;
+    int32 PendingRestoreLoads = 0;
+    uint32 ServerActionSerial = 0;
+    uint32 RestoreGeneration = 0;
 };

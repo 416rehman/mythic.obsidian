@@ -15,6 +15,7 @@ struct FCompiledAffixProfile;
 UCLASS(Blueprintable, BlueprintType)
 class MYTHIC_API UMythicItemInstance : public UMythicReplicatedObject {
     GENERATED_BODY()
+    friend class UMythicInventoryComponent;
 
 protected:
     /** Item definition that supplied this instance's immutable authored data. */
@@ -22,7 +23,7 @@ protected:
     UItemDefinition *ItemDefinition;
 
     /** Runtime fragment copies materialized from the item definition for this instance. */
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Item")
+    UPROPERTY(ReplicatedUsing=OnRep_ItemFragments, BlueprintReadOnly, Category = "Item")
     TArray<TObjectPtr<UItemFragment>> ItemFragments;
 
     /** Current stack quantity, clamped by the definition's maximum stack size. */
@@ -71,6 +72,8 @@ protected:
     UFUNCTION()
     void OnRep_ItemDefinition();
 
+    UFUNCTION() void OnRep_ItemFragments();
+
     UFUNCTION()
     void OnRep_OwningInventory();
 
@@ -79,6 +82,9 @@ protected:
 
 public:
     virtual void Serialize(FArchive &Ar) override;
+
+    /** Presentation-only replication arrival. Never refresh a replacement item in our former slot. */
+    void NotifyReplicatedItemState();
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override {
         Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -186,7 +192,7 @@ public:
     bool isStackableWith(const UMythicItemInstance *Other) const;
 
     template <typename T>
-    const T *GetFragment() {
+    const T *GetFragment() const {
         for (const UItemFragment *frag : this->ItemFragments) {
             if (auto casted = Cast<T>(frag)) {
                 return casted;
@@ -200,6 +206,9 @@ public:
     int32 CountFragmentsOfClass(TSubclassOf<UItemFragment> FragmentClass) const;
 
     void ConsumeItem(int32 StackQty = 1);
+    bool ContainsFragment(const UItemFragment* Fragment) const { return ItemFragments.Contains(Fragment); }
+    TConstArrayView<TObjectPtr<UItemFragment>> GetFragmentsView() const { return ItemFragments; }
 
     virtual void OnDestroyed() override;
+    virtual void Destroy() override;
 };

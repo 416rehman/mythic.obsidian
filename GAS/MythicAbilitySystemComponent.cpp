@@ -1,4 +1,5 @@
-﻿#include "MythicAbilitySystemComponent.h"
+#include "MythicAbilitySystemComponent.h"
+#include "Player/MythicPlayerController.h"
 
 #include "Mythic.h"
 #include "MythicTags_GAS.h"
@@ -6,6 +7,11 @@
 #include "System/MythicAssetManager.h"
 #include "Itemization/Affixes/MythicAffixApplicationComponent.h"
 #include "GAS/AttributeSets/MythicAttributeSet.h"
+#include "GAS/Abilities/MythicGA_AbilityWindow.h"
+#include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
+#include "GAS/MythicGameplayEffectContext.h"
+#include "Settings/MythicCombatSettings.h"
+#include "TimerManager.h"
 
 namespace {
 bool IsValidActivationGroup(const EMythicAbilityActivationGroup Group) {
@@ -26,6 +32,8 @@ void UMythicAbilitySystemComponent::BeginPlay() {
 
     ReconcileAllBoundedAttributes();
 
+    OnAbilityProjectionChanged.Broadcast();
+
     if (!AbilityTagRelationshipMapping) {
         if (const UMythicDeveloperSettings *Settings = GetDefault<UMythicDeveloperSettings>()) {
             UMythicAssetManager::LoadAsync(this, Settings->DefaultAbilityTagRelationshipMapping,
@@ -40,9 +48,16 @@ void UMythicAbilitySystemComponent::BeginPlay() {
 }
 
 void UMythicAbilitySystemComponent::InitAbilityActorInfo(AActor *InOwnerActor, AActor *InAvatarActor) {
+    if (GetAvatarActor() && GetAvatarActor() != InAvatarActor) {
+        CancelAbilityWindows();
+        TArray<FGuid> Handles;
+        for (const auto& Shield : OwnedShields) Handles.Add(Shield.Handle);
+        for (FGuid Handle : Handles) RemoveOwnedShield(Handle);
+    }
     Super::InitAbilityActorInfo(InOwnerActor, InAvatarActor);
 
     ReconcileAllBoundedAttributes();
+    OnAbilityProjectionChanged.Broadcast();
 
     if (!InOwnerActor || !InOwnerActor->HasAuthority()) {
         return;
@@ -79,154 +94,172 @@ void UMythicAbilitySystemComponent::NotifyAbilityEnded(
 
 void UMythicAbilitySystemComponent::SetTagRelationshipMapping(UMythicAbilityTagRelationshipMapping *NewMapping) {
     AbilityTagRelationshipMapping = NewMapping;
+    OnAbilityProjectionChanged.Broadcast();
 }
 
-void UMythicAbilitySystemComponent::AbilityInputTagPressed(const FGameplayTag &InputTag) {
-    if (InputTag.IsValid()) {
-        UE_LOG(Myth, Log, TEXT("ASC::AbilityInputTagPressed: Tag=%s, ASC=%s, ActivatableAbilities.Num=%d"),
-               *InputTag.ToString(),
-               *GetName(),
-               ActivatableAbilities.Items.Num());
+bool UMythicAbilitySystemComponent::CanAcceptAbilityInput() const {
+    if (bAbilityInputSuppressed || HasMatchingGameplayTag(GAS_INPUT_BLOCKED)) return false;
+    const auto* Controller=AbilityActorInfo.IsValid() ? Cast<AMythicPlayerController>(AbilityActorInfo->PlayerController.Get()) : nullptr;
+    return !Controller || !Controller->IsGameplayAbilityInputBlocked();
+}
 
-        for (const FGameplayAbilitySpec &AbilitySpec : ActivatableAbilities.Items) {
-            if (AbilitySpec.Ability) {
-                FGameplayTagContainer DynamicTags = AbilitySpec.GetDynamicSpecSourceTags();
-                bool bMatches = DynamicTags.HasTagExact(InputTag);
-                if (bMatches) {
-                    UE_LOG(Myth, Log, TEXT("  -> Matched Ability: %s"), *GetNameSafe(AbilitySpec.Ability));
-                    InputPressedSpecHandles.AddUnique(AbilitySpec.Handle);
-                    InputHeldSpecHandles.AddUnique(AbilitySpec.Handle);
-                }
+void UMythicAbilitySystemComponent::AbilityInputTagPressed(const FGameplayTag& InputTag) {
+    if (!InputTag.IsValid() || !CanAcceptAbilityInput() || PressedInputOwners.Contains(InputTag)) return;
+    auto& Owners=PressedInputOwners.Add(InputTag);
+    ABILITYLIST_SCOPE_LOCK();
+    for (const auto& Spec:ActivatableAbilities.Items) {
+        if (Spec.Ability && Spec.GetDynamicSpecSourceTags().HasTagExact(InputTag)) Owners.Add(Spec.Handle);
+    }
+    // Copy before callbacks/overflow cleanup can invalidate the map entry.
+    const auto Handles=Owners;
+    for (auto Handle:Handles) AbilityInputSpecPressed(Handle);
+}
+
+void UMythicAbilitySystemComponent::AbilityInputTagReleased(const FGameplayTag& InputTag) {
+    TArray<FGameplayAbilitySpecHandle> Handles;
+    if (!PressedInputOwners.RemoveAndCopyValue(InputTag,Handles)) return;
+    for (auto Handle:Handles) AbilityInputSpecReleased(Handle);
+}
+
+void UMythicAbilitySystemComponent::AbilityInputTagCanceled(const FGameplayTag& InputTag) {
+    TArray<FGameplayAbilitySpecHandle> Handles;
+    if (!PressedInputOwners.RemoveAndCopyValue(InputTag,Handles)) return;
+    for (auto Handle:Handles) AbilityInputSpecCanceled(Handle);
+}
+
+void UMythicAbilitySystemComponent::AbilityInputSpecPressed(FGameplayAbilitySpecHandle Handle) {
+    if (!CanAcceptAbilityInput() || !FindAbilitySpecFromHandle(Handle) || InputHeldSpecHandles.Contains(Handle)) return;
+    if (AbilityInputEdges.Num()>=128) { ClearAbilityInput(); return; }
+    InputHeldSpecHandles.Add(Handle);
+    AbilityInputEdges.Add({Handle,true,InputCancelEpochs.FindRef(Handle)});
+}
+
+void UMythicAbilitySystemComponent::AbilityInputSpecReleased(FGameplayAbilitySpecHandle Handle) {
+    if (!InputHeldSpecHandles.Remove(Handle)) return;
+    if (!CanAcceptAbilityInput() || AbilityInputEdges.Num()>=128) { AbilityInputSpecCanceled(Handle); return; }
+    AbilityInputEdges.Add({Handle,false,InputCancelEpochs.FindRef(Handle)});
+}
+
+void UMythicAbilitySystemComponent::CancelActiveAbilityInput(FGameplayAbilitySpecHandle Handle,const FPredictionKey* RequiredKey) {
+    ABILITYLIST_SCOPE_LOCK();
+    auto* Spec=FindAbilitySpecFromHandle(Handle);
+    if (!Spec || !Spec->IsActive()) return;
+    // GAS windows disallow arbitrary client termination. This narrow interruption route
+    // checks the exact active prediction key and uses the authored family cancel policy.
+    const auto Instances=Spec->GetAbilityInstances();
+    for (auto* Instance:Instances) {
+        auto* Ability=Cast<UMythicGameplayAbility>(Instance);
+        if (!Ability || !Ability->IsActive()) continue;
+        const auto Info=Ability->GetCurrentActivationInfo();
+        const auto Key=Info.GetActivationPredictionKey();
+        if (RequiredKey && Key!=*RequiredKey) continue;
+        Spec->InputPressed=false;
+        if (!RequiredKey && AbilityActorInfo.IsValid() && AbilityActorInfo->IsLocallyControlled() && !IsOwnerActorAuthoritative() && Key.IsValidKey()) {
+            ServerAbilityInputCanceled(Handle,Key);
+        }
+        if (Ability->ShouldCancelOnInputInterrupted()) Ability->CancelAbility(Handle,AbilityActorInfo.Get(),Info,IsOwnerActorAuthoritative());
+    }
+}
+
+void UMythicAbilitySystemComponent::ServerAbilityInputCanceled_Implementation(FGameplayAbilitySpecHandle Handle,FPredictionKey ActivationKey) {
+    if (!ActivationKey.IsValidKey()) return;
+    CancelActiveAbilityInput(Handle,&ActivationKey);
+}
+
+void UMythicAbilitySystemComponent::AbilityInputSpecCanceled(FGameplayAbilitySpecHandle Handle) {
+    ++InputCancelEpochs.FindOrAdd(Handle);
+    InputHeldSpecHandles.Remove(Handle);
+    AbilityInputEdges.RemoveAll([Handle](const auto& Edge){ return Edge.Handle==Handle; });
+    if (auto* Spec=FindAbilitySpecFromHandle(Handle)) Spec->InputPressed=false;
+    CancelActiveAbilityInput(Handle);
+}
+
+void UMythicAbilitySystemComponent::SetAbilityInputSuppressed(bool bSuppressed) {
+    if (bAbilityInputSuppressed==bSuppressed) return;
+    bAbilityInputSuppressed=bSuppressed;
+    if (bSuppressed) ClearAbilityInput();
+    OnAbilityProjectionChanged.Broadcast();
+}
+
+void UMythicAbilitySystemComponent::ProcessAbilityInput(float DeltaTime,bool bGamePaused) {
+    if (bProcessingAbilityInput) return;
+    TGuardValue<bool> Processing(bProcessingAbilityInput,true);
+    if (bGamePaused || !CanAcceptAbilityInput()) {
+        if (!bInputWasBlocked || !AbilityInputEdges.IsEmpty() || !InputHeldSpecHandles.IsEmpty()) ClearAbilityInput();
+        bInputWasBlocked=true; return;
+    }
+    bInputWasBlocked=false;
+    const auto Edges=MoveTemp(AbilityInputEdges);
+    AbilityInputEdges.Reset();
+    const uint32 ClearEpoch=InputClearEpoch;
+    for (const auto& Edge:Edges) ProcessingInputOwners.AddUnique(Edge.Handle);
+    TSet<FGameplayAbilitySpecHandle> Attempted;
+    for (const auto& Edge:Edges) {
+        if (ClearEpoch!=InputClearEpoch) break;
+        if (Edge.CancelEpoch!=InputCancelEpochs.FindRef(Edge.Handle)) continue;
+        if (!CanAcceptAbilityInput()) { ClearAbilityInput(); break; }
+        auto* Spec=FindAbilitySpecFromHandle(Edge.Handle);
+        if (!Spec || !Spec->Ability) continue;
+        Spec->InputPressed=Edge.bPressed;
+        if (Spec->IsActive()) {
+            if (Edge.bPressed) AbilitySpecInputPressed(*Spec);
+            else AbilitySpecInputReleased(*Spec);
+        } else if (Edge.bPressed) {
+            const auto* Ability=Cast<UMythicGameplayAbility>(Spec->Ability);
+            if (Ability && (Ability->GetActivationPolicy()==EMythicAbilityActivationPolicy::OnInputTriggered || Ability->GetActivationPolicy()==EMythicAbilityActivationPolicy::WhileInputActive)) {
+                Attempted.Add(Edge.Handle);
+                TryActivateAbility(Edge.Handle);
             }
         }
     }
-    else {
-        UE_LOG(Myth, Warning, TEXT("ASC::AbilityInputTagPressed: InputTag is NOT VALID!"));
+    ProcessingInputOwners.Reset();
+    TArray<FAbilityInputEdge,TInlineAllocator<8>> Held;
+    for (auto Handle:InputHeldSpecHandles) Held.Add({Handle,false,InputCancelEpochs.FindRef(Handle)});
+    for (const auto& Retry:Held) {
+        const auto Handle=Retry.Handle;
+        if (ClearEpoch!=InputClearEpoch) break;
+        if (!InputHeldSpecHandles.Contains(Handle) || Retry.CancelEpoch!=InputCancelEpochs.FindRef(Handle)) continue;
+        if (!CanAcceptAbilityInput()) { ClearAbilityInput(); break; }
+        auto* Spec=FindAbilitySpecFromHandle(Handle);
+        const auto* Ability=Spec ? Cast<UMythicGameplayAbility>(Spec->Ability) : nullptr;
+        if (Ability && !Spec->IsActive() && !Attempted.Contains(Handle) && Ability->GetActivationPolicy()==EMythicAbilityActivationPolicy::WhileInputActive) TryActivateAbility(Handle);
     }
-}
-
-void UMythicAbilitySystemComponent::AbilityInputTagReleased(const FGameplayTag &InputTag) {
-    if (InputTag.IsValid()) {
-        UE_LOG(Myth, Log, TEXT("ASC::AbilityInputTagReleased: Tag=%s, ASC=%s"),
-               *InputTag.ToString(),
-               *GetName());
-
-        for (const FGameplayAbilitySpec &AbilitySpec : ActivatableAbilities.Items) {
-            if (AbilitySpec.Ability && (AbilitySpec.GetDynamicSpecSourceTags().HasTagExact(InputTag))) {
-                InputReleasedSpecHandles.AddUnique(AbilitySpec.Handle);
-                InputHeldSpecHandles.Remove(AbilitySpec.Handle);
-                UE_LOG(Myth, Log, TEXT("  -> Matched Ability: %s"), *GetNameSafe(AbilitySpec.Ability));
-            }
-        }
-    }
-    else {
-        UE_LOG(Myth, Warning, TEXT("ASC::AbilityInputTagReleased: InputTag is NOT VALID!"));
-    }
-}
-
-void UMythicAbilitySystemComponent::AbilityInputSpecPressed(
-    const FGameplayAbilitySpecHandle SpecHandle) {
-    if (SpecHandle.IsValid() && FindAbilitySpecFromHandle(SpecHandle)) {
-        InputPressedSpecHandles.AddUnique(SpecHandle);
-        InputHeldSpecHandles.AddUnique(SpecHandle);
-    }
-}
-
-void UMythicAbilitySystemComponent::AbilityInputSpecReleased(
-    const FGameplayAbilitySpecHandle SpecHandle) {
-    if (!SpecHandle.IsValid()) {
-        return;
-    }
-    if (FindAbilitySpecFromHandle(SpecHandle)) {
-        InputReleasedSpecHandles.AddUnique(SpecHandle);
-    }
-    InputHeldSpecHandles.Remove(SpecHandle);
-}
-
-void UMythicAbilitySystemComponent::ProcessAbilityInput(float DeltaTime, bool bGamePaused) {
-    if (HasMatchingGameplayTag(GAS_INPUT_BLOCKED)) {
-        ClearAbilityInput();
-        return;
-    }
-
-    static TArray<FGameplayAbilitySpecHandle> AbilitiesToActivate;
-    AbilitiesToActivate.Reset();
-
-    for (const FGameplayAbilitySpecHandle &SpecHandle : InputHeldSpecHandles) {
-        if (const FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(SpecHandle)) {
-            if (AbilitySpec->Ability && !AbilitySpec->IsActive()) {
-                const UMythicGameplayAbility *MythicAbilityCDO = Cast<UMythicGameplayAbility>(AbilitySpec->Ability);
-                if (MythicAbilityCDO) {
-                    UE_LOG(Myth, Log, TEXT("  -> Held ability %s, ActivationPolicy=%d (WhileInputActive=%d)"),
-                           *GetNameSafe(AbilitySpec->Ability),
-                           (int32)MythicAbilityCDO->GetActivationPolicy(),
-                           (int32)EMythicAbilityActivationPolicy::WhileInputActive);
-
-                    if (MythicAbilityCDO->GetActivationPolicy() == EMythicAbilityActivationPolicy::WhileInputActive) {
-                        AbilitiesToActivate.AddUnique(AbilitySpec->Handle);
-                    }
-                }
-            }
-        }
-    }
-
-    for (const FGameplayAbilitySpecHandle &SpecHandle : InputPressedSpecHandles) {
-        if (FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(SpecHandle)) {
-            if (AbilitySpec->Ability) {
-                AbilitySpec->InputPressed = true;
-
-                if (AbilitySpec->IsActive()) {
-                    UE_LOG(Myth, Log, TEXT("  -> Pressed ability %s is already ACTIVE, forwarding input"), *GetNameSafe(AbilitySpec->Ability));
-                    AbilitySpecInputPressed(*AbilitySpec);
-                }
-                else {
-                    const UMythicGameplayAbility *MythicAbilityCDO = Cast<UMythicGameplayAbility>(AbilitySpec->Ability);
-                    if (MythicAbilityCDO) {
-                        UE_LOG(Myth, Log, TEXT("  -> Pressed ability %s, ActivationPolicy=%d (OnInputTriggered=%d)"),
-                               *GetNameSafe(AbilitySpec->Ability),
-                               (int32)MythicAbilityCDO->GetActivationPolicy(),
-                               (int32)EMythicAbilityActivationPolicy::OnInputTriggered);
-
-                        if (MythicAbilityCDO->GetActivationPolicy() == EMythicAbilityActivationPolicy::OnInputTriggered) {
-                            AbilitiesToActivate.AddUnique(AbilitySpec->Handle);
-                        }
-                    }
-                    else {
-                        UE_LOG(Myth, Warning, TEXT("  -> Pressed ability %s is NOT a MythicGameplayAbility!"), *GetNameSafe(AbilitySpec->Ability));
-                    }
-                }
-            }
-        }
-    }
-
-    for (const FGameplayAbilitySpecHandle &AbilitySpecHandle : AbilitiesToActivate) {
-        if (FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(AbilitySpecHandle)) {
-            UE_LOG(Myth, Log, TEXT("  -> Attempting to activate ability %s"), *GetNameSafe(AbilitySpec->Ability));
-        }
-        bool bSuccess = TryActivateAbility(AbilitySpecHandle);
-        UE_LOG(Myth, Log, TEXT("  -> TryActivateAbility result: %s"), bSuccess ? TEXT("SUCCESS") : TEXT("FAILED"));
-    }
-
-    for (const FGameplayAbilitySpecHandle &SpecHandle : InputReleasedSpecHandles) {
-        if (FGameplayAbilitySpec *AbilitySpec = FindAbilitySpecFromHandle(SpecHandle)) {
-            if (AbilitySpec->Ability) {
-                AbilitySpec->InputPressed = false;
-
-                if (AbilitySpec->IsActive()) {
-                    AbilitySpecInputReleased(*AbilitySpec);
-                }
-            }
-        }
-    }
-
-    InputPressedSpecHandles.Reset();
-    InputReleasedSpecHandles.Reset();
 }
 
 void UMythicAbilitySystemComponent::ClearAbilityInput() {
-    InputPressedSpecHandles.Reset();
-    InputReleasedSpecHandles.Reset();
-    InputHeldSpecHandles.Reset();
+    if (bClearingAbilityInput) return;
+    TGuardValue<bool> Clearing(bClearingAbilityInput,true);
+    ++InputClearEpoch;
+    auto Handles=MoveTemp(InputHeldSpecHandles);
+    for (const auto& Edge:AbilityInputEdges) Handles.AddUnique(Edge.Handle);
+    for (auto Handle:ProcessingInputOwners) Handles.AddUnique(Handle);
+    // A placement preview can outlive the physical press. Its explicit interruption
+    // policy, rather than a held-key array, owns the continuing input-dependent work.
+    for (const auto& Spec:ActivatableAbilities.Items) {
+        const auto* Ability=Cast<UMythicGameplayAbility>(Spec.Ability);
+        if (Spec.IsActive() && Ability && Ability->ShouldCancelOnInputInterrupted()) Handles.AddUnique(Spec.Handle);
+    }
+    ProcessingInputOwners.Reset();
+    AbilityInputEdges.Reset(); InputHeldSpecHandles.Reset(); PressedInputOwners.Reset();
+    for (auto Handle:Handles) {
+        if (auto* Spec=FindAbilitySpecFromHandle(Handle)) Spec->InputPressed=false;
+        CancelActiveAbilityInput(Handle);
+    }
+}
+
+void UMythicAbilitySystemComponent::OnGiveAbility(FGameplayAbilitySpec& Spec) {
+    Super::OnGiveAbility(Spec);
+    OnAbilityProjectionChanged.Broadcast();
+}
+
+void UMythicAbilitySystemComponent::OnRemoveAbility(FGameplayAbilitySpec& Spec) {
+    InputCancelEpochs.Remove(Spec.Handle);
+    AbilityInputEdges.RemoveAll([Handle=Spec.Handle](const auto& Edge){ return Edge.Handle==Handle; });
+    InputHeldSpecHandles.Remove(Spec.Handle);
+    for (auto& Pair:PressedInputOwners) Pair.Value.Remove(Spec.Handle);
+    Spec.InputPressed=false;
+    Super::OnRemoveAbility(Spec);
+    OnAbilityProjectionChanged.Broadcast();
 }
 
 const TArray<UMythicAttributeSet *> &UMythicAbilitySystemComponent::GetAttributeSets() const {

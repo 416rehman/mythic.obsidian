@@ -1,4 +1,5 @@
 #include "Itemization/Affixes/MythicAffixCompiler.h"
+#include "GAS/Abilities/MythicAbilityActionTypes.h"
 
 #include "Itemization/Affixes/MythicAffixRng.h"
 #include "Itemization/Affixes/MythicItemizationDataRegistrySubsystem.h"
@@ -199,6 +200,7 @@ bool CompileDefinitionInternal(const FMythicAffixDefinitionHandle &Handle,
     CompiledDefinition.TargetStatPresentationRevision = Stat->PresentationRevision;
     CompiledDefinition.TargetCategoryPresentationRevision = Category->PresentationRevision;
     CompiledDefinition.ModifierOp = Definition->ModifierOp;
+    CompiledDefinition.Application=Definition->Application;
     CompiledDefinition.Quantization = Definition->Quantization;
     CompiledDefinition.ComparisonDirection = Stat->ComparisonDirection;
     CompiledDefinition.NeutralValue = Stat->NeutralValue;
@@ -294,6 +296,13 @@ void AddDefinitionHash(FMythicAffixCanonicalWriter &Gameplay,
     Gameplay.AddName(Definition.StackingGroup.GetTagName());
     Gameplay.AddUInt8(static_cast<uint8>(Definition.StackingRule));
     AddSortedTags(Gameplay, Definition.ConflictGroups);
+    // Preserve legacy hashes byte-for-byte when the new optional domain is unused.
+    if (Definition.Application.Scope!=EMythicAffixApplicationScope::Permanent || !Definition.Application.IsValid()) {
+        Gameplay.AddName(TEXT("ActionApplication.v1"));
+        Gameplay.AddUInt8(static_cast<uint8>(Definition.Application.Scope));
+        AddGameplayTagQuery(Gameplay,Definition.Application.ActionQuery); AddGameplayTagQuery(Gameplay,Definition.Application.AbilityQuery);
+        AddGameplayTagQuery(Gameplay,Definition.Application.SourceStateQuery); AddGameplayTagQuery(Gameplay,Definition.Application.ItemQuery);
+    }
     Presentation.AddPrimaryAssetId(Definition.DefinitionId);
     Presentation.AddInt32(Definition.PresentationRevision);
     Presentation.AddPrimaryAssetId(Definition.TargetStatId);
@@ -564,15 +573,17 @@ bool FMythicAffixCompiler::ValidateDefinitionAuthoring(
         && HasStableStringTableIdentity(Definition.DisplayNameTemplate)
         && (Definition.DescriptionTemplate.IsEmpty()
             || HasStableStringTableIdentity(Definition.DescriptionTemplate))
+        && (Definition.Application.Scope != EMythicAffixApplicationScope::Action || !Definition.DescriptionTemplate.IsEmpty())
         && Definition.TargetStat.IsValid() && Definition.Quantization.IsValid()
         && MythicAffix::IsSupportedModifierOp(Definition.ModifierOp)
-        && !Definition.TierProgressions.IsEmpty();
+        && !Definition.TierProgressions.IsEmpty() && Definition.Application.IsValid();
     const UEnum *StackingRuleEnum = StaticEnum<EMythicAffixStackingRule>();
     bValid &= StackingRuleEnum
         && StackingRuleEnum->IsValidEnumValue(static_cast<int64>(Definition.StackingRule));
     const UMythicStatDefinition *Stat = StatRegistry.FindStat(
         Definition.TargetStat.GetPrimaryAssetId());
     bValid &= Stat && Stat->bCanBeAffixTarget && Stat->Attribute.IsValid();
+    if (Stat && Definition.Application.Scope==EMythicAffixApplicationScope::Action) bValid &= FMythicAbilityActionSource::IsSupportedStat(Stat->Attribute);
     bValid &= Definition.StackingRule == EMythicAffixStackingRule::StackAll
         || Definition.GetEffectiveStackingGroup().IsValid();
     if (Stat && (Definition.StackingRule == EMythicAffixStackingRule::HighestPerItem

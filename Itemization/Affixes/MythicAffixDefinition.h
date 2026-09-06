@@ -131,6 +131,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (DisplayName = "Operation"))
     TEnumAsByte<EGameplayModOp::Type> ModifierOp = EGameplayModOp::AddBase;
 
+    /** Action bonuses are evaluated from equipped sources at cast commit without writing live GAS bases. */
+    UPROPERTY(EditAnywhere,BlueprintReadOnly) FMythicAffixApplicationRule Application;
+
     /** Rounding applied once when rolled so save, network, tooltip, stat sheet, and gameplay values stay identical. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (DisplayName = "Value Rounding"))
     FMythicAffixQuantization Quantization;

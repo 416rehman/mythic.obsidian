@@ -1,4 +1,5 @@
 #include "ItemDefinition.h"
+#include "Itemization/Inventory/Fragments/Actionable/MythicWeaponActionContract.h"
 #include "Fragments/ItemFragment.h"
 #include "Itemization/MythicTags_Inventory.h"
 #include "Mythic/Mythic.h"
@@ -64,7 +65,8 @@ void UItemDefinition::Weapon() {
         return;
     }
     Modify();
-    EnsureFragment<UAttackFragment>();
+    if (!UAttackFragment::FindPrimaryOnDefinition(this))
+        Fragments.Add(NewObject<UAttackFragment>(this,UAttackFragment::StaticClass(),NAME_None,RF_Transactional));
     EnsureFragment<UAffixesFragment>();
     PostEditChange();
     MarkPackageDirty();
@@ -73,7 +75,8 @@ void UItemDefinition::Weapon() {
 void UItemDefinition::Tool() {
     Modify();
     ItemType = ITEMIZATION_TYPE_EQUIPMENT_TOOL;
-    EnsureFragment<UAttackFragment>();
+    if (!UAttackFragment::FindPrimaryOnDefinition(this))
+        Fragments.Add(NewObject<UAttackFragment>(this,UAttackFragment::StaticClass(),NAME_None,RF_Transactional));
     PostEditChange();
     MarkPackageDirty();
 }
@@ -170,6 +173,10 @@ void UItemDefinition::PreSave(FObjectPreSaveContext SaveContext) {
 EDataValidationResult UItemDefinition::IsDataValid(FDataValidationContext &Context) const {
     EDataValidationResult Result = Super::IsDataValid(Context);
 
+    FText WeaponActionError;
+    if (!MythicWeaponAction::ValidateDefinition(this,&WeaponActionError)) {
+        Context.AddError(WeaponActionError); Result=EDataValidationResult::Invalid;
+    }
     int32 AttackFragmentCount = 0;
     int32 AffixesFragmentCount = 0;
 
@@ -196,7 +203,7 @@ EDataValidationResult UItemDefinition::IsDataValid(FDataValidationContext &Conte
                     : FragmentError));
             Result = EDataValidationResult::Invalid;
         }
-        AttackFragmentCount += Cast<UAttackFragment>(Fragments[Index]) ? 1 : 0;
+        if (const auto* Attack=Cast<UAttackFragment>(Fragments[Index]); Attack && !Attack->IsSecondaryAttack()) ++AttackFragmentCount;
         AffixesFragmentCount += Cast<UAffixesFragment>(Fragments[Index]) ? 1 : 0;
     }
 

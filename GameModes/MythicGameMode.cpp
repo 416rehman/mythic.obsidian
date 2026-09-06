@@ -1,6 +1,8 @@
 
 
 #include "MythicGameMode.h"
+#include "Player/MythicSessionPartySubsystem.h"
+#include "Player/MythicPlayerController.h"
 
 #include "Mythic.h"
 #include "Engine/World.h"
@@ -13,6 +15,7 @@
 #include "TimerManager.h"
 #include "AbilitySystemInterface.h"
 #include "AbilitySystemComponent.h"
+#include "GAS/MythicAbilitySystemComponent.h"
 #include "EngineUtils.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Itemization/Loot/MythicWorldItem.h"
@@ -104,6 +107,10 @@ void AMythicGameMode::HandleRespawnTimer(AController *Controller) {
 }
 
 void AMythicGameMode::Logout(AController *Exiting) {
+    if (HasAuthority() && GetWorld()) if (auto* Parties=GetWorld()->GetSubsystem<UMythicSessionPartySubsystem>())
+        Parties->UnregisterController(Cast<AMythicPlayerController>(Exiting));
+    if (HasAuthority() && Exiting) if (auto* PS=Cast<AMythicPlayerState>(Exiting->PlayerState))
+        if (auto* ASC=Cast<UMythicAbilitySystemComponent>(PS->GetAbilitySystemComponent())) ASC->CancelAbilityWindows();
     if (FTimerHandle *Existing = RespawnTimers.Find(Exiting)) {
         GetWorldTimerManager().ClearTimer(*Existing);
         RespawnTimers.Remove(Exiting);
@@ -140,6 +147,9 @@ void AMythicGameMode::OnPostLogin(AController *NewPlayer) {
     if (!HasAuthority() || !NewPlayer || !NewPlayer->PlayerState) {
         return;
     }
+    // Register before starting the asynchronous load; persistent-key readiness reconciles at successful load completion.
+    if (auto* Parties=GetWorld()->GetSubsystem<UMythicSessionPartySubsystem>())
+        Parties->RegisterController(Cast<AMythicPlayerController>(NewPlayer));
     if (UMythicSaveGameSubsystem *SaveSys = GetSaveSubsystem()) {
         const FString Slot = GetCharacterSlotForPlayer(NewPlayer->PlayerState);
         if (!UGameplayStatics::DoesSaveGameExist(Slot, 0)) {
@@ -160,12 +170,21 @@ void AMythicGameMode::OnPostLogin(AController *NewPlayer) {
     }
 }
 
+void AMythicGameMode::HandleSeamlessTravelPlayer(AController*& Controller) {
+    Super::HandleSeamlessTravelPlayer(Controller);
+    if (HasAuthority() && GetWorld()) if (auto* Parties=GetWorld()->GetSubsystem<UMythicSessionPartySubsystem>())
+        Parties->RegisterController(Cast<AMythicPlayerController>(Controller));
+}
+
 void AMythicGameMode::BeginPlay() {
     Super::BeginPlay();
 
     if (!HasAuthority()) {
         return;
     }
+
+    if (auto* Parties=GetWorld()->GetSubsystem<UMythicSessionPartySubsystem>())
+        for (auto It=GetWorld()->GetPlayerControllerIterator();It;++It) Parties->RegisterController(Cast<AMythicPlayerController>(It->Get()));
 
     if (UMythicSaveGameSubsystem::TryResolveAuthorityWorldSlot(
             AuthorityWorldSaveSlot)) {

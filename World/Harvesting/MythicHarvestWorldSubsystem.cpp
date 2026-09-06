@@ -1604,7 +1604,7 @@ bool UMythicHarvestWorldSubsystem::ResolveEquippedHarvestTool(
             continue;
         }
         for (const FMythicInventorySlotEntry &Slot : Inventory->GetAllSlots()) {
-            if (!Slot.IsGearSlot()) {
+            if (!Slot.AppliesEquipmentEffects()) {
                 continue;
             }
             UMythicItemInstance *Item = Slot.SlottedItemInstance.Get();

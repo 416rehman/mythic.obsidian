@@ -406,7 +406,7 @@ void UMythicGA_Skill::ApplySelfEffect() {
     K2_ApplyGameplayEffectSpecToOwner(SpecHandle);
 }
 
-void UMythicGA_Skill::ApplyStatus(const TArray<FHitResult> &Hits, AActor *Instigator, const FGameplayTag &Status, float Chance) const {
+void UMythicGA_Skill::ApplyStatus(const TArray<FHitResult> &Hits, AActor *Instigator, const FGameplayTag &Status, float Chance, float DurationOverride) const {
     for (const FHitResult &Hit : Hits) {
         AActor *Target = Hit.GetActor();
         if (!Target) {
@@ -421,7 +421,7 @@ void UMythicGA_Skill::ApplyStatus(const TArray<FHitResult> &Hits, AActor *Instig
         if (!MythicCombat::RollSucceeds(Survives, FMath::FRand())) {
             continue;
         }
-        UMythicStatusRegistry::ApplyStatusToActor(Target, Status, Instigator);
+        UMythicStatusRegistry::ApplyStatusToActor(Target, Status, Instigator, DurationOverride);
     }
 }
 

@@ -3,8 +3,15 @@
 #if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
 
 #include "AI/NPCs/MythicNPCCharacter.h"
+#include "AI/Creatures/MythicCreatureCharacter.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/WorldSettings.h"
+#include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
+#include "Tests/Progression/MythicAbilityWorldFixture.h"
+#include "UObject/StrongObjectPtr.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
 #include "UObject/UnrealType.h"
@@ -90,6 +97,173 @@ bool RoundTripNetStruct(const StructType &Source, StructType &OutResult) {
 }
 
 } // namespace
+
+namespace {
+class FPoolStartupCommand final : public IAutomationLatentCommand {
+public:
+    FPoolStartupCommand(FAutomationTestBase* InTest, UGameInstance* InGame,
+        TArray<TWeakObjectPtr<AMythicNPCCharacter>> InWarmed,
+        AMythicNPCCharacter* InDirect, AMythicNPCCharacter* InAuthored,
+        AMythicNPCCharacter* InPrepared, AMythicNPCCharacter* InActive,
+        FMythicEntityPresentationInstance InActiveInstance)
+        : Test(InTest), Game(InGame), Warmed(MoveTemp(InWarmed)), Direct(InDirect),
+          Authored(InAuthored), Prepared(InPrepared), Active(InActive),
+          ActiveInstance(InActiveInstance),
+          Deadline(FPlatformTime::Seconds() + 15.0) {}
+
+    ~FPoolStartupCommand() override { DestroyOwnedAbilityTestWorld(Game.Get()); }
+
+    bool Update() override {
+        if (FPlatformTime::Seconds() > Deadline) {
+            Test->AddError(TEXT("pool startup fixture exceeded its 15-second frame deadline"));
+            return true;
+        }
+        if (LastFrame == GFrameCounter) return false;
+        LastFrame = GFrameCounter;
+        UWorld* World = Game->GetWorld();
+        World->Tick(LEVELTICK_All, 1.0f / 60.0f);
+        if (++Frames < 2) return false;
+        Frames = 0;
+
+        for (const auto& Weak : Warmed) CheckParked(Weak.Get(), true);
+        if (Stage == 0) {
+            Test->TestTrue(TEXT("ordinary runtime spawn still activates through its real deferred timer"),
+                Presentation(Direct.Get())->GetPublicIdentitySnapshot().IsActive()
+                && Presentation(Direct.Get())->GetAuthorityEntityId().GetDomain() == EMythicEntityDomain::Runtime);
+            Test->TestTrue(TEXT("ordinary placed spawn retains its authored identity through BeginPlay"),
+                Presentation(Authored.Get())->GetPublicIdentitySnapshot().IsActive()
+                && Presentation(Authored.Get())->GetAuthorityEntityId().GetDomain() == EMythicEntityDomain::AuthoredWorld);
+            Test->TestTrue(TEXT("canonical activation before BeginPlay stays active and collidable"),
+                Presentation(Active.Get())->GetPublicIdentitySnapshot().IsActive()
+                && Presentation(Active.Get())->GetPresentationInstance() == ActiveInstance
+                && Active->GetActorEnableCollision() && !Active->IsHidden()
+                && Active->GetCharacterMovement()->MovementMode != MOVE_None);
+            CheckParked(Prepared.Get(), false);
+
+            // Spawn into a begun world so a real fallback is already queued, then
+            // claim the body without an identity. Wake must not re-enable fallback.
+            FActorSpawnParameters Spawn;
+            Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+            LatePrepared = World->SpawnActor<AMythicNPCCharacter>(FVector(6000, 0, 500), FRotator::ZeroRotator, Spawn);
+            if (!Test->TestNotNull(TEXT("post-BeginPlay actor spawns"), LatePrepared.Get())) return true;
+            Test->TestTrue(TEXT("late spawn really queued its BeginPlay fallback"), LatePrepared->HasActorBegunPlay());
+            LatePrepared->PrepareForEmbodiment();
+            auto* LatePooled = World->SpawnActor<AMythicNPCCharacter>(FVector(8000, 0, 500), FRotator::ZeroRotator, Spawn);
+            if (!Test->TestNotNull(TEXT("post-BeginPlay pool return control spawns"), LatePooled)) return true;
+            Test->TestTrue(TEXT("late pool control has already begun play"), LatePooled->HasActorBegunPlay());
+            LatePooled->SleepToPool();
+            Warmed.Add(LatePooled);
+            Direct->SleepToPool();
+            Warmed.Add(Direct.Get());
+            Prepared->SleepToPool();
+            Prepared->WakeFromPool();
+            ++Stage;
+            return false;
+        }
+        if (Stage == 1) {
+            CheckParked(Prepared.Get(), false);
+            CheckParked(LatePrepared.Get(), false);
+            FMythicPublicIdentitySnapshot Identity;
+            Identity.PublicKindTag = MythicEntityPresentationTags::EntityKindHumanoid;
+            ReuseId = MakeEntityId(EMythicEntityDomain::LivingWorld, 900);
+            Test->TestTrue(TEXT("managed body can receive its intended canonical identity after waiting"),
+                Presentation(Prepared.Get())->AuthorityPrepareEmbodiment(ReuseId, Identity));
+            Test->TestTrue(TEXT("managed preparation activates through the explicit authority path"), Prepared->ActivatePreparedEmbodiment());
+            ReuseInstance = Presentation(Prepared.Get())->GetPresentationInstance();
+            ++Stage;
+            return false;
+        }
+        if (Stage == 2) {
+            Test->TestTrue(TEXT("managed activation survives later frames without a fallback replacement"),
+                Presentation(Prepared.Get())->GetAuthorityEntityId() == ReuseId
+                && Presentation(Prepared.Get())->GetPresentationInstance() == ReuseInstance
+                && Presentation(Prepared.Get())->GetPublicIdentitySnapshot().IsActive()
+                && Prepared->GetActorEnableCollision() && Prepared->LifeComponent->IsInitialized());
+            Prepared->SleepToPool();
+            Warmed.Add(Prepared.Get());
+            ++Stage;
+            return false;
+        }
+        Test->TestFalse(TEXT("returned embodiment releases its prior public instance"),
+            Presentation(Prepared.Get())->GetPresentationInstance().IsValid());
+        return true;
+    }
+
+private:
+    static UMythicEntityPresentationComponent* Presentation(AMythicNPCCharacter* NPC) {
+        return NPC->GetEntityPresentationComponent_Implementation();
+    }
+    void CheckParked(AMythicNPCCharacter* NPC, bool bPooled) {
+        if (!Test->TestNotNull(TEXT("owned inactive body still exists"), NPC)) return;
+        Test->TestTrue(TEXT("inactive body stays hidden, intangible and movement-parked across real frames"),
+            NPC->IsHidden() && !NPC->GetActorEnableCollision() && !NPC->IsActorTickEnabled()
+            && NPC->GetCharacterMovement()->MovementMode == MOVE_None
+            && !NPC->GetCharacterMovement()->IsComponentTickEnabled());
+        Test->TestFalse(TEXT("inactive body cannot invent a direct identity"), Presentation(NPC)->GetAuthorityEntityId().IsValid());
+        Test->TestFalse(TEXT("inactive body cannot publish an active presentation"), Presentation(NPC)->GetPublicIdentitySnapshot().IsActive());
+        if (bPooled) Test->TestFalse(TEXT("BeginPlay cannot rebind a pooled body's life component"), NPC->LifeComponent->IsInitialized());
+    }
+
+    FAutomationTestBase* Test;
+    TStrongObjectPtr<UGameInstance> Game;
+    TArray<TWeakObjectPtr<AMythicNPCCharacter>> Warmed;
+    TWeakObjectPtr<AMythicNPCCharacter> Direct, Authored, Prepared, Active, LatePrepared;
+    FMythicEntityPresentationInstance ActiveInstance, ReuseInstance;
+    FMythicEntityId ReuseId;
+    uint64 LastFrame = MAX_uint64;
+    double Deadline;
+    int32 Frames = 0, Stage = 0;
+};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicPoolStartupPresentationTest,
+    "Mythic.World.Entity.Identity.PooledStartupPresentation",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FMythicPoolStartupPresentationTest::RunTest(const FString&) {
+    auto* Game = NewObject<UGameInstance>(GEngine);
+    Game->InitializeStandalone();
+    UWorld* World = Game->GetWorld();
+    TArray<TWeakObjectPtr<AMythicNPCCharacter>> Warmed;
+    // Include actual Living World warm-pool bodies when enabled, plus explicit
+    // humanoid/creature warmups so the regression does not depend on that setting.
+    for (TActorIterator<AMythicNPCCharacter> It(World); It; ++It) Warmed.Add(*It);
+    FActorSpawnParameters Spawn;
+    Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    auto* WarmNPC = World->SpawnActor<AMythicNPCCharacter>(FVector(1000, 0, 500), FRotator::ZeroRotator, Spawn);
+    auto* WarmCreature = World->SpawnActor<AMythicCreatureCharacter>(FVector(2000, 0, 500), FRotator::ZeroRotator, Spawn);
+    auto* Direct = World->SpawnActor<AMythicNPCCharacter>(FVector(3000, 0, 500), FRotator::ZeroRotator, Spawn);
+    auto* Authored = World->SpawnActor<AMythicNPCCharacter>(FVector(4000, 0, 500), FRotator::ZeroRotator, Spawn);
+    auto* Prepared = World->SpawnActor<AMythicNPCCharacter>(FVector(5000, 0, 500), FRotator::ZeroRotator, Spawn);
+    auto* Active = World->SpawnActor<AMythicNPCCharacter>(FVector(7000, 0, 500), FRotator::ZeroRotator, Spawn);
+    if (!WarmNPC || !WarmCreature || !Direct || !Authored || !Prepared || !Active) {
+        AddError(TEXT("pool startup fixture could not spawn its owned actors"));
+        DestroyOwnedAbilityTestWorld(Game);
+        return false;
+    }
+    FMythicDirectEntityPresentationTestAccess::SetAuthoredIdentity(*Authored, FGuid::NewGuid());
+    WarmNPC->SleepToPool(); WarmCreature->SleepToPool();
+    Warmed.Add(WarmNPC); Warmed.Add(WarmCreature);
+    World->InitializeActorsForPlay(FURL());
+    TestTrue(TEXT("startup routes real actor initialization while still before BeginPlay"),
+        World->AreActorsInitialized() && !World->HasBegunPlay());
+    Prepared->PrepareForEmbodiment();
+    Active->PrepareForEmbodiment();
+    FMythicPublicIdentitySnapshot Identity;
+    Identity.PublicKindTag = MythicEntityPresentationTags::EntityKindHumanoid;
+    if (!Active->GetEntityPresentationComponent_Implementation()->AuthorityPrepareEmbodiment(
+            MakeEntityId(EMythicEntityDomain::LivingWorld, 901), Identity)
+        || !Active->ActivatePreparedEmbodiment()) {
+        AddError(TEXT("pool startup fixture could not activate its pre-BeginPlay control"));
+        DestroyOwnedAbilityTestWorld(Game);
+        return false;
+    }
+    const auto ActiveInstance = Active->GetEntityPresentationComponent_Implementation()->GetPresentationInstance();
+    World->GetWorldSettings()->NotifyBeginPlay();
+    TestTrue(TEXT("pool startup test exercises actual actor BeginPlay"), World->HasBegunPlay() && WarmNPC->HasActorBegunPlay());
+    ADD_LATENT_AUTOMATION_COMMAND(FPoolStartupCommand(this, Game, MoveTemp(Warmed), Direct, Authored, Prepared, Active, ActiveInstance));
+    return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMythicDirectEntityPresentationTest,

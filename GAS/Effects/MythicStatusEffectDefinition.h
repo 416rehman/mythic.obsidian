@@ -102,6 +102,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     TSubclassOf<UGameplayEffect> EffectToApply;
 
+    /** Explicit permission to consume one entire finite AggregateBySource effect. Never permission to reconstruct an individual historical stack. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Removal")
+    bool bAllowSourceGroupRemoval = false;
+
     /** Attribute that accumulates buildup until the effective threshold applies this status. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Status|Effect")
     FGameplayAttribute BuildupAttribute;

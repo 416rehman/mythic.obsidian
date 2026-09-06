@@ -53,6 +53,15 @@ bool FMythicInventorySlotDomainContractTest::RunTest(
     TestTrue(TEXT("the equipment domain is the one gear predicate"),
              Equipment.IsGearSlot());
 
+    TestTrue(TEXT("legacy equipment defaults retain worn effects"),Equipment.AppliesEquipmentEffects());
+    Equipment.bAppliesEquipmentEffects=false;
+    TestTrue(TEXT("passive loadout storage retains placement/UI classification"),Equipment.IsGearSlot());
+    TestFalse(TEXT("passive loadout storage supplies no worn effects"),Equipment.AppliesEquipmentEffects());
+    Carried.bAppliesEquipmentEffects=true;
+    TestFalse(TEXT("carried storage cannot opt into worn effects"),Carried.AppliesEquipmentEffects());
+    TestNull(TEXT("save slots cannot override current profile effect policy"),
+             FindFProperty<FProperty>(FSerializedSlotData::StaticStruct(),TEXT("bAppliesEquipmentEffects")));
+
     TestNull(TEXT("legacy boolean profile authority is removed"),
              FindFProperty<FProperty>(FInventorySlotGroup::StaticStruct(),
                                       TEXT("bIsEquipmentGroup")));

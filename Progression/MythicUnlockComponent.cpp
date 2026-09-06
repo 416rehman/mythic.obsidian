@@ -62,6 +62,7 @@ void UMythicUnlockComponent::BeginPlay() {
         Achievements->OnAchievementUnlocked.RemoveDynamic(this, &UMythicUnlockComponent::HandleAchievementUnlocked);
         Achievements->OnAchievementUnlocked.AddDynamic(this, &UMythicUnlockComponent::HandleAchievementUnlocked);
     }
+    EnqueueAndDrain(FGameplayTag());
 }
 
 void UMythicUnlockComponent::EndPlay(const EEndPlayReason::Type EndPlayReason) {
@@ -183,25 +184,39 @@ bool UMythicUnlockComponent::EvaluatePass() {
     TArray<int32> Fire;
     FMythicUnlockEngine::CollectNewlySatisfied(RulePreconditions, Owned, AppliedRuleIndices, Fire);
 
+    bool bAppliedAny = false;
     for (int32 Idx : Fire) {
         AppliedRuleIndices.Add(Idx);
         UMythicUnlockRule *Rule = ResolvedRuleSet->Rules.IsValidIndex(Idx) ? ResolvedRuleSet->Rules[Idx] : nullptr;
         if (!Rule) {
+            AppliedRuleIndices.Remove(Idx);
             continue;
         }
-        ApplyRule(*Rule);
+        if (!ApplyRule(*Rule)) { AppliedRuleIndices.Remove(Idx); continue; }
+        bAppliedAny = true;
         const FGameplayTag Key = RuleKey(*Rule);
         if (Key.IsValid()) {
             AppliedUnlockRules.AddUnique(Key);
         }
     }
-    return Fire.Num() > 0;
+    return bAppliedAny;
 }
 
-void UMythicUnlockComponent::ApplyRule(const UMythicUnlockRule &Rule) {
+bool UMythicUnlockComponent::ApplyRule(const UMythicUnlockRule &Rule) {
+    const AMythicPlayerState* OwnerPS = Cast<AMythicPlayerState>(GetOwner());
+    if (!OwnerPS) return false;
+    if ((Rule.Effect == EMythicUnlockEffect::GrantSkillSlot || Rule.Effect == EMythicUnlockEffect::GrantSkillModifierSlot) && !OwnerPS->GetSkillComponent()) return false;
+    if (Rule.Effect == EMythicUnlockEffect::GrantPerkSlot && !OwnerPS->GetRuneComponent()) return false;
+    if ((Rule.Effect == EMythicUnlockEffect::UnlockSkill || Rule.Effect == EMythicUnlockEffect::UnlockPerk) && !Rule.EffectPayloadTag.IsValid()) return false;
+    if (!bIsRestoring && RewardIsSet(Rule.OptionalReward)) {
+        APlayerController* PC = ResolvePC();
+        if (!PC || !Rule.OptionalReward.Give(PC)) return false;
+    }
     switch (Rule.Effect) {
         case EMythicUnlockEffect::UnlockSkill:
         case EMythicUnlockEffect::UnlockPerk:
+            GrantedUnlockTags.AddTag(Rule.EffectPayloadTag);
+            if (UMythicSkillComponent* Skills = OwnerPS->GetSkillComponent()) Skills->HandlePermanentTag(Rule.EffectPayloadTag);
             break;
         case EMythicUnlockEffect::GrantSkillSlot:
             if (const AMythicPlayerState *PS = Cast<AMythicPlayerState>(GetOwner())) {
@@ -242,11 +257,7 @@ void UMythicUnlockComponent::ApplyRule(const UMythicUnlockRule &Rule) {
             break;
     }
 
-    if (!bIsRestoring && RewardIsSet(Rule.OptionalReward)) {
-        if (APlayerController *PC = ResolvePC()) {
-            Rule.OptionalReward.Give(PC);
-        }
-    }
+    return true;
 }
 
 
@@ -311,6 +322,9 @@ void UMythicUnlockComponent::RestoreUnlockState(const FGameplayTagContainer &Sav
     for (const FGameplayTag &Id : AppliedUnlockRules) {
         if (const int32 *Idx = RuleIndexById.Find(Id)) {
             AppliedRuleIndices.Add(*Idx);
+            const UMythicUnlockRule* Rule = ResolvedRuleSet && ResolvedRuleSet->Rules.IsValidIndex(*Idx) ? ResolvedRuleSet->Rules[*Idx] : nullptr;
+            if (Rule && (Rule->Effect == EMythicUnlockEffect::UnlockSkill || Rule->Effect == EMythicUnlockEffect::UnlockPerk) && Rule->EffectPayloadTag.IsValid())
+                GrantedUnlockTags.AddTag(Rule->EffectPayloadTag);
         }
     }
 }

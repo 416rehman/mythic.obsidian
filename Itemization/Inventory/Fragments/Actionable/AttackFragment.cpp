@@ -1,6 +1,8 @@
 
 
 #include "AttackFragment.h"
+#include "WeaponSecondaryAttackFragment.h"
+#include "MythicWeaponActionContract.h"
 
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimNotifyQueue.h"
@@ -13,11 +15,28 @@
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Input/MythicTags_Input.h"
 
+UAttackFragment::UAttackFragment() { InputTag=INPUT_ACTION_ATTACK; }
+bool UAttackFragment::IsSecondaryAttack() const { return IsA<UWeaponSecondaryAttackFragment>(); }
+FGameplayTag UAttackFragment::GetCanonicalInputTag() const { return IsSecondaryAttack()?INPUT_ACTION_ATTACK_ALT:INPUT_ACTION_ATTACK; }
+const UAttackFragment* UAttackFragment::FindPrimaryOnItem(const UMythicItemInstance* Item) {
+    const UAttackFragment* Found=nullptr;
+    if (Item) for (const auto& Fragment:Item->GetFragmentsView()) if (const auto* Attack=Cast<UAttackFragment>(Fragment); Attack && !Attack->IsSecondaryAttack()) {
+        if (Found) return nullptr; Found=Attack;
+    }
+    return Found;
+}
+const UAttackFragment* UAttackFragment::FindPrimaryOnDefinition(const UItemDefinition* Definition) {
+    const UAttackFragment* Found=nullptr;
+    if (Definition) for (const auto& Fragment:Definition->Fragments) if (const auto* Attack=Cast<UAttackFragment>(Fragment); Attack && !Attack->IsSecondaryAttack()) {
+        if (Found) return nullptr; Found=Attack;
+    }
+    return Found;
+}
 #if WITH_EDITOR
 bool UAttackFragment::IsValidFragment(FText &OutErrorMessage) const {
-    if (!InputTag.MatchesTagExact(INPUT_ACTION_ATTACK)) {
+    if (!InputTag.MatchesTagExact(GetCanonicalInputTag())) {
         OutErrorMessage = FText::FromString(
-            "AttackFragment: InputTag must be the canonical Input.Action.Attack; exact readied-source routing owns activation");
+            "AttackFragment: InputTag must match its canonical primary Attack or secondary AttackAlt role");
         return false;
     }
 
@@ -405,6 +424,8 @@ bool UAttackFragment::GetRuntimeAuthorizedHitSamples(
 
 void UAttackFragment::OnItemActivated(UMythicItemInstance *ItemInstance) {
     Super::OnItemActivated(ItemInstance);
+    if (!MythicWeaponAction::MatchesDefinition(this)) return;
+    InputTag=GetCanonicalInputTag();
 
     UE_LOG(Myth, Log, TEXT("UAttackFragment::OnItemActivated: Fragment=%s, Item=%s, InputTag=%s"),
            *GetName(),
@@ -466,6 +487,7 @@ void UAttackFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
     FAttackRuntimeServerOnlyData &Runtime = AttackRuntimeServerOnlyData;
     UMythicAbilitySystemComponent *ASC = Runtime.ASC.Get();
     if (ASC && Runtime.AbilityHandle.IsValid()) {
+        ASC->CancelAbilityHandle(Runtime.AbilityHandle);
         ASC->ClearAbility(Runtime.AbilityHandle);
         UE_LOG(Myth, Log, TEXT("  -> Cleared ability"));
     }
@@ -480,7 +502,7 @@ void UAttackFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
 
 bool UAttackFragment::CanBeStackedWith(const UItemFragment *Other) const {
     auto OtherFragment = Cast<UAttackFragment>(Other);
-    if (!OtherFragment) {
+    if (!OtherFragment || GetClass()!=OtherFragment->GetClass() || IsSecondaryAttack()!=OtherFragment->IsSecondaryAttack()) {
         return false;
     }
 

@@ -79,6 +79,7 @@ struct MYTHIC_API FCompiledAffixDefinition {
     int32 TargetStatPresentationRevision = 1;
     int32 TargetCategoryPresentationRevision = 1;
     EGameplayModOp::Type ModifierOp = EGameplayModOp::AddBase;
+    FMythicAffixApplicationRule Application;
     FMythicAffixQuantization Quantization;
     EMythicStatComparisonDirection ComparisonDirection = EMythicStatComparisonDirection::HigherIsBetter;
     float NeutralValue = 0.0f;

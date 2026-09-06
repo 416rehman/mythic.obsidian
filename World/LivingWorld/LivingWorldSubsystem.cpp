@@ -167,6 +167,9 @@ AMythicNPCCharacter *UMythicLivingWorldSubsystem::AcquireEmbodiedActor(UClass *A
 
     FActorSpawnParameters SpawnInfo;
     SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    // Only these runtime embodiments opt out of map actor loading; authored NPCs
+    // retain their class defaults. Apply before construction/network initialization.
+    SpawnInfo.CustomPreSpawnInitialization = [](AActor* Actor) { Actor->bNetLoadOnClient = false; };
     AMythicNPCCharacter *Spawned =
         World->SpawnActor<AMythicNPCCharacter>(ActorClass, Loc, Rot, SpawnInfo);
     if (Spawned) {
@@ -214,6 +217,7 @@ void UMythicLivingWorldSubsystem::WarmEmbodimentPool(UClass *ActorClass, int32 C
 
     FActorSpawnParameters SpawnInfo;
     SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    SpawnInfo.CustomPreSpawnInitialization = [](AActor* Actor) { Actor->bNetLoadOnClient = false; };
 
     for (int32 i = Bucket.Num(); i < Target; ++i) {
         AMythicNPCCharacter *Warmed = World->SpawnActor<AMythicNPCCharacter>(ActorClass, FVector::ZeroVector, FRotator::ZeroRotator, SpawnInfo);

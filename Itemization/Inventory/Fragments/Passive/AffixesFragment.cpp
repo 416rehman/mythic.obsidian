@@ -145,7 +145,7 @@ bool UAffixesFragment::RerollUnlockedAffixes(int32 ItemLevel) {
     const bool bEquipped = Inventory
         && Inventory->GetSlotEntry(OwningItem->GetSlot(), Slot)
         && Slot.SlottedItemInstance == OwningItem
-        && Slot.IsGearSlot();
+        && Slot.AppliesEquipmentEffects();
     if (bEquipped
         && !Inventory->ReconcileEquippedAffixSnapshotMutationTransactional(OwningItem, ProposedSnapshots)) {
         return false;

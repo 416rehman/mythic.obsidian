@@ -33,6 +33,9 @@ public:
 
     void RestoreUnlockedAchievements(const FGameplayTagContainer &Saved);
 
+    /** Once all saved rewards and ledgers are restored, catch newly configured deeds already earned by this character. */
+    void ReconcileSatisfiedAchievements();
+
     void SetRestoring(bool bInRestoring) { bIsRestoring = bInRestoring; }
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const override;

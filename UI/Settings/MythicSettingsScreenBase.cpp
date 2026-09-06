@@ -1,5 +1,12 @@
 
 #include "UI/Settings/MythicSettingsScreenBase.h"
+#include "UI/Controls/MythicControlsPage.h"
+#include "Input/MythicControlsComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "Engine/LocalPlayer.h"
+#include "Input/CommonUIActionRouterBase.h"
+#include "Input/CommonUIInputTypes.h"
+#include "UI/Widgets/MythicInputGlyph.h"
 
 #include "Groups/CommonButtonGroupBase.h"
 #include "InputAction.h"
@@ -9,6 +16,7 @@
 #include "CommonTextBlock.h"
 #include "ICommonInputModule.h"
 #include "Components/PanelWidget.h"
+#include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/HorizontalBoxSlot.h"
@@ -34,6 +42,7 @@ void UMythicSettingsScreenBase::HandleRestoreDefaultsAction() {
 }
 
 void UMythicSettingsScreenBase::HandleBackAction() {
+    if (TryHandleNestedBackAction()) return;
     DeactivateWidget();
 }
 
@@ -48,13 +57,25 @@ TArray<FMythicSettingCategory> UMythicSettingsScreenBase::GetCategories() const 
 
 void UMythicSettingsScreenBase::NativeOnInitialized() {
     Super::NativeOnInitialized();
+    // Resolve the scroll host through the bound content instead of a designer widget name.
+    int32 ParentDepth=0;
+    for (UWidget* Parent=RowList; Parent && ParentDepth++<32; Parent=Parent->GetParent()) {
+        if (auto* Scroll=Cast<UScrollBox>(Parent)) {
+            // SScrollBox observes actual descendant focus without assigning focus itself.
+            Scroll->SetScrollWhenFocusChanges(EScrollWhenFocusChanges::InstantScroll);
+            Scroll->SetNavigationDestination(EDescendantScrollDestination::IntoView);
+            break;
+        }
+    }
     BuildScreen();
 }
 
 void UMythicSettingsScreenBase::NativeOnActivated() {
+    bLeavingSettings=false;
     // Built before Super, because activation drives the first focus pass and a screen whose rows do not
     // exist yet focuses nothing and never gets asked again.
     BuildScreen();
+    ApplyCategoryVisibility();
     Super::NativeOnActivated();
 
     // This widget instance can be popped and pushed repeatedly without being destroyed. Activation owns
@@ -67,6 +88,7 @@ void UMythicSettingsScreenBase::NativeOnActivated() {
     // The UI context has to be live before the bar looks, or Enhanced Input reports no keys for these
     // actions and the bar filters both prompts out.
     AddUIInputContext();
+    BindCategoryActions();
 
     if (UInputAction *Apply = ApplyInputAction.LoadSynchronous()) {
         FInputActionExecutedDelegate OnApply;
@@ -109,6 +131,7 @@ void UMythicSettingsScreenBase::BuildScreen() {
         return;
     }
     bScreenBuilt = true;
+    BuildCategoryHints();
 
     const TArray<FMythicSettingCategory> Cats = GetCategories();
     for (int32 CatIndex = 0; CatIndex < Cats.Num(); ++CatIndex) {
@@ -142,9 +165,20 @@ void UMythicSettingsScreenBase::BuildScreen() {
         RowList->AddChild(Container);
         CategoryContainers.Add(Container);
 
+        if (Cats[CatIndex].Id==FGameplayTag::RequestGameplayTag(TEXT("Settings.Category.Controls"))) {
+            ControlsCategory=CatIndex;
+            ControlsPage=CreateWidget<UMythicControlsPage>(GetOwningPlayer(),UMythicControlsPage::StaticClass());
+            if (ControlsPage) {
+                ControlsPage->InitializeControls(GetOwningPlayer() ? GetOwningPlayer()->FindComponentByClass<UMythicControlsComponent>():nullptr);
+                ControlsPage->OnCaptureStateChanged.AddUObject(this,&ThisClass::HandleControlsCapture);
+                ControlsPage->OnFocusHelp.AddUObject(this,&ThisClass::HandleControlsFocusHelp);
+                Container->AddChild(ControlsPage);
+            }
+        }
         const TArray<FMythicSettingDefinition> CatRows = GetRowsForCategory(CatIndex);
 
         for (const FMythicSettingDefinition &Def : CatRows) {
+            if (CatIndex==ControlsCategory && Def.Control==EMythicSettingControl::Keybind) continue;
             UVerticalBox *Column = Container;
             const TSubclassOf<UMythicSettingRowBase> RowClass =
                 IsGroupHeading(Def) ? GroupHeadingClass : GetRowClassFor(Def.Control);
@@ -196,22 +230,23 @@ void UMythicSettingsScreenBase::PushChrome() {
         Text_Breadcrumb->SetVisibility(ESlateVisibility::Collapsed);
     }
 
+    const bool bControlHelp=bControlsFocusHelp && ActiveCategory==ControlsCategory;
     const bool bHasFocus = !FocusedRow.Label.IsEmpty();
     if (Text_DetailTitle) {
-        Text_DetailTitle->SetText(bHasFocus ? FocusedRow.Label : FText::GetEmpty());
+        Text_DetailTitle->SetText(bControlHelp ? ControlsFocusTitle : (bHasFocus ? FocusedRow.Label : FText::GetEmpty()));
     }
     if (Text_DetailBody) {
-        Text_DetailBody->SetText(bHasFocus ? FocusedRow.Description : EmptyDetailHint);
+        Text_DetailBody->SetText(bControlHelp ? ControlsFocusBody : (bHasFocus ? FocusedRow.Description : EmptyDetailHint));
     }
     if (Text_DetailNow) {
         // A label introducing nothing. With no row focused the panel read "CURRENTLY" over blank space.
-        Text_DetailNow->SetVisibility(bHasFocus ? ESlateVisibility::HitTestInvisible
+        Text_DetailNow->SetVisibility(bHasFocus && !bControlHelp ? ESlateVisibility::HitTestInvisible
                                                 : ESlateVisibility::Collapsed);
     }
     if (Text_DetailValue) {
-        Text_DetailValue->SetVisibility(bHasFocus ? ESlateVisibility::HitTestInvisible
+        Text_DetailValue->SetVisibility(bHasFocus && !bControlHelp ? ESlateVisibility::HitTestInvisible
                                                   : ESlateVisibility::Collapsed);
-        if (bHasFocus) {
+        if (bHasFocus && !bControlHelp) {
             Text_DetailValue->SetText(UMythicSettingAccess::GetDisplayText(FocusedRow));
         }
     }
@@ -369,6 +404,9 @@ void UMythicSettingsScreenBase::RefreshActionBar() {
 }
 
 void UMythicSettingsScreenBase::ApplyCategoryVisibility() {
+    bControlsFocusHelp=ActiveCategory==ControlsCategory;
+    ControlsFocusTitle=NSLOCTEXT("Mythic","ControlsFocusTitle","Bindings");
+    ControlsFocusBody=NSLOCTEXT("Mythic","ControlsFocusHint","Choose a keyboard or controller binding. Review changes before applying them.");
     ActiveRows.Reset();
     for (int32 Index = 0; Index < CategoryContainers.Num(); ++Index) {
         UPanelWidget *Container = CategoryContainers[Index];
@@ -397,6 +435,13 @@ void UMythicSettingsScreenBase::ApplyCategoryVisibility() {
                 }
             }
         }
+    }
+
+    // Activate the embedded category only after its container is visible, so
+    // CommonUI's desired-focus pass cannot target an invisible binding row.
+    if (ControlsPage) {
+        if (ActiveCategory==ControlsCategory) ControlsPage->ActivateWidget();
+        else ControlsPage->DeactivateWidget();
     }
 
     // The group deselects whatever was selected before; asking each button to drop its own state does not
@@ -449,6 +494,10 @@ void UMythicSettingsScreenBase::ApplyCategoryVisibility() {
         }
     }
 
+    if (ControlsPage && ActiveCategory==ControlsCategory) {
+        ControlsPage->SetRailFocus(ActiveTab,FirstSetting);
+        if (auto* First=ControlsPage->GetBindingFocus()) for (auto& Tab:TabButtons) if (Tab) Tab->SetNavigationRuleExplicit(EUINavigation::Right,First);
+    }
     PushChrome();
 }
 
@@ -475,6 +524,12 @@ void UMythicSettingsScreenBase::HandleTabClicked(int32 CategoryIndex) {
 }
 
 UWidget *UMythicSettingsScreenBase::NativeGetDesiredFocusTarget() const {
+    // Generic Controls settings are siblings of the embedded binding page.
+    // Device changes must preserve their real focus after that page yields its leaf.
+    auto* Player=GetOwningPlayer();
+    for (UMythicSettingRowBase* Row:ActiveRows) if (Row && Player && Row->GetIsEnabled() && Row->IsVisible()
+        && (Row->HasUserFocus(Player) || Row->HasUserFocusedDescendants(Player))) return Row;
+    if (ControlsPage && ActiveCategory==ControlsCategory) return ControlsPage->GetBindingFocus();
     // First real setting, never a heading: a heading takes focus but answers no input, so the pad feels dead.
     for (UMythicSettingRowBase *Row : ActiveRows) {
         if (Row && !IsGroupHeading(Row->GetDefinition())) {
@@ -562,7 +617,16 @@ TArray<FMythicSettingDefinition> UMythicSettingsScreenBase::GetRowsForCategory(i
 }
 
 void UMythicSettingsScreenBase::SetFocusedRow(const FMythicSettingDefinition &Row) {
+    bControlsFocusHelp=false;
     FocusedRow = Row;
+    // A generic setting now owns focus outside the embedded page. Yield the
+    // CommonUI leaf to Settings; the page remains visible for ordinary Up return.
+    auto* Player=GetOwningPlayer();
+    const bool bGenericOwnsFocus=Player && ActiveRows.ContainsByPredicate([Player](const auto& Active) {
+        return Active && (Active->HasUserFocus(Player) || Active->HasUserFocusedDescendants(Player));
+    });
+    if (bGenericOwnsFocus && ControlsPage && ActiveCategory==ControlsCategory && ControlsPage->IsActivated()
+        && !ControlsPage->IsCapturing()) ControlsPage->DeactivateWidget();
     PushChrome();
     OnFocusedRowChanged();
 }
@@ -577,6 +641,8 @@ void UMythicSettingsScreenBase::MarkPendingApply() {
 }
 
 void UMythicSettingsScreenBase::NativeOnDeactivated() {
+    bLeavingSettings=true;
+    if (ControlsPage) ControlsPage->DeactivateWidget();
     // Leaving without applying puts everything back. A settings screen that keeps changes you walked away
     // from is how players end up with a renderer they never chose and cannot retrace.
     // Nothing was applied, so discarding is just forgetting - no restore pass to get wrong.
@@ -587,7 +653,46 @@ void UMythicSettingsScreenBase::NativeOnDeactivated() {
     Super::NativeOnDeactivated();
 }
 
+
+bool UMythicSettingsScreenBase::TryHandleNestedBackAction() { return ControlsPage && ControlsPage->TryHandleNestedBackAction(); }
+bool UMythicSettingsScreenBase::NativeOnHandleBackAction() { if (TryHandleNestedBackAction()) return true; return Super::NativeOnHandleBackAction(); }
+void UMythicSettingsScreenBase::HandleControlsFocusHelp(const FText& Title,const FText& Body) {
+    if (bLeavingSettings || !IsActivated() || ActiveCategory!=ControlsCategory || !ControlsPage) return;
+    // A real button focus event reclaims the embedded leaf after a generic row.
+    // Activation's desired target preserves that already-focused button.
+    if (!ControlsPage->IsActivated()) ControlsPage->ActivateWidget();
+    bControlsFocusHelp=true; ControlsFocusTitle=Title; ControlsFocusBody=Body;
+    PushChrome();
+}
+
+void UMythicSettingsScreenBase::HandleControlsCapture(bool bCapturing) {
+    ReleaseActionBindings();
+    if (bCapturing || bLeavingSettings || !IsActivated()) return;
+    BindCategoryActions();
+    if (auto* Action=ApplyInputAction.LoadSynchronous()) {
+        FInputActionExecutedDelegate Callback; Callback.BindDynamic(this,&ThisClass::HandleApplyAction);
+        RegisterInputActionBinding(Action,IE_Pressed,Callback,false,ApplyBinding);
+    }
+    if (auto* Action=RestoreDefaultsInputAction.LoadSynchronous()) {
+        FInputActionExecutedDelegate Callback; Callback.BindDynamic(this,&ThisClass::HandleRestoreDefaultsAction);
+        RegisterInputActionBinding(Action,IE_Pressed,Callback,false,RestoreBinding);
+    }
+    if (ApplyButton) ApplyButton->SetRepresentedAction(ApplyBinding.Handle);
+    if (ResetButton) ResetButton->SetRepresentedAction(RestoreBinding.Handle);
+    RefreshActionBar();
+}
+
+void UMythicSettingsScreenBase::NativeDestruct() {
+    ReleaseActionBindings();
+    Super::NativeDestruct();
+}
+
 void UMythicSettingsScreenBase::ReleaseActionBindings() {
+    PreviousCategoryBinding.Unregister();
+    NextCategoryBinding.Unregister();
+    PreviousCategoryBinding=FUIActionBindingHandle();
+    NextCategoryBinding=FUIActionBindingHandle();
+    RefreshCategoryHints();
     if (ApplyBinding.Handle.IsValid()) {
         UnregisterInputBinding(ApplyBinding);
     }
@@ -625,4 +730,81 @@ void UMythicSettingsScreenBase::RestoreDefaults() {
         }
     }
     OnCategoryChanged();
+}
+
+
+bool UMythicSettingsScreenBase::CanCycleCategoryFromInput() const {
+    if (!IsActivated() || bLeavingSettings || (ControlsPage && ControlsPage->IsCapturing())) return false;
+    const auto* LocalPlayer=GetOwningLocalPlayer();
+    const auto* Router=LocalPlayer ? LocalPlayer->GetSubsystem<UCommonUIActionRouterBase>():nullptr;
+    if (!Router || Router->IsPendingTreeChange()) return false;
+    const auto* Leaf=Router->GetLeafmostActivatableWidget();
+    // The uncaptured embedded Controls category is part of this screen. A
+    // picker, modal or any other child owns input instead of its Settings parent.
+    return Leaf==this || (Leaf==ControlsPage && ActiveCategory==ControlsCategory
+        && ControlsPage && ControlsPage->IsActivated());
+}
+
+void UMythicSettingsScreenBase::BindCategoryActions() {
+    if (!IsActivated() || bLeavingSettings || (ControlsPage && ControlsPage->IsCapturing())) return;
+    const auto Bind=[this](const TCHAR* Name,int32 Delta,FUIActionBindingHandle& Handle) {
+        if (Handle.IsValid()) return;
+        const auto Tag=FGameplayTag::RequestGameplayTag(FName(Name),false);
+        if (!Tag.IsValid()) return;
+        FBindUIActionArgs Args(FUIActionTag::ConvertChecked(Tag),false,
+            FSimpleDelegate::CreateUObject(this,&ThisClass::HandleCategoryInput,Delta));
+        Args.InputMode=ECommonInputMode::Menu;
+        Args.KeyEvent=IE_Pressed;
+        Args.bConsumeInput=true;
+        Handle=RegisterUIActionBinding(Args);
+    };
+    Bind(TEXT("UI.Action.SettingsPreviousCategory"),-1,PreviousCategoryBinding);
+    Bind(TEXT("UI.Action.SettingsNextCategory"),1,NextCategoryBinding);
+    RefreshCategoryHints();
+}
+
+void UMythicSettingsScreenBase::HandleCategoryInput(int32 Delta) {
+    if (!CanCycleCategoryFromInput()) return;
+    const int32 Previous=ActiveCategory;
+    CycleCategory(Delta);
+    if (!IsActivated() || bLeavingSettings || ActiveCategory==Previous) return;
+    // A cached widget from the previous category remains live under a collapsed
+    // container. Use this category's desired target when CommonUI next focuses it.
+    ClearFocusRestorationTarget();
+    if (ControlsPage && ActiveCategory==ControlsCategory) ControlsPage->ClearFocusRestorationTarget();
+    // Route focus through the newly visible CommonUI leaf. If an authored
+    // category callback opened a modal, CommonUI ignores the parent's request.
+    if (ControlsPage && ActiveCategory==ControlsCategory) ControlsPage->RequestRefreshFocus();
+    else RequestRefreshFocus();
+}
+
+void UMythicSettingsScreenBase::BuildCategoryHints() {
+    if (CategoryHints || !Rail || !WidgetTree) return;
+    CategoryHints=WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(),TEXT("SettingsCategoryHints"));
+    Rail->AddChild(CategoryHints);
+    const auto AddHint=[this](FName Name,const FText& Label) {
+        auto* HintRow=WidgetTree->ConstructWidget<UHorizontalBox>();
+        CategoryHints->AddChild(HintRow);
+        auto* Glyph=WidgetTree->ConstructWidget<UMythicInputGlyph>(UMythicInputGlyph::StaticClass(),Name);
+        Glyph->GlyphHeight=22.f;
+        auto* Caption=FMythicUIStyle::MakeText(this,EMythicTextRole::Subtle);
+        Caption->SetText(Label);
+        for (UWidget* Child:{static_cast<UWidget*>(Glyph),static_cast<UWidget*>(Caption)}) {
+            Child->SetVisibility(ESlateVisibility::HitTestInvisible);
+            auto* HintSlot=HintRow->AddChildToHorizontalBox(Child);
+            HintSlot->SetVerticalAlignment(VAlign_Center);
+            HintSlot->SetPadding(FMargin(3.f,2.f));
+        }
+        return Glyph;
+    };
+    PreviousCategoryGlyph=AddHint(TEXT("SettingsPreviousCategoryGlyph"),NSLOCTEXT("Mythic","SettingsPreviousHint","Previous"));
+    NextCategoryGlyph=AddHint(TEXT("SettingsNextCategoryGlyph"),NSLOCTEXT("Mythic","SettingsNextHint","Next"));
+    RefreshCategoryHints();
+}
+
+void UMythicSettingsScreenBase::RefreshCategoryHints() {
+    if (PreviousCategoryGlyph) PreviousCategoryGlyph->SetActionBinding(PreviousCategoryBinding);
+    if (NextCategoryGlyph) NextCategoryGlyph->SetActionBinding(NextCategoryBinding);
+    if (CategoryHints) CategoryHints->SetVisibility(PreviousCategoryBinding.IsValid() && NextCategoryBinding.IsValid()
+        ? ESlateVisibility::HitTestInvisible:ESlateVisibility::Hidden);
 }

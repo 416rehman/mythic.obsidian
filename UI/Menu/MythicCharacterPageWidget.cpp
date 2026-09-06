@@ -12,6 +12,7 @@
 #include "Progression/Runes/MythicRuneComponent.h"
 #include "Progression/Runes/MythicRuneDefinition.h"
 #include "UI/Menu/MythicRunePickerWidget.h"
+#include "UI/Menu/MythicAbilityPickerWidget.h"
 #include "UI/Menu/MythicRuneSocketWidget.h"
 #include "UI/ViewModels/MythicRuneDescriber.h"
 #include "UI/Inventory/MythicSocketRowWidget.h"
@@ -53,6 +54,12 @@
 #include "InputAction.h"
 #include "InputCoreTypes.h"
 #include "Input/Events.h"
+#include "Input/CommonUIActionRouterBase.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/Application/SlateUser.h"
+#include "Engine/GameViewportClient.h"
+#include "Layout/WidgetPath.h"
+#include "Widgets/SViewport.h"
 #include "Engine/LocalPlayer.h"
 #include "MVVMSubsystem.h"
 #include "View/MVVMView.h"
@@ -106,6 +113,8 @@ void UMythicInventoryActionClickProxy::HandleClicked() {
 void UMythicCharacterPageWidget::NativeConstruct() {
     // Pool before Super: activation can fire inside it, and a refresh must find these already built.
     BuildBagChrome();
+    if (!AbilityPicker && AbilityPickerClass && GetOwningLocalPlayer()) AbilityPicker=CreateWidget<UMythicAbilityPickerWidget>(GetOwningPlayer(),AbilityPickerClass);
+    BuildAbilitySockets();
     if (!RunePicker && RunePickerClass && GetOwningLocalPlayer()) {
         RunePicker = CreateWidget<UMythicRunePickerWidget>(GetOwningPlayer(), RunePickerClass);
     }
@@ -269,6 +278,8 @@ void UMythicCharacterPageWidget::NativeOnActivated() {
     BindInventoryInputs();
     BindProgression();
     BindRunes();
+    BuildAbilitySockets();
+    RefreshAbilitySockets();
     RefreshHeader();
     BuildSockets();
     // Whatever changed while the page was away is state to record, not a landing to replay on entry.
@@ -286,6 +297,7 @@ void UMythicCharacterPageWidget::NativeOnActivated() {
 }
 
 UWidget *UMythicCharacterPageWidget::NativeGetDesiredFocusTarget() const {
+    if (AbilitySockets.IsValidIndex(LastOpenedAbilitySocket)) if (auto* Hit=AbilitySockets[LastOpenedAbilitySocket]->GetFocusWidget()) return Hit;
     // The picker hands focus back to the socket it was opened from, not to whatever the bag last selected.
     if (UMythicRuneSocketWidget *Socket = GetSocketWidget(LastOpenedSocket)) {
         if (UWidget *Hit = Socket->GetFocusWidget()) {
@@ -325,23 +337,24 @@ void UMythicCharacterPageWidget::FocusInitialSlot() {
         SelectFirstOccupiedSlot();
     }
     BindInventoryEvents();
-    if (UItemSlotVM *Selected = GetSelectedSlot()) {
-        for (const TWeakObjectPtr<UListViewBase> &WeakList : BoundSlotLists) {
-            if (UListView *List = Cast<UListView>(WeakList.Get())) {
-                if (UUserWidget *Entry = List->GetEntryWidgetFromItem(Selected)) {
-                    Entry->SetFocus();
-                    return;
-                }
-            }
-        }
-    }
-    UListView *Strip = WeaponStrip.Get();
-    if (Strip && Strip->GetVisibility() != ESlateVisibility::Collapsed) {
-        Strip->SetFocus();
-    }
+    const auto* Router = GetOwningLocalPlayer()->GetSubsystem<UCommonUIActionRouterBase>();
+    if (!Router || !Router->IsWidgetInActiveRoot(this)
+        || (AbilityPicker && AbilityPicker->IsOnLayer()) || (RunePicker && RunePicker->IsActivated())
+        || InventoryPageState != EInventoryPageState::Browsing || !GetOwningPlayer()
+        || !FSlateApplication::IsInitialized() || FSlateApplication::Get().GetActiveModalWindow()) return;
+    const auto* LocalPlayer = GetOwningLocalPlayer();
+    const auto User = LocalPlayer->GetSlateUser();
+    const auto Viewport = LocalPlayer->ViewportClient ? LocalPlayer->ViewportClient->GetGameViewportWidget() : nullptr;
+    if (!User || !Viewport || !User->GetFocusedWidget()) return;
+    FWidgetPath FocusPath;
+    FSlateApplication::Get().GeneratePathToWidgetUnchecked(User->GetFocusedWidget().ToSharedRef(), FocusPath);
+    if (!FocusPath.ContainsWidget(Viewport.Get())) return;
+    // Preserve selection while honoring the socket focus chosen by the page and its pickers.
+    if (UWidget* Target = NativeGetDesiredFocusTarget()) Target->SetUserFocus(GetOwningPlayer());
 }
 
 bool UMythicCharacterPageWidget::TryHandleNestedBackAction() {
+    if (AbilityPicker && AbilityPicker->IsOnLayer()) { AbilityPicker->Close(); return true; }
     if (InventoryPageState != EInventoryPageState::Browsing) {
         CloseInventoryModal(true);
         return true;
@@ -598,6 +611,7 @@ void UMythicCharacterPageWidget::HandleNextInventoryCategory() {
 }
 
 void UMythicCharacterPageWidget::NativeOnDeactivated() {
+    UnbindSkills();
     if (UMythicInventoryInteractionCoordinator *Coordinator = GetInventoryInteractionCoordinator()) {
         Coordinator->SetCharacterInventoryPageActive(false);
     }
@@ -613,6 +627,7 @@ void UMythicCharacterPageWidget::NativeOnDeactivated() {
 }
 
 void UMythicCharacterPageWidget::NativeDestruct() {
+    UnbindSkills();
     if (UMythicInventoryInteractionCoordinator *Coordinator = GetInventoryInteractionCoordinator()) {
         Coordinator->SetCharacterInventoryPageActive(false);
     }
@@ -1376,6 +1391,17 @@ void UMythicCharacterPageWidget::RefreshInventoryActionBar() {
 }
 
 void UMythicCharacterPageWidget::HandlePrimaryInventoryAction() {
+    if (!IsActivated() || (AbilityPicker && AbilityPicker->IsOnLayer()) || (RunePicker && RunePicker->IsActivated())) return;
+    const auto HasOwnFocus = [this](const UWidget* Widget) {
+        return Widget && GetOwningPlayer() && (Widget->HasUserFocus(GetOwningPlayer()) || Widget->HasUserFocusedDescendants(GetOwningPlayer()));
+    };
+    // Confirm belongs to the focused region, not the previously selected inventory item.
+    for (int32 Index=0; Index<AbilitySockets.Num(); ++Index) {
+        if (HasOwnFocus(AbilitySockets[Index])) { OpenAbilityPicker(Index); return; }
+    }
+    for (const auto& Socket : Sockets) {
+        if (HasOwnFocus(Socket.Widget)) { HandleSocketPressed(Socket.SlotIndex); return; }
+    }
     if (InventoryPageState == EInventoryPageState::MoveTarget) {
         ConfirmMoveTarget();
         return;
@@ -2645,7 +2671,7 @@ void UMythicCharacterPageWidget::BuildSockets() {
 
         if (UHorizontalBoxSlot *CellSlot = Cast<UHorizontalBoxSlot>(SocketStrip->AddChild(Widget))) {
             CellSlot->SetVerticalAlignment(VAlign_Center);
-            CellSlot->SetPadding(FMargin(i == 0 ? 0.0f : Style.SpaceM, 0.0f, 0.0f, 0.0f));
+            CellSlot->SetPadding(FMargin(i == 0 ? 0.0f : Style.SpaceS, 0.0f, 0.0f, 0.0f));
         }
         Sockets.Add(Socket);
     }
@@ -2886,9 +2912,11 @@ void UMythicCharacterPageWidget::HandleSocketHoverChanged(int32 SlotIndex, bool 
 }
 
 void UMythicCharacterPageWidget::OpenSocketPicker(int32 SlotIndex) {
+    LastOpenedAbilitySocket=INDEX_NONE;
     if (!RunePicker) {
         UE_LOG(Myth, Warning, TEXT("Runes: socket %d has no rune picker to open."), SlotIndex);
         return;
     }
+    if (auto* HUD = FindHUDLayout()) RunePicker->ConfigureMenuDismissAction(HUD->GetOpenMenuAction());
     RunePicker->OpenForSlot(SlotIndex, this);
 }

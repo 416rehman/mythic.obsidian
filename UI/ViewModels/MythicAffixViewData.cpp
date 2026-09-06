@@ -157,6 +157,7 @@ bool BuildViewDataInternal(
     FMythicAffixViewData Candidate;
     Candidate.RollGuid = Snapshot.RollGuid;
     Candidate.AffixTag = Definition->AffixTag;
+    Candidate.ApplicationScope = Definition->Application.Scope;
     Candidate.PrimaryStatTag = Stat->StatTag;
     Candidate.RollGroup = Snapshot.Provenance.RollGroup;
     Candidate.SourceKind = Snapshot.Provenance.SourceKind;
@@ -219,6 +220,10 @@ bool BuildViewDataInternal(
     Candidate.RichText = BuildRichText(Candidate,
         !DisplayTemplate.IsEmpty()
         && DisplayTemplate.ToString().Contains(TEXT("{Value}"), ESearchCase::CaseSensitive));
+    if (Candidate.ApplicationScope == EMythicAffixApplicationScope::Action) {
+        if (Candidate.Description.IsEmpty()) return false;
+        Candidate.RichText = FText::Format(NSLOCTEXT("MythicAffixes", "ConditionalAffixRichText", "{0}\n{1}"), Candidate.RichText, Candidate.Description);
+    }
     OutViewData = MoveTemp(Candidate);
     return true;
 }

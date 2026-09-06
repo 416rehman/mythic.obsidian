@@ -90,7 +90,7 @@ private:
 
     void EnqueueAndDrain(const FGameplayTag &Tag);
     bool EvaluatePass();
-    void ApplyRule(const UMythicUnlockRule &Rule);
+    bool ApplyRule(const UMythicUnlockRule &Rule);
 
     UFUNCTION()
     void HandleStoryTagEarned(FGameplayTag Tag);

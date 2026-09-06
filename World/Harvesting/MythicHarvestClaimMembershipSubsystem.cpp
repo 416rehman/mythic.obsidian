@@ -97,6 +97,7 @@ bool UMythicHarvestClaimMembershipSubsystem::ReplacePartyMembers(
     }
     PartyByPersistentPlayer = MoveTemp(Staged);
     HighestAppliedRosterRevision = RosterRevision;
+    OnMembershipChanged.Broadcast();
     return true;
 }
 
@@ -116,6 +117,7 @@ bool UMythicHarvestClaimMembershipSubsystem::RemoveParty(
         }
     }
     HighestAppliedRosterRevision = RosterRevision;
+    OnMembershipChanged.Broadcast();
     return true;
 }
 

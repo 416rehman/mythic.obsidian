@@ -47,6 +47,9 @@ enum class EMythicInventoryReceiptDisposition : uint8 {
     Replayed,
 };
 
+UENUM(BlueprintType)
+enum class EMythicItemUsePurpose : uint8 { Inventory, Healing, Utility };
+
 /**
  * Identity-checked address of the item a player saw when submitting an action.
  * Slot index alone is never authority: the server also requires the same physical item GUID and quantity.
@@ -70,6 +73,9 @@ struct MYTHIC_API FMythicInventorySourceLocator {
     /** Exact stack quantity observed when the request was submitted. */
     UPROPERTY(BlueprintReadWrite, Category = "Mythic|Inventory|Action")
     int32 ExpectedQuantity = 0;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Mythic|Inventory|Action")
+    EMythicItemUsePurpose UsePurpose = EMythicItemUsePurpose::Inventory;
 
     bool IsStructurallyValid() const {
         return Inventory != nullptr && SlotIndex >= 0 && ExpectedItemGuid.IsValid()

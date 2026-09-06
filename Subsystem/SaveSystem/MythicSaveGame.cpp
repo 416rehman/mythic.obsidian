@@ -1,5 +1,6 @@
 #include "MythicSaveGame.h"
 #include "Mythic/Mythic.h"
+#include "Progression/Skills/MythicSkillComponent.h"
 
 void UMythicSaveGame::FixupData() {
     if (CharacterData.DataVersion < static_cast<int32>(CurrentCharacterSaveVersion)) {
@@ -20,6 +21,13 @@ void UMythicSaveGame::FixupData() {
                 CharacterData.AppliedUnlockRules);
         }
 
+        if (CharacterData.DataVersion <= static_cast<int32>(EMythicCharacterSaveVersion::PreCombatControls)) {
+            CharacterData.EquippedSkills.SetNum(FMath::Min(2, CharacterData.EquippedSkills.Num()));
+        }
         CharacterData.DataVersion = static_cast<int32>(CurrentCharacterSaveVersion);
+    }
+    if (CharacterData.DataVersion == static_cast<int32>(CurrentCharacterSaveVersion)) {
+        CharacterData.UnlockedSkillSlots = UMythicSkillComponent::SlotCount;
+        CharacterData.EquippedSkills.SetNum(UMythicSkillComponent::SlotCount);
     }
 }

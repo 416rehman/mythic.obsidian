@@ -10,6 +10,8 @@
 #include "GAS/Abilities/MythicAnimNotify_SphereOverlap.h"
 #include "GAS/Effects/MythicWeaponDamageEffects.h"
 #include "GAS/MythicTags_GAS.h"
+#include "GAS/MythicGameplayEffectContext.h"
+#include "Itemization/Inventory/Fragments/Actionable/WeaponSecondaryAttackFragment.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
@@ -18,6 +20,7 @@
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Itemization/Inventory/MythicItemInstance.h"
 #include "Itemization/Inventory/Fragments/Actionable/AttackFragment.h"
+#include "Itemization/Inventory/Fragments/Actionable/MythicWeaponActionContract.h"
 #include "Itemization/Inventory/Fragments/Passive/DurabilityFragment.h"
 #include "Itemization/Inventory/Fragments/Passive/HarvestToolFragment.h"
 #include "Itemization/MythicTags_Inventory.h"
@@ -102,7 +105,7 @@ bool IsSourceItemEquipped(const FGameplayAbilityActorInfo *ActorInfo,
     }
     const TArray<FMythicInventorySlotEntry> &Slots = Inventory->GetAllSlots();
     const int32 SlotIndex = SourceItem->GetSlot();
-    if (!Slots.IsValidIndex(SlotIndex) || !Slots[SlotIndex].IsGearSlot()
+    if (!Slots.IsValidIndex(SlotIndex) || !Slots[SlotIndex].AppliesEquipmentEffects()
         || Slots[SlotIndex].SlottedItemInstance.Get() != SourceItem) {
         return false;
     }
@@ -194,6 +197,7 @@ void GatherUsableAttackSpecs(const FGameplayAbilityActorInfo *ActorInfo,
         }
         const UAttackFragment *AttackFragment =
             Cast<UAttackFragment>(Spec.SourceObject.Get());
+        if (!AttackFragment || AttackFragment->IsSecondaryAttack()) continue;
         const EMythicAttackSourceDomain Domain =
             UMythicWeaponAttackAbility::ResolveAttackSourceDomain(AttackFragment);
         if (Domain == EMythicAttackSourceDomain::Invalid
@@ -559,7 +563,8 @@ const UAttackFragment *UMythicWeaponAttackAbility::ResolveAttackFragment(
     const UAbilitySystemComponent *ASC =
         ActorInfo ? ActorInfo->AbilitySystemComponent.Get() : nullptr;
     const FGameplayAbilitySpec *Spec = ASC ? ASC->FindAbilitySpecFromHandle(Handle) : nullptr;
-    return Cast<UAttackFragment>(Spec ? Spec->SourceObject.Get() : nullptr);
+    const auto* Fragment=Cast<UAttackFragment>(Spec ? Spec->SourceObject.Get() : nullptr);
+    return MythicWeaponAction::MatchesDefinition(Fragment) ? Fragment : nullptr;
 }
 
 EMythicAttackSourceDomain UMythicWeaponAttackAbility::ResolveAttackSourceDomain(
@@ -596,7 +601,9 @@ EMythicAttackSourceDomain UMythicWeaponAttackAbility::ResolveAttackSourceDomain(
     }
     FGameplayTagContainer ItemTypeProbe;
     ItemInstance->GetTypeProbe(ItemTypeProbe);
-    return ResolveAttackSourceDomain(ItemTypeProbe);
+    const auto Domain=ResolveAttackSourceDomain(ItemTypeProbe);
+    return AttackFragment->IsSecondaryAttack() && Domain!=EMythicAttackSourceDomain::Weapon
+        ? EMythicAttackSourceDomain::Invalid : Domain;
 }
 
 bool UMythicWeaponAttackAbility::IsTargetAllowedForSourceDomain(
@@ -638,6 +645,8 @@ bool UMythicWeaponAttackAbility::IsPreferredAttackSourceForPress(
     const FGameplayAbilitySpecHandle Handle,
     const FGameplayAbilityActorInfo *ActorInfo,
     const EMythicAttackSourceDomain SourceDomain) const {
+    if (const auto* Fragment=ResolveAttackFragment(Handle,ActorInfo); Fragment && Fragment->IsSecondaryAttack())
+        return SourceDomain==EMythicAttackSourceDomain::Weapon;
     TArray<FAttackSpecCandidate> Candidates;
     GatherUsableAttackSpecs(ActorInfo, Candidates);
 
@@ -765,7 +774,7 @@ bool UMythicWeaponAttackAbility::CanActivateAbility(
                TEXT("Weapon attack %s rejected its source: item=%s inventory=%s slot=%d slotValid=%s gearSlot=%s occupantMatches=%s providerOwnsInventory=%s"),
                *GetPathName(), *GetNameSafe(SourceItem), *GetNameSafe(SourceInventory), SlotIndex,
                bSlotValid ? TEXT("yes") : TEXT("no"),
-               bSlotValid && (*Slots)[SlotIndex].IsGearSlot() ? TEXT("yes") : TEXT("no"),
+               bSlotValid && (*Slots)[SlotIndex].AppliesEquipmentEffects() ? TEXT("yes") : TEXT("no"),
                bSlotValid && (*Slots)[SlotIndex].SlottedItemInstance.Get() == SourceItem ? TEXT("yes") : TEXT("no"),
                ResolveInventoryProvider(ActorInfo)
                    && SourceInventory
@@ -802,6 +811,7 @@ void UMythicWeaponAttackAbility::ActivateAbility(
     MontageTask = nullptr;
     AuthorizedHitSamples.Reset();
     ActiveSourceDomain = EMythicAttackSourceDomain::Invalid;
+    ActiveDamageMultiplier=1.0f; ActiveAttackRateMultiplier=1.0f;
     ActiveHarvestCycleToken = FMythicHarvestAttackCycleToken();
     UnregisterActiveMontageInstance();
 
@@ -829,6 +839,11 @@ void UMythicWeaponAttackAbility::ActivateAbility(
         return;
     }
     ActiveSourceDomain = SourceDomain;
+    if (const auto* Heavy=Cast<UWeaponSecondaryAttackFragment>(AttackFragment)) {
+        // ResolveAttackFragment and MatchesDefinition already reject runtime values that drift from authored data.
+        ActiveDamageMultiplier=Heavy->DamageMultiplier;
+        ActiveAttackRateMultiplier=Heavy->AttackRateMultiplier;
+    }
 
     // The tool is worn, never wielded; only its animation is substituted. An unauthored or contract-breaking family
     // swing falls back to the granting item's validated montage, because no swing at all is the worse failure.
@@ -863,7 +878,7 @@ void UMythicWeaponAttackAbility::ActivateAbility(
                 TEXT("substituted tool montage exposes no named attack-variant section"));
         }
     }
-    const float PlayRate = GetClampedAttackSpeedPlayRate();
+    const float PlayRate = GetClampedAttackSpeedPlayRate()*ActiveAttackRateMultiplier;
     for (const UMythicAnimNotify_SphereOverlap *Sample : ResolvedHitSamples) {
         AuthorizedHitSamples.Add(Sample);
     }
@@ -938,6 +953,16 @@ void UMythicWeaponAttackAbility::ActivateAbility(
             EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         }
     }
+}
+
+FMythicDamageContainerSpec UMythicWeaponAttackAbility::MakeDamageContainerSpec(const FMythicDamageContainer& Container,int32 OverrideGameplayLevel) {
+    if (!IsActive() || ActiveSourceDomain==EMythicAttackSourceDomain::Invalid) return {};
+    auto Spec=Super::MakeDamageContainerSpec(Container,OverrideGameplayLevel);
+    if (auto* Context=FMythicGameplayEffectContext::ExtractEffectContext(Spec.EffectContextHandle)) {
+        // Calculation/application share this context. Only application consumes its bonus, after Dmg.Pre reactions.
+        Context->SetBonusDamageMultiplier(Context->GetBonusDamageMultiplier()*ActiveDamageMultiplier);
+    }
+    return Spec;
 }
 
 bool UMythicWeaponAttackAbility::TryConsumeHitEvent(bool &bInOutConsumed) {
@@ -1268,6 +1293,7 @@ void UMythicWeaponAttackAbility::EndAbility(
     MontageTask = nullptr;
     AuthorizedHitSamples.Reset();
     ActiveSourceDomain = EMythicAttackSourceDomain::Invalid;
+    ActiveDamageMultiplier=1.0f; ActiveAttackRateMultiplier=1.0f;
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility,
                       bWasCancelled);
     bHitEventConsumed = false;

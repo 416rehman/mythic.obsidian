@@ -209,6 +209,10 @@ void UMythicAffixRowWidget::SetPresentation(
     if (AttributeText.IsEmpty()) {
         AttributeText = Presentation.DisplayData.AttributeName;
     }
+    if (ViewData.ApplicationScope == EMythicAffixApplicationScope::Action) {
+        AttributeText = FText::Format(NSLOCTEXT("MythicAffixes", "ConditionalAffixLabel", "{0}\n{1}"), AttributeText, ViewData.Description);
+        if (Presentation.bBaselineOnly) AttributeText = FText::Format(NSLOCTEXT("MythicAffixes", "EquippedConditionalAffix", "Equipped: {0}"), AttributeText);
+    }
 
     const TArray<const FAttributeDiff *> VisibleDiffs = GetVisibleDiffs(Presentation);
     const bool bCandidateOnlyRow = AreAllDiffsCandidateOnly(VisibleDiffs);
@@ -217,7 +221,7 @@ void UMythicAffixRowWidget::SetPresentation(
     const bool bOneSidedRow = bCandidateOnlyRow || bBaselineOnlyRow;
 
     const TArray<const FMythicAffixValueViewData *> Channels = GetDisplayOrderedValues(ViewData);
-    const FText RollText = bOneSidedRow
+    const FText RollText = bOneSidedRow && !VisibleDiffs.IsEmpty()
         ? BuildDeltaText(VisibleDiffs)
         : Channels.Num() > 0
             ? JoinChannelText(Channels, false)

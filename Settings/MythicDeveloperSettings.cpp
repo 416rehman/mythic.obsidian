@@ -47,6 +47,7 @@ UMythicAbilityTagRelationshipMapping *UMythicDeveloperSettings::GetAbilityTagRel
 }
 
 void UMythicDeveloperSettings::GetStartupAssetPaths(TArray<FSoftObjectPath> &OutPaths) const {
+    if (!AbilityCameraDefinition.IsNull()) OutPaths.Add(AbilityCameraDefinition.ToSoftObjectPath());
     if (!DefaultAbilityTagRelationshipMapping.IsNull()) {
         OutPaths.Add(DefaultAbilityTagRelationshipMapping.ToSoftObjectPath());
     }

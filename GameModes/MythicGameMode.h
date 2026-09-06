@@ -8,7 +8,7 @@
 
 class UMythicAbilitySystemComponent;
 class UMythicSaveGameSubsystem;
-UCLASS()
+UCLASS(Config=Game)
 class MYTHIC_API AMythicGameMode : public AGameModeBase {
     GENERATED_BODY()
 
@@ -22,6 +22,11 @@ public:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void Logout(AController *Exiting) override;
     virtual void OnPostLogin(AController *NewPlayer) override;
+    virtual void HandleSeamlessTravelPlayer(AController*& Controller) override;
+
+    /** Explicit gameplay policy: ready session players share ability-party and harvest-claim semantics. PvP opts out. */
+    UPROPERTY(Config, EditDefaultsOnly, BlueprintReadOnly, Category="Co-op")
+    bool bSessionPlayersFormCoopParty = true;
 
 
     float GetAutosaveTimeRemaining() const;

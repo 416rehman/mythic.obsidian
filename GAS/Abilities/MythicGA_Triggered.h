@@ -260,4 +260,7 @@ private:
 
     // Qualifying events seen per clause, for EveryNthEvent.
     TMap<int32, int32> EventCounts;
+    TSet<int32> ExecutingClauses;
+    uint8 IncomingGeneration = 0;
+    FGuid IncomingActivation;
 };

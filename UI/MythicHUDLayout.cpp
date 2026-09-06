@@ -7,9 +7,19 @@
 #include "PrimaryGameLayout.h"
 #include "Widgets/CommonActivatableWidgetContainer.h"
 #include "Components/NamedSlot.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
+#include "UI/Widgets/MythicCombatUtilityOverlay.h"
 #include "Components/PanelWidget.h"
 #include "Input/CommonUIInputTypes.h"
 #include "Input/UIActionBinding.h"
+#include "Input/CommonUIActionRouterBase.h"
+#include "Engine/LocalPlayer.h"
+#include "Engine/GameViewportClient.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/Application/SlateUser.h"
+#include "Layout/WidgetPath.h"
+#include "Widgets/SViewport.h"
 #include "NativeGameplayTags.h"
 #include "Interaction/ContextActions/MythicContextActionProjectionPolicy.h"
 #include "UI/Menu/MythicMenuShell.h"
@@ -25,6 +35,8 @@
 #include "UI/Nameplate/MythicNameplateDirector.h"
 #include "UI/Nameplate/MythicNameplatePolicy.h"
 #include "UI/MythicTags_UI.h"
+#include "Player/MythicPlayerController.h"
+#include "Player/MythicAbilityIntentComponent.h"
 
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_UI_LAYER_MENU, "UI.Layer.Menu");
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_UI_ACTION_ESCAPE, "UI.Action.Escape");
@@ -71,10 +83,21 @@ bool ConfigureAuthoredCommonUIHold(const FUIActionBindingHandle Handle,
 UMythicHUDLayout::UMythicHUDLayout(const FObjectInitializer &ObjectInitializer) : Super(ObjectInitializer) {}
 
 void UMythicHUDLayout::NativeOnInitialized() {
+    // SystemMenu belongs to the local controls router. The gameplay HUD must not
+    // register CommonUI's default Back handler ahead of that physical-key route.
+    bIsBackHandler=false;
+    // Gameplay's HUD must never restore the borrowed inventory after it returns to a collapsed slot.
+    // CommonUI owns the local viewport fallback and its modal / PIE focus guards.
+    SetIsFocusable(false); bAutoRestoreFocus=false; bSupportsActivationFocus=true;
     Super::NativeOnInitialized();
 
-    RegisterUIActionBinding(FBindUIActionArgs(FUIActionTag::ConvertChecked(TAG_UI_ACTION_ESCAPE), false,
-                                              FSimpleDelegate::CreateUObject(this, &ThisClass::HandleEscapeAction)));
+    const auto* ControlsPC=GetOwningPlayer<AMythicPlayerController>();
+    const bool bCentralControls=ControlsPC && ControlsPC->ControlsComponent;
+    if (!bCentralControls) {
+    FBindUIActionArgs EscapeBindArgs(FUIActionTag::ConvertChecked(TAG_UI_ACTION_ESCAPE), false,
+        FSimpleDelegate::CreateUObject(this, &ThisClass::HandleEscapeAction));
+    EscapeBindArgs.InputMode = ECommonInputMode::Game;
+    RegisterUIActionBinding(EscapeBindArgs);
     FBindUIActionArgs InspectBindArgs(
         FUIActionTag::ConvertChecked(UI_ACTION_INSPECT_ENTITY), false,
         FSimpleDelegate::CreateUObject(
@@ -85,18 +108,39 @@ void UMythicHUDLayout::NativeOnInitialized() {
     InspectActionBinding = RegisterUIActionBinding(InspectBindArgs);
 
     if (OpenMenuAction.IsValid()) {
-        RegisterUIActionBinding(FBindUIActionArgs(FUIActionTag::ConvertChecked(OpenMenuAction), false,
-                                                  FSimpleDelegate::CreateUObject(this, &ThisClass::HandleMenuAction)));
+        FBindUIActionArgs MenuBindArgs(FUIActionTag::ConvertChecked(OpenMenuAction), false,
+            FSimpleDelegate::CreateUObject(this, &ThisClass::HandleMenuAction));
+        MenuBindArgs.InputMode = ECommonInputMode::Game;
+        RegisterUIActionBinding(MenuBindArgs);
     }
 
-    if (WorldOverlaySlot && NameplateLayerClass && !NameplateLayer) {
-        NameplateLayer = CreateWidget<UMythicNameplateLayer>(GetOwningPlayer(), NameplateLayerClass);
-        if (NameplateLayer) {
-            WorldOverlaySlot->AddChild(NameplateLayer);
+    }
+    if (WorldOverlaySlot && WidgetTree && !WorldOverlayStack) {
+        UWidget* Existing=WorldOverlaySlot->GetContent();
+        if (Existing) Existing->RemoveFromParent();
+        WorldOverlayStack=WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(),TEXT("CombatWorldOverlayStack"));
+        WorldOverlayStack->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+        WorldOverlaySlot->AddChild(WorldOverlayStack);
+        const auto AddWorldLayer=[this](UWidget* Widget) {
+            if (!Widget) return;
+            auto* Slot=WorldOverlayStack->AddChildToOverlay(Widget);
+            Slot->SetHorizontalAlignment(HAlign_Fill); Slot->SetVerticalAlignment(VAlign_Fill);
+        };
+        AddWorldLayer(Existing);
+        NameplateLayer=Cast<UMythicNameplateLayer>(Existing);
+        if (!NameplateLayer && NameplateLayerClass) {
+            NameplateLayer=CreateWidget<UMythicNameplateLayer>(GetOwningPlayer(),NameplateLayerClass);
+            AddWorldLayer(NameplateLayer);
         }
+        CombatUtilityOverlay=CreateWidget<UMythicCombatUtilityOverlay>(GetOwningPlayer(),UMythicCombatUtilityOverlay::StaticClass());
+        AddWorldLayer(CombatUtilityOverlay);
     }
 
     if (ULocalPlayer *LocalPlayer = GetOwningLocalPlayer()) {
+        if (auto* Router = LocalPlayer->GetSubsystem<UCommonUIActionRouterBase>()) {
+            BoundInputRouter = Router;
+            InputConfigHandle = Router->OnActiveInputConfigChanged().AddUObject(this, &ThisClass::HandleGameplayInputConfig);
+        }
         if (UMythicNameplateDirector *Director =
                 LocalPlayer->GetSubsystem<UMythicNameplateDirector>()) {
             BoundNameplateDirector = Director;
@@ -121,9 +165,11 @@ void UMythicHUDLayout::NativeOnInitialized() {
     }
     SyncContextActionPresentationBindings();
 
-    if (RevealHUDAction.IsValid()) {
-        RegisterUIActionBinding(FBindUIActionArgs(FUIActionTag::ConvertChecked(RevealHUDAction), false,
-                                                  FSimpleDelegate::CreateUObject(this, &ThisClass::HandleRevealHUD)));
+    if (!bCentralControls && RevealHUDAction.IsValid()) {
+        FBindUIActionArgs RevealBindArgs(FUIActionTag::ConvertChecked(RevealHUDAction), false,
+            FSimpleDelegate::CreateUObject(this, &ThisClass::HandleRevealHUD));
+        RevealBindArgs.InputMode = ECommonInputMode::Game;
+        RegisterUIActionBinding(RevealBindArgs);
     }
 
     BindContextualElements();
@@ -134,11 +180,21 @@ void UMythicHUDLayout::NativeOnInitialized() {
     }
 }
 
+TOptional<FUIInputConfig> UMythicHUDLayout::GetDesiredInputConfig() const {
+    const auto* PC=GetOwningPlayer<AMythicPlayerController>();
+    const bool bWorldCursor=PC && PC->AbilityIntentComponent
+        && PC->AbilityIntentComponent->GetSelectedCameraMode().AbilityAimPolicy==EMythicAbilityAimPolicy::WorldCursor;
+    return FUIInputConfig(ECommonInputMode::Game,bWorldCursor ? EMouseCaptureMode::CaptureDuringMouseDown : EMouseCaptureMode::CapturePermanently,!bWorldCursor);
+}
+
 void UMythicHUDLayout::HandleAccessibilityChanged() {
     SetSalienceTicking(true);
 }
 
 void UMythicHUDLayout::NativeDestruct() {
+    if (auto* Router = BoundInputRouter.Get()) Router->OnActiveInputConfigChanged().Remove(InputConfigHandle);
+    InputConfigHandle.Reset();
+    BoundInputRouter.Reset();
     ClearContextActionBindings();
     InspectActionBinding.Unregister();
     InspectActionBinding = FUIActionBindingHandle();
@@ -163,8 +219,37 @@ void UMythicHUDLayout::NativeDestruct() {
             }
         }
     }
-    NameplateLayer = nullptr;
+    // The stack remains part of the HUD tree across a Slate reconstruction.
+    // Child NativeDestruct unbinds; NativeConstruct reattaches exact-owner events.
     Super::NativeDestruct();
+}
+
+void UMythicHUDLayout::HandleGameplayInputConfig(FUIInputConfig Config) {
+    auto* Router = BoundInputRouter.Get();
+    auto* LocalPlayer = GetOwningLocalPlayer();
+    if (!IsActivated() || !Router || Router->GetLeafmostActivatableWidget() != this
+        || Config.GetInputMode() != ECommonInputMode::Game || Router->GetActiveInputMode() != ECommonInputMode::Game
+        || !InventorySlot || InventorySlot->GetVisibility() != ESlateVisibility::Collapsed
+        || !LocalPlayer || !LocalPlayer->ViewportClient || !FSlateApplication::IsInitialized()) return;
+
+    auto& Slate = FSlateApplication::Get();
+    if (Slate.GetActiveModalWindow()) return;
+    const auto User = LocalPlayer->GetSlateUser();
+    const auto Viewport = LocalPlayer->ViewportClient->GetGameViewportWidget();
+    const auto Inventory = InventorySlot->GetCachedWidget();
+    if (!User || !Viewport || !Inventory) return;
+
+    FWidgetPath CurrentPath;
+    if (const auto Focus = User->GetFocusedWidget()) Slate.GeneratePathToWidgetUnchecked(Focus.ToSharedRef(), CurrentPath, EVisibility::All);
+    // Preserve CommonUI's exact local viewport guard, including when several PIE windows exist.
+    if (!CurrentPath.ContainsWidget(Viewport.Get())) return;
+    FWidgetPath PendingPath;
+    if (const auto Pending = LocalPlayer->GetSlateOperations().GetUserFocusRecepient()) Slate.GeneratePathToWidgetUnchecked(Pending.ToSharedRef(), PendingPath, EVisibility::All);
+    if (CurrentPath.ContainsWidget(Inventory.Get()) || PendingPath.ContainsWidget(Inventory.Get())) {
+        // CommonUI otherwise considers the returned inventory an acceptable HUD descendant even while collapsed.
+        // Set the pending target before its leaf-focus pass; do not clear focus or borrow another player's viewport.
+        LocalPlayer->GetSlateOperations().SetUserFocus(Viewport.ToSharedRef(), EFocusCause::SetDirectly, false);
+    }
 }
 
 void UMythicHUDLayout::BindContextualElements() {
@@ -536,6 +621,8 @@ void UMythicHUDLayout::RemoveContextActionBinding(
 }
 
 void UMythicHUDLayout::RefreshContextActionBindings() {
+    // Physical gameplay edges are resolved once by CombatControls, including LB chords.
+    if (const auto* PC=Cast<AMythicPlayerController>(GetOwningPlayer()); PC && PC->ControlsComponent) { ClearContextActionBindings(); return; }
     UMythicNameplateDirector *Director = BoundNameplateDirector.Get();
     if (!Director) {
         ClearContextActionBindings();
@@ -674,6 +761,7 @@ void UMythicHUDLayout::OpenMenuOnPage(FName PageId) {
         UCommonUIExtensions::PushContentToLayer_ForPlayer(GetOwningLocalPlayer(), TAG_UI_LAYER_MENU, MenuShellClass);
     if (UMythicMenuShell *Shell = Cast<UMythicMenuShell>(Pushed)) {
         ActiveMenuShell = Shell;
+        Shell->SetMenuToggleAction(OpenMenuAction);
         Shell->OpenPage(PageId);
     }
 }

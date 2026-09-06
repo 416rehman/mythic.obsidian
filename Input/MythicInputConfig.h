@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "GameplayTagContainer.h"
+#include "InputTriggers.h"
 #include "MythicInputConfig.generated.h"
 
 class UInputAction;
@@ -21,6 +22,10 @@ public:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Meta = (Categories = "Input"))
     FGameplayTag InputTag;
+
+    /** Started for raw ability buttons; Triggered retains authored trigger-gated actions. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+    ETriggerEvent AbilityPressEvent = ETriggerEvent::Triggered;
 };
 
 UCLASS(BlueprintType, Const)

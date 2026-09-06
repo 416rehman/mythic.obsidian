@@ -5,6 +5,7 @@
 #include "Engine/GameInstance.h"
 #include "TimerManager.h"
 #include "GameFramework/HUD.h"
+#include "GameFramework/PlayerController.h"
 #include "GameUIPolicy.h"
 #include "Mythic.h"
 #include "PrimaryGameLayout.h"
@@ -185,6 +186,26 @@ void UMythicUIManagerSubsystem::AddWidgetInstanceToLayer(FGameplayTag LayerName,
         return;
     }
     Layer->AddWidgetInstance(*Widget);
+}
+
+bool UMythicUIManagerSubsystem::TryAddWidgetInstanceToPlayerLayer(FGameplayTag LayerName,
+    const APlayerController* Controller,UCommonActivatableWidget* Widget,
+    TWeakObjectPtr<UCommonActivatableWidgetContainerBase>& AttachedLayer) {
+    AttachedLayer.Reset();
+    const auto* LP=IsValid(Controller) ? Cast<UCommonLocalPlayer>(Controller->GetLocalPlayer()):nullptr;
+    const auto* Policy=GetCurrentUIPolicy();
+    if (!LP || !Controller->IsLocalController() || Controller->GetGameInstance()!=GetGameInstance()
+        || !IsValid(Widget) || Widget->GetOwningPlayer()!=Controller || Widget->GetOwningLocalPlayer()!=LP
+        || Widget->GetWorld()!=Controller->GetWorld() || !Policy) return false;
+    auto* Layout=Policy->GetRootLayout(LP);
+    auto* Layer=Layout ? Layout->GetLayerWidget(LayerName):nullptr;
+    if (!Layer || Layer->GetWidgetList().Contains(Widget)) return false;
+    // The wheel may cancel synchronously during AddWidgetInstance. Retain the real layer before that callback.
+    AttachedLayer=Layer;
+    Layer->AddWidgetInstance(*Widget);
+    return IsValid(Controller) && IsValid(Widget) && IsValid(Layer)
+        && Widget->GetOwningPlayer()==Controller && Widget->GetOwningLocalPlayer()==LP
+        && Layer->GetWidgetList().Contains(Widget);
 }
 
 void UMythicUIManagerSubsystem::RemoveWidgetInstanceFromLayer(FGameplayTag LayerName, const APlayerController *Controller, UCommonActivatableWidget *Widget) {

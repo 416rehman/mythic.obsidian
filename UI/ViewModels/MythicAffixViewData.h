@@ -88,6 +88,10 @@ struct MYTHIC_API FMythicAffixViewData {
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Affixes")
     FText Description;
 
+    /** Contextual action bonuses do not contribute to unconditional equipment comparisons. */
+    UPROPERTY(BlueprintReadOnly, Category = "Mythic|Affixes")
+    EMythicAffixApplicationScope ApplicationScope = EMythicAffixApplicationScope::Permanent;
+
     /** Complete display line for tooltip widgets that support the project's rich-text markup. */
     UPROPERTY(BlueprintReadOnly, Category = "Mythic|Affixes")
     FText RichText;

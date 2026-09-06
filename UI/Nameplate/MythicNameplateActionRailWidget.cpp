@@ -5,11 +5,33 @@
 #include "Components/TextBlock.h"
 #include "UI/Nameplate/MythicNameplateVisualStyle.h"
 #include "UI/Widgets/MythicInputGlyph.h"
+#include "Input/MythicControlsComponent.h"
+#include "Player/MythicPlayerController.h"
 
 void UMythicNameplateActionRailWidget::NativeOnInitialized() {
     Super::NativeOnInitialized();
     Projection.Actions.Reserve(2);
     SetVisibility(ESlateVisibility::Collapsed);
+}
+
+void UMythicNameplateActionRailWidget::NativeConstruct() {
+    Super::NativeConstruct();
+    if (auto* PC=Cast<AMythicPlayerController>(GetOwningPlayer()); PC && PC->ControlsComponent) {
+        BoundControls=PC->ControlsComponent;
+        BoundControls->OnInteractionHoldProgress.RemoveAll(this);
+        BoundControls->OnInteractionHoldProgress.AddUObject(this,&ThisClass::HandleInteractionHold);
+    }
+    RefreshEntries();
+}
+
+void UMythicNameplateActionRailWidget::NativeDestruct() {
+    if (BoundControls.IsValid()) BoundControls->OnInteractionHoldProgress.RemoveAll(this);
+    BoundControls.Reset(); Super::NativeDestruct();
+}
+
+void UMythicNameplateActionRailWidget::HandleInteractionHold(const FMythicEntityPresentationInstance& Subject,FGameplayTag Action,float Progress) {
+    if (PrimaryGlyph && Projection.Instance==Subject && !Projection.Actions.IsEmpty() && Projection.Actions[0].ActionTag==Action)
+        PrimaryGlyph->SetHoldProgress(Progress);
 }
 
 void UMythicNameplateActionRailWidget::ApplyProjection(
@@ -133,6 +155,7 @@ void UMythicNameplateActionRailWidget::ApplyEntry(
     const FUIActionBindingHandle BindingHandle) {
     const bool bVisible = InputTag.IsValid() && !Label.IsEmpty();
     if (Glyph) {
+        Glyph->SetExternalHoldPresentation(false);
         Glyph->SetActionBinding(
             bVisible && BindingHandle.IsValid()
                 ? BindingHandle : FUIActionBindingHandle());
@@ -169,6 +192,7 @@ void UMythicNameplateActionRailWidget::RefreshEntries() {
     ApplyEntry(PrimaryGlyph, PrimaryActionText, PrimaryInputTag,
                Primary ? Primary->ResolvedLabel : FText::GetEmpty(),
                ActionBindings.FindRef(PrimaryInputTag));
+    if (PrimaryGlyph && Primary && BoundControls.IsValid()) PrimaryGlyph->SetExternalHoldPresentation(Primary->HoldDurationSeconds>0);
 
     const FMythicNameplateActionProjection *Secondary = nullptr;
     if (!Projection.bInspectAvailable && Projection.Actions.Num() > 1) {

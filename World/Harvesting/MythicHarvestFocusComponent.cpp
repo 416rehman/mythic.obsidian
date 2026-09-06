@@ -295,6 +295,7 @@ void UMythicHarvestFocusComponent::InitializeLocalInput(
     }
 
     OwnerController = Controller;
+    if (Controller->ControlsComponent) return;
     ResolveInputAssets();
     if (!ResolvedContextInteractAction || !ResolvedContextMappingContext) {
         return;
@@ -619,7 +620,7 @@ void UMythicHarvestFocusComponent::RefreshFocusedPresentation() {
             Candidate.Probe.ToolType = HarvestFragment->ToolType;
             Candidate.Probe.ItemGuid = Item->GetItemInstanceGuid();
             Candidate.Probe.ToolTier = HarvestFragment->ToolTier;
-            Candidate.Probe.bInGearSlot = Slot.IsGearSlot();
+            Candidate.Probe.bInGearSlot = Slot.AppliesEquipmentEffects();
             Candidate.Probe.bHasDurabilityFragment =
                 Candidate.DurabilityFragment.IsValid();
             Candidate.Probe.bBroken = Candidate.DurabilityFragment.IsValid()
@@ -735,6 +736,12 @@ void UMythicHarvestFocusComponent::HandleContextInteractStarted() {
     }
 }
 
+bool UMythicHarvestFocusComponent::TryControlsInteraction() {
+    if (!CurrentFocus.bHasFocus) return false;
+    HandleContextInteractStarted();
+    return true;
+}
+
 bool UMythicHarvestFocusComponent::RequestEquipFocusedTool() {
     AMythicPlayerController *Controller = OwnerController.Get();
     UMythicInventoryComponent *SourceInventory = SelectedToolInventory.Get();
@@ -767,7 +774,7 @@ bool UMythicHarvestFocusComponent::RequestEquipFocusedTool() {
             Inventory->GetAllSlots();
         for (int32 SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex) {
             const FMythicInventorySlotEntry &Slot = Slots[SlotIndex];
-            if (Slot.SlottedItemInstance || !Slot.IsGearSlot()
+            if (Slot.SlottedItemInstance || !Slot.AppliesEquipmentEffects()
                 || !Inventory->CanSlotAcceptItem(SlotIndex, Item, true)) {
                 continue;
             }

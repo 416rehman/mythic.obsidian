@@ -98,6 +98,7 @@ public:
     virtual void OnInventorySlotChanged(UMythicInventoryComponent *Inventory, int32 SlotIndex) override;
 
     virtual void ExecuteGenericAction(UMythicItemInstance *ItemInstance) override;
+    virtual bool ExecuteReservedInventoryAction(UMythicItemInstance* ItemInstance, bool& bConsumeOne) override;
 
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
 

@@ -5,9 +5,11 @@
 #include "CoreMinimal.h"
 #include "AbilitySystemInterface.h"
 #include "GameplayTagContainer.h"
+#include "GameplayEffectTypes.h"
 #include "GameFramework/Character.h"
 #include "MythicRegistryInterface.h"
 #include "Itemization/Inventory/InventorySlotDefinition.h"
+#include "GAS/Cues/MythicAbilityPoseRemnant.h"
 #include "MythicCharacter.generated.h"
 
 class AMythicCharacter;
@@ -99,6 +101,9 @@ protected:
 
     void Input_AbilityInputTagPressed(FGameplayTag InputTag);
     void Input_AbilityInputTagReleased(FGameplayTag InputTag);
+    void Input_AbilityInputTagCanceled(FGameplayTag InputTag);
+    TArray<uint32> AbilityInputBindHandles;
+    TWeakObjectPtr<class UMythicInputComponent> BoundAbilityInputComponent;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mythic|Input")
     TObjectPtr<class UMythicInputConfig> InputConfig;
@@ -140,8 +145,17 @@ public:
     // detach and destroy client-side spawned mesh component for Slot
     UFUNCTION(BlueprintCallable, Category = "Mythic|Equipment")
     void RemoveLocalEquipmentMesh(EInventorySlotType Slot);
+    /** Primary body and explicit equipped visuals only; excludes first-person duplicate arms and unrelated attachments. */
+    void GatherAbilityPoseMeshes(TArray<USkeletalMeshComponent*>& Out) const;
+    /** Uses character relevancy; the persistent PlayerState ASC must not broadcast cosmetics to the whole server. */
+    void PublishAbilityPoseRemnant(const FMythicAbilityPoseRemnantEvent& Event,bool bCancel);
+    void PublishAbilityCue(FGameplayTag Cue,const FGameplayCueParameters& Parameters);
 
 protected:
+    UFUNCTION(NetMulticast,Reliable)
+    void MulticastAbilityPoseRemnant(FMythicAbilityPoseRemnantEvent Event,bool bCancel);
+    UFUNCTION(NetMulticast,Unreliable)
+    void MulticastAbilityCue(FGameplayTag Cue,FGameplayCueParameters Parameters);
     UPROPERTY()
     UAbilitySystemComponent* CachedASC;
 

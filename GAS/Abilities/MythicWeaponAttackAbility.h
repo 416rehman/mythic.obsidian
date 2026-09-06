@@ -130,6 +130,9 @@ public:
         return ActiveSourceDomain;
     }
 
+    /** One per-hit context factor, composed before canonical Dmg.Pre; all damage and wear remain canonical. */
+    virtual FMythicDamageContainerSpec MakeDamageContainerSpec(const FMythicDamageContainer& Container,int32 OverrideGameplayLevel=-1) override final;
+
     /** Native commit path: validates the active spec and broadcasts commit without dispatching Blueprint hooks. */
     virtual bool CommitAbility(
         const FGameplayAbilitySpecHandle Handle,
@@ -298,6 +301,9 @@ private:
     EMythicAttackSourceDomain ActiveSourceDomain =
         EMythicAttackSourceDomain::Invalid;
     FMythicHarvestAttackCycleToken ActiveHarvestCycleToken;
+    /** Frozen from the exact immutable secondary before commit; each spec/instance owns its own action. */
+    float ActiveDamageMultiplier=1.0f;
+    float ActiveAttackRateMultiplier=1.0f;
     bool bHitEventConsumed = false;
     bool bEndingNativeLifecycle = false;
 };

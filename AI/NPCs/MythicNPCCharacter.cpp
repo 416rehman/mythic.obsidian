@@ -106,6 +106,7 @@ bool AMythicNPCCharacter::OnSpawnedFromPool(const struct FMythicNPCData &InNPCDa
     if (!this->HasAuthority()) {
         return false;
     }
+    PresentationLifecycle = EPresentationLifecycle::Managed;
     // The body remains invisible and unregistered until every field for its next logical person is complete.
     SetActorHiddenInGame(true);
     SetActorEnableCollision(false);
@@ -716,6 +717,7 @@ void AMythicNPCCharacter::OnReturnedToPool() {
     if (!HasAuthority()) {
         return;
     }
+    PresentationLifecycle = EPresentationLifecycle::Pooled;
 
     // Revoke presentation first while the old handle still resolves for owner-grant cleanup.
     if (EntityPresentationComponent) {
@@ -770,6 +772,7 @@ void AMythicNPCCharacter::WakeFromPool() {
     if (!HasAuthority()) {
         return;
     }
+    PresentationLifecycle = EPresentationLifecycle::Managed;
 
     InitializeASC();
 
@@ -790,6 +793,7 @@ void AMythicNPCCharacter::PrepareForEmbodiment() {
     if (!HasAuthority()) {
         return;
     }
+    PresentationLifecycle = EPresentationLifecycle::Managed;
     SetActorHiddenInGame(true);
     SetActorEnableCollision(false);
     SetActorTickEnabled(false);
@@ -810,6 +814,7 @@ bool AMythicNPCCharacter::ActivatePreparedEmbodiment() {
         || !EntityPresentationComponent->GetAuthorityEntityId().IsValid()) {
         return false;
     }
+    PresentationLifecycle = EPresentationLifecycle::Managed;
     if (!CommitCombatInitializationForEmbodiment()) {
         return false;
     }
@@ -1264,11 +1269,13 @@ void AMythicNPCCharacter::InitializeASC() {
     AbilitySystemComponent->InitAbilityActorInfo(this, this);
     CapturePristineAttributeBases();
 
-    if (LifeComponent && !LifeComponent->IsInitialized()) {
+    if (LifeComponent && !LifeComponent->IsInitialized()
+        && PresentationLifecycle != EPresentationLifecycle::Pooled) {
         LifeComponent->InitializeWithAbilitySystem(AbilitySystemComponent);
     }
 
-    if (HasAuthority() && LifeComponent) {
+    if (HasAuthority() && LifeComponent
+        && PresentationLifecycle != EPresentationLifecycle::Pooled) {
         // Authoritative teardown uses native delegates. Blueprint lifecycle
         // events remain presentation hooks, but cannot strand a live actor if
         // their serialized invocation list is reset or reinstanced.
@@ -1440,13 +1447,21 @@ void AMythicNPCCharacter::BeginPlay() {
 
     // Manager, Mass, and designer spawners stamp their canonical identity synchronously after spawning. Defer the
     // fallback one tick so those richer paths always win; only a genuinely direct actor reaches the typed fallback.
-    if (HasAuthority()) {
+    if (HasAuthority() && (!EntityPresentationComponent
+        || !EntityPresentationComponent->GetPublicIdentitySnapshot().IsActive())) {
         SetActorHiddenInGame(true);
         SetActorEnableCollision(false);
         SetActorTickEnabled(false);
         ParkMovementForPool();
-        GetWorldTimerManager().SetTimerForNextTick(
-            this, &ThisClass::TryActivateDirectEntityPresentation);
+        if (PresentationLifecycle == EPresentationLifecycle::Pooled && CognitiveBrain) {
+            // Component BeginPlay may have armed a timer after the pre-world pool
+            // return. Only a fully pooled body can discard its brain initialization.
+            CognitiveBrain->StopThinking();
+        }
+        if (PresentationLifecycle == EPresentationLifecycle::AwaitingDirectFallback) {
+            GetWorldTimerManager().SetTimerForNextTick(
+                this, &ThisClass::TryActivateDirectEntityPresentation);
+        }
     }
 }
 
@@ -1474,7 +1489,8 @@ void AMythicNPCCharacter::BuildDirectPublicIdentity(
 }
 
 void AMythicNPCCharacter::TryActivateDirectEntityPresentation() {
-    if (!HasAuthority() || !EntityPresentationComponent
+    if (!HasAuthority() || PresentationLifecycle != EPresentationLifecycle::AwaitingDirectFallback
+        || !EntityPresentationComponent
         || EntityPresentationComponent->GetAuthorityEntityId().IsValid()
         || EntityPresentationComponent->GetPublicIdentitySnapshot().IsActive()) {
         return;
@@ -1549,6 +1565,7 @@ void AMythicNPCCharacter::InitializeFromMassEntity(const FMassEntityHandle &InEn
     if (!HasAuthority()) {
         return;
     }
+    PresentationLifecycle = EPresentationLifecycle::Managed;
 
     UMassEntitySubsystem *EntitySubsystem = UWorld::GetSubsystem<UMassEntitySubsystem>(GetWorld());
     if (!EntitySubsystem || !EntitySubsystem->GetEntityManager().IsEntityValid(InEntityHandle)) {

@@ -138,7 +138,9 @@ void UMythicAttributeSet_Life::SendEventToInstigator(const FGameplayEffectModCal
         Payload.Target = OwnerASC->GetAvatarActor();
         Payload.OptionalObject = Data.EffectSpec.Def;
         Payload.ContextHandle = Data.EffectSpec.GetContext();
-        Payload.InstigatorTags = *Data.EffectSpec.CapturedSourceTags.GetAggregatedTags();
+        if (const auto* Context=FMythicGameplayEffectContext::ExtractEffectContext(Payload.ContextHandle); Context && Context->ActionGroupId.IsValid()) {
+            Payload.InstigatorTags=Context->ActionFacets; Payload.InstigatorTags.AddTag(GAS_ABILITY_TYPE_SKILL);
+        } else Payload.InstigatorTags = *Data.EffectSpec.CapturedSourceTags.GetAggregatedTags();
         AppendHitTags(Data.EffectSpec.GetContext(), Payload.InstigatorTags);
         Payload.TargetTags = *Data.EffectSpec.CapturedTargetTags.GetAggregatedTags();
         Payload.EventMagnitude = Magnitude;
@@ -155,7 +157,9 @@ void UMythicAttributeSet_Life::SendEventToOwner(const FGameplayEffectModCallback
         Payload.Target = Instigator;
         Payload.OptionalObject = Data.EffectSpec.Def;
         Payload.ContextHandle = Data.EffectSpec.GetContext();
-        Payload.InstigatorTags = *Data.EffectSpec.CapturedSourceTags.GetAggregatedTags();
+        if (const auto* Context=FMythicGameplayEffectContext::ExtractEffectContext(Payload.ContextHandle); Context && Context->ActionGroupId.IsValid()) {
+            Payload.InstigatorTags=Context->ActionFacets; Payload.InstigatorTags.AddTag(GAS_ABILITY_TYPE_SKILL);
+        } else Payload.InstigatorTags = *Data.EffectSpec.CapturedSourceTags.GetAggregatedTags();
         AppendHitTags(Data.EffectSpec.GetContext(), Payload.InstigatorTags);
         Payload.TargetTags = *Data.EffectSpec.CapturedTargetTags.GetAggregatedTags();
         Payload.EventMagnitude = Magnitude;
@@ -181,10 +185,14 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
         // or turning an accidental sign error into untracked healing.
         const float RawDamage = GetDamage();
         const float DamageDone = FMath::IsFinite(RawDamage) ? FMath::Max(0.0f, RawDamage) : 0.0f;
+        // Consume the meta value before health callbacks can apply a separate hit.
+        SetDamage(0.0f);
+        bool bKilledThisApplication=false;
 
-        const float NewHealth = FMath::Clamp(GetHealth() - DamageDone, 0.0f, GetMaxHealth());
+        const float HealthBeforeDamage=GetHealth();
+        const float NewHealth = FMath::Clamp(HealthBeforeDamage - DamageDone, 0.0f, GetMaxHealth());
         SetHealth(NewHealth);
-        const float AppliedHealthDamage = ResolveAppliedHealthDamage(HealthBeforeAttributeChange, NewHealth);
+        const float AppliedHealthDamage = ResolveAppliedHealthDamage(HealthBeforeDamage, NewHealth);
 
         const bool bLethalHit = ComputeOutOfHealthLatch(GetHealth()) && !bOutOfHealth;
         if (bLethalHit && !bInDeathPreHook && ASC && ASC->IsOwnerActorAuthoritative()) {
@@ -196,11 +204,16 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
         }
 
         if (ComputeOutOfHealthLatch(GetHealth()) && !bOutOfHealth) {
-            bOutOfHealth = true;
+            bOutOfHealth = true; bKilledThisApplication=true;
         }
 
-        SetDamage(0.0f);
-
+        // Publish the exact settlement before callbacks can heal, kill, or recycle the recipient.
+        if (auto* Context=FMythicGameplayEffectContext::ExtractEffectContext(EffectContext)) {
+            Context->ResolvedDamage.HealthLost=AppliedHealthDamage;
+            Context->ResolvedDamage.ShieldAbsorbed=ResolveAppliedShieldDamage(Context->GetShieldAbsorbed());
+            Context->ResolvedDamage.bKilled=bKilledThisApplication;
+        }
+        if (auto* MythicASC=Cast<UMythicAbilitySystemComponent>(ASC)) MythicASC->PublishOwnedShieldDamage(EffectContext);
         const FMythicGameplayEffectContext *MythicCtx = FMythicGameplayEffectContext::ExtractEffectContext(EffectContext);
         const float RawShieldAbsorbed = MythicCtx ? MythicCtx->GetShieldAbsorbed() : 0.0f;
         const float ShieldAbsorbed = ResolveAppliedShieldDamage(RawShieldAbsorbed);
@@ -276,7 +289,7 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
                                 continue;
                             }
                             for (const FMythicInventorySlotEntry &Slot : Inv->GetAllSlots()) {
-                                if (!Slot.IsGearSlot()
+                                if (!Slot.AppliesEquipmentEffects()
                                     || !Slot.SlottedItemInstance) {
                                     continue;
                                 }
@@ -292,7 +305,7 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
                 }
             }
 
-            if (bOutOfHealth && ASC && ASC->IsOwnerActorAuthoritative()) {
+            if (bKilledThisApplication && ASC && ASC->IsOwnerActorAuthoritative()) {
                 SendEventToOwner(Data, ASC, Instigator, GAS_EVENT_DEATH, DamageDone);
 
                 if (Instigator && Instigator != ASC->GetOwnerActor()) {
@@ -311,11 +324,18 @@ void UMythicAttributeSet_Life::PostGameplayEffectExecute(const FGameplayEffectMo
         }
     }
     else if (Data.EvaluatedData.Attribute == GetHealingAttribute()) {
-        const float HealingDone = GetHealing();
+        const float HealingDone = FMath::IsFinite(GetHealing()) ? FMath::Max(0.0f,GetHealing()) : 0.0f;
+        const float HealthBefore = GetHealth();
 
         const float NewHealth = FMath::Clamp(GetHealth() + HealingDone, 0.0f, GetMaxHealth());
         SetHealth(NewHealth);
         SetHealing(0.0f);
+
+        if (auto* Context=FMythicGameplayEffectContext::ExtractEffectContext(EffectContext)) {
+            Context->ResolvedHealing.Attempted=HealingDone;
+            Context->ResolvedHealing.Gained=FMath::Clamp(NewHealth-HealthBefore,0.0f,HealingDone);
+            Context->ResolvedHealing.Unused=HealingDone-Context->ResolvedHealing.Gained;
+        }
 
         bOutOfHealth = ComputeOutOfHealthLatch(GetHealth());
 

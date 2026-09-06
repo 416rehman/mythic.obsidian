@@ -1,4 +1,5 @@
 #include "MythicItemInstance.h"
+#include "Itemization/Inventory/Fragments/Actionable/MythicWeaponActionContract.h"
 
 #include "MythicInventoryComponent.h"
 #include "Itemization/Affixes/MythicAffixCompiler.h"
@@ -8,6 +9,8 @@
 #include "Itemization/Affixes/MythicTags_Affixes.h"
 #include "Fragments/ItemFragment.h"
 #include "Fragments/FragmentTypes.h"
+#include "Fragments/Actionable/ConsumableActionFragment.h"
+#include "Fragments/Actionable/ConsumableEffectFragment.h"
 #include "Fragments/Passive/AffixesFragment.h"
 #include "Fragments/Passive/MythicGemFragment.h"
 #include "Fragments/Passive/SocketsFragment.h"
@@ -125,6 +128,7 @@ uint64 DeriveFactoryAffixSeed(const FGuid &ItemGuid, const FPrimaryAssetId &Prof
 }
 
 void UMythicItemInstance::Serialize(FArchive &Ar) {
+    if (Ar.IsSaveGame() && UMythicInventoryComponent::IsItemMutationFrozen(this)) { Ar.SetError(); return; }
     Super::Serialize(Ar);
 
     if (!Ar.IsSaveGame() || Ar.IsError()) return;
@@ -245,15 +249,35 @@ void UMythicItemInstance::Serialize(FArchive &Ar) {
             Ar.SetError();
             return;
         }
+        if (auto* EffectFragment=Cast<UConsumableEffectFragment>(NewFragment);
+            EffectFragment && !EffectFragment->RehydrateDefinitionEffects(Cast<UConsumableEffectFragment>(Template))) {
+            UE_LOG(MythSaveLoad, Error, TEXT("Effect consumable frame has no matching current definition entry shape"));
+            Ar.SetError(); return;
+        }
         StagedFragments.Add(NewFragment);
     }
 
+    // An authored opt-in repairs a historical empty action without rewriting any valid saved payload or identity.
+    if (const auto* Replacement=UItemDefinition::GetFragment<UConsumableEffectFragment>(ItemDefinition);
+        Replacement && Replacement->ConsumableEffectConfig.bMigrateLegacyEmptyAction && !Replacement->ConsumableEffectConfig.Effects.IsEmpty()
+        && !StagedFragments.ContainsByPredicate([](const UItemFragment* Fragment){return Fragment && Fragment->IsA<UConsumableEffectFragment>();})) {
+        int32 EmptyIndex=INDEX_NONE;
+        for (int32 Index=0;Index<StagedFragments.Num();++Index) if (const auto* Legacy=Cast<UConsumableActionFragment>(StagedFragments[Index])) {
+            const auto& Config=Legacy->ConsumableActionConfig;
+            if (Config.TagsToAdd.IsEmpty() && Config.TagsToRemove.IsEmpty() && Config.GameplayAbility.IsNull() && !Config.EventTag.IsValid()) {
+                if (EmptyIndex!=INDEX_NONE) { EmptyIndex=INDEX_NONE; break; }
+                EmptyIndex=Index;
+            }
+        }
+        if (EmptyIndex!=INDEX_NONE) StagedFragments[EmptyIndex]=DuplicateObject<UConsumableEffectFragment>(Replacement,this);
+    }
     // Publish only after every nested fragment archive has consumed a valid complete payload.
     for (UItemFragment *Fragment : StagedFragments) Fragment->SetOwnerItemInstance(this);
     ItemFragments = MoveTemp(StagedFragments);
 }
 
 void UMythicItemInstance::SetStackSize(const int32 newQuantity) {
+    if (UMythicInventoryComponent::IsItemMutationFrozen(this)) return;
     auto owner = this->GetOwningActor();
     checkf(owner->HasAuthority(), TEXT("Only the server can set the stack size of an item instance"));
 
@@ -461,6 +485,9 @@ FMythicItemInitializeResult UMythicItemInstance::InitializeTransactional(
         return Result;
     }
 
+    if (!MythicWeaponAction::ValidateDefinition(Request.ItemDefinition)) {
+        Result.DiagnosticCode=TEXT("InvalidWeaponActionShape"); return Result;
+    }
     const UAffixesFragment *DefinitionAffixes = nullptr;
     const UMythicGemFragment *DefinitionGem = nullptr;
     const UYieldQualityFragment *DefinitionYieldQuality = nullptr;
@@ -727,6 +754,8 @@ int32 UMythicItemInstance::CountFragmentsOfClass(
 }
 
 void UMythicItemInstance::SetInventory(UMythicInventoryComponent *NewInventory, int32 NewSlotIndex) {
+    if (UMythicInventoryComponent::IsItemMutationFrozen(this)
+        || (NewInventory && UMythicInventoryComponent::IsOwnerMutationFrozen(NewInventory->GetOwner()))) return;
     this->OwningInventory = NewInventory;
     this->SlotIndex = NewSlotIndex;
     for (TObjectPtr ItemFragment : this->ItemFragments) {
@@ -750,6 +779,7 @@ AActor *UMythicItemInstance::GetInventoryOwner() const {
 }
 
 void UMythicItemInstance::AddTag(const FGameplayTag &Tag) {
+    if (UMythicInventoryComponent::IsItemMutationFrozen(this)) return;
     checkf(this->GetOwningActor()->HasAuthority(), TEXT("Only the server can add tags to an item instance"));
 
     if (HasTag(Tag)) {
@@ -760,6 +790,7 @@ void UMythicItemInstance::AddTag(const FGameplayTag &Tag) {
 }
 
 void UMythicItemInstance::RemoveTag(const FGameplayTag &Tag) {
+    if (UMythicInventoryComponent::IsItemMutationFrozen(this)) return;
     checkf(this->GetOwningActor()->HasAuthority(), TEXT("Only the server can remove tags from an item instance"));
 
     ItemTags.RemoveTag(Tag);
@@ -781,6 +812,7 @@ void UMythicItemInstance::ServerApplyTransform(const FGameplayTag &NewItemType,
                                                const FGameplayTagContainer &TagsToAdd,
                                                const FGameplayTagContainer &TagsToRemove,
                                                UItemDefinition *OptionalNewDef) {
+    if (UMythicInventoryComponent::IsItemMutationFrozen(this)) return;
     checkf(GetOwningActor() && GetOwningActor()->HasAuthority(), TEXT("ServerApplyTransform: authority only"));
 
     for (const FGameplayTag &T : TagsToRemove) {
@@ -841,6 +873,10 @@ void UMythicItemInstance::ConsumeItem(int32 StackQty) {
     }
 }
 
+void UMythicItemInstance::Destroy() {
+    if (!UMythicInventoryComponent::IsItemMutationFrozen(this)) Super::Destroy();
+}
+
 void UMythicItemInstance::OnDestroyed() {
     if (IsValid(this)) {
         auto inventory = this->GetInventoryComponent();
@@ -858,37 +894,21 @@ void UMythicItemInstance::OnDestroyed() {
     }
 }
 
-void UMythicItemInstance::OnRep_Quantity() {
-    if (OwningInventory) {
-        OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
+void UMythicItemInstance::NotifyReplicatedItemState() {
+    if (IsValid(OwningInventory) && SlotIndex != INDEX_NONE && OwningInventory->GetItem(SlotIndex) == this) {
+        OwningInventory->NotifyItemInstanceUpdated(SlotIndex, false);
     }
 }
 
-void UMythicItemInstance::OnRep_ItemDefinition() {
-    if (OwningInventory) {
-        OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
-    }
-}
-
-void UMythicItemInstance::OnRep_OwningInventory() {
-    if (OwningInventory && SlotIndex != INDEX_NONE) {
-        OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
-    }
-}
-
-void UMythicItemInstance::OnRep_SlotIndex() {
-    if (OwningInventory && SlotIndex != INDEX_NONE) {
-        OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
-    }
-}
-
-void UMythicItemInstance::OnRep_MarkedJunk() {
-    if (OwningInventory && SlotIndex != INDEX_NONE) {
-        OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
-    }
-}
+void UMythicItemInstance::OnRep_Quantity() { NotifyReplicatedItemState(); }
+void UMythicItemInstance::OnRep_ItemDefinition() { NotifyReplicatedItemState(); }
+void UMythicItemInstance::OnRep_ItemFragments() { NotifyReplicatedItemState(); }
+void UMythicItemInstance::OnRep_OwningInventory() { NotifyReplicatedItemState(); }
+void UMythicItemInstance::OnRep_SlotIndex() { NotifyReplicatedItemState(); }
+void UMythicItemInstance::OnRep_MarkedJunk() { NotifyReplicatedItemState(); }
 
 void UMythicItemInstance::ServerSetMarkedJunk(bool bJunk) {
+    if (UMythicInventoryComponent::IsItemMutationFrozen(this)) return;
     checkf(GetOwningActor() && GetOwningActor()->HasAuthority(), TEXT("Only the server can set the junk flag on an item instance"));
 
     if (bMarkedJunk == bJunk) {

@@ -6,6 +6,8 @@
 #include "MythicSettingsScreenBase.generated.h"
 
 class UCommonButtonBase;
+class UMythicControlsPage;
+class UMythicInputGlyph;
 class UCommonButtonGroupBase;
 class UCommonButtonStyle;
 class UCommonTextBlock;
@@ -129,6 +131,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mythic|Settings")
     void RestoreDefaults();
 
+    virtual bool TryHandleNestedBackAction() override;
+
     /** Redraw hooks for the Blueprint. */
     UFUNCTION(BlueprintImplementableEvent, Category = "Mythic|Settings")
     void OnCategoryChanged();
@@ -141,6 +145,8 @@ public:
 
 protected:
     virtual void NativeOnInitialized() override;
+    virtual void NativeDestruct() override;
+    virtual bool NativeOnHandleBackAction() override;
     virtual void NativeOnActivated() override;
     virtual void NativeOnDeactivated() override;
     virtual UWidget *NativeGetDesiredFocusTarget() const override;
@@ -274,5 +280,23 @@ private:
     UPROPERTY()
     TObjectPtr<UMythicBoundActionButton> ApplyButton;
 
+    UPROPERTY() TObjectPtr<UMythicControlsPage> ControlsPage;
+    int32 ControlsCategory = INDEX_NONE;
+    bool bLeavingSettings = false;
+    void HandleControlsCapture(bool bCapturing);
+    void HandleControlsFocusHelp(const FText& Title,const FText& Body);
+    bool bControlsFocusHelp=false;
+    FText ControlsFocusTitle;
+    FText ControlsFocusBody;
+    void BindCategoryActions();
+    void HandleCategoryInput(int32 Delta);
+    bool CanCycleCategoryFromInput() const;
+    void BuildCategoryHints();
+    void RefreshCategoryHints();
+    FUIActionBindingHandle PreviousCategoryBinding;
+    FUIActionBindingHandle NextCategoryBinding;
+    UPROPERTY() TObjectPtr<UVerticalBox> CategoryHints;
+    UPROPERTY() TObjectPtr<UMythicInputGlyph> PreviousCategoryGlyph;
+    UPROPERTY() TObjectPtr<UMythicInputGlyph> NextCategoryGlyph;
     bool bScreenBuilt = false;
 };

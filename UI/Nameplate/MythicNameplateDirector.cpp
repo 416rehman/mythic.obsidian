@@ -436,7 +436,19 @@ bool UMythicNameplateDirector::OpenFocusedEntityInspect() {
     InspectPage->ApplyInspectProjection(CurrentInspectProjection);
     AttentionSubsystem->SetInspectTarget(InspectedInstance);
     RequestProjectionRefresh();
+    InspectPage->BeginInspectInputOwnership();
     return true;
+}
+
+bool UMythicNameplateDirector::ToggleFocusedEntityInspect() {
+    if (!IsInGameThread()) return false;
+    if (ActiveInspectPage.IsValid() || InspectedInstance.IsValid()) { CloseEntityInspectInternal(true); return true; }
+    return OpenFocusedEntityInspect();
+}
+
+bool UMythicNameplateDirector::CloseEntityInspectForPage(UMythicEntityInspectPage* ExpectedPage) {
+    if (!IsInGameThread() || !ExpectedPage || ActiveInspectPage.Get()!=ExpectedPage) return false;
+    CloseEntityInspectInternal(true); return true;
 }
 
 void UMythicNameplateDirector::CloseEntityInspect() {
@@ -1871,23 +1883,20 @@ void UMythicNameplateDirector::CloseEntityInspectInternal(
     }
     InspectPageDeactivatedHandle.Reset();
     ActiveInspectPage.Reset();
-    if (bDeactivatePage && InspectPage && InspectPage->IsActivated()) {
-        InspectPage->DeactivateWidget();
-    }
+    // Clear the old transaction before notifying UI/attention. A deactivation callback may open another page.
+    const bool bHadInspect = InspectedInstance.IsValid() || CurrentInspectProjection.IsValid();
+    InspectedInstance.Reset(); CurrentInspectProjection = FMythicEntityInspectProjection();
 
     if (UMythicEntityAttentionSubsystem *AttentionSubsystem = Attention.Get()) {
         AttentionSubsystem->SetInspectTarget(
             FMythicEntityPresentationInstance());
     }
 
-    const bool bHadInspect = InspectedInstance.IsValid()
-        || CurrentInspectProjection.IsValid();
-    InspectedInstance.Reset();
-    CurrentInspectProjection = FMythicEntityInspectProjection();
     if (bHadInspect) {
         PublishInspectRevision();
         RequestProjectionRefresh();
     }
+    if (bDeactivatePage && InspectPage && InspectPage->IsActivated()) InspectPage->DeactivateWidget();
 }
 
 void UMythicNameplateDirector::PublishInspectRevision() {

@@ -30,6 +30,19 @@ public:
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     static UMythicUserSettings *Get();
 
+    UFUNCTION(BlueprintPure, Category="Mythic|Settings")
+    bool GetHoldToCrouch() const { return bHoldToCrouch; }
+
+    /** Optional local third-person camera following; never changes hit/target authority. */
+    UFUNCTION(BlueprintPure, Category="Mythic|Settings")
+    bool GetLockYawAssist() const { return bLockYawAssist; }
+
+    UFUNCTION(BlueprintCallable, Category="Mythic|Settings")
+    void SetLockYawAssist(bool bEnabled) { bLockYawAssist=bEnabled; OnInputSettingsChanged.Broadcast(); }
+
+    UFUNCTION(BlueprintCallable, Category="Mythic|Settings")
+    void SetHoldToCrouch(bool bHold) { bHoldToCrouch=bHold; OnInputSettingsChanged.Broadcast(); }
+
     /** Returns the master audio volume in the normalized 0..1 range. */
     UFUNCTION(BlueprintPure, Category = "Mythic|Settings")
     float GetMasterVolume() const { return MasterVolume; }
@@ -554,6 +567,12 @@ private:
     void ApplyAudioSettings() const;
 
     // ---- Controls ----
+    UPROPERTY(Config)
+    bool bHoldToCrouch = false;
+
+    UPROPERTY(Config)
+    bool bLockYawAssist = false;
+
     UPROPERTY(Config)
     float MouseLookSensitivity = 1.0f;
 

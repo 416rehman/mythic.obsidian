@@ -35,12 +35,18 @@ class UGameplayEffect;
 class AMythicMount;
 class UMythicItemizationRuleset;
 class UItemDefinition;
+class UMythicSkillDefinition;
+class UMythicAbilityCameraDefinition;
 
 UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Mythic"))
 class MYTHIC_API UMythicDeveloperSettings : public UDeveloperSettings {
     GENERATED_BODY()
 
 public:
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Input|Camera")
+    TSoftObjectPtr<UMythicAbilityCameraDefinition> AbilityCameraDefinition;
+    UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Progression|Abilities")
+    TArray<TSoftObjectPtr<UMythicSkillDefinition>> AbilityCatalog;
     UMythicDeveloperSettings();
 
     virtual FName GetCategoryName() const override { return FName("Game"); }

@@ -133,4 +133,6 @@ private:
     TArray<FMythicEscapeEntry> Entries;
 
     bool bBuilt = false;
+    bool bHadContentPage = false;
+    TWeakObjectPtr<UWidget> ContentReturnFocus;
 };

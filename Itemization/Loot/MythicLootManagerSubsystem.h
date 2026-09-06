@@ -2,6 +2,7 @@
 
 #include "Mythic/Itemization/Loot/MythicWorldItem.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "MythicLootCreditContext.h"
 #include "MythicLootManagerSubsystem.generated.h"
 
 class APlayerController;
@@ -12,6 +13,7 @@ class UItemDefinition;
 struct FLootTierBonus;
 
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnMythicPreLootRoll, APlayerController *, FLootTierBonus &);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnMythicAbilityLootCredit,const FMythicLootCreditContext&,FLootTierBonus&);
 
 UCLASS()
 class MYTHIC_API UMythicLootManagerSubsystem : public UGameInstanceSubsystem {
@@ -61,6 +63,7 @@ public:
      * quantity find are in the bonus; a listener edits the bonus in place. Quest, chest and bounty loot never raise it.
      */
     FOnMythicPreLootRoll OnPreLootRoll;
+    FOnMythicAbilityLootCredit OnAbilityLootCredit;
 
     /** Creates a server-authoritative item instance for the specified recipient and item level. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Loot")

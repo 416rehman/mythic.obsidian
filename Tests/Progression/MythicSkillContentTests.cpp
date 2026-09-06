@@ -1,224 +1,69 @@
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "AssetRegistry/IAssetRegistry.h"
 #include "Misc/AutomationTest.h"
-
-#include "GAS/Abilities/MythicGA_Skill.h"
-#include "GAS/Effects/MythicStatusEffectDefinition.h"
+#include "GAS/Abilities/MythicGA_AbilityWindow.h"
 #include "Progression/Skills/MythicSkillDefinition.h"
+#include "Settings/MythicDeveloperSettings.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
-
 namespace {
-    constexpr int32 ExpectedSkills = 16;
-
-    void LoadSkillDefinitions(TArray<UMythicSkillDefinition *> &Out) {
-        FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-        Module.Get().SearchAllAssets(true);
-
-        TArray<FAssetData> Assets;
-        Module.Get().GetAssetsByClass(UMythicSkillDefinition::StaticClass()->GetClassPathName(), Assets, true);
-        for (const FAssetData &Asset : Assets) {
-            if (UMythicSkillDefinition *Skill = Cast<UMythicSkillDefinition>(Asset.GetAsset())) {
-                Out.Add(Skill);
-            }
-        }
-        Out.Sort([](const UMythicSkillDefinition &A, const UMythicSkillDefinition &B) {
-            return A.GetName() < B.GetName();
-        });
+TArray<UMythicSkillDefinition*> ApprovedAbilities(FAutomationTestBase& Test) {
+    TArray<UMythicSkillDefinition*> Definitions;
+    TSet<FSoftObjectPath> Seen;
+    for (const auto& Path:GetDefault<UMythicDeveloperSettings>()->AbilityCatalog) {
+        Test.TestFalse(TEXT("catalogue identities are unique"),Seen.Contains(Path.ToSoftObjectPath())); Seen.Add(Path.ToSoftObjectPath());
+        auto* Definition=Path.LoadSynchronous();
+        if (Test.TestNotNull(TEXT("configured ability metadata loads"),Definition)) Definitions.Add(Definition);
     }
+    return Definitions;
 }
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicSkillContentTest,
-                                 "Mythic.Progression.SkillContent",
-                                 EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-/**
- * The sixteen skills are rows on UMythicGA_Skill, not sixteen graphs, so what makes each one a skill is its
- * authored data. A row that reaches nobody, moves nobody and changes nobody still loads, still shows its icon
- * and still fires - it just does nothing, which is the failure this guards.
- */
-bool FMythicSkillContentTest::RunTest(const FString &Parameters) {
-    TArray<UMythicSkillDefinition *> Skills;
-    LoadSkillDefinitions(Skills);
-
-    AddInfo(FString::Printf(TEXT("%d skill definitions found, %d expected"), Skills.Num(), ExpectedSkills));
-    if (!TestEqual(TEXT("every authored skill is present"), Skills.Num(), ExpectedSkills)) {
-        return false;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicSkillContentTest,"Mythic.Progression.SkillContent",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FMythicSkillContentTest::RunTest(const FString&) {
+    const auto Definitions=ApprovedAbilities(*this);
+    TestEqual(TEXT("the accepted four abilities are configured"),Definitions.Num(),4);
+    TSet<FGameplayTag> Cooldowns; TSet<UClass*> Implementations; TSet<FName> Names;
+    for (const auto* Definition:Definitions) {
+        TArray<FText> Errors; const bool Valid=Definition->ValidateDefinition(Errors);
+        TestTrue(*Definition->GetName(),Valid); for (const auto& Error:Errors) AddError(Error.ToString());
+        TestTrue(TEXT("only the new authored root is in the live catalogue"),Definition->GetPathName().StartsWith(TEXT("/Game/Mythic/Progression/Abilities/")));
+        TestNull(TEXT("metadata has no legacy hard ability reference"),Definition->Ability.Get());
+        auto* Runtime=Definition->RuntimeAbility.LoadSynchronous();
+        if (!TestNotNull(TEXT("equippable runtime class loads"),Runtime)) continue;
+        const auto* Window=Cast<UMythicGA_AbilityWindow>(Runtime->GetDefaultObject());
+        if (!TestNotNull(TEXT("runtime uses the bounded GAS window"),Window)) continue;
+        if (Definition->HasTimedCooldown()) {
+            TestFalse(TEXT("timed ability cooldown keys cannot collide"),Cooldowns.Contains(Definition->CooldownTag)); Cooldowns.Add(Definition->CooldownTag);
+        }
+        TestFalse(TEXT("each new ability has independently authored behavior"),Implementations.Contains(Runtime)); Implementations.Add(Runtime);
+        Names.Add(Definition->GetFName());
+        TestNotNull(TEXT("icon asset loads"),Definition->Icon.LoadSynchronous());
+        const UFunction* Sequence=Runtime->FindFunctionByName(TEXT("OnWindowStarted"));
+        TestTrue(TEXT("the ability owns an executable Blueprint sequence"),Sequence && Sequence->GetOuterUClass()==Runtime && !Sequence->Script.IsEmpty());
+        TestTrue(TEXT("window safety duration is finite and bounded"),FMath::IsFinite(Window->Duration) && Window->Duration>0 && Window->Duration<=120);
+        TestTrue(TEXT("new abilities use prediction-capable GAS"),Window->GetNetExecutionPolicy()==EGameplayAbilityNetExecutionPolicy::LocalPredicted);
+        for (const auto& Budget:Window->Budgets) TestTrue(TEXT("authored event budgets are bounded"),!Budget.Key.IsNone() && Budget.Value>=0 && Budget.Value<=256);
     }
-
-    int32 Reaching = 0;
-    int32 Moving = 0;
-    int32 WithStatus = 0;
-
-    for (const UMythicSkillDefinition *Skill : Skills) {
-        const FString Id = Skill->GetName();
-
-        TestFalse(*FString::Printf(TEXT("%s is named"), *Id), Skill->Name.IsEmpty());
-        TestFalse(*FString::Printf(TEXT("%s is described"), *Id), Skill->Description.IsEmpty());
-        TestFalse(*FString::Printf(TEXT("%s carries an icon"), *Id), Skill->Icon.IsNull());
-
-        if (!TestTrue(*FString::Printf(TEXT("%s has an ability"), *Id), Skill->HasPayload())) {
-            continue;
-        }
-
-        const UMythicGA_Skill *Ability = Cast<UMythicGA_Skill>(Skill->Ability->GetDefaultObject());
-        if (!TestNotNull(*FString::Printf(TEXT("%s's ability is a UMythicGA_Skill"), *Id), Ability)) {
-            continue;
-        }
-
-        const bool bReaches = Ability->Shape.Radius > 0.0f;
-        const bool bMoves = Ability->Movement != EMythicSkillMovement::None && Ability->MovementDistance > 0.0f;
-        const bool bChangesCaster = Ability->SelfEffect != nullptr;
-
-        TestTrue(*FString::Printf(TEXT("%s does something: it reaches, moves or changes the caster"), *Id),
-                 bReaches || bMoves || bChangesCaster);
-
-        Reaching += bReaches ? 1 : 0;
-        Moving += bMoves ? 1 : 0;
-
-        if (bReaches) {
-            // A skill that reaches has to be able to hurt what it reaches, or the reach is decoration.
-            TestNotNull(*FString::Printf(TEXT("%s can calculate damage"), *Id),
-                        Ability->Damage.DamageCalculationEffect.Get());
-            TestNotNull(*FString::Printf(TEXT("%s can apply damage"), *Id),
-                        Ability->Damage.DamageApplicationEffect.Get());
-        }
-
-        // An arc or cone with no width selects nothing; a full 360 is the sphere case and is legitimate.
-        if (Ability->Shape.Shape == EMythicSkillShape::Arc || Ability->Shape.Shape == EMythicSkillShape::Cone) {
-            TestTrue(*FString::Printf(TEXT("%s has a usable angle"), *Id),
-                     Ability->Shape.AngleDegrees > 0.0f && Ability->Shape.AngleDegrees <= 360.0f);
-        }
-
-        if (Ability->StatusToApply.IsValid()) {
-            ++WithStatus;
-            // The registry keys on Status.Type.*; a GAS.Debuff.* tag here resolves to nothing and applies nothing.
-            TestTrue(*FString::Printf(TEXT("%s names a Status.Type tag"), *Id),
-                     Ability->StatusToApply.ToString().StartsWith(TEXT("Status.Type.")));
-            TestTrue(*FString::Printf(TEXT("%s has a rollable status chance"), *Id),
-                     Ability->StatusChance > 0.0f && Ability->StatusChance <= 1.0f);
-        }
-    }
-
-    AddInfo(FString::Printf(TEXT("of %d skills: %d reach, %d move, %d carry a status"),
-                            Skills.Num(), Reaching, Moving, WithStatus));
-
-    // The sweep must find a spread, not sixteen copies of one row.
-    TestTrue(TEXT("skills that reach exist"), Reaching > 0);
-    TestTrue(TEXT("skills that move exist"), Moving > 0);
-    TestTrue(TEXT("skills that carry a status exist"), WithStatus > 0);
-    TestTrue(TEXT("not every skill reaches, so the defensive and movement ones are real"), Reaching < Skills.Num());
-
+    for (const TCHAR* Identity:{TEXT("CinderLash"),TEXT("ObsidianMaw"),TEXT("Winterbite"),TEXT("MortalMolt")})
+        TestTrue(*FString::Printf(TEXT("accepted ability %s is configured"),Identity),Names.Contains(FName(*FString::Printf(TEXT("DA_Ability_%s"),Identity))));
+    for (const TCHAR* Identity:{TEXT("BellOfLastStand"),TEXT("FuneralSun"),TEXT("Stormroad"),TEXT("BriarSovereign"),TEXT("BorrowedDawn"),TEXT("CrownOfDebts")})
+        TestFalse(*FString::Printf(TEXT("retired ability %s is absent from the live catalogue"),Identity),Names.Contains(FName(*FString::Printf(TEXT("DA_Ability_%s"),Identity))));
     return true;
 }
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicSkillModifierContentTest,
-                                 "Mythic.Progression.SkillModifierContent",
-                                 EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-/**
- * Every authored modifier must change the skill it sits on.
- *
- * A modifier costs a point and a skill level, so one that changes nothing sells both for nothing. Two ways to
- * write one: leave every delta at zero, which HasEffect catches, or set a delta the ability never reads on
- * that skill, which it does not. The ability folds RadiusDelta only where the shape has a radius,
- * TargetCountDelta only where MaxTargets is already capped (an uncapped skill early-returns, since there is
- * nothing to add to "everyone"), DurationDelta only through a SelfEffect, and MovementDistanceDelta only
- * where the skill moves you. So the lever has to be checked against the skill, not on its own.
- */
-bool FMythicSkillModifierContentTest::RunTest(const FString &Parameters) {
-    TArray<UMythicSkillDefinition *> Skills;
-    LoadSkillDefinitions(Skills);
-    if (!TestEqual(TEXT("every authored skill is present"), Skills.Num(), ExpectedSkills)) {
-        return false;
-    }
-
-    // StatusOverride is matched against the registry's StatusType, not the GAS.Debuff.* state an afflicted actor
-    // ends up owning. Both are registered tags, so naming the wrong one passes every tag check and applies nothing.
-    FAssetRegistryModule &Module = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-    TSet<FGameplayTag> StatusKeys;
-    TArray<FAssetData> StatusAssets;
-    Module.Get().GetAssetsByClass(UMythicStatusEffectDefinition::StaticClass()->GetClassPathName(), StatusAssets, true);
-    for (const FAssetData &Asset : StatusAssets) {
-        if (const UMythicStatusEffectDefinition *Status = Cast<UMythicStatusEffectDefinition>(Asset.GetAsset())) {
-            if (Status->StatusType.IsValid()) {
-                StatusKeys.Add(Status->StatusType);
-            }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicSkillModifierContentTest,"Mythic.Progression.SkillModifierContent",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FMythicSkillModifierContentTest::RunTest(const FString&) {
+    const auto Definitions=ApprovedAbilities(*this);
+    for (const auto* Definition:Definitions) {
+        TArray<FText> Errors;
+        TestTrue(*Definition->GetName(),Definition->ValidateDefinition(Errors));
+        for (const auto& Error:Errors) AddError(Error.ToString());
+        // Modifier count and behavior are authored choices. Validate any supplied
+        // modifiers without requiring filler transformations or shared formulas.
+        TSet<FName> Identities;
+        for (const auto& Modifier:Definition->Modifiers) {
+            TestFalse(TEXT("stable modifier ID is present"),Modifier.ModifierId.IsNone());
+            TestFalse(TEXT("modifier IDs do not collide"),Identities.Contains(Modifier.ModifierId)); Identities.Add(Modifier.ModifierId);
+            TestFalse(TEXT("modifier name is readable"),Modifier.Name.IsEmpty()); TestFalse(TEXT("modifier describes its replacement behavior"),Modifier.Description.IsEmpty());
         }
     }
-    if (!TestTrue(TEXT("the status registry has keys to match against"), StatusKeys.Num() > 0)) {
-        return false;
-    }
-
-    int32 Total = 0;
-    int32 WithStatus = 0;
-    int32 SkillsWithNone = 0;
-
-    for (const UMythicSkillDefinition *Skill : Skills) {
-        const FString Name = Skill->GetName();
-        if (!Skill->Ability) {
-            continue;
-        }
-        const UMythicGA_Skill *Ability = Cast<UMythicGA_Skill>(Skill->Ability->GetDefaultObject());
-        if (!Ability) {
-            continue;
-        }
-
-        if (Skill->Modifiers.Num() == 0) {
-            ++SkillsWithNone;
-            continue;
-        }
-
-        // The ceiling is derived from this list, so an empty one means a skill that can never be levelled.
-        const bool bReaches = Ability->Shape.Radius > 0.0f;
-        const bool bCapped = Ability->Shape.MaxTargets > 0;
-        const bool bHasSelfEffect = Ability->SelfEffect != nullptr;
-        const bool bMoves = Ability->Movement != EMythicSkillMovement::None && Ability->MovementDistance > 0.0f;
-
-        for (int32 Index = 0; Index < Skill->Modifiers.Num(); ++Index) {
-            const FMythicSkillModifier &Mod = Skill->Modifiers[Index];
-            const FString Where = FString::Printf(TEXT("%s modifier %d (%s)"), *Name, Index, *Mod.Name.ToString());
-            ++Total;
-
-            TestFalse(*FString::Printf(TEXT("%s is named"), *Where), Mod.Name.IsEmpty());
-            TestFalse(*FString::Printf(TEXT("%s is described"), *Where), Mod.Description.IsEmpty());
-            TestTrue(*FString::Printf(TEXT("%s costs at least one point"), *Where), Mod.PointCost >= 1);
-            TestTrue(*FString::Printf(TEXT("%s changes something"), *Where), Mod.HasEffect());
-
-            if (!FMath::IsNearlyZero(Mod.RadiusDelta)) {
-                TestTrue(*FString::Printf(TEXT("%s moves a radius its skill has"), *Where), bReaches);
-            }
-            if (Mod.TargetCountDelta != 0) {
-                TestTrue(*FString::Printf(TEXT("%s moves a target cap its skill has"), *Where), bCapped);
-            }
-            if (!FMath::IsNearlyZero(Mod.DurationDelta)) {
-                TestTrue(*FString::Printf(TEXT("%s moves a duration its skill has"), *Where), bHasSelfEffect);
-            }
-            if (!FMath::IsNearlyZero(Mod.MovementDistanceDelta)) {
-                TestTrue(*FString::Printf(TEXT("%s moves a distance its skill travels"), *Where), bMoves);
-            }
-            if (Mod.StatusOverride.IsValid()) {
-                ++WithStatus;
-                TestTrue(*FString::Printf(TEXT("%s names a status the registry can apply"), *Where),
-                         StatusKeys.Contains(Mod.StatusOverride));
-                TestTrue(*FString::Printf(TEXT("%s applies its status to something it reaches"), *Where), bReaches);
-            }
-            if (!FMath::IsNearlyZero(Mod.StatusChanceDelta)) {
-                TestTrue(*FString::Printf(TEXT("%s moves a chance on a skill that can inflict"), *Where),
-                         bReaches && (Mod.StatusOverride.IsValid() || Ability->StatusToApply.IsValid()));
-            }
-        }
-    }
-
-    AddInfo(FString::Printf(TEXT("%d skills, %d modifiers, %d status overrides, checked against %d registry keys"),
-                            Skills.Num(), Total, WithStatus, StatusKeys.Num()));
-
-    // A sweep over an empty set passes everything above, which is the same shape as the bug it guards.
-    TestTrue(TEXT("modifiers were actually found to check"), Total > 0);
-    TestEqual(TEXT("every skill carries at least one modifier"), SkillsWithNone, 0);
-    TestTrue(TEXT("status overrides exist, so the registry check is exercised"), WithStatus > 0);
-
     return true;
 }
-
 #endif

@@ -140,6 +140,10 @@ void UMythicEntityAttentionSubsystem::SetHardTarget(
     RequestImmediateRefresh();
 }
 
+void UMythicEntityAttentionSubsystem::ClearHardTargetIfMatches(const FMythicEntityPresentationInstance& Expected) {
+    if (IsInGameThread() && Expected.IsValid() && HardTarget==Expected) SetHardTarget({});
+}
+
 void UMythicEntityAttentionSubsystem::SetInspectTarget(
     FMythicEntityPresentationInstance Instance) {
     if (!IsInGameThread()) {

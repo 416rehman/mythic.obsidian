@@ -86,11 +86,18 @@ void UMythicAttributeSet_Defense::PreAttributeChange(const FGameplayAttribute &A
     }
 }
 
+void UMythicAttributeSet_Defense::PostAttributeChange(const FGameplayAttribute& Attribute,float OldValue,float NewValue) {
+    Super::PostAttributeChange(Attribute,OldValue,NewValue);
+    if (Attribute == GetShieldAttribute()) if (auto* ASC=Cast<UMythicAbilitySystemComponent>(GetOwningAbilitySystemComponent())) ASC->ReconcileOwnedShields(NewValue,FMath::Max(0.0f,OldValue-NewValue));
+}
+
 void UMythicAttributeSet_Defense::PostGameplayEffectExecute(const FGameplayEffectModCallbackData &Data) {
     Super::PostGameplayEffectExecute(Data);
 
     if (Data.EvaluatedData.Attribute == GetShieldAttribute()) {
         const float Absorbed = ShieldBeforeChange - GetShield();
+        if (auto* MythicASC=Cast<UMythicAbilitySystemComponent>(GetOwningAbilitySystemComponent()))
+            MythicASC->ConsumeOwnedShieldDamage(FMath::Max(0.0f,Absorbed),Data.EffectSpec.GetContext());
         if (Absorbed > 0.0f) {
             const UAbilitySystemComponent *ASC = GetOwningAbilitySystemComponent();
             const APawn *Avatar = ASC ? Cast<APawn>(ASC->GetAvatarActor()) : nullptr;
@@ -136,6 +143,8 @@ void UMythicAttributeSet_Defense::PostGameplayEffectExecute(const FGameplayEffec
             ThresholdReduction = Offense->GetStatusThresholdReduction();
         }
     }
+    if (const auto* Context=FMythicGameplayEffectContext::ExtractEffectContext(Data.EffectSpec.GetContext()); Context && Context->ActionSnapshot && Context->ActionSnapshot->Source)
+        UMythicStatusRegistry::TryReadApplierStat(Data.EffectSpec.GetContext().GetOriginalInstigator(),UMythicAttributeSet_Offense::GetStatusThresholdReductionAttribute(),ThresholdReduction,Data.EffectSpec.GetContext());
     const float Threshold = ComputeBuildupThreshold(ThresholdReduction);
     const bool bHardCC = Definition->bHardCrowdControl;
 
@@ -166,57 +175,25 @@ void UMythicAttributeSet_Defense::PostGameplayEffectExecute(const FGameplayEffec
 
     TargetASC->SetNumericAttributeBase(Data.EvaluatedData.Attribute, CurrentBuildup - EffectiveThreshold);
 
-    if (bHardCC) {
-        CcHardTrackStates.Add(Definition->StatusType, CcRes.NextState);
-    }
+    AActor* EffectInstigator=Data.EffectSpec.GetContext().GetInstigator();
+    AActor* EffectCauser=Data.EffectSpec.GetContext().GetEffectCauser();
+    UMythicStatusRegistry::ApplyStatusEffect(TargetASC,Definition,EffectInstigator,EffectCauser,0,Data.EffectSpec.GetContext());
+}
 
-    AActor *EffectInstigator = Data.EffectSpec.GetContext().GetInstigator();
-    AActor *EffectCauser = Data.EffectSpec.GetContext().GetEffectCauser();
-
-    const FMythicStatusReaction *Reaction = nullptr;
-    for (const FMythicStatusReaction &Candidate : Definition->Reactions) {
-        if (Candidate.RequiredTargetTag.IsValid() && TargetASC->HasMatchingGameplayTag(Candidate.RequiredTargetTag)) {
-            Reaction = &Candidate;
-            break;
-        }
-    }
-
-    if (Reaction) {
-        if (Reaction->bConsumeExistingStatus) {
-            TargetASC->RemoveActiveEffectsWithGrantedTags(FGameplayTagContainer(Reaction->RequiredTargetTag));
-        }
-        if (Reaction->ReactionEventTag.IsValid()) {
-            FGameplayEventData ReactionEvent;
-            ReactionEvent.EventTag = Reaction->ReactionEventTag;
-            ReactionEvent.Instigator = EffectInstigator;
-            ReactionEvent.Target = TargetASC->GetAvatarActor();
-            ReactionEvent.OptionalObject = Definition;
-            TargetASC->HandleGameplayEvent(ReactionEvent.EventTag, &ReactionEvent);
-        }
-        UMythicStatusRegistry::PlayStatusCue(TargetASC, Reaction->ReactionCueTag);
-    }
-
-    if (!Reaction || !Reaction->bSuppressStatusApplication) {
-        FGameplayEventData ApplyEvent;
-        ApplyEvent.EventTag = TAG_Event_ApplyStatus;
-        ApplyEvent.Instigator = EffectInstigator;
-        ApplyEvent.Target = TargetASC->GetAvatarActor();
-        ApplyEvent.EventMagnitude = 1.0f;
-        ApplyEvent.OptionalObject = Definition;
-        TargetASC->HandleGameplayEvent(TAG_Event_ApplyStatus, &ApplyEvent);
-
-        UMythicStatusRegistry::ApplyStatusEffect(TargetASC, Definition, EffectInstigator, EffectCauser);
-    }
-
-    if (bHardCC && CcRes.bGrantImmunity) {
-        FGameplayEffectContextHandle ImmuneCtx = TargetASC->MakeEffectContext();
-        ImmuneCtx.AddInstigator(EffectInstigator, EffectCauser);
-        FGameplayEffectSpecHandle ImmuneSpec = TargetASC->MakeOutgoingSpec(UMythicGE_CCImmune::StaticClass(), 1.0f, ImmuneCtx);
-        if (ImmuneSpec.IsValid()) {
-            ImmuneSpec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_CCIMMUNE_DURATION, CcCfg.ImmuneSeconds);
-            TargetASC->ApplyGameplayEffectSpecToSelf(*ImmuneSpec.Data.Get());
-        }
-    }
+bool UMythicAttributeSet_Defense::TryAdmitHardCrowdControl(FGameplayTag Status,AActor* Instigator,AActor* Causer) {
+    auto* ASC=GetOwningAbilitySystemComponent();
+    if (!ASC || !ASC->IsOwnerActorAuthoritative()) return false;
+    if (ASC->HasMatchingGameplayTag(GAS_IMMUNE_HARDCC)) { UMythicStatusRegistry::PlayStatusCue(ASC,TAG_GameplayCue_Combat_Immune); return false; }
+    const auto* Settings=GetDefault<UMythicCombatSettings>();
+    const auto Config=FMythicCrowdControlRules::ConfigForTier(Settings->CcEscalationByTier,ResolveTargetTierInt(ASC));
+    const auto Resolution=FMythicCrowdControlRules::ResolveCcTrigger(CcHardTrackStates.FindRef(Status),Config,GetWorld() ? GetWorld()->GetTimeSeconds():0);
+    CcHardTrackStates.Add(Status,Resolution.NextState);
+    if (!Resolution.bGrantImmunity) return true;
+    auto Context=ASC->MakeEffectContext(); Context.AddInstigator(Instigator,Causer);
+    auto Spec=ASC->MakeOutgoingSpec(UMythicGE_CCImmune::StaticClass(),1,Context);
+    if (Spec.IsValid()) { Spec.Data->SetSetByCallerMagnitude(GAS_SETBYCALLER_CCIMMUNE_DURATION,Config.ImmuneSeconds); ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get()); }
+    UMythicStatusRegistry::PlayStatusCue(ASC,TAG_GameplayCue_Combat_Immune);
+    return false;
 }
 
 void UMythicAttributeSet_Defense::OnRep_Armor(const FGameplayAttributeData &OldArmor) {

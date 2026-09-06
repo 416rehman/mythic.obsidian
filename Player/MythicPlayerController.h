@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "AbilitySystemInterface.h"
 #include "CommonPlayerController.h"
+#include "CommonInputModeTypes.h"
 #include "Itemization/InventoryProviderInterface.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
 #include "Player/Proficiency/ProficiencyComponent.h"
@@ -48,6 +49,7 @@ class AMythicNPCCharacter;
 
 class UMythicCheatManager;
 class UMythicHUDLayout;
+class UMythicControlsComponent;
 
 USTRUCT(BlueprintType)
 struct FPlayerStatsSummary {
@@ -191,6 +193,16 @@ protected:
     FMythicCombatPresentationProjectionPolicy CombatPresentationProjectionPolicy;
 
 public:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability Aim")
+    TObjectPtr<class UMythicAbilityIntentComponent> AbilityIntentComponent;
+    bool IsGameplayAbilityInputBlocked() const;
+    /** Local projections may bind before PlayerState replication; no polling deadline can replace this readiness edge. */
+    FSimpleMulticastDelegate OnLocalGameplayOwnerChanged;
+    virtual void FlushPressedKeys() override;
+    virtual bool InputKey(const FInputKeyEventArgs& Args) override;
+    friend class UMythicControlsComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Input") TObjectPtr<UMythicControlsComponent> ControlsComponent;
+
     AMythicPlayerController();
 
     virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override;
@@ -457,8 +469,8 @@ public:
     UFUNCTION(BlueprintCallable, Server, Reliable, WithValidation, Category = "Vendor")
     void ServerVendorRepairAll(AMythicVendor *Vendor, UMythicInventoryComponent *PlayerInventory);
 
-    // Buy back a recently-sold instance from the vendor's buyback ring (indexed by BuybackIndex) at the buyback price —
-    // the price it was sold for × the vendor's small markup. Same authorization as buy (vendor open + in range). The
+    // Buy back a recently-sold instance from the vendor's buyback ring (indexed by BuybackIndex) at the buyback price â€”
+    // the price it was sold for Ã— the vendor's small markup. Same authorization as buy (vendor open + in range). The
     // vendor hands back the SAME instance (rolled affixes / item level / durability intact, never a re-mint); on a hard
     // reject (unaffordable / already gone / no room) the standard trade-result callout is surfaced.
     /** Buys back the exact recently sold item instance after validating access, price, and inventory capacity. */
@@ -469,7 +481,7 @@ public:
     void ServerSetItemJunk(UMythicItemInstance *Item, bool bJunk);
 
     // Sell EVERY junk-flagged (manual OR auto), sellable item across the player's own inventories to Vendor, reusing the
-    // per-item vendor sell path (AMythicVendor::Server_ExecuteSell) — so it's exactly-once with no dupe/loss, and the
+    // per-item vendor sell path (AMythicVendor::Server_ExecuteSell) â€” so it's exactly-once with no dupe/loss, and the
     // vendor re-validates each item. Server-authoritative; the vendor must be open + in range (same gate as a manual
     // sell). Bounded: a single forward pass over the slots (equipment/currency/non-takeable slots are skipped by the
     // junk predicate). A successful sale already floats the "+N <currency>" callout per item, so no extra feedback here.
@@ -641,7 +653,7 @@ public:
     // ---- HUD notices ----
     /**
      * The single stream every HUD callout arrives on. The feed, banner and objective tracker each subscribe and take
-     * the kinds they present, so adding an event to the HUD means raising a notice — not building another widget.
+     * the kinds they present, so adding an event to the HUD means raising a notice â€” not building another widget.
      */
     UPROPERTY(BlueprintAssignable, Category = "Mythic|HUD")
     FMythicHudNoticeRaised OnHudNotice;
@@ -707,7 +719,7 @@ public:
 
     /**
      * The first time a status is inflicted on this player, name it and say what it does. Sent once per status per
-     * character — the codex glossary is what remembers, so it survives a reload and never fires twice.
+     * character â€” the codex glossary is what remembers, so it survives a reload and never fires twice.
      */
     UFUNCTION(Client, Reliable, Category = "Status")
     void ClientNotifyStatusLearned(const FText &StatusName, const FText &Description, FLinearColor Accent);
@@ -728,6 +740,11 @@ public:
     bool IsOverloadedForFastTravel() const;
 
 private:
+    void HandleAbilityInputModeChanged(ECommonInputMode Mode);
+    void HandleAbilityApplicationActivation(bool bActive);
+    FDelegateHandle AbilityInputModeHandle;
+    FDelegateHandle AbilityApplicationHandle;
+    bool bAbilityApplicationActive = true;
     struct FPendingContextActionHold {
         FMythicEntityPresentationInstance Subject;
         FGameplayTag ActionTag;

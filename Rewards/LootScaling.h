@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 struct FLootTierBonus {
+    float AbilityDropScale = 1.0f;
     int32 ExtraDropCount = 0;
 
     float RarityMult = 1.0f;
@@ -45,10 +46,12 @@ struct FMythicLootScaling {
     }
 
     /** Drops one table pays: its own roll plus the guaranteed and fractional extras, then the scale. */
-    static int32 ResolveDropCount(int32 BaseCount, const FLootTierBonus &Bonus, float FractionalRoll) {
+    static int32 ResolveDropCount(int32 BaseCount, const FLootTierBonus &Bonus, float FractionalRoll, float AbilityRoll = 1.0f) {
         const int32 FractionalExtra =
             (Bonus.FractionalDropChance > 0.0f && FractionalRoll < Bonus.FractionalDropChance) ? 1 : 0;
         const int32 Count = FMath::Max(0, BaseCount) + FMath::Max(0, Bonus.ExtraDropCount) + FractionalExtra;
-        return FMath::FloorToInt(static_cast<float>(Count) * FMath::Max(0.0f, Bonus.DropCountScale));
+        const int32 Ordinary=FMath::FloorToInt(static_cast<float>(Count) * FMath::Max(0.0f, Bonus.DropCountScale));
+        const float Scaled=Ordinary*FMath::Clamp(Bonus.AbilityDropScale,1.0f,1.25f);
+        return FMath::FloorToInt(Scaled)+(AbilityRoll<FMath::Frac(Scaled) ? 1:0);
     }
 };

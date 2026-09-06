@@ -13,7 +13,7 @@ class MYTHIC_API UActionableItemFragment : public UItemFragment {
 
 public:
     /** Optional enhanced-input action tag for fragments that grant a GAS input ability while active. */
-    UPROPERTY(Replicated, EditAnywhere, SaveGame,
+    UPROPERTY(ReplicatedUsing=OnRep_InputTag, EditAnywhere, SaveGame,
               meta = (ShowOnlyInnerProperties, Categories = "Input",
                       ToolTip = "Optional enhanced-input action tag. Leave unset for actions invoked directly by inventory or hotbar UI; input-bound fragments validate their own required tag."))
     FGameplayTag InputTag;
@@ -45,7 +45,13 @@ public:
 
     virtual void ExecuteGenericAction(UMythicItemInstance *ItemInstance);
 
+    /** Executes under the owning inventory's exact source reservation. Must not mutate item quantity or slots. */
+    virtual bool ExecuteReservedInventoryAction(UMythicItemInstance* ItemInstance, bool& bConsumeOne) { bConsumeOne=false; return false; }
+
 protected:
+    // InputTag participates in authored stack identity and may resolve after the effect payload.
+    UFUNCTION() void OnRep_InputTag() { OnRep_ParentItemInstance(); }
+
     /** Grants one exact-fragment source spec; bBindInputTag controls only generic input routing, never SourceObject. */
     FGameplayAbilitySpecHandle GrantItemAbility(
         class UMythicAbilitySystemComponent *ASC,

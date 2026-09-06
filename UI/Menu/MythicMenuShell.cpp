@@ -76,6 +76,10 @@ void UMythicMenuShell::NativeConstruct() {
     }
 }
 
+void UMythicMenuShell::SetMenuToggleAction(FGameplayTag Action) {
+    ConfigureMenuDismissAction(Action);
+}
+
 void UMythicMenuShell::BuildPages() {
     if (bPagesBuilt || !ContentSwitcher) {
         return;

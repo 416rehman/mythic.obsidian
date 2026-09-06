@@ -14,7 +14,10 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnHUDRevealChanged, bool);
 class UMythicMenuShell;
 class UMythicNameplateDirector;
 class UMythicNameplateLayer;
+class UMythicCombatUtilityOverlay;
+class UOverlay;
 class UNamedSlot;
+class UCommonUIActionRouterBase;
 
 USTRUCT(BlueprintType)
 struct FMythicHUDElementRule {
@@ -52,6 +55,7 @@ struct FMythicHUDElementBinding {
 UCLASS(Abstract, BlueprintType, Blueprintable)
 class MYTHIC_API UMythicHUDLayout : public UMythicActivatableWidget {
     GENERATED_BODY()
+    friend class UMythicControlsComponent;
 
 public:
     UMythicHUDLayout(const FObjectInitializer &ObjectInitializer);
@@ -59,6 +63,8 @@ public:
 
     void NativeOnInitialized() override;
     virtual void NativeDestruct() override;
+    virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override;
+    virtual UWidget* NativeGetDesiredFocusTarget() const override { return nullptr; }
 
 public:
     /** Return true when Blueprint handled Escape and the native escape menu should remain closed. */
@@ -222,6 +228,9 @@ protected:
 
 private:
     void ClearBlueprintInventoryOpenFlag();
+    void HandleGameplayInputConfig(FUIInputConfig Config);
+    TWeakObjectPtr<UCommonUIActionRouterBase> BoundInputRouter;
+    FDelegateHandle InputConfigHandle;
 
     UPROPERTY(Transient)
     TWeakObjectPtr<UMythicMenuShell> ActiveMenuShell;
@@ -229,6 +238,10 @@ private:
     /** Runtime layer owned by WorldOverlaySlot; never persisted and never shared across split-screen local players. */
     UPROPERTY(Transient)
     TObjectPtr<UMythicNameplateLayer> NameplateLayer;
+
+    /** Stack preserves the existing nameplate child and owns the passive ping sibling. */
+    UPROPERTY(Transient) TObjectPtr<UOverlay> WorldOverlayStack;
+    UPROPERTY(Transient) TObjectPtr<UMythicCombatUtilityOverlay> CombatUtilityOverlay;
 
     struct FContextActionBindingRecord {
         FUIActionBindingHandle Handle;

@@ -1,6 +1,8 @@
-
-
 #include "MythicInventoryComponent.h"
+#include "Fragments/Actionable/ConsumableEffectFragment.h"
+#include "Fragments/Actionable/ConsumableActionFragment.h"
+
+
 #include "Serialization/MemoryWriter.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
@@ -56,7 +58,7 @@ UMythicInventoryComponent::UMythicInventoryComponent(const FObjectInitializer &O
 }
 
 void FMythicInventorySlotEntry::ClientUpdateActiveState(UMythicInventoryComponent* Owner) {
-    bool bChanged = ClientLastKnownItem != SlottedItemInstance;
+    bool bChanged = ClientLastKnownItem != SlottedItemInstance || bClientLastKnownEquipmentEffects != AppliesEquipmentEffects();
     UE_LOG(Myth, Log, TEXT("ClientUpdateActiveState: Slot Item: %s, LastKnown: %s, SlotDomain: %d, Changed: %d"),
            SlottedItemInstance ? *SlottedItemInstance->GetName() : TEXT("Null"),
            ClientLastKnownItem ? *ClientLastKnownItem->GetName() : TEXT("Null"),
@@ -64,7 +66,7 @@ void FMythicInventorySlotEntry::ClientUpdateActiveState(UMythicInventoryComponen
            bChanged);
 
     if (bChanged) {
-        if (IsGearSlot() && IsValid(ClientLastKnownItem)) {
+        if (bClientLastKnownEquipmentEffects && IsValid(ClientLastKnownItem)) {
             UE_LOG(Myth, Log, TEXT("ClientUpdateActiveState: Deactivating Old Item: %s"), *ClientLastKnownItem->GetName());
             ClientLastKnownItem->OnClientInactiveItem();
 
@@ -77,7 +79,7 @@ void FMythicInventorySlotEntry::ClientUpdateActiveState(UMythicInventoryComponen
             }
         }
 
-        if (IsGearSlot() && IsValid(SlottedItemInstance)) {
+        if (AppliesEquipmentEffects() && IsValid(SlottedItemInstance)) {
             UE_LOG(Myth, Log, TEXT("ClientUpdateActiveState: Activating New Item: %s"), *SlottedItemInstance->GetName());
             SlottedItemInstance->OnClientActiveItem();
 
@@ -95,11 +97,12 @@ void FMythicInventorySlotEntry::ClientUpdateActiveState(UMythicInventoryComponen
         }
 
         ClientLastKnownItem = SlottedItemInstance;
+        bClientLastKnownEquipmentEffects = AppliesEquipmentEffects();
     }
 }
 
 void FMythicInventorySlotEntry::ServerUpdateActiveState() {
-    if (IsGearSlot() && IsValid(SlottedItemInstance)) {
+    if (AppliesEquipmentEffects() && IsValid(SlottedItemInstance)) {
         SlottedItemInstance->OnActiveItem();
     }
 }
@@ -225,6 +228,7 @@ void UMythicInventoryComponent::OnRep_Slots() {
 }
 
 void UMythicInventoryComponent::InitializeSlots() {
+    if (IsOwnerMutationFrozen(GetOwner())) return;
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("InitializeSlots:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("InitializeSlots:: Called without Authority!"));
@@ -255,6 +259,7 @@ void UMythicInventoryComponent::InitializeSlots() {
                 FMythicInventorySlotEntry SlotEntry;
                 SlotEntry.SlotDefinition = Entry.SlotDefinition;
                 SlotEntry.SlotDomain = Group.SlotDomain;
+                SlotEntry.bAppliesEquipmentEffects = Group.bAppliesEquipmentEffects;
                 SlotEntry.GroupTag = GroupTag;
                 SlotEntry.EntryIndex = EntryIndex;
                 SlotEntry.bRequireUniqueInEntry = Entry.bRequireUniqueItems;
@@ -311,7 +316,7 @@ bool UMythicInventoryComponent::CanSlotAcceptItem(
         return false;
     }
 
-    if (bFromPlayer && Slot.IsGearSlot()) {
+    if (bFromPlayer && Slot.AppliesEquipmentEffects()) {
         if (const UItemDefinition *Def = ItemInstance->GetItemDefinition()) {
             if (Def->RequiredEquipTag.IsValid()) {
                 FGameplayTagContainer OwnerTags;
@@ -543,6 +548,7 @@ UMythicAffixApplicationComponent *UMythicInventoryComponent::ResolveAffixApplica
 
 bool UMythicInventoryComponent::CommitSlotMutationsTransactional(
     const TConstArrayView<FStagedSlotMutation> Mutations) {
+    for (const auto& Mutation : Mutations) if (!Mutation.Inventory || IsOwnerMutationFrozen(Mutation.Inventory->GetOwner())) return false;
     if (!ValidateFinalSlotLayout(Mutations)) {
         return false;
     }
@@ -552,7 +558,7 @@ bool UMythicInventoryComponent::CommitSlotMutationsTransactional(
     for (const FStagedSlotMutation &Mutation : Mutations) {
         const FMythicInventorySlotEntry &Slot = Mutation.Inventory->Slots.Items[Mutation.SlotIndex];
         if (Mutation.ExpectedItem == Mutation.ProposedItem
-            || !Slot.IsGearSlot()) {
+            || !Slot.AppliesEquipmentEffects()) {
             continue;
         }
         UMythicAffixApplicationComponent *CandidateApplication =
@@ -575,10 +581,10 @@ bool UMythicInventoryComponent::CommitSlotMutationsTransactional(
     TSet<UMythicItemInstance *> ProposedActiveItems;
     for (const FStagedSlotMutation &Mutation : Mutations) {
         const FMythicInventorySlotEntry &Slot = Mutation.Inventory->Slots.Items[Mutation.SlotIndex];
-        if (Mutation.ExpectedItem && Slot.IsGearSlot()) {
+        if (Mutation.ExpectedItem && Slot.AppliesEquipmentEffects()) {
             PreviouslyActiveItems.Add(Mutation.ExpectedItem);
         }
-        if (Mutation.ProposedItem && Slot.IsGearSlot()) {
+        if (Mutation.ProposedItem && Slot.AppliesEquipmentEffects()) {
             ProposedActiveItems.Add(Mutation.ProposedItem);
         }
     }
@@ -661,7 +667,7 @@ bool UMythicInventoryComponent::ReconcileEquippedAffixSnapshotMutationTransactio
         return false;
     }
     const FMythicInventorySlotEntry &Slot = Slots.Items[ItemInstance->GetSlot()];
-    if (!Slot.IsGearSlot() || Slot.SlottedItemInstance != ItemInstance) {
+    if (!Slot.AppliesEquipmentEffects() || Slot.SlottedItemInstance != ItemInstance) {
         return false;
     }
     UMythicAffixApplicationComponent *Application = ResolveAffixApplicationComponent();
@@ -680,6 +686,8 @@ void UMythicInventoryComponent::NotifyOwnerItemAcquired(const UItemDefinition *I
 }
 
 AMythicWorldItem *UMythicInventoryComponent::AddItem(UMythicItemInstance *ItemInstance, AController *TargetRecipient) {
+    if (!IsValid(ItemInstance) || IsOwnerMutationFrozen(GetOwner())
+        || IsItemMutationFrozen(ItemInstance)) return nullptr;
     auto OriginalQty = ItemInstance->GetStacks();
     auto PickupDef = ItemInstance->GetItemDefinition();
     auto AmountAdded = AddToAnySlot(ItemInstance);
@@ -698,6 +706,8 @@ AMythicWorldItem *UMythicInventoryComponent::AddItem(UMythicItemInstance *ItemIn
 }
 
 int32 UMythicInventoryComponent::AddToAnySlot(UMythicItemInstance *ItemInstance, bool bFromPlayer) {
+    if (!IsValid(ItemInstance) || IsOwnerMutationFrozen(GetOwner())
+        || IsItemMutationFrozen(ItemInstance)) return 0;
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("GetItem:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("AddToAnySlot:: Called without Authority!"));
@@ -767,6 +777,8 @@ int32 UMythicInventoryComponent::AddToAnySlot(UMythicItemInstance *ItemInstance,
 }
 
 int32 UMythicInventoryComponent::AddToSlot(UMythicItemInstance *ItemInstance, int32 SlotIndex, bool bFromPlayer) {
+    if (!IsValid(ItemInstance) || IsOwnerMutationFrozen(GetOwner())
+        || IsItemMutationFrozen(ItemInstance)) return 0;
     if (!ItemInstance) {
         UE_LOG(Myth, Verbose, TEXT("AddToSlot: ItemInstance is null"));
         return 0;
@@ -804,6 +816,8 @@ int32 UMythicInventoryComponent::AddToSlot(UMythicItemInstance *ItemInstance, in
 }
 
 int32 UMythicInventoryComponent::ReceiveItem(TObjectPtr<UMythicItemInstance> ItemInstance, int32 TargetSlotIndex, bool bFromPlayer) {
+    if (!IsValid(ItemInstance) || IsOwnerMutationFrozen(GetOwner())
+        || IsItemMutationFrozen(ItemInstance)) return 0;
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("GetItem:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("AddToAnySlot:: Called without Authority!"));
@@ -817,6 +831,7 @@ int32 UMythicInventoryComponent::ReceiveItem(TObjectPtr<UMythicItemInstance> Ite
 }
 
 int32 UMythicInventoryComponent::SendItem(int32 SlotIndex, UMythicInventoryComponent *TargetInventory, int32 TargetSlotIndex) {
+    if (IsOwnerMutationFrozen(GetOwner()) || !TargetInventory || IsOwnerMutationFrozen(TargetInventory->GetOwner())) return 0;
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("GetItem:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("AddToAnySlot:: Called without Authority!"));
@@ -973,6 +988,7 @@ EMythicInventoryActionResult UMythicInventoryComponent::TryPlayerMoveItem(
     const FMythicInventorySourceLocator &Source,
     const FMythicInventoryTargetLocator &Target,
     int32 &OutQuantityProcessed) {
+    if (IsOwnerMutationFrozen(GetOwner())) return EMythicInventoryActionResult::CommitFailed;
     OutQuantityProcessed = 0;
 
     EMythicInventoryActionResult Result = ValidatePlayerMoveItem(Source, Target);
@@ -1032,6 +1048,7 @@ EMythicInventoryActionResult UMythicInventoryComponent::TryTransferPlayerItemToA
     const FMythicInventorySourceLocator &Source,
     UMythicInventoryComponent *TargetInventory,
     int32 &OutQuantityProcessed) {
+    if (IsOwnerMutationFrozen(GetOwner())) return EMythicInventoryActionResult::CommitFailed;
     OutQuantityProcessed = 0;
     if (!TargetInventory || TargetInventory == this) {
         return EMythicInventoryActionResult::InvalidRequest;
@@ -1115,6 +1132,7 @@ EMythicInventoryActionResult UMythicInventoryComponent::TryTransferPlayerItemToA
 }
 
 bool UMythicInventoryComponent::DropItem(int32 SlotIndex, const FVector &location, const float radius, AController *TargetRecipient) {
+    if (IsOwnerMutationFrozen(GetOwner())) return false;
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("DropItem:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("DropItem:: Called without Authority!"));
@@ -1172,6 +1190,7 @@ EMythicInventoryActionResult UMythicInventoryComponent::DropItemQuantity(
     AController *TargetRecipient,
     int32 &OutQuantityDropped,
     AMythicWorldItem *&OutWorldItem) {
+    if (IsOwnerMutationFrozen(GetOwner())) return EMythicInventoryActionResult::CommitFailed;
     OutQuantityDropped = 0;
     OutWorldItem = nullptr;
 
@@ -1314,10 +1333,10 @@ void UMythicInventoryComponent::HandleSlotsRemoved(const TArrayView<int32> &Remo
     for (int32 idx : RemovedIndices) {
         if (Slots.IsValidIndex(idx)) {
             FMythicInventorySlotEntry &Slot = Slots.Items[idx];
-            if (IsValid(Slot.ClientLastKnownItem)) {
+            if (Slot.AppliesEquipmentEffects() && IsValid(Slot.ClientLastKnownItem)) {
                 Slot.ClientLastKnownItem->OnClientInactiveItem();
 
-                if (Slot.IsGearSlot() && GetOwner()) {
+                if (Slot.AppliesEquipmentEffects() && GetOwner()) {
                     if (AMythicCharacter* CharOwner = Cast<AMythicCharacter>(GetOwner())) {
                         if (Slot.SlotDefinition) {
                             CharOwner->RemoveLocalEquipmentMesh(Slot.SlotDefinition->SlotType);
@@ -1360,6 +1379,7 @@ int32 UMythicInventoryComponent::GetItemCount(UItemDefinition *RequiredItem) con
 }
 
 void UMythicInventoryComponent::ServerRemoveItem_Implementation(UMythicItemInstance *ItemInstance, int32 Amount) {
+    if (IsOwnerMutationFrozen(GetOwner())) return;
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("RemoveItem:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("RemoveItem:: Called without Authority!"));
@@ -1386,6 +1406,7 @@ void UMythicInventoryComponent::ServerRemoveItem_Implementation(UMythicItemInsta
 }
 
 void UMythicInventoryComponent::ServerRemoveItemByDefinition_Implementation(UItemDefinition *ItemDef, int32 Amount) {
+    if (IsOwnerMutationFrozen(GetOwner())) return;
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("RemoveItem:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("RemoveItem:: Called without Authority!"));
@@ -1423,6 +1444,7 @@ void UMythicInventoryComponent::ServerRemoveItemByDefinition_Implementation(UIte
 }
 
 bool UMythicInventoryComponent::DestroySlot(int32 SlotIndex) {
+    if (IsOwnerMutationFrozen(GetOwner())) return false;
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("Called without Authority!"));
@@ -1445,6 +1467,7 @@ bool UMythicInventoryComponent::DestroySlot(int32 SlotIndex) {
 }
 
 void UMythicInventoryComponent::DestroyAllSlots() {
+    if (IsOwnerMutationFrozen(GetOwner())) return;
     AActor *lOwner = GetOwner();
     checkf(lOwner != nullptr, TEXT("DestroySlot:: Invalid Inventory Owner"));
     checkf(lOwner->HasAuthority(), TEXT("DestroySlot:: Called without Authority!"));
@@ -1504,6 +1527,7 @@ int32 UMythicInventoryComponent::GetTotalCurrency() const {
 }
 
 int32 UMythicInventoryComponent::SpendCurrency(int32 Amount) {
+    if (IsOwnerMutationFrozen(GetOwner())) return 0;
     const AActor *lOwner = GetOwner();
     if (!lOwner || !lOwner->HasAuthority() || Amount <= 0) {
         return 0;
@@ -1542,13 +1566,14 @@ void UMythicInventoryComponent::NotifyItemInstanceUpdated(const int32 SlotIndex,
     // depend on fragment callback order and reconnect/load never relies on a stale incremental ledger.
     if (bReconcileAffixes && GetOwner() && GetOwner()->HasAuthority()
         && Slots.Items.IsValidIndex(SlotIndex)
-        && Slots.Items[SlotIndex].IsGearSlot()) {
+        && Slots.Items[SlotIndex].AppliesEquipmentEffects()) {
         UMythicAffixApplicationComponent *Application = ResolveAffixApplicationComponent();
         if (Application) Application->RequestAuthoritativeReconciliation();
     }
 }
 
 void UMythicInventoryComponent::AddSlot(UInventorySlotDefinition *SlotDefinition, int32 Count) {
+    if (IsOwnerMutationFrozen(GetOwner())) return;
     if (!SlotDefinition || Count <= 0) {
         return;
     }
@@ -1570,6 +1595,7 @@ void UMythicInventoryComponent::AddSlot(UInventorySlotDefinition *SlotDefinition
 }
 
 bool UMythicInventoryComponent::RemoveSlot(UInventorySlotDefinition *SlotDefinition, int32 Count, bool bDropItems) {
+    if (IsOwnerMutationFrozen(GetOwner())) return false;
     if (!SlotDefinition || Count <= 0) {
         return false;
     }
@@ -1625,6 +1651,7 @@ EMythicInventoryActionResult UMythicInventoryComponent::TrySplitStackToFreeSlot(
     const FMythicInventorySourceLocator &Source,
     const int32 SplitAmount,
     int32 &OutTargetSlotIndex) {
+    if (IsOwnerMutationFrozen(GetOwner())) return EMythicInventoryActionResult::CommitFailed;
     OutTargetSlotIndex = INDEX_NONE;
 
     UMythicItemInstance *SourceItem = nullptr;
@@ -1809,6 +1836,7 @@ EMythicInventoryActionResult UMythicInventoryComponent::TrySortGroup(
 int32 UMythicInventoryComponent::TransferAllTakeableItemsToInventory(
     UMythicInventoryComponent *Target,
     const FGameplayTag OptionalTypeFilter) {
+    if (IsOwnerMutationFrozen(GetOwner())) return 0;
     AActor *SourceOwner = GetOwner();
     AActor *TargetOwner = Target ? Target->GetOwner() : nullptr;
     if (!SourceOwner || !SourceOwner->HasAuthority()
@@ -1849,6 +1877,7 @@ EMythicInventoryActionResult UMythicInventoryComponent::TryUseItemInSlot(
     const FMythicInventorySourceLocator &Source,
     int32 &OutQuantityConsumed) {
     OutQuantityConsumed = 0;
+    if (!GetOwner() || !GetOwner()->HasAuthority() || IsOwnerUseInProgress(GetOwner())) return EMythicInventoryActionResult::CommitFailed;
     UMythicItemInstance *Item = nullptr;
     const EMythicInventoryActionResult SourceResult = ResolveSourceLocator(Source, Item);
     if (SourceResult != EMythicInventoryActionResult::Succeeded) {
@@ -1858,29 +1887,9 @@ EMythicInventoryActionResult UMythicInventoryComponent::TryUseItemInSlot(
     if (!SourceEntry.bCanPlayerTake) {
         return EMythicInventoryActionResult::SourceProtected;
     }
-    if (SourceEntry.IsGearSlot()) {
-        static const FGameplayTag QuickPouchGroup = FGameplayTag::RequestGameplayTag(
-            TEXT("Inventory.Group.Equipment.QuickPouch"), false);
-        if (!QuickPouchGroup.IsValid()
-            || !SourceEntry.GroupTag.MatchesTagExact(QuickPouchGroup)) {
-            return EMythicInventoryActionResult::NotUsable;
-        }
-    }
+    if (!CanUseItemInSlot(Source.SlotIndex)) return EMythicInventoryActionResult::NotUsable;
 
-    if (!Item->HasTag(ITEMIZATION_ACTIONTYPE_ININVENTORY)) {
-        const UItemDefinition *Def = Item->GetItemDefinition();
-        if (!Def || !Def->ItemType.MatchesTag(ITEMIZATION_ACTIONTYPE_ININVENTORY)) {
-            return EMythicInventoryActionResult::NotUsable;
-        }
-    }
-
-    if (const auto *ActionFrag = Item->GetFragment<UActionableItemFragment>()) {
-        const_cast<UActionableItemFragment *>(ActionFrag)->ExecuteGenericAction(Item);
-        OutQuantityConsumed = Source.ExpectedQuantity
-            - (IsValid(Item) ? FMath::Max(0, Item->GetStacks()) : 0);
-        return EMythicInventoryActionResult::Succeeded;
-    }
-    return EMythicInventoryActionResult::NotUsable;
+    return ExecuteConsumableUse(Source, OutQuantityConsumed);
 }
 
 EMythicInventoryActionResult UMythicInventoryComponent::TrySetItemJunk(
@@ -1918,18 +1927,41 @@ bool UMythicInventoryComponent::CanUseItemInSlot(int32 SlotIndex) const {
     if (!Entry.bCanPlayerTake) {
         return false;
     }
-    if (Entry.IsGearSlot()) {
-        static const FGameplayTag QuickPouchGroup = FGameplayTag::RequestGameplayTag(
-            TEXT("Inventory.Group.Equipment.QuickPouch"), false);
-        if (!QuickPouchGroup.IsValid()
-            || !Entry.GroupTag.MatchesTagExact(QuickPouchGroup)) {
-            return false;
-        }
-    }
+    if (Entry.AppliesEquipmentEffects()) return false;
 
     UMythicItemInstance *Item = Entry.SlottedItemInstance;
-    if (!Item) {
+    if (!IsValid(Item) || Item->GetStacks()<=0) {
         return false;
+    }
+
+    const auto* Effect=Item->GetFragment<UConsumableEffectFragment>();
+    const auto* Action=Item->GetFragment<UConsumableActionFragment>();
+    if ((!Effect && !Action) || (Effect && Action)) return false;
+    if (Item->CountFragmentsOfClass(UConsumableEffectFragment::StaticClass())
+        +Item->CountFragmentsOfClass(UConsumableActionFragment::StaticClass())!=1) return false;
+    auto* Definition=Item->GetItemDefinition();
+    const auto* Authored=Definition ? UItemDefinition::GetFragment<UConsumableEffectFragment>(Definition):nullptr;
+    const bool bTyped=Effect && (Effect->ConsumableEffectConfig.bHealing || Effect->ConsumableEffectConfig.bUtility
+        || (Authored && (Authored->ConsumableEffectConfig.bHealing || Authored->ConsumableEffectConfig.bUtility)));
+    if (bTyped) {
+        // Quick use is an authored consumable capability. Fresh factory items do not need a
+        // legacy mutable action tag, and malformed saved variants cannot bypass this contract.
+        if (!Authored || Effect->GetOwningItemInstance()!=Item || !Effect->CanBeStackedWith(Authored)) return false;
+        int32 EffectCount=0;
+        for (const UItemFragment* Fragment:Definition->Fragments) {
+            if (Cast<UConsumableActionFragment>(Fragment)) return false;
+            if (Cast<UConsumableEffectFragment>(Fragment)) ++EffectCount;
+        }
+        if (EffectCount!=1) return false;
+        const auto& Effects=Effect->ConsumableEffectConfig.Effects;
+        if (Effects.IsEmpty() || Effects.Num()>32) return false;
+        for (const auto& Payload:Effects) {
+            if (!Payload.GameplayEffectClass || !FMath::IsFinite(Payload.EffectLevel) || Payload.EffectLevel<=0
+                || Payload.SetByCallerMagnitudes.Num()>FConsumableEffectEntry::MaxSetByCallerMagnitudes) return false;
+            for (const auto& Magnitude:Payload.SetByCallerMagnitudes)
+                if (!Magnitude.Key.IsValid() || !FMath::IsFinite(Magnitude.Value)) return false;
+        }
+        return true;
     }
 
     if (!Item->HasTag(ITEMIZATION_ACTIONTYPE_ININVENTORY)) {
@@ -1939,5 +1971,5 @@ bool UMythicInventoryComponent::CanUseItemInSlot(int32 SlotIndex) const {
         }
     }
 
-    return Item->GetFragment<UActionableItemFragment>() != nullptr;
+    return true;
 }

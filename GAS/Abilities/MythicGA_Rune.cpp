@@ -1,4 +1,6 @@
 #include "GAS/Abilities/MythicGA_Rune.h"
+#include "GAS/Abilities/MythicGA_AbilityWindow.h"
+#include "GAS/Abilities/MythicGA_SystemDash.h"
 
 #include "AbilitySystemComponent.h"
 #include "Engine/GameInstance.h"
@@ -71,6 +73,10 @@ void UMythicGA_Rune::ActivateAbility(const FGameplayAbilitySpecHandle Handle, co
                           .AddUObject(this, &UMythicGA_Rune::HandleMovingTagChanged);
     AbilityActivatedHandle = ASC->AbilityActivatedCallbacks.AddUObject(this, &UMythicGA_Rune::HandleAbilityActivated);
     AbilityEndedHandle = ASC->OnAbilityEnded.AddUObject(this, &UMythicGA_Rune::HandleAbilityEnded);
+    if (auto* MythicASC=Cast<UMythicAbilitySystemComponent>(ASC)) {
+        MythicASC->OnAbilityMovementStarted.AddUObject(this, &UMythicGA_Rune::NotifyRuneSkillDashStarted);
+        MythicASC->OnAbilityMovementEnded.AddUObject(this, &UMythicGA_Rune::NotifyRuneSkillDashEnded);
+    }
     BindAvatar(ActorInfo->AvatarActor.Get());
     BindLootManager();
     bRuneBound = true;
@@ -240,6 +246,7 @@ void UMythicGA_Rune::HandleMovementModeChanged(EMovementMode PrevMovementMode, u
 }
 
 void UMythicGA_Rune::HandleAbilityActivated(UGameplayAbility *Ability) {
+    if (Cast<UMythicGA_AbilityWindow>(Ability) || Cast<UMythicGA_SystemDash>(Ability)) return;
     UMythicGA_Skill *Skill = Cast<UMythicGA_Skill>(Ability);
     if (!Skill || Skill->Movement == EMythicSkillMovement::None || !IsRuneAuthority()) {
         return;
@@ -249,6 +256,7 @@ void UMythicGA_Rune::HandleAbilityActivated(UGameplayAbility *Ability) {
 }
 
 void UMythicGA_Rune::HandleAbilityEnded(const FAbilityEndedData &Data) {
+    if (Cast<UMythicGA_AbilityWindow>(Data.AbilityThatEnded) || Cast<UMythicGA_SystemDash>(Data.AbilityThatEnded)) return;
     UMythicGA_Skill *Skill = Cast<UMythicGA_Skill>(Data.AbilityThatEnded);
     if (!Skill || Skill->Movement == EMythicSkillMovement::None || !IsRuneAuthority()) {
         return;
@@ -339,6 +347,10 @@ void UMythicGA_Rune::UnbindAll(const FGameplayAbilityActorInfo *ActorInfo) {
         }
         ASC->AbilityActivatedCallbacks.Remove(AbilityActivatedHandle);
         ASC->OnAbilityEnded.Remove(AbilityEndedHandle);
+        if (auto* MythicASC=Cast<UMythicAbilitySystemComponent>(ASC)) {
+            MythicASC->OnAbilityMovementStarted.RemoveAll(this);
+            MythicASC->OnAbilityMovementEnded.RemoveAll(this);
+        }
     }
     BoundEvents.Empty();
     MovingTagHandle.Reset();
@@ -490,73 +502,30 @@ FActiveGameplayEffectHandle UMythicGA_Rune::ApplyRuneEffect(const TSoftClassPtr<
     return ApplyGameplayEffectSpecToOwner(GetCurrentAbilitySpecHandle(), GetCurrentActorInfo(), GetCurrentActivationInfo(), Spec);
 }
 
-void UMythicGA_Rune::BeginRuneGuard(float ShieldAmount, float DurationSeconds) {
-    UAbilitySystemComponent *ASC = GetAbilitySystemComponentFromActorInfo();
-    if (!ASC || ShieldAmount <= 0.0f || DurationSeconds <= 0.0f || !IsRuneAuthority()) {
-        return;
-    }
-    if (!ASC->HasAttributeSetForAttribute(UMythicAttributeSet_Defense::GetShieldAttribute())) {
-        UE_LOG(Myth, Warning, TEXT("Runes: %s cannot guard %s, which carries no Shield"), *GetName(), *GetNameSafe(ASC->GetOwner()));
-        return;
-    }
-
-    if (bGuardActive) {
-        // The Shield to hand back is still the one from before the first guard, not what that guard left.
-        TGuardValue<bool> Ending(bEndingGuard, true);
-        ASC->RemoveActiveGameplayEffect(GuardShieldHandle);
-        ASC->RemoveActiveGameplayEffect(GuardMaxShieldHandle);
-        bGuardActive = false;
-    }
-    else {
-        PreGuardShield = ASC->GetNumericAttribute(UMythicAttributeSet_Defense::GetShieldAttribute());
-    }
-
-    const UMythicCombatSettings *Settings = GetDefault<UMythicCombatSettings>();
-    // Ceiling first: the Shield add is clamped against whatever MaxShield stands when it lands.
-    GuardMaxShieldHandle = ApplyRuneEffect(Settings->RuneGuardMaxShieldEffect, ShieldAmount, DurationSeconds, FGameplayTag());
-    GuardShieldHandle = ApplyRuneEffect(Settings->RuneGuardShieldEffect, ShieldAmount, DurationSeconds, FGameplayTag());
-    if (!GuardShieldHandle.IsValid()) {
-        ASC->RemoveActiveGameplayEffect(GuardMaxShieldHandle);
-        GuardMaxShieldHandle.Invalidate();
-        return;
-    }
-    bGuardActive = true;
-    if (FOnActiveGameplayEffectRemoved_Info *Removed = ASC->OnGameplayEffectRemoved_InfoDelegate(GuardShieldHandle)) {
-        Removed->AddUObject(this, &UMythicGA_Rune::HandleGuardShieldRemoved);
-    }
+void UMythicGA_Rune::BeginRuneGuard(float ShieldAmount,float DurationSeconds) {
+    auto* ASC=Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponentFromActorInfo());
+    if (!ASC || !IsRuneAuthority()) return;
+    if (bGuardActive) FinishRuneGuard(false,false);
+    OwnedGuardHandle=ASC->GrantOwnedShield(this,FGuid::NewGuid(),TEXT("RuneGuard"),ShieldAmount,DurationSeconds);
+    bGuardActive=OwnedGuardHandle.IsValid();
+    if (bGuardActive) OwnedGuardRemovedListener=ASC->OnOwnedShieldRemoved.AddWeakLambda(this,[this](FGuid Handle) {
+        if (Handle==OwnedGuardHandle) FinishRuneGuard(true,true);
+    });
 }
-
 void UMythicGA_Rune::EndRuneGuard() {
-    if (bGuardActive && IsRuneAuthority()) {
-        FinishRuneGuard(false, true);
-    }
+    if (bGuardActive && IsRuneAuthority()) FinishRuneGuard(false,true);
 }
-
-void UMythicGA_Rune::FinishRuneGuard(bool bShieldEffectAlreadyRemoved, bool bNotify) {
-    UAbilitySystemComponent *ASC = GetAbilitySystemComponentFromActorInfo();
-    bGuardActive = false;
-    {
-        TGuardValue<bool> Ending(bEndingGuard, true);
-        if (ASC) {
-            // The add goes before its ceiling, or the ceiling's fall clamps the add away first and the bookkeeping lies.
-            if (!bShieldEffectAlreadyRemoved) {
-                ASC->RemoveActiveGameplayEffect(GuardShieldHandle);
-            }
-            ASC->RemoveActiveGameplayEffect(GuardMaxShieldHandle);
-        }
+void UMythicGA_Rune::FinishRuneGuard(bool bAlreadyRemoved,bool bNotify) {
+    auto* ASC=Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponentFromActorInfo());
+    bGuardActive=false;
+    const FGuid Handle=OwnedGuardHandle;
+    OwnedGuardHandle.Invalidate();
+    if (ASC) {
+        ASC->OnOwnedShieldRemoved.Remove(OwnedGuardRemovedListener);
+        if (!bAlreadyRemoved) ASC->RemoveOwnedShield(Handle);
     }
-    GuardShieldHandle.Invalidate();
-    GuardMaxShieldHandle.Invalidate();
-
-    if (ASC && ASC->HasAttributeSetForAttribute(UMythicAttributeSet_Defense::GetShieldAttribute())) {
-        const float MaxShield = ASC->GetNumericAttribute(UMythicAttributeSet_Defense::GetMaxShieldAttribute());
-        ASC->SetNumericAttributeBase(UMythicAttributeSet_Defense::GetShieldAttribute(), FMath::Clamp(PreGuardShield, 0.0f, MaxShield));
-    }
-    PreGuardShield = 0.0f;
-
-    if (bNotify) {
-        NotifyRuneGuardEnded();
-    }
+    OwnedGuardRemovedListener.Reset();
+    if (bNotify) NotifyRuneGuardEnded();
 }
 
 void UMythicGA_Rune::DealRuneSelfDamage(float Amount, FGameplayTag HitTag) {
@@ -836,7 +805,7 @@ int32 UMythicGA_Rune::RepairRuneGear(int32 Amount) {
             continue;
         }
         for (const FMythicInventorySlotEntry &Slot : Inventory->GetAllSlots()) {
-            if (!Slot.IsGearSlot() || !Slot.SlottedItemInstance) {
+            if (!Slot.AppliesEquipmentEffects() || !Slot.SlottedItemInstance) {
                 continue;
             }
             if (const UDurabilityFragment *Durability = Slot.SlottedItemInstance->GetFragment<UDurabilityFragment>()) {

@@ -1000,6 +1000,7 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
                             Reward->OverridenLootSource = PersonalSource;
                             FLootRewardContext Ctx;
                             Ctx.PlayerController = MythicPC;
+                            Ctx.Credit=FMythicLootCreditContext::FromEnemyDeath(Owner,MythicPC,EnemyTierInt);
                             Ctx.PutInInventory = nullptr;
                             Ctx.SpawnLocation = DropLoc;
                             Ctx.EnemyTierInt = EnemyTierInt;
@@ -1014,6 +1015,7 @@ void UMythicLifeComponent::StartDeath(AActor *Killer) {
                 Reward->OverridenLootSource = LootDrop;
                 FLootRewardContext Ctx;
                 Ctx.PlayerController = KillerPC;
+                Ctx.Credit=FMythicLootCreditContext::FromEnemyDeath(Owner,KillerPC,EnemyTierInt);
                 Ctx.PutInInventory = Corpse ? Corpse->GetContainerInventory() : nullptr;
                 Ctx.SpawnLocation = DropLoc;
                 Ctx.EnemyTierInt = EnemyTierInt;
@@ -1438,6 +1440,7 @@ float GrantedStaminaCostReduction(float RawReduction) {
 }
 
 bool UMythicLifeComponent::CanSpendStamina(float Cost) const {
+    if (!FMath::IsFinite(Cost) || Cost<0.0f) return false;
     if (Cost <= 0.0f) {
         return true;
     }
@@ -1449,6 +1452,7 @@ bool UMythicLifeComponent::CanSpendStamina(float Cost) const {
 }
 
 float UMythicLifeComponent::EffectiveStaminaCost(float RawCost, float StaminaCostReduction) {
+    if (!FMath::IsFinite(RawCost) || RawCost<0.0f || !FMath::IsFinite(StaminaCostReduction)) return MAX_flt;
     return RawCost * (1.0f - FMath::Clamp(StaminaCostReduction, 0.0f, 1.0f));
 }
 
@@ -1464,6 +1468,7 @@ bool UMythicLifeComponent::IsStaggerImmune(double Now, double LastStaggerTime, f
 }
 
 bool UMythicLifeComponent::TrySpendStamina(float Cost) {
+    if (!FMath::IsFinite(Cost) || Cost<0.0f) return false;
     if (!AbilitySystemComponent || !AbilitySystemComponent->IsOwnerActorAuthoritative() || Cost <= 0.0f) {
         return Cost <= 0.0f;
     }
@@ -1473,7 +1478,7 @@ bool UMythicLifeComponent::TrySpendStamina(float Cost) {
     }
     const float Effective = EffectiveStaminaCost(Cost, GrantedStaminaCostReduction(Util->GetStaminaCostReduction()));
     const float Cur = Util->GetCurrentStamina();
-    if (Cur < Effective) {
+    if (!FMath::IsFinite(Cur) || !FMath::IsFinite(Effective) || Effective==MAX_flt || Cur < Effective) {
         return false;
     }
     AbilitySystemComponent->SetNumericAttributeBase(UMythicAttributeSet_Utility::GetCurrentStaminaAttribute(), Cur - Effective);

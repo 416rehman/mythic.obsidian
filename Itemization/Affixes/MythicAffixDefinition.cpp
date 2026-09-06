@@ -122,6 +122,9 @@ EDataValidationResult UMythicAffixDefinition::IsDataValid(FDataValidationContext
         Result = EDataValidationResult::Invalid;
     };
 
+    if (!Application.IsValid()) Error(LOCTEXT("InvalidApplicationRule","Permanent affixes cannot declare action eligibility queries."));
+    if (Application.Scope == EMythicAffixApplicationScope::Action && DescriptionTemplate.IsEmpty())
+        Error(LOCTEXT("MissingActionConditionText","Action affixes require a localized Description Template that explains when the bonus applies."));
     if (!AffixTag.IsValid() || !AffixTag.ToString().StartsWith(TEXT("Itemization.Affix."))) {
         Error(LOCTEXT("InvalidAffixTag", "AffixTag must be a valid Itemization.Affix.* tag."));
     }

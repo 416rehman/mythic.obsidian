@@ -36,6 +36,7 @@ bool ComposeItemLocalAttackAttribute(
 
     TArray<FMythicPermanentStatContribution> Contributions;
     for (const FAffixDisplayData &DisplayData : DisplayAffixes) {
+        if (DisplayData.ViewData.ApplicationScope != EMythicAffixApplicationScope::Permanent) continue;
         const UMythicStatDefinition *EntryStat = Registry.FindStat(DisplayData.StatTag);
         if (!EntryStat || EntryStat->Attribute != Attribute) {
             continue;
@@ -261,6 +262,7 @@ bool UItemTooltipVM::BuildAffixDisplayData(UMythicItemInstance *Item,
         Entry.bIsPercentage = Format == EMythicStatFormat::Percent
             || Format == EMythicStatFormat::Multiplier;
         Entry.bOwnedByWeaponAttackPresentation = bUseWeaponAttackPresentation
+            && Entry.ViewData.ApplicationScope == EMythicAffixApplicationScope::Permanent
             && Entry.ViewData.SourceKind == AFFIX_SOURCE_IMPLICIT
             && IsWeaponAttackAttribute(StatDefinition->Attribute);
 
@@ -272,7 +274,7 @@ bool UItemTooltipVM::BuildAffixDisplayData(UMythicItemInstance *Item,
 }
 
 bool UItemTooltipVM::ShouldUseWeaponAttackPresentation(UMythicItemInstance *Item) {
-    if (!Item || !Item->GetFragment<UAttackFragment>()) {
+    if (!Item || !UAttackFragment::FindPrimaryOnItem(Item)) {
         return false;
     }
 
@@ -346,7 +348,7 @@ bool UItemTooltipVM::BuildWeaponAttackDisplayData(
         return false;
     }
 
-    const UAttackFragment *AttackFragment = Item->GetFragment<UAttackFragment>();
+    const UAttackFragment *AttackFragment = UAttackFragment::FindPrimaryOnItem(Item);
     const UAnimMontage *AttackMontage = AttackFragment
         ? AttackFragment->AttackConfig.AttackMontage
         : nullptr;

@@ -282,55 +282,48 @@ void UConsumableEffectFragment::OnInventorySlotChanged(UMythicInventoryComponent
 
 void UConsumableEffectFragment::OnItemDeactivated(UMythicItemInstance *ItemInstance) {
     Super::OnItemDeactivated(ItemInstance);
-    if (ConsumableEffectRuntimeReplicatedData.ASC && ConsumableEffectRuntimeReplicatedData.AbilityHandle.IsValid()) {
-        ConsumableEffectRuntimeReplicatedData.ASC->ClearAbility(ConsumableEffectRuntimeReplicatedData.AbilityHandle);
-    }
+    auto* ASC=ConsumableEffectRuntimeReplicatedData.ASC;
+    const auto Handle=ConsumableEffectRuntimeReplicatedData.AbilityHandle;
+    ConsumableEffectRuntimeReplicatedData.AbilityHandle=FGameplayAbilitySpecHandle();
+    if (ASC && Handle.IsValid()) ASC->ClearAbility(Handle);
 }
 
 void UConsumableEffectFragment::OnClientActionEnd(UMythicItemInstance *ItemInstance) {
-    ServerApplyEffects(ItemInstance);
-    if (auto Inventory = GetOwningInventoryComponent()) {
-        Inventory->ServerRemoveItem(ParentItemInstance, 1);
-    }
+    // The canonical inventory request or granted GAS ability owns use; release is not a second use.
 }
 
 void UConsumableEffectFragment::ServerApplyEffects_Implementation(UMythicItemInstance *ItemInstance) {
-    auto ASC = ConsumableEffectRuntimeReplicatedData.ASC;
-    if (!ASC) {
-        ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(ItemInstance->GetInventoryOwner());
+    if (!IsValid(ItemInstance) || GetOwningItemInstance()!=ItemInstance || ItemInstance->GetFragment<UConsumableEffectFragment>()!=this) return;
+    auto* Inventory=ItemInstance->GetInventoryComponent(); if (!Inventory) return;
+    FMythicInventorySourceLocator Source;
+    Source.Inventory=Inventory; Source.SlotIndex=ItemInstance->GetSlot(); Source.ExpectedItemGuid=ItemInstance->GetItemInstanceGuid(); Source.ExpectedQuantity=ItemInstance->GetStacks();
+    int32 Consumed=0; Inventory->TryUseItemInSlot(Source,Consumed);
+}
+
+bool UConsumableEffectFragment::RehydrateDefinitionEffects(const UConsumableEffectFragment* DefinitionFragment) {
+    if (!DefinitionFragment || GetClass()!=DefinitionFragment->GetClass()) return false;
+    auto& Saved=ConsumableEffectConfig.Effects;
+    const auto& Authored=DefinitionFragment->ConsumableEffectConfig.Effects;
+    // Historical entries saved their SBC data but never saved GE class or level. Their immutable identity was ordinal
+    // within this exact definition fragment. Changed shape has no sound correspondence and must quarantine the frame.
+    if (Saved.Num()!=Authored.Num() || Saved.Num()>32) return false;
+    for (int32 Index=0;Index<Saved.Num();++Index) {
+        const auto& Template=Authored[Index]; const auto& Entry=Saved[Index];
+        if (!Template.GameplayEffectClass || !FMath::IsFinite(Template.EffectLevel) || Template.EffectLevel<=0
+            || (Entry.GameplayEffectClass && Entry.GameplayEffectClass!=Template.GameplayEffectClass)
+            || Entry.SetByCallerMagnitudes.Num()>FConsumableEffectEntry::MaxSetByCallerMagnitudes) return false;
+        for (const auto& Pair:Entry.SetByCallerMagnitudes) if (!Pair.Key.IsValid() || !FMath::IsFinite(Pair.Value)) return false;
     }
-    if (!ASC) {
-        UE_LOG(Myth, Error, TEXT("UConsumableEffectFragment: No ASC"));
-        return;
+    for (int32 Index=0;Index<Saved.Num();++Index) {
+        Saved[Index].GameplayEffectClass=Authored[Index].GameplayEffectClass;
+        Saved[Index].EffectLevel=Authored[Index].EffectLevel;
     }
-
-    for (const FConsumableEffectEntry &Entry : ConsumableEffectConfig.Effects) {
-        if (!Entry.GameplayEffectClass) {
-            UE_LOG(Myth, Warning, TEXT("UConsumableEffectFragment: Invalid GameplayEffectClass in config"));
-            continue;
-        }
-
-        FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
-        Context.AddSourceObject(this);
-
-        FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(Entry.GameplayEffectClass, Entry.EffectLevel, Context);
-        if (Spec.IsValid()) {
-            for (const auto &Pair : Entry.SetByCallerMagnitudes) {
-                Spec.Data->SetSetByCallerMagnitude(Pair.Key, Pair.Value);
-            }
-
-            ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
-            UE_LOG(Myth, Log, TEXT("Applied effect: %s"), *Entry.GameplayEffectClass->GetName());
-        }
-        else {
-            UE_LOG(Myth, Error, TEXT("UConsumableEffectFragment: Failed to make outgoing spec for effect: %s"), *Entry.GameplayEffectClass->GetName());
-        }
-    }
+    return true;
 }
 
 bool UConsumableEffectFragment::CanBeStackedWith(const UItemFragment *Other) const {
     auto OtherFrag = Cast<UConsumableEffectFragment>(Other);
-    if (!OtherFrag) {
+    if (!OtherFrag || ConsumableEffectConfig.bHealing!=OtherFrag->ConsumableEffectConfig.bHealing || ConsumableEffectConfig.bUtility!=OtherFrag->ConsumableEffectConfig.bUtility || ConsumableEffectConfig.QuickUseVariant!=OtherFrag->ConsumableEffectConfig.QuickUseVariant) {
         return false;
     }
 
@@ -519,3 +512,31 @@ FText UConsumableEffectFragment::GetCombinedRichText() const {
     }
     return FText::FromString(FString::Join(Lines, TEXT("\n")));
 }
+
+void UConsumableEffectFragment::OnRep_ConsumableEffectConfig() {
+    if (IsValid(ParentItemInstance) && ParentItemInstance->ContainsFragment(this)) {
+        ParentItemInstance->NotifyReplicatedItemState();
+    }
+}
+
+#if WITH_EDITOR
+bool UConsumableEffectFragment::IsValidFragment(FText& OutErrorMessage) const {
+    const auto& Config=ConsumableEffectConfig;
+    if (Config.Effects.Num()>32 || ((Config.bHealing || Config.bUtility) && Config.Effects.IsEmpty())) {
+        OutErrorMessage=NSLOCTEXT("Mythic","ConsumableEffectCount","Quick-use consumables require 1–32 effects.");
+        return false;
+    }
+    for (const auto& Entry:Config.Effects) {
+        if (!Entry.GameplayEffectClass || !FMath::IsFinite(Entry.EffectLevel) || Entry.EffectLevel<=0
+            || Entry.SetByCallerMagnitudes.Num()>FConsumableEffectEntry::MaxSetByCallerMagnitudes) {
+            OutErrorMessage=NSLOCTEXT("Mythic","ConsumableEffectPayload","Each consumable effect requires a class, a finite positive level and at most 64 magnitudes.");
+            return false;
+        }
+        for (const auto& Pair:Entry.SetByCallerMagnitudes) if (!Pair.Key.IsValid() || !FMath::IsFinite(Pair.Value)) {
+            OutErrorMessage=NSLOCTEXT("Mythic","ConsumableEffectMagnitude","Consumable magnitudes require valid tags and finite values.");
+            return false;
+        }
+    }
+    return true;
+}
+#endif

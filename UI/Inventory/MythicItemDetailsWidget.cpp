@@ -1,6 +1,7 @@
 // Copyright Stellar Games. All Rights Reserved.
 
 #include "UI/Inventory/MythicItemDetailsWidget.h"
+#include "Algo/AnyOf.h"
 #include "UI/Settings/MythicUserSettings.h"
 
 #include "Components/NamedSlot.h"
@@ -36,7 +37,7 @@ void AppendComparableAffixStats(
     const TConstArrayView<FAffixDisplayData> Affixes,
     TArray<FMythicComparableStat> &OutStats) {
     for (const FAffixDisplayData &Affix : Affixes) {
-        if (Affix.bOwnedByWeaponAttackPresentation) {
+        if (Affix.bOwnedByWeaponAttackPresentation || Affix.ViewData.ApplicationScope != EMythicAffixApplicationScope::Permanent) {
             continue;
         }
         for (const FMythicAffixValueViewData &Value : Affix.ViewData.Values) {
@@ -103,7 +104,7 @@ void BuildAffixRowPresentations(
             ? EAffixPanelRoute::CoreStats
             : EAffixPanelRoute::Affixes;
 
-        if (bComparisonActive) {
+        if (bComparisonActive && CandidateAffix.ViewData.ApplicationScope == EMythicAffixApplicationScope::Permanent) {
             for (const FMythicAffixValueViewData &Channel : CandidateAffix.ViewData.Values) {
                 const FAttributeDiff *Found = DiffByTag.FindRef(Channel.StatTag);
                 const bool bAllowedByScope = bCompareAllAffixes
@@ -132,6 +133,16 @@ void BuildAffixRowPresentations(
 
         FMythicAffixRowPresentation Synthetic;
         Synthetic.DisplayData = BaselineAffix;
+        if (BaselineAffix.ViewData.ApplicationScope == EMythicAffixApplicationScope::Action) {
+            // Both contextual rolls remain inspectable; a stat-only comparison cannot judge their conditions.
+            const bool bSameRoll = Algo::AnyOf(CandidateAffixes, [&](const FAffixDisplayData& Candidate) { return Candidate.ViewData.RollGuid == BaselineAffix.ViewData.RollGuid; });
+            if (!bSameRoll) {
+                Synthetic.bBaselineOnly = true; Synthetic.bComparisonActive = true;
+                FPendingAffixRow& Pending = OutRows.AddDefaulted_GetRef();
+                Pending.Presentation = MoveTemp(Synthetic); Pending.Route = EAffixPanelRoute::Affixes;
+            }
+            continue;
+        }
         for (const FMythicAffixValueViewData &Channel : BaselineAffix.ViewData.Values) {
             const FAttributeDiff *Found = DiffByTag.FindRef(Channel.StatTag);
             if (Found && Found->bBaselineOnly

@@ -1,4 +1,12 @@
 #include "MythicPlayerController.h"
+#include "Input/MythicControlsComponent.h"
+#include "Input/MythicQuickUseComponent.h"
+#include "Input/MythicCombatUtilityComponent.h"
+#include "Components/Navigation/MythicNavigationComponent.h"
+#include "Player/MythicAbilityIntentComponent.h"
+#include "Misc/ScopeExit.h"
+#include "Input/CommonUIActionRouterBase.h"
+#include "Framework/Application/SlateApplication.h"
 
 #include "Mythic.h"
 #include "MythicPlayerState.h"
@@ -355,6 +363,10 @@ bool MythicValidateFocusedCombatPresentation(
 
 
 AMythicPlayerController::AMythicPlayerController() {
+    ControlsComponent=CreateDefaultSubobject<UMythicControlsComponent>(TEXT("CombatControls"));
+    CreateDefaultSubobject<UMythicQuickUseComponent>(TEXT("QuickUseItems"));
+    CreateDefaultSubobject<UMythicCombatUtilityComponent>(TEXT("CombatUtility"));
+
     bShowMouseCursor = true;
     DefaultMouseCursor = EMouseCursor::Default;
     bReplicateUsingRegisteredSubObjectList = true;
@@ -375,6 +387,7 @@ AMythicPlayerController::AMythicPlayerController() {
     ChronicleRelay = CreateDefaultSubobject<UMythicChronicleRelayComponent>(TEXT("ChronicleRelay"));
 
     HarvestFocusComponent = CreateDefaultSubobject<UMythicHarvestFocusComponent>(TEXT("HarvestFocusComponent"));
+    AbilityIntentComponent = CreateDefaultSubobject<UMythicAbilityIntentComponent>(TEXT("AbilityIntentComponent"));
 }
 
 
@@ -398,6 +411,7 @@ UMythicInventoryComponent *AMythicPlayerController::GetInventoryForItemType(cons
 }
 
 void AMythicPlayerController::OnPossess(APawn *InPawn) {
+    ON_SCOPE_EXIT { OnLocalGameplayOwnerChanged.Broadcast(); };
     Super::OnPossess(InPawn);
     LastPresentedHarvestFeedbackSequence = 0;
     BindContextActionAttention();
@@ -417,6 +431,9 @@ void AMythicPlayerController::OnPossess(APawn *InPawn) {
 }
 
 void AMythicPlayerController::OnUnPossess() {
+    if (HasAuthority()) if (auto* Utility=FindComponentByClass<UMythicCombatUtilityComponent>()) Utility->AuthorityEndUtilitySession();
+    ON_SCOPE_EXIT { OnLocalGameplayOwnerChanged.Broadcast(); };
+    if (auto* ASC=Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponent())) ASC->ClearAbilityInput();
     if (UMythicPlayerRegistrySubsystem *Registry = GetWorld() ? GetWorld()->GetSubsystem<UMythicPlayerRegistrySubsystem>() : nullptr) {
         Registry->UnregisterObject(this);
     }
@@ -466,10 +483,20 @@ void AMythicPlayerController::OnRep_PlayerState() {
     LastPresentedHarvestFeedbackSequence = 0;
     BindContextActionAttention();
     OnPossessedOnClient();
+    OnLocalGameplayOwnerChanged.Broadcast();
 }
 
 void AMythicPlayerController::BeginPlay() {
     Super::BeginPlay();
+    if (const auto* LocalPlayer=GetLocalPlayer()) {
+        if (auto* Router=LocalPlayer->GetSubsystem<UCommonUIActionRouterBase>()) {
+            AbilityInputModeHandle=Router->OnActiveInputModeChanged().AddUObject(this,&ThisClass::HandleAbilityInputModeChanged);
+        }
+        if (FSlateApplication::IsInitialized()) {
+            bAbilityApplicationActive=FSlateApplication::Get().IsActive();
+            AbilityApplicationHandle=FSlateApplication::Get().OnApplicationActivationStateChanged().AddUObject(this,&ThisClass::HandleAbilityApplicationActivation);
+        }
+    }
 
     BindContextActionAttention();
 
@@ -1068,12 +1095,12 @@ void AMythicPlayerController::Login(int32 LocalUserNum) {
 
     IOnlineSubsystem *OSS = Online::GetSubsystem(GetWorld());
     if (!OSS) {
-        UE_LOG(Myth, Error, TEXT("EOS: No Online Subsystem available — skipping login"));
+        UE_LOG(Myth, Error, TEXT("EOS: No Online Subsystem available â€” skipping login"));
         return;
     }
     IOnlineIdentityPtr Identity = OSS->GetIdentityInterface();
     if (!Identity.IsValid()) {
-        UE_LOG(Myth, Error, TEXT("EOS: Identity interface unavailable — skipping login"));
+        UE_LOG(Myth, Error, TEXT("EOS: Identity interface unavailable â€” skipping login"));
         return;
     }
 
@@ -1120,12 +1147,12 @@ void AMythicPlayerController::CB_LoginResponse(int32 LocalUserNum, bool bWasSucc
 
     IOnlineSubsystem *OSS = Online::GetSubsystem(GetWorld());
     if (!OSS) {
-        UE_LOG(Myth, Error, TEXT("EOS: No Online Subsystem available — cannot clear login delegate"));
+        UE_LOG(Myth, Error, TEXT("EOS: No Online Subsystem available â€” cannot clear login delegate"));
         return;
     }
     IOnlineIdentityPtr Identity = OSS->GetIdentityInterface();
     if (!Identity.IsValid()) {
-        UE_LOG(Myth, Error, TEXT("EOS: Identity interface unavailable — cannot clear login delegate"));
+        UE_LOG(Myth, Error, TEXT("EOS: Identity interface unavailable â€” cannot clear login delegate"));
         return;
     }
 
@@ -2915,12 +2942,12 @@ void AMythicPlayerController::ServerRecruitNpc_Implementation(AMythicNPCCharacte
     }
 
     if (!NPC->CognitiveBrain) {
-        UE_LOG(Myth, Warning, TEXT("ServerRecruitNpc: '%s' is recruitable but has no cognitive brain — cannot be a companion."), *GetNameSafe(NPC));
+        UE_LOG(Myth, Warning, TEXT("ServerRecruitNpc: '%s' is recruitable but has no cognitive brain â€” cannot be a companion."), *GetNameSafe(NPC));
         return;
     }
     const FMassEntityHandle Src = NPC->CognitiveBrain->GetSourceEntity();
     if (!Src.IsValid()) {
-        UE_LOG(Myth, Warning, TEXT("ServerRecruitNpc: '%s' has no valid MASS source entity — cannot be a companion."), *GetNameSafe(NPC));
+        UE_LOG(Myth, Warning, TEXT("ServerRecruitNpc: '%s' has no valid MASS source entity â€” cannot be a companion."), *GetNameSafe(NPC));
         return;
     }
     FString RecruiterKey;
@@ -3524,6 +3551,10 @@ void AMythicPlayerController::ClientNotifyStatusLearned_Implementation(const FTe
 }
 
 void AMythicPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason) {
+    if (auto* ASC=Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponent())) ASC->ClearAbilityInput();
+    if (const auto* LocalPlayer=GetLocalPlayer()) if (auto* Router=LocalPlayer->GetSubsystem<UCommonUIActionRouterBase>()) Router->OnActiveInputModeChanged().Remove(AbilityInputModeHandle);
+    if (FSlateApplication::IsInitialized()) FSlateApplication::Get().OnApplicationActivationStateChanged().Remove(AbilityApplicationHandle);
+    AbilityInputModeHandle.Reset(); AbilityApplicationHandle.Reset();
     UnbindContextActionAttention();
     ResetInventoryActionSubmissionState();
     if (ULocalPlayer *LocalPlayer = GetLocalPlayer()) {
@@ -3666,15 +3697,62 @@ void AMythicPlayerController::ServerSetItemAffixLocked_Implementation(UMythicIte
 
 void AMythicPlayerController::SetupInputComponent() {
     Super::SetupInputComponent();
+    if (ControlsComponent) ControlsComponent->InitializeLocalInput();
+    if (AbilityIntentComponent) AbilityIntentComponent->InitializeLocalInput(InputComponent);
     if (HarvestFocusComponent) {
         HarvestFocusComponent->InitializeLocalInput(InputComponent);
     }
 }
 
 void AMythicPlayerController::PostProcessInput(const float DeltaTime, const bool bGamePaused) {
+    if (ControlsComponent) ControlsComponent->AdvanceInput(DeltaTime);
+    if (AbilityIntentComponent) AbilityIntentComponent->AdvanceReticle(DeltaTime);
     if (UMythicAbilitySystemComponent *MythicASC = Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponent())) {
+        MythicASC->SetAbilityInputSuppressed(IsGameplayAbilityInputBlocked());
         MythicASC->ProcessAbilityInput(DeltaTime, bGamePaused);
     }
 
+    // Optional camera presentation runs after this frame's normal ability intent has been sampled.
+    if (!bGamePaused) if (auto* Utility=FindComponentByClass<UMythicCombatUtilityComponent>()) Utility->AdvanceLockYawAssist(DeltaTime);
     Super::PostProcessInput(DeltaTime, bGamePaused);
+}
+
+bool AMythicPlayerController::IsGameplayAbilityInputBlocked() const {
+    if (!bAbilityApplicationActive || (GetWorld() && GetWorld()->IsPaused())) return true;
+    const auto* ASC=GetAbilitySystemComponent();
+    if (!GetPawn() || !ASC || ASC->HasMatchingGameplayTag(GAS_STATE_DEAD) || ASC->HasMatchingGameplayTag(GAS_STATE_DOWNED)) return true;
+    if (ControlsComponent && (ControlsComponent->IsGameplayWheelOpen() || ControlsComponent->IsCameraAdjustmentOpen())) return true;
+    const auto* LocalPlayer=GetLocalPlayer();
+    const auto* Router=LocalPlayer ? LocalPlayer->GetSubsystem<UCommonUIActionRouterBase>() : nullptr;
+    return Router && !Router->CanProcessNormalGameInput();
+}
+
+void AMythicPlayerController::FlushPressedKeys() {
+    if (ControlsComponent && !ControlsComponent->IsGameplayWheelOpen() && !ControlsComponent->IsClosingForTraversalInput()) ControlsComponent->CancelHeldInput();
+    if (auto* Navigation=FindComponentByClass<UMythicNavigationComponent>()) Navigation->CancelDestinationCommand();
+    if (AbilityIntentComponent) AbilityIntentComponent->ResetHeldInput();
+    // The superclass flush may synthesize release. Cancel owned gameplay edges first.
+    if (auto* ASC=Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponent())) ASC->ClearAbilityInput();
+    Super::FlushPressedKeys();
+}
+
+void AMythicPlayerController::HandleAbilityInputModeChanged(ECommonInputMode Mode) {
+    if (ControlsComponent && IsGameplayAbilityInputBlocked() && !ControlsComponent->IsGameplayWheelOpen() && !ControlsComponent->IsClosingForTraversalInput()) ControlsComponent->CancelHeldInput();
+    if (IsGameplayAbilityInputBlocked()) if (auto* Navigation=FindComponentByClass<UMythicNavigationComponent>()) Navigation->CancelDestinationCommand();
+    if (AbilityIntentComponent) AbilityIntentComponent->ResetHeldInput();
+    if (auto* ASC=Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponent())) ASC->SetAbilityInputSuppressed(IsGameplayAbilityInputBlocked());
+}
+
+void AMythicPlayerController::HandleAbilityApplicationActivation(bool bActive) {
+    bAbilityApplicationActive=bActive;
+    if (!bActive && ControlsComponent) { ControlsComponent->CancelHeldInput(); ControlsComponent->CloseWheel(false); }
+    if (!bActive) if (auto* Navigation=FindComponentByClass<UMythicNavigationComponent>()) Navigation->CancelDestinationCommand();
+    if (AbilityIntentComponent) AbilityIntentComponent->ResetHeldInput();
+    if (auto* ASC=Cast<UMythicAbilitySystemComponent>(GetAbilitySystemComponent())) ASC->SetAbilityInputSuppressed(IsGameplayAbilityInputBlocked());
+}
+
+bool AMythicPlayerController::InputKey(const FInputKeyEventArgs& Args) {
+    const bool bOwned=ControlsComponent && ControlsComponent->HandleKey(Args.Key,Args.Event);
+    const bool bEngine=Super::InputKey(Args);
+    return bOwned || bEngine;
 }

@@ -371,7 +371,8 @@ private:
 
     FActiveGameplayEffectHandle GuardMaxShieldHandle;
     FActiveGameplayEffectHandle GuardShieldHandle;
-    float PreGuardShield = 0.0f;
+    FGuid OwnedGuardHandle;
+    FDelegateHandle OwnedGuardRemovedListener;
 
     // Server world seconds each cue tag last played, for the throttle.
     TMap<FGameplayTag, double> CueLastPlayedSeconds;

@@ -42,8 +42,11 @@ protected:
      */
     virtual void NativeOnAddedToFocusPath(const FFocusEvent &InFocusEvent) override;
     virtual void NativeOnRemovedFromFocusPath(const FFocusEvent &InFocusEvent) override;
+    virtual FReply NativeOnPreviewKeyDown(const FGeometry& Geometry,const FKeyEvent& Event) override;
 
 public:
+	/** Uses the configured menu key through CommonUI before a child table consumes it as navigation. */
+	void ConfigureMenuDismissAction(FGameplayTag Action);
 	/**
 	 * Gives an active child page one chance to close local modal state before its owning screen handles Back.
 	 * Ordinary pages return false so Back remains owned by the container that was pushed onto the CommonUI layer.
@@ -94,6 +97,12 @@ protected:
 public:
 
 private:
+    FUIActionBindingHandle MenuDismissBinding;
+    FGameplayTag MenuDismissAction;
+    // Release precisely the context/subsystem acquired, even if ownership or defaults change.
+    TWeakObjectPtr<class UEnhancedInputLocalPlayerSubsystem> AcquiredInputSubsystem;
+    UPROPERTY(Transient) TObjectPtr<class UInputMappingContext> AcquiredInputContext;
+
     UPROPERTY()
 	TArray<FUIActionBindingHandle> BindingHandles;
 

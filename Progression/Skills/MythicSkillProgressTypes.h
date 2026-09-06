@@ -3,9 +3,11 @@
 
 #include "CoreMinimal.h"
 #include "UObject/SoftObjectPtr.h"
+#include "Net/Serialization/FastArraySerializer.h"
 #include "MythicSkillProgressTypes.generated.h"
 
 class UMythicSkillDefinition;
+class UMythicSkillComponent;
 
 /**
  * One skill's growth, keyed on the definition so a skill keeps what it earned whether or not it is currently bound
@@ -15,6 +17,10 @@ class UMythicSkillDefinition;
 USTRUCT(BlueprintType)
 struct FMythicSkillProgress {
     GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, SaveGame) bool bLearned = false;
+    UPROPERTY(BlueprintReadOnly, SaveGame) TArray<FName> ActiveModifierIds;
+    UPROPERTY(SaveGame) int32 SchemaVersion = 0;
 
     UPROPERTY(BlueprintReadOnly, SaveGame, Category = "Progression|Skills")
     TSoftObjectPtr<UMythicSkillDefinition> Skill;
@@ -31,4 +37,32 @@ struct FMythicSkillProgress {
     // which is why nothing a client can call needs to raise a level: practice is the only currency.
     UPROPERTY(BlueprintReadOnly, SaveGame, Category = "Progression|Skills")
     int32 Uses = 0;
+};
+
+USTRUCT()
+struct FMythicSkillProgressItem : public FFastArraySerializerItem {
+    GENERATED_BODY()
+    UPROPERTY() FMythicSkillProgress Data;
+};
+
+USTRUCT()
+struct FMythicSkillProgressArray : public FFastArraySerializer {
+    GENERATED_BODY()
+    UPROPERTY() TArray<FMythicSkillProgressItem> Items;
+    UPROPERTY(NotReplicated) TObjectPtr<UMythicSkillComponent> Owner;
+    bool NetDeltaSerialize(FNetDeltaSerializeInfo& Info) {
+        return FastArrayDeltaSerialize<FMythicSkillProgressItem, FMythicSkillProgressArray>(Items, Info, *this);
+    }
+    void PostReplicatedReceive(const FFastArraySerializer::FPostReplicatedReceiveParameters& Parameters);
+};
+
+template<> struct TStructOpsTypeTraits<FMythicSkillProgressArray> : TStructOpsTypeTraitsBase2<FMythicSkillProgressArray> {
+    enum { WithNetDeltaSerializer = true };
+};
+
+USTRUCT(BlueprintType)
+struct FMythicAbilityCooldownSave {
+    GENERATED_BODY()
+    UPROPERTY(SaveGame) FSoftObjectPath Skill;
+    UPROPERTY(SaveGame) float RemainingSeconds = 0;
 };

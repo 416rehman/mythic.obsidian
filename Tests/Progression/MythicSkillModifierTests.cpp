@@ -1,5 +1,6 @@
 
 #include "Misc/AutomationTest.h"
+#include "Tests/Progression/MythicAbilityTestFixture.h"
 
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -12,6 +13,8 @@
 #include "Player/MythicPlayerState.h"
 #include "Progression/Skills/MythicSkillComponent.h"
 #include "Progression/Skills/MythicSkillDefinition.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
 
 namespace {
 
@@ -65,6 +68,7 @@ bool BuildModifierFixture(FAutomationTestBase &Test, FMythicSkillModifierFixture
         Out.ASC->RegisterComponent();
     }
     Out.ASC->InitAbilityActorInfo(Out.PlayerState, Out.PlayerState);
+    InitializeAbilityTestPlayer(Out.PlayerState);
 
     // A standalone world never initialises actor components, so the ability system never runs the pass that adopts
     // the player state's own attribute sets. The set has to be handed to it by name or every bonus reads as zero.
@@ -75,6 +79,7 @@ bool BuildModifierFixture(FAutomationTestBase &Test, FMythicSkillModifierFixture
     Out.Definition = NewObject<UMythicSkillDefinition>();
     Out.Definition->Ability = UMythicGA_Skill::StaticClass();
     Out.Definition->Modifiers = Modifiers;
+    RegisterAbilityTestDefinition(Out.Skills,Out.Definition);
 
     // The definition is the spec's source object, which is the only thread from a fired skill back to the authored
     // modifiers it was granted from.
@@ -314,6 +319,7 @@ bool FMythicSkillModifierResolvedShapeTest::RunTest(const FString &Parameters) {
     Cursed[0].MovementDistanceDelta = -9000.0f;
     Cursed[0].StatusChanceDelta = -5.0f;
     Skill->Modifiers = Cursed;
+    RegisterAbilityTestDefinition(Skills,Skill);
 
     if (TestTrue(TEXT("the cursed modifier switches on"), ToggleModifier(Skills, Skill, 0, true))) {
         TestEqual(TEXT("a crushing radius delta shrinks the skill rather than inverting it"), Ability->ResolveShape().Radius, 0.0f);
@@ -332,6 +338,7 @@ bool FMythicSkillModifierResolvedShapeTest::RunTest(const FString &Parameters) {
     Ability->MovementDistance = 0.0f;
     Ability->Shape.MaxTargets = 0;
     Skill->Modifiers = Modifiers;
+    RegisterAbilityTestDefinition(Skills,Skill);
     Skills->ServerSetModifierActive(Skill, 0, false);
 
     if (TestTrue(TEXT("the duration modifier switches on against the sentinel"), ToggleModifier(Skills, Skill, 2, true))) {
@@ -479,3 +486,5 @@ bool FMythicSkillModifierAttributeStackingTest::RunTest(const FString &Parameter
 
     return true;
 }
+
+#endif

@@ -129,8 +129,10 @@ struct FConsumableEffectRuntimeReplicatedData {
 };
 
 USTRUCT(BlueprintType)
-struct FConsumableEffectEntry {
+struct MYTHIC_API FConsumableEffectEntry {
     GENERATED_BODY()
+
+    static constexpr int32 MaxSetByCallerMagnitudes = 64;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effect")
     TSubclassOf<UGameplayEffect> GameplayEffectClass;
@@ -145,11 +147,26 @@ struct FConsumableEffectEntry {
     // Override display text for complex effects
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effect|Display")
     FText DisplayTextOverride;
+
+    bool NetSerialize(FArchive& Ar, UPackageMap* Map, bool& bOutSuccess);
+};
+
+template<> struct TStructOpsTypeTraits<FConsumableEffectEntry> : TStructOpsTypeTraitsBase2<FConsumableEffectEntry> {
+    enum { WithNetSerializer = true };
 };
 
 USTRUCT(BlueprintType)
 struct FConsumableEffectConfig {
     GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category="Quick Use") bool bHealing = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category="Quick Use") bool bUtility = false;
+    /** Stable authored variant. Different payloads must have different identities. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category="Quick Use") FName QuickUseVariant = NAME_None;
+    /** Presentation order, lowest first. Resolved from the current definition; never changes stack identity. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quick Use") int32 QuickUsePriority = 0;
+    /** Explicit definition migration for formerly empty action consumables; never replaces a nonempty payload. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Migration") bool bMigrateLegacyEmptyAction = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects", SaveGame)
     TArray<FConsumableEffectEntry> Effects;
@@ -162,7 +179,7 @@ class MYTHIC_API UConsumableEffectFragment : public UActionableItemFragment {
 public:
     DECLARE_FRAGMENT(ConsumableEffect)
 
-    UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, meta = (ShowOnlyInnerProperties), SaveGame)
+    UPROPERTY(ReplicatedUsing=OnRep_ConsumableEffectConfig, EditAnywhere, BlueprintReadWrite, meta = (ShowOnlyInnerProperties), SaveGame)
     FConsumableEffectConfig ConsumableEffectConfig;
 
     UPROPERTY(Replicated, BlueprintReadOnly, SaveGame)
@@ -173,6 +190,11 @@ public:
     virtual void OnItemDeactivated(UMythicItemInstance *ItemInstance) override;
     virtual void OnInventorySlotChanged(UMythicInventoryComponent *Inventory, int32 SlotIndex) override;
     virtual bool CanBeStackedWith(const UItemFragment *Other) const override;
+#if WITH_EDITOR
+    virtual bool IsValidFragment(FText& OutErrorMessage) const override;
+#endif
+    /** Rehydrates class/level after the SaveGame Effects array has reconstructed its entries. Preserves saved SBC values. */
+    bool RehydrateDefinitionEffects(const UConsumableEffectFragment* DefinitionFragment);
 
     virtual void ExecuteGenericAction(UMythicItemInstance *ItemInstance) override;
 
@@ -207,6 +229,8 @@ public:
     void ServerApplyEffects(UMythicItemInstance *ItemInstance);
 
 protected:
+    UFUNCTION() void OnRep_ConsumableEffectConfig();
+
     static FMythicEffectModifierDisplayData ParseModifier(
         const FGameplayModifierInfo &Modifier,
         const TMap<FGameplayTag, float> &SetByCallerValues);
