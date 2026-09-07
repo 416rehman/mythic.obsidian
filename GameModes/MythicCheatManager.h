@@ -84,6 +84,10 @@ public:
     UFUNCTION(Exec)
     void MythGiveItem(const FString &ItemName, int32 Count = 1, int32 ItemLevel = 1);
 
+    // A string preserves the omitted-count default in packaged builds, where Exec numeric defaults lack metadata.
+    UFUNCTION(Exec)
+    void MythGiveRandomItems(const FString &CountText = TEXT(""));
+
     UFUNCTION(Exec)
     void MythListTalents();
 
@@ -251,6 +255,9 @@ public:
     void MythDumpActions();
 
 private:
+    bool bGivingRandomItems = false;
+    TSharedPtr<struct FStreamableHandle> RandomItemLoad;
+
     /** Drives one deed's counters and story tags through their real writers. Returns whether it ended up earned. */
     bool Cheat_GrantDeed(class AMythicPlayerState *PS, const class UMythicAchievementDefinition *Def, bool bVerbose);
 };

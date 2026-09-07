@@ -9,6 +9,9 @@
 #include "Mythic/Itemization/Inventory/MythicInventoryComponent.h"
 #include "Mythic/Itemization/Inventory/MythicItemInstance.h"
 #include "Mythic/Itemization/Inventory/ItemDefinition.h"
+#include "Mythic/Itemization/Inventory/MythicItemFactorySubsystem.h"
+#include "Engine/StreamableManager.h"
+#include "UObject/StrongObjectPtr.h"
 #include "Mythic/Itemization/Loot/MythicLootManagerSubsystem.h"
 #include "Mythic/Itemization/InventoryProviderInterface.h"
 #include "Mythic/System/MythicAssetManager.h"
@@ -102,6 +105,7 @@ void UMythicCheatManager::MythHelp() {
     UE_LOG(Myth, Warning, TEXT("--- ITEMS ---"));
     UE_LOG(Myth, Warning, TEXT("  MythListItems                      - List all item definitions"));
     UE_LOG(Myth, Warning, TEXT("  MythGiveItem <Name> [Count] [Lvl]  - Give item by name (partial match)"));
+    UE_LOG(Myth, Warning, TEXT("  MythGiveRandomItems [Count]       - Give random items at your level; default 1, max 1000 (host/standalone)"));
     UE_LOG(Myth, Warning, TEXT("  MythClearInventory                 - Clear all inventory items"));
     UE_LOG(Myth, Warning, TEXT(""));
     UE_LOG(Myth, Warning, TEXT("--- ATTRIBUTES ---"));
@@ -470,6 +474,124 @@ void UMythicCheatManager::MythGiveItem(const FString &ItemName, int32 Count, int
     }
     else {
         UE_LOG(Myth, Warning, TEXT(">>> Gave %d x %s"), Count, *MatchedItem->Name.ToString());
+    }
+}
+
+void UMythicCheatManager::MythGiveRandomItems(const FString &CountText) {
+    const FString Argument = CountText.TrimStartAndEnd();
+    int32 Count = 1;
+    if (!Argument.IsEmpty()) {
+        Count = 0;
+        for (const TCHAR Digit : Argument) {
+            if (Digit < TEXT('0') || Digit > TEXT('9') || Count > 1000) {
+                Count = 0;
+                break;
+            }
+            Count = Count * 10 + (Digit - TEXT('0'));
+        }
+        if (Count < 1 || Count > 1000) {
+            UE_LOG(Myth, Warning, TEXT(">>> Usage: MythGiveRandomItems [Count], an integer from 1 to 1000 (default 1)"));
+            return;
+        }
+    }
+
+    AMythicPlayerController *PC = Cast<AMythicPlayerController>(GetOuterAPlayerController());
+    if (!PC || !PC->HasAuthority() || PC->GetNetMode() == NM_Client || !PC->GetGameInstance()) {
+        UE_LOG(Myth, Warning, TEXT(">>> MythGiveRandomItems needs authority - run it on the host or in standalone"));
+        return;
+    }
+    if (bGivingRandomItems) {
+        UE_LOG(Myth, Warning, TEXT(">>> The previous random-item grant is still loading"));
+        return;
+    }
+
+    UMythicAssetManager &Assets = UMythicAssetManager::Get();
+    TArray<FPrimaryAssetId> Ids;
+    Assets.GetPrimaryAssetIdList(UMythicAssetManager::ItemDefinitionType, Ids);
+    TArray<FSoftObjectPath> Paths;
+    for (const FPrimaryAssetId &Id : Ids) {
+        const FSoftObjectPath Path = Assets.GetPrimaryAssetPath(Id);
+        if (Path.IsValid()) Paths.AddUnique(Path);
+    }
+    if (Paths.IsEmpty()) {
+        UE_LOG(Myth, Warning, TEXT(">>> No registered item definitions are available"));
+        return;
+    }
+
+    bGivingRandomItems = true;
+    const TWeakObjectPtr<AMythicPlayerController> WeakPC(PC);
+    const TWeakObjectPtr<UWorld> OriginalWorld(PC->GetWorld());
+    RandomItemLoad = Assets.GetStreamableManager().RequestAsyncLoad(Paths,
+        FStreamableDelegate::CreateWeakLambda(this, [this, WeakPC, OriginalWorld, Paths, Count]() {
+            AMythicPlayerController *Recipient = WeakPC.Get();
+            if (!Recipient || !Recipient->HasAuthority() || !OriginalWorld.IsValid()
+                || Recipient->GetWorld() != OriginalWorld.Get() || !Recipient->GetGameInstance()) {
+                bGivingRandomItems = false;
+                RandomItemLoad.Reset();
+                return;
+            }
+            UMythicItemFactorySubsystem *Factory = Recipient->GetGameInstance()->GetSubsystem<UMythicItemFactorySubsystem>();
+            struct FGrantBatch {
+                TArray<TStrongObjectPtr<UItemDefinition>> Definitions;
+                int32 Remaining = 0;
+                int32 Granted = 0;
+                int32 Dropped = 0;
+            };
+            const TSharedRef<FGrantBatch> Batch = MakeShared<FGrantBatch>();
+            for (const FSoftObjectPath &Path : Paths) {
+                UItemDefinition *Definition = Cast<UItemDefinition>(Path.ResolveObject());
+                if (Definition && Definition->ItemType.IsValid()
+                    && Recipient->GetInventoryForItemDefinition(Definition)) {
+                    Batch->Definitions.Emplace(Definition);
+                }
+            }
+            // The batch now keeps templates alive until every asynchronous factory request has completed.
+            RandomItemLoad.Reset();
+            if (!Factory || Batch->Definitions.IsEmpty()) {
+                bGivingRandomItems = false;
+                UE_LOG(Myth, Warning, TEXT(">>> No compatible items or item factory are available"));
+                return;
+            }
+            Batch->Remaining = Count;
+            const TWeakObjectPtr<UMythicCheatManager> WeakCheats(this);
+            for (int32 Index = 0; Index < Count; ++Index) {
+                FMythicCreateItemRequest Request;
+                Request.ItemDefinition = Batch->Definitions[FMath::RandHelper(Batch->Definitions.Num())].Get();
+                Request.OwningActor = Recipient;
+                Request.Quantity = 1;
+                Request.ItemLevel = FMath::Max(1, Recipient->GetPlayerLevel());
+                Factory->CreateItemAsync(Request, FOnMythicItemCreated::CreateLambda(
+                    [Batch, WeakPC, WeakCheats, OriginalWorld, Count](FMythicCreateItemResult Result) {
+                        AMythicPlayerController *Owner = WeakPC.Get();
+                        bool bDelivered = false;
+                        if (Result.IsSuccess() && WeakCheats.IsValid() && OriginalWorld.IsValid() && Owner && Owner->HasAuthority()
+                            && Owner->GetWorld() == OriginalWorld.Get()) {
+                            UMythicInventoryComponent *Inventory = Owner->GetInventoryForItemInstance(Result.Item);
+                            if (Inventory && !UMythicInventoryComponent::IsOwnerMutationFrozen(Inventory->GetOwner())) {
+                                const bool bDropped = Inventory->AddItem(Result.Item, Owner) != nullptr;
+                                bDelivered = bDropped || Result.Item->GetInventoryComponent() == Inventory
+                                    || Result.Item->GetStacks() == 0;
+                                Batch->Dropped += bDropped ? 1 : 0;
+                            }
+                        }
+                        if (bDelivered) ++Batch->Granted;
+                        else {
+                            UE_LOG(Myth, Warning, TEXT(">>> Random item could not be delivered (%s)"),
+                                   Result.IsSuccess() ? TEXT("recipient unavailable or inventory rejected item")
+                                       : *Result.DiagnosticCode.ToString());
+                            if (Result.Item) Result.Item->Destroy();
+                        }
+                        if (--Batch->Remaining == 0) {
+                            if (UMythicCheatManager *Cheats = WeakCheats.Get()) Cheats->bGivingRandomItems = false;
+                            UE_LOG(Myth, Warning, TEXT(">>> Random items: granted %d/%d (%d private overflow drops)"),
+                                   Batch->Granted, Count, Batch->Dropped);
+                        }
+                    }));
+            }
+        }));
+    if (!RandomItemLoad) {
+        bGivingRandomItems = false;
+        UE_LOG(Myth, Warning, TEXT(">>> Could not start loading random item definitions"));
     }
 }
 
