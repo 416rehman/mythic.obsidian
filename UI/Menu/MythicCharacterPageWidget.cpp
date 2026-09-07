@@ -13,6 +13,7 @@
 #include "Progression/Runes/MythicRuneDefinition.h"
 #include "UI/Menu/MythicRunePickerWidget.h"
 #include "UI/Menu/MythicAbilityPickerWidget.h"
+#include "UI/Menu/MythicAppearanceWidget.h"
 #include "UI/Menu/MythicRuneSocketWidget.h"
 #include "UI/ViewModels/MythicRuneDescriber.h"
 #include "UI/Inventory/MythicSocketRowWidget.h"
@@ -28,8 +29,10 @@
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "CommonButtonBase.h"
+#include "CommonInputSubsystem.h"
 #include "Components/VerticalBox.h"
 #include "Blueprint/WidgetTree.h"
+#include "Blueprint/IUserObjectListEntry.h"
 #include "TimerManager.h"
 #include "CommonActivatableWidget.h"
 #include "CommonTextBlock.h"
@@ -271,6 +274,11 @@ void UMythicCharacterPageWidget::NativeOnActivated() {
     BuildDetailsCard();
     BorrowInventory();
     BindSlotSelection();
+    // Observe the owning Slate user while the HUD inventory is borrowed by this page.
+    if (FSlateApplication::IsInitialized() && !DetailsFocusHandle.IsValid()) {
+        DetailsFocusHandle = FSlateApplication::Get().OnFocusChanging().AddUObject(
+            this, &ThisClass::HandleOwnerFocusChanging);
+    }
     BindInventoryEvents();
     if (UMythicInventoryInteractionCoordinator *Coordinator = GetInventoryInteractionCoordinator()) {
         Coordinator->SetCharacterInventoryPageActive(true);
@@ -285,7 +293,7 @@ void UMythicCharacterPageWidget::NativeOnActivated() {
     // Whatever changed while the page was away is state to record, not a landing to replay on entry.
     bSocketsDrawn = false;
     RefreshSockets();
-    RestoreSelectionByGuid();
+    RestoreSelectionByGuid(true);
     RefreshInventoryActionBar();
 
     // Focus one tick late: at activation the borrowed strips are not yet in a visible Slate path, and
@@ -331,7 +339,7 @@ void UMythicCharacterPageWidget::FocusInitialSlot() {
     BindRunes();
     RefreshSockets();
     if (BoundInventoryVM.IsValid()) {
-        RestoreSelectionByGuid();
+        RestoreSelectionByGuid(true);
     }
     else {
         SelectFirstOccupiedSlot();
@@ -354,6 +362,7 @@ void UMythicCharacterPageWidget::FocusInitialSlot() {
 }
 
 bool UMythicCharacterPageWidget::TryHandleNestedBackAction() {
+    if (AppearanceEditor && AppearanceEditor->IsOnLayer()) { AppearanceEditor->Close(); return true; }
     if (AbilityPicker && AbilityPicker->IsOnLayer()) { AbilityPicker->Close(); return true; }
     if (InventoryPageState != EInventoryPageState::Browsing) {
         CloseInventoryModal(true);
@@ -490,6 +499,12 @@ void UMythicCharacterPageWidget::BuildInventoryActionBar() {
     ActionsActionButton = CreateInventoryActionButton(Style.SecondaryActionButtonStyle.LoadSynchronous());
     TargetActionButton = CreateInventoryActionButton(Style.SecondaryActionButtonStyle.LoadSynchronous());
     SortActionButton = CreateInventoryActionButton(Style.QuietActionButtonStyle.LoadSynchronous());
+    CustomizeButton = CreateInventoryActionButton(Style.QuietActionButtonStyle.LoadSynchronous());
+    if (CustomizeButton) {
+        CustomizeButton->SetActionBarPromptOnly(false);
+        CustomizeButton->SetLabelOverride(NSLOCTEXT("Appearance","Customize","Customize"));
+        CustomizeButton->OnClicked().AddUObject(this,&ThisClass::OpenAppearance);
+    }
 
     if (PrimaryActionButton) {
         PrimaryActionButton->OnClicked().AddUObject(this, &UMythicCharacterPageWidget::HandlePrimaryInventoryAction);
@@ -611,6 +626,9 @@ void UMythicCharacterPageWidget::HandleNextInventoryCategory() {
 }
 
 void UMythicCharacterPageWidget::NativeOnDeactivated() {
+    if (FSlateApplication::IsInitialized()) FSlateApplication::Get().OnFocusChanging().Remove(DetailsFocusHandle);
+    DetailsFocusHandle.Reset();
+    if (AppearanceEditor) AppearanceEditor->ForceClose();
     UnbindSkills();
     if (UMythicInventoryInteractionCoordinator *Coordinator = GetInventoryInteractionCoordinator()) {
         Coordinator->SetCharacterInventoryPageActive(false);
@@ -627,6 +645,9 @@ void UMythicCharacterPageWidget::NativeOnDeactivated() {
 }
 
 void UMythicCharacterPageWidget::NativeDestruct() {
+    if (FSlateApplication::IsInitialized()) FSlateApplication::Get().OnFocusChanging().Remove(DetailsFocusHandle);
+    DetailsFocusHandle.Reset();
+    if (AppearanceEditor) AppearanceEditor->ForceClose();
     UnbindSkills();
     if (UMythicInventoryInteractionCoordinator *Coordinator = GetInventoryInteractionCoordinator()) {
         Coordinator->SetCharacterInventoryPageActive(false);
@@ -649,8 +670,10 @@ void UMythicCharacterPageWidget::ResetInventoryInteractionState() {
     QuantityMaximum = 1;
     ActiveTargetSlotIndex = INDEX_NONE;
     bSelectionRestoreScheduled = false;
+    bSelectionRestoreFocus = false;
     HoveredItemGuid.Invalidate();
     DisplayedDetailsSlot.Reset();
+    HoveredDetailsSlot.Reset(); NavigatedDetailsSlot.Reset(); bDetailsFromNavigation = false;
     ++DetailsPositionSerial;
     ActionSourceGuid.Invalidate();
     ActionSourceSlotIndex = INDEX_NONE;
@@ -750,15 +773,17 @@ void UMythicCharacterPageWidget::UnbindSlotSelection() {
     SelectedList.Reset();
     HoveredItemGuid.Invalidate();
     DisplayedDetailsSlot.Reset();
+    HoveredDetailsSlot.Reset(); NavigatedDetailsSlot.Reset(); bDetailsFromNavigation = false;
     ++DetailsPositionSerial;
     ShowDetailsFor(nullptr);
 }
 
 void UMythicCharacterPageWidget::HandleSlotSelectionChanged(UObject *Item) {
     UItemSlotVM *SlotVM = Cast<UItemSlotVM>(Item);
-    if (!SlotVM || bSynchronizingSelection) {
+    if (bSynchronizingSelection) {
         return;
     }
+    if (!SlotVM) { if (bDetailsFromNavigation) ShowDetailsFor(nullptr); return; }
     LastOpenedSocket = INDEX_NONE;
 
     UListViewBase *SourceList = FindListSelecting(Item);
@@ -791,7 +816,7 @@ void UMythicCharacterPageWidget::HandleSlotSelectionChanged(UObject *Item) {
 
     if (UMythicItemInstance *ItemInstance = SlotVM->TryGetItemInstance()) {
         SetSelectedSlot(SlotVM, SourceList);
-    }
+    } else if (bDetailsFromNavigation) ShowDetailsFor(nullptr);
 }
 
 void UMythicCharacterPageWidget::HandleSlotClicked(UObject *Item) {
@@ -810,31 +835,101 @@ void UMythicCharacterPageWidget::HandleSlotClicked(UObject *Item) {
 
     // Clicking pins the exact physical item even when a particular list's selection mode is disabled or the
     // item was already selected. Hover remains a preview only; all inventory actions continue to use this pin.
-    HoveredItemGuid.Invalidate();
+    HoveredDetailsSlot = SlotVM;
+    HoveredItemGuid = SlotVM->TryGetItemInstance()->GetItemInstanceGuid();
     SetSelectedSlot(SlotVM, FindListContaining(Item));
 }
 
 void UMythicCharacterPageWidget::HandleSlotHoverChanged(UObject *Item, const bool bIsHovered) {
+    // CommonUI moves its virtual cursor with gamepad focus; those hover events do not own previews.
+    const auto* Input = UCommonInputSubsystem::Get(GetOwningLocalPlayer());
+    if (Input && Input->GetCurrentInputType() == ECommonInputType::Gamepad) return;
     UItemSlotVM *SlotVM = Cast<UItemSlotVM>(Item);
-    UMythicItemInstance *ItemInstance = SlotVM ? SlotVM->TryGetItemInstance() : nullptr;
-    if (!ItemInstance || InventoryPageState != EInventoryPageState::Browsing) {
+    if (!SlotVM) {
         return;
     }
-
-    const FGuid ItemGuid = ItemInstance->GetItemInstanceGuid();
-    if (!ItemGuid.IsValid()) {
-        return;
-    }
-    if (bIsHovered) {
-        // Hover is ordinary selection: the same physical GUID drives details, actions, comparison, and focus.
-        HoveredItemGuid = ItemGuid;
-        SetSelectedSlot(SlotVM, FindListContaining(Item));
-        return;
-    }
-
-    if (HoveredItemGuid == ItemGuid) {
+    // A leave still belongs to the row when its physical item has been removed or replaced.
+    if (!bIsHovered) {
+        if (HoveredDetailsSlot.Get() != SlotVM) return;
+        HoveredDetailsSlot.Reset();
         HoveredItemGuid.Invalidate();
+        if (UWorld *World = GetWorld()) {
+            // Allow the same pointer event to enter the card's socket controls before dismissing it.
+            World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this,
+                [this]() { RefreshPointerDetails(); }));
+        } else RefreshPointerDetails();
+        return;
     }
+    if (InventoryPageState != EInventoryPageState::Browsing) return;
+    bDetailsFromNavigation = false;
+    NavigatedDetailsSlot.Reset();
+    HoveredDetailsSlot = SlotVM;
+    UMythicItemInstance *ItemInstance = SlotVM->TryGetItemInstance();
+    HoveredItemGuid = ItemInstance ? ItemInstance->GetItemInstanceGuid() : FGuid();
+    if (HoveredItemGuid.IsValid()) {
+        SetSelectedSlot(SlotVM, FindListContaining(Item));
+    } else ShowDetailsFor(nullptr);
+}
+
+bool UMythicCharacterPageWidget::IsPointerOverDetails() const {
+    return DetailsSurface && DetailsSurface->IsVisible() && FSlateApplication::IsInitialized()
+        && DetailsSurface->GetCachedGeometry().IsUnderLocation(FSlateApplication::Get().GetCursorPos());
+}
+
+void UMythicCharacterPageWidget::RefreshPointerDetails() {
+    if (InventoryPageState != EInventoryPageState::Browsing || bDetailsFromNavigation) return;
+    if (!HoveredDetailsSlot.IsValid() && !IsPointerOverDetails()) ShowDetailsFor(nullptr);
+}
+
+FReply UMythicCharacterPageWidget::NativeOnMouseMove(const FGeometry &Geometry, const FPointerEvent &Event) {
+    const auto* Input = UCommonInputSubsystem::Get(GetOwningLocalPlayer());
+    if ((!Input || Input->GetCurrentInputType() != ECommonInputType::Gamepad) && !Event.GetCursorDelta().IsNearlyZero()) {
+        bDetailsFromNavigation = false;
+        NavigatedDetailsSlot.Reset();
+        RefreshPointerDetails();
+    }
+    return Super::NativeOnMouseMove(Geometry, Event);
+}
+
+void UMythicCharacterPageWidget::NativeOnMouseLeave(const FPointerEvent &Event) {
+    Super::NativeOnMouseLeave(Event);
+    const auto* Input = UCommonInputSubsystem::Get(GetOwningLocalPlayer());
+    if (Input && Input->GetCurrentInputType() == ECommonInputType::Gamepad) return;
+    HoveredDetailsSlot.Reset(); HoveredItemGuid.Invalidate(); bDetailsFromNavigation = false;
+    NavigatedDetailsSlot.Reset();
+    RefreshPointerDetails();
+}
+
+void UMythicCharacterPageWidget::HandleOwnerFocusChanging(const FFocusEvent &Event,
+    const FWeakWidgetPath &PreviousPath, const TSharedPtr<SWidget> &PreviousWidget,
+    const FWidgetPath &NewPath, const TSharedPtr<SWidget> &NewWidget) {
+    if (!IsActivated() || bSynchronizingSelection || InventoryPageState != EInventoryPageState::Browsing) return;
+    const auto* LocalPlayer = GetOwningLocalPlayer();
+    const auto User = LocalPlayer ? LocalPlayer->GetSlateUser() : nullptr;
+    if (!User || User->GetUserIndex() != Event.GetUser()) return;
+    const auto* Input = UCommonInputSubsystem::Get(GetOwningLocalPlayer());
+    const bool bNavigation = Event.GetCause() == EFocusCause::Navigation
+        || (Input && Input->GetCurrentInputType() == ECommonInputType::Gamepad);
+    for (const auto& WeakList : BoundSlotLists) if (auto* List = Cast<UListView>(WeakList.Get())) {
+        for (auto* Entry : List->GetDisplayedEntryWidgets()) {
+            // Authored Blueprint entries implement the interface without a native interface pointer.
+            auto* FocusedSlotVM = Entry ? Cast<UItemSlotVM>(UUserObjectListEntryLibrary::GetListItemObject(Entry)) : nullptr;
+            const auto Slate = Entry ? Entry->GetCachedWidget() : nullptr;
+            if (!FocusedSlotVM || !Slate || (Slate != NewWidget && !NewPath.ContainsWidget(Slate.Get()))) continue;
+            if (bNavigation) {
+                HoveredDetailsSlot.Reset(); HoveredItemGuid.Invalidate(); bDetailsFromNavigation = true;
+                NavigatedDetailsSlot = FocusedSlotVM;
+                if (FocusedSlotVM->TryGetItemInstance()) SetSelectedSlot(FocusedSlotVM, List);
+                else ShowDetailsFor(nullptr);
+            }
+            return;
+        }
+    }
+    const auto Card = DetailsSurface ? DetailsSurface->GetCachedWidget() : nullptr;
+    if (Card && NewPath.ContainsWidget(Card.Get())) return;
+    bDetailsFromNavigation = false;
+    NavigatedDetailsSlot.Reset();
+    RefreshPointerDetails();
 }
 
 UListViewBase *UMythicCharacterPageWidget::FindListSelecting(UObject *Item) const {
@@ -928,18 +1023,21 @@ UMythicInventoryComponent *UMythicCharacterPageWidget::GetInventoryComponent() c
     return BoundInventoryVM.IsValid() ? BoundInventoryVM->GetOwningInventoryComponent() : nullptr;
 }
 
-void UMythicCharacterPageWidget::ScheduleRestoreSelection() {
+void UMythicCharacterPageWidget::ScheduleRestoreSelection(bool bRestoreFocus) {
+    bSelectionRestoreFocus |= bRestoreFocus;
     if (bSelectionRestoreScheduled || !GetWorld()) {
         return;
     }
     bSelectionRestoreScheduled = true;
     GetWorld()->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]() {
         bSelectionRestoreScheduled = false;
-        RestoreSelectionByGuid();
+        const bool bFocus = bSelectionRestoreFocus;
+        bSelectionRestoreFocus = false;
+        RestoreSelectionByGuid(bFocus);
     }));
 }
 
-void UMythicCharacterPageWidget::RestoreSelectionByGuid() {
+void UMythicCharacterPageWidget::RestoreSelectionByGuid(bool bRestoreFocus) {
     // A modal owns focus until it closes. Its close path schedules the canonical source restoration.
     if (!IsActivated() || InventoryPageState != EInventoryPageState::Browsing) {
         return;
@@ -979,7 +1077,7 @@ void UMythicCharacterPageWidget::RestoreSelectionByGuid() {
             TGuardValue<bool> SelectionGuard(bSynchronizingSelection, true);
             ClearOtherListSelections(List);
             List->SetSelectedItem(SlotToSelect);
-            if (ITypedUMGListView<UObject *> *Typed = AsTypedList(List)) {
+            if (bRestoreFocus) if (ITypedUMGListView<UObject *> *Typed = AsTypedList(List)) {
                 Typed->RequestNavigateToItem(SlotToSelect);
             }
             SelectedList = List;
@@ -988,11 +1086,12 @@ void UMythicCharacterPageWidget::RestoreSelectionByGuid() {
             ResolveActiveEquipmentTarget();
             ShowDetailsFor(SlotToSelect);
             RefreshInventoryActionBar();
-            if (UWorld *World = GetWorld()) {
+            if (UWorld *World = GetWorld(); World && bRestoreFocus) {
                 TWeakObjectPtr<UListView> WeakResolvedList = List;
                 TWeakObjectPtr<UItemSlotVM> WeakSlot = SlotToSelect;
                 World->GetTimerManager().SetTimerForNextTick(
-                    FTimerDelegate::CreateWeakLambda(this, [WeakResolvedList, WeakSlot]() {
+                    FTimerDelegate::CreateWeakLambda(this, [this, WeakResolvedList, WeakSlot]() {
+                        if (!IsActivated() || InventoryPageState != EInventoryPageState::Browsing) return;
                         if (UListView *ResolvedList = WeakResolvedList.Get()) {
                             if (UUserWidget *Entry = ResolvedList->GetEntryWidgetFromItem(WeakSlot.Get())) {
                                 Entry->SetFocus();
@@ -1678,7 +1777,7 @@ void UMythicCharacterPageWidget::CloseInventoryModal(bool bRestoreSourceSelectio
     InventoryPageState = EInventoryPageState::Browsing;
     if (bRestoreSourceSelection && ActionSourceGuid.IsValid()) {
         SelectedItemGuid = ActionSourceGuid;
-        ScheduleRestoreSelection();
+        ScheduleRestoreSelection(true);
     }
     ActionSourceGuid.Invalidate();
     ActionSourceSlotIndex = INDEX_NONE;
@@ -1939,7 +2038,7 @@ void UMythicCharacterPageWidget::HandleInventoryActionReceipt(
     InventoryPageState = EInventoryPageState::Browsing;
     ActionSourceGuid.Invalidate();
     ActionSourceSlotIndex = INDEX_NONE;
-    ScheduleRestoreSelection();
+    ScheduleRestoreSelection(true);
     RefreshInventoryActionBar();
 }
 
@@ -1980,6 +2079,15 @@ void UMythicCharacterPageWidget::BuildDetailsCard() {
 
 void UMythicCharacterPageWidget::ShowDetailsFor(UObject *SlotVM) {
     UItemSlotVM *SelectedSlot = Cast<UItemSlotVM>(SlotVM);
+    // Focus can move to an empty row while action selection still names the last occupied row.
+    // Later inventory refreshes must follow the actual navigation owner, just like pointer previews.
+    if (SelectedSlot && InventoryPageState == EInventoryPageState::Browsing && bDetailsFromNavigation
+        && NavigatedDetailsSlot.Get() != SelectedSlot) SelectedSlot = nullptr;
+    // Inventory actions retain their selected GUID after a pointer preview is dismissed. A receipt or
+    // deferred selection restore must not reopen the card merely because that action selection still exists.
+    if (SelectedSlot && InventoryPageState == EInventoryPageState::Browsing && !bDetailsFromNavigation
+        && HoveredDetailsSlot.Get() != SelectedSlot
+        && !(DisplayedDetailsSlot.Get() == SelectedSlot && IsPointerOverDetails())) SelectedSlot = nullptr;
     UMythicItemInstance *SelectedItem = SelectedSlot
         ? SelectedSlot->TryGetItemInstance() : nullptr;
     const bool bHasItem = SelectedItem != nullptr && DetailsCard != nullptr;
@@ -1987,7 +2095,7 @@ void UMythicCharacterPageWidget::ShowDetailsFor(UObject *SlotVM) {
     if (DetailsCard) {
         if (bHasItem) {
             if (UMVVMView *View = UMVVMSubsystem::GetViewFromUserWidget(DetailsCard)) {
-                View->SetViewModelByClass(TScriptInterface<INotifyFieldValueChanged>(SlotVM));
+                View->SetViewModelByClass(TScriptInterface<INotifyFieldValueChanged>(SelectedSlot));
             }
 
             FMythicItemDetailsComparisonContext Context;
@@ -2103,7 +2211,7 @@ void UMythicCharacterPageWidget::PositionDetailsBeside(UItemSlotVM *SlotVM) {
         CardSize.Y = 520.0f;
     }
 
-    constexpr float Gap = 12.0f;
+    constexpr float Gap = 0.0f; // Keep the interactive socket card reachable during a slow pointer transfer.
     constexpr float EdgePadding = 16.0f;
     const float RightX = EntryBottomRight.X + Gap;
     const float LeftX = EntryTopLeft.X - CardSize.X - Gap;
@@ -2919,4 +3027,11 @@ void UMythicCharacterPageWidget::OpenSocketPicker(int32 SlotIndex) {
     }
     if (auto* HUD = FindHUDLayout()) RunePicker->ConfigureMenuDismissAction(HUD->GetOpenMenuAction());
     RunePicker->OpenForSlot(SlotIndex, this);
+}
+
+void UMythicCharacterPageWidget::OpenAppearance() {
+    if (IsMutationPending() || !GetOwningPlayer()) return;
+    CloseInventoryModal(false);
+    if (!AppearanceEditor) AppearanceEditor=CreateWidget<UMythicAppearanceWidget>(GetOwningPlayer(),UMythicAppearanceWidget::StaticClass());
+    if (AppearanceEditor) AppearanceEditor->Open(this,CustomizeButton);
 }

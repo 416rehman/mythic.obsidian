@@ -719,8 +719,11 @@ bool UMythicAffixApplicationComponent::RequestItemDataClosure(
         const bool bNeedsSocketClosure =
             !Sockets->SocketStates.Items.IsEmpty() && !Sockets->IsRuntimeDataReady();
         if (bNeedsSocketClosure) {
-            bReady = false;
             Sockets->RequestRuntimeData();
+            // Restored socket snapshots have transient readiness cleared. When
+            // their semantic data is already resident, validation completes in
+            // this call; do not reject that valid atomic equipment restore.
+            bReady &= Sockets->IsRuntimeDataReady();
         }
     }
     return bReady;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Character/Appearance/MythicAppearanceTypes.h"
 #include "UObject/SoftObjectPath.h"
 #include "SavedInventory.generated.h"
 
@@ -48,6 +49,7 @@ struct FSerializedSlotData {
 USTRUCT(BlueprintType)
 struct FSerializedInventoryData {
     GENERATED_BODY()
+    TArray<FMythicAppearanceItemStamp> AppearanceStamps;
 
     /** Exact current save schema version; unsupported layouts are rejected rather than converted at runtime. */
     UPROPERTY(BlueprintReadWrite)

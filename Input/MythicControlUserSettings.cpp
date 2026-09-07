@@ -1,4 +1,5 @@
 #include "MythicControlUserSettings.h"
+#include "MythicControlsSettings.h"
 #include "EnhancedActionKeyMapping.h"
 #include "PlayerMappableKeySettings.h"
 #include "UObject/UnrealType.h"
@@ -17,6 +18,11 @@ bool MythicControlMapping::Configure(FEnhancedActionKeyMapping& Mapping,UObject*
 
 int32 UMythicControlKeyProfile::GetPlayerMappedKeysForRebuildControlMappings(const FEnhancedActionKeyMapping& DefaultMapping,TArray<FKey>& OutKeys) const {
     const FName Name=DefaultMapping.GetMappingName();
+    if (Name==UMythicControlsSettings::MappingName(EMythicControl::Utility,false)
+        || Name==UMythicControlsSettings::MappingName(EMythicControl::Utility,true)) {
+        OutKeys.AddUnique(EKeys::Invalid);
+        return OutKeys.Num();
+    }
     if (Name.ToString().StartsWith(TEXT("Mythic.Controls."))) if (const auto* Row=FindKeyMappingRow(Name)) {
         for (const auto& Mapping:Row->Mappings) if (Mapping.GetSlot()==EPlayerMappableKeySlot::First) {
             // Invalid is an explicit unbind, not an absent row that permits restoration of the default.

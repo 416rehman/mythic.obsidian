@@ -1,6 +1,7 @@
 #include "MythicCharacter.h"
 #include "Mythic/Mythic.h"
 #include "MythicPlayerState.h"
+#include "MythicAbilityIntentComponent.h"
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Life.h"
 #include "GAS/AttributeSets/Shared/MythicLifeComponent.h"
 #include "Itemization/Inventory/MythicInventoryComponent.h"
@@ -17,6 +18,8 @@
 #include "GameplayEffect.h"
 
 namespace {
+const FName ModularBodyTag(TEXT("Mythic.Character.Body"));
+const FName OwnerHeadTag(TEXT("Mythic.Character.OwnerHead"));
 // A pawn with no Defense set takes plain fall damage; reading the absent attribute would answer 0 and make it immune.
 float ResolveFallDamageTaken(const UAbilitySystemComponent &ASC) {
     const FGameplayAttribute Attribute = UMythicAttributeSet_Defense::GetFallDamageTakenAttribute();
@@ -85,24 +88,33 @@ void AMythicCharacter::BeginPlay() {
     Super::BeginPlay();
 
     InitializeASC();
+    InitializeModularBodyPresentation();
 }
 
 void AMythicCharacter::PossessedBy(AController *NewController) {
     Super::PossessedBy(NewController);
 
     InitializeASC();
+    RefreshModularBodyVisibility();
+}
+
+void AMythicCharacter::UnPossessed() {
+    Super::UnPossessed();
+    RefreshModularBodyVisibility();
 }
 
 void AMythicCharacter::OnRep_Controller() {
     Super::OnRep_Controller();
 
     InitializeASC();
+    RefreshModularBodyVisibility();
 }
 
 void AMythicCharacter::OnRep_PlayerState() {
     Super::OnRep_PlayerState();
 
     InitializeASC();
+    RefreshModularBodyVisibility();
 }
 
 void AMythicCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) {
@@ -215,8 +227,50 @@ void AMythicCharacter::RemoveLocalEquipmentMesh(EInventorySlotType Slot) {
     }
 }
 
+void AMythicCharacter::InitializeModularBodyPresentation() {
+    if (!GetMesh()) return;
+    TInlineComponentArray<USkeletalMeshComponent*> Parts(this);
+    bool bHasBody=false;
+    for (auto* Part:Parts) {
+        if (Part==GetMesh() || !Part->ComponentHasTag(ModularBodyTag) || !Part->GetSkeletalMeshAsset()) continue;
+        bHasBody=true;
+        Part->bEnableUpdateRateOptimizations=false;
+        // Retarget once on the body source, then copy that pose into its modular children.
+        Part->AddTickPrerequisiteComponent(GetMesh());
+        if (auto* PoseParent=Cast<USkeletalMeshComponent>(Part->GetAttachParent()))
+            Part->AddTickPrerequisiteComponent(PoseParent);
+        Part->SetTickGroup(TG_PostPhysics);
+        Part->SetComponentTickEnabled(GetNetMode()!=NM_DedicatedServer);
+        Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Part->SetGenerateOverlapEvents(false);
+        Part->SetCanEverAffectNavigation(false);
+    }
+    if (bHasBody) {
+        // Copy Pose can read the driver's cached URO pose before its interpolation.
+        // Keep this player-only assembly on one evaluated pose, including observer clients.
+        GetMesh()->bEnableUpdateRateOptimizations=false;
+        GetMesh()->SetHiddenInGame(true,false);
+        GetMesh()->SetVisibility(false,false);
+        GetMesh()->SetCastShadow(false);
+        GetMesh()->VisibilityBasedAnimTickOption=EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+    }
+    RefreshModularBodyVisibility();
+}
+
+void AMythicCharacter::RefreshModularBodyVisibility() {
+    const auto* PC=Cast<APlayerController>(GetController());
+    const auto* Intent=PC && PC->IsLocalController() ? PC->FindComponentByClass<UMythicAbilityIntentComponent>() : nullptr;
+    const bool bHideHead=Intent && Intent->GetSelectedCameraMode().bHideOwnerHead;
+    TInlineComponentArray<USkeletalMeshComponent*> Parts(this);
+    for (auto* Part:Parts) if (Part->ComponentHasTag(ModularBodyTag))
+        Part->SetOwnerNoSee(bHideHead && Part->ComponentHasTag(OwnerHeadTag));
+}
+
 void AMythicCharacter::GatherAbilityPoseMeshes(TArray<USkeletalMeshComponent*>& Out) const {
     Out.Reset();
-    if (GetMesh()) Out.Add(GetMesh());
+    if (GetMesh() && GetMesh()->IsVisible() && !GetMesh()->bHiddenInGame) Out.Add(GetMesh());
+    TInlineComponentArray<USkeletalMeshComponent*> Parts(this);
+    Parts.Sort([](const USkeletalMeshComponent& A,const USkeletalMeshComponent& B) { return A.GetFName().LexicalLess(B.GetFName()); });
+    for (auto* Part:Parts) if (Part->ComponentHasTag(ModularBodyTag) && Part->IsVisible() && !Part->bHiddenInGame) Out.AddUnique(Part);
     for (const auto& Pair:EquippedVisualMeshes) if (IsValid(Pair.Value) && Pair.Value->IsVisible() && !Pair.Value->bHiddenInGame) Out.AddUnique(Pair.Value);
 }

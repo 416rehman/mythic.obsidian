@@ -234,6 +234,9 @@ protected:
     AMythicPlayerState();
 
 public:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Appearance")
+    TObjectPtr<class UMythicAppearanceComponent> AppearanceComponent;
+
     virtual UAbilitySystemComponent *GetAbilitySystemComponent() const override;
     UMythicAbilitySystemComponent *GetMythicAbilitySystemComponent() const;
 

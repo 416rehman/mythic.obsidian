@@ -175,8 +175,9 @@ bool FMythicReplicatedSocketArray::Serialize(FArchive &Ar) {
     }
     if (Ar.IsLoading()) {
         Items = MoveTemp(StagedItems);
-        ArrayReplicationKey = 0;
-        IDCounter = 0;
+        // Rows receive fresh network IDs on their next delta. Keep the
+        // container's monotonic identity/key history when restoring in place.
+        MarkArrayDirty();
     }
     return true;
 }

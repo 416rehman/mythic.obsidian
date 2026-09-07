@@ -26,7 +26,6 @@ UMythicControlsSettings::UMythicControlsSettings() {
     Add(EMythicControl::SkillT,TEXT("Ability slot 4"),EKeys::T,EKeys::Gamepad_FaceButton_Top,true);
     Add(EMythicControl::AbilityLayer,TEXT("Ability modifier"),EKeys::Invalid,EKeys::Gamepad_LeftShoulder);
     Add(EMythicControl::Heal,TEXT("Heal / select healing item"),EKeys::Z,EKeys::Gamepad_DPad_Up);
-    Add(EMythicControl::Utility,TEXT("Use item / utility wheel"),EKeys::Four,EKeys::Gamepad_DPad_Down);
     Add(EMythicControl::LockTarget,TEXT("Target lock"),EKeys::LeftControl,EKeys::Gamepad_RightThumbstick);
     Add(EMythicControl::Ping,TEXT("Ping / communication wheel"),EKeys::G,EKeys::Gamepad_DPad_Right);
     Add(EMythicControl::Inspect,TEXT("Inspect"),EKeys::LeftAlt);
@@ -36,6 +35,7 @@ UMythicControlsSettings::UMythicControlsSettings() {
 }
 
 const FMythicControlBinding* UMythicControlsSettings::Find(EMythicControl Control) const {
+    if (!IsAvailable(Control)) return nullptr;
     return Bindings.FindByPredicate([Control](const auto& Binding) { return Binding.Control == Control; });
 }
 

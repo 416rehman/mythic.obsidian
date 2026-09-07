@@ -1,4 +1,5 @@
 #include "MythicPlayerState.h"
+#include "Character/Appearance/MythicAppearanceComponent.h"
 #include "Player/MythicSessionPartySubsystem.h"
 
 #include "GAS/AttributeSets/Shared/MythicAttributeSet_Defense.h"
@@ -36,6 +37,7 @@
 #include "Net/UnrealNetwork.h"
 
 AMythicPlayerState::AMythicPlayerState() {
+    AppearanceComponent=CreateDefaultSubobject<UMythicAppearanceComponent>(TEXT("AppearanceComponent"));
     MythicAbilitySystemComponent = CreateDefaultSubobject<UMythicAbilitySystemComponent>(TEXT("MythicAbilitySystemComponent"));
     MythicAbilitySystemComponent->SetIsReplicated(true);
     MythicAbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);

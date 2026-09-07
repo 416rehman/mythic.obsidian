@@ -25,6 +25,18 @@ bool FMythicControlsDefaultContracts::RunTest(const FString&) {
     TestEqual(TEXT("T is slot four"),Resolve(EKeys::T,false),EMythicControl::SkillT);
     TestEqual(TEXT("Shift only dashes"),Resolve(EKeys::LeftShift,false),EMythicControl::Dash);
     TestEqual(TEXT("Z selects healing"),Resolve(EKeys::Z,false),EMythicControl::Heal);
+    TestEqual(TEXT("DPad up retains healing"),Resolve(EKeys::Gamepad_DPad_Up,true),EMythicControl::Heal);
+    for (bool Layer : {false,true}) {
+        TestEqual(TEXT("4 has no utility action"),Resolve(EKeys::Four,Layer),EMythicControl::Count);
+        TestEqual(TEXT("DPad down has no utility action"),Resolve(EKeys::Gamepad_DPad_Down,Layer),EMythicControl::Count);
+    }
+    auto LegacyBindings=Bindings;
+    FMythicControlBinding Retired; Retired.Control=EMythicControl::Utility; Retired.Keyboard=EKeys::H;
+    Retired.Gamepad=EKeys::Gamepad_DPad_Down; LegacyBindings.Add(Retired);
+    TestEqual(TEXT("old configured utility row cannot revive on a remapped key"),
+        UMythicControlsComponent::ResolvePress(LegacyBindings,EKeys::H,false),EMythicControl::Count);
+    TestFalse(TEXT("retired utility is not a wheel"),UMythicControlsComponent::IsWheel(EMythicControl::Utility));
+    TestEqual(TEXT("serialized enum slot remains reserved"),static_cast<uint8>(EMythicControl::Utility),uint8(16));
     TestEqual(TEXT("V has no heavy action"),Resolve(EKeys::V,false),EMythicControl::Count);
     TestEqual(TEXT("L3 has no sprint or zoom"),Resolve(EKeys::Gamepad_LeftThumbstick,false),EMythicControl::Count);
     TestEqual(TEXT("invalid key never triggers an unauthored cell"),Resolve(EKeys::Invalid,true),EMythicControl::Count);
@@ -48,6 +60,11 @@ bool FMythicControlProfileClear::RunTest(const FString&) {
     TestTrue(TEXT("cleared gamepad key does not resurrect LB"),Keys.Num()==1 && !Keys[0].IsValid());
     Settings->ResetAllPlayerKeysInRow(Args,Failures); Keys.Reset(); Profile->GetPlayerMappedKeysForRebuildControlMappings(Mapping,Keys);
     TestTrue(TEXT("reset restores authored LB"),Keys.Num()==1 && Keys[0]==EKeys::Gamepad_LeftShoulder);
+    auto& RetiredMapping=Context->MapKey(Action,EKeys::Four);
+    MythicControlMapping::Configure(RetiredMapping,Context,
+        UMythicControlsSettings::MappingName(EMythicControl::Utility,false),FText::GetEmpty());
+    Keys.Reset(); Profile->GetPlayerMappedKeysForRebuildControlMappings(RetiredMapping,Keys);
+    TestTrue(TEXT("retired mapping suppresses even an old context's authored default"),Keys.Num()==1 && !Keys[0].IsValid());
     return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicFourSlotMigration,"Mythic.Controls.LegacyFourSlotMigration",EAutomationTestFlags_ApplicationContextMask|EAutomationTestFlags::ProductFilter)

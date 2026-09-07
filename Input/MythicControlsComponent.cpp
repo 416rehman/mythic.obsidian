@@ -55,6 +55,7 @@ void UMythicControlsComponent::InitializeLocalInput() {
     InputSubsystem=Subsystem; UserSettings=Settings;
     MappingContext=NewObject<UInputMappingContext>(this,TEXT("CombatControlMappings"));
     for (const auto& Binding:GetDefault<UMythicControlsSettings>()->Bindings) {
+        if (!UMythicControlsSettings::IsAvailable(Binding.Control)) continue;
         auto* Action=NewObject<UInputAction>(this,*FString::Printf(TEXT("Control_%d"),static_cast<int32>(Binding.Control)));
         Action->ValueType=EInputActionValueType::Boolean; Action->bConsumeInput=true;
         Actions.Add(Binding.Control,Action);
@@ -73,6 +74,7 @@ void UMythicControlsComponent::InitializeLocalInput() {
 void UMythicControlsComponent::HandleMappingsRebuilt() { if (bEditingMappings) return; RefreshMappings(); }
 void UMythicControlsComponent::RefreshMappings() {
     auto Resolved=GetDefault<UMythicControlsSettings>()->Bindings;
+    Resolved.RemoveAll([](const auto& Binding) { return !UMythicControlsSettings::IsAvailable(Binding.Control); });
     const auto* Profile=UserSettings.IsValid() ? UserSettings->GetActiveKeyProfile():nullptr;
     if (Profile) for (auto& Binding:Resolved) for (bool bGamepad:{false,true}) {
         const auto* Row=Profile->FindKeyMappingRow(UMythicControlsSettings::MappingName(Binding.Control,bGamepad));
@@ -93,11 +95,11 @@ void UMythicControlsComponent::RefreshMappings() {
 }
 bool UMythicControlsComponent::IsSkill(EMythicControl C) { return C>=EMythicControl::SkillQ && C<=EMythicControl::SkillT; }
 bool UMythicControlsComponent::IsMovement(EMythicControl C) { return C>=EMythicControl::MoveForward && C<=EMythicControl::MoveRight; }
-bool UMythicControlsComponent::IsWheel(EMythicControl C) { return C==EMythicControl::Heal || C==EMythicControl::Utility || C==EMythicControl::Ping; }
+bool UMythicControlsComponent::IsWheel(EMythicControl C) { return C==EMythicControl::Heal || C==EMythicControl::Ping; }
 EMythicControl UMythicControlsComponent::ResolvePress(const TArray<FMythicControlBinding>& Bindings,FKey Key,bool bLayerHeld) {
     if (!Key.IsValid()) return EMythicControl::Count;
-    if (Key.IsGamepadKey() && bLayerHeld) for (const auto& Binding:Bindings) if (Binding.bGamepadAbilityLayer && Binding.Gamepad==Key) return Binding.Control;
-    for (const auto& Binding:Bindings) if (Key.IsGamepadKey() ? (!Binding.bGamepadAbilityLayer && Binding.Gamepad==Key) : Binding.Keyboard==Key) return Binding.Control;
+    if (Key.IsGamepadKey() && bLayerHeld) for (const auto& Binding:Bindings) if (UMythicControlsSettings::IsAvailable(Binding.Control) && Binding.bGamepadAbilityLayer && Binding.Gamepad==Key) return Binding.Control;
+    for (const auto& Binding:Bindings) if (UMythicControlsSettings::IsAvailable(Binding.Control) && (Key.IsGamepadKey() ? (!Binding.bGamepadAbilityLayer && Binding.Gamepad==Key) : Binding.Keyboard==Key)) return Binding.Control;
     return EMythicControl::Count;
 }
 FKey UMythicControlsComponent::GetEffectiveKey(EMythicControl C,bool bGamepad) const { const auto* B=EffectiveBindings.FindByPredicate([C](const auto& B){return B.Control==C;}); return B ? (bGamepad ? B->Gamepad:B->Keyboard):EKeys::Invalid; }
@@ -151,7 +153,7 @@ bool UMythicControlsComponent::HandleKey(FKey Key,EInputEvent Event) {
         // Continue into the ordinary physical-key owner below. Release only on the real edge.
     }
     if (bCameraAdjustment) {
-        if (Control==EMythicControl::Utility) { EndCameraAdjustment(); SuppressedKeys.Add(Key); return true; }
+        if (Control==EMythicControl::CameraMode) { EndCameraAdjustment(); SuppressedKeys.Add(Key); return true; }
         if (Control==EMythicControl::CharacterMenu || Control==EMythicControl::SystemMenu) EndCameraAdjustment();
         else if (Control==EMythicControl::Primary || Control==EMythicControl::Secondary || IsMovement(Control)) {
             FMythicControlPress Press; Press.Control=Control; Press.StartedAt=FPlatformTime::Seconds(); Presses.Add(Key,Press); ++HeldActions.FindOrAdd(Control); return true;
@@ -213,7 +215,7 @@ void UMythicControlsComponent::DispatchRelease(EMythicControl C,bool bCanceled) 
     if (!PC) return;
     if (C==EMythicControl::Interact) EndInteraction(bCanceled);
     if (bCanceled) return;
-    if (C==EMythicControl::Heal || C==EMythicControl::Utility) if (auto* Quick=PC->FindComponentByClass<UMythicQuickUseComponent>()) Quick->UseSelected(C==EMythicControl::Heal);
+    if (C==EMythicControl::Heal) if (auto* Quick=PC->FindComponentByClass<UMythicQuickUseComponent>()) Quick->UseSelected(true);
     if (C==EMythicControl::Ping) ExecuteWheelCommand(C,0);
 }
 void UMythicControlsComponent::CancelHeldInput() {
@@ -430,7 +432,7 @@ bool UMythicControlsComponent::RemapControl(EMythicControl C,bool bGamepad,FKey 
 }
 void UMythicControlsComponent::ResetMappings() {
     if (!UserSettings.IsValid()) return; CancelHeldInput();
-    for (const auto& Binding:GetDefault<UMythicControlsSettings>()->Bindings) for (bool bGamepad:{false,true}) if ((bGamepad ? Binding.Gamepad:Binding.Keyboard).IsValid()) {
+    for (const auto& Binding:GetDefault<UMythicControlsSettings>()->Bindings) if (UMythicControlsSettings::IsAvailable(Binding.Control)) for (bool bGamepad:{false,true}) if ((bGamepad ? Binding.Gamepad:Binding.Keyboard).IsValid()) {
         FMapPlayerKeyArgs Args; Args.MappingName=UMythicControlsSettings::MappingName(Binding.Control,bGamepad); Args.Slot=EPlayerMappableKeySlot::First; Args.ProfileIdString=UserSettings->GetActiveKeyProfileId();
         FGameplayTagContainer Failures; UserSettings->ResetAllPlayerKeysInRow(Args,Failures);
     }

@@ -26,6 +26,8 @@ struct MYTHIC_API FMythicCameraMode {
     UPROPERTY(EditAnywhere, BlueprintReadOnly) EMythicAbilityAimPolicy AbilityAimPolicy = EMythicAbilityAimPolicy::ViewCenter;
     /** Explicit presentation capability, authored only on a supported third-person rig. ViewCenter alone includes first-person. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly) bool bAllowLockYawAssist = false;
+    /** Local rendering only. Authored on the first-person rig, independently of its aim policy. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly) bool bHideOwnerHead = false;
 };
 
 /** Cooked camera selection and input policy shared by the director and ability intent. */

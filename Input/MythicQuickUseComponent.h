@@ -22,6 +22,7 @@ struct MYTHIC_API FMythicQuickUseEntry {
     GENERATED_BODY()
     UPROPERTY(BlueprintReadOnly) FMythicQuickUseKey Key;
     UPROPERTY(BlueprintReadOnly) FText Name;
+    UPROPERTY(BlueprintReadOnly) FText Description;
     UPROPERTY(BlueprintReadOnly) int32 Quantity = 0;
     UPROPERTY(BlueprintReadOnly) TSoftObjectPtr<UTexture2D> Icon;
     int32 SortPriority = 0;

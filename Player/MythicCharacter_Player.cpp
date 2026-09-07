@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "MythicCharacter_Player.h"
+#include "Character/Appearance/MythicAppearanceRenderer.h"
 #include "Input/MythicTraversalComponent.h"
 #include "GAS/MythicAbilitySystemComponent.h"
 
@@ -21,6 +22,7 @@
 #include "World/Entity/MythicEntityPresentationTags.h"
 
 AMythicCharacter_Player::AMythicCharacter_Player() {
+    AppearanceRenderer=CreateDefaultSubobject<UMythicAppearanceRenderer>(TEXT("AppearanceRenderer"));
     GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 
     LifeComponent = CreateDefaultSubobject<UMythicLifeComponent>(TEXT("LifeComponent"));
@@ -41,6 +43,7 @@ AMythicCharacter_Player::AMythicCharacter_Player() {
 
 
 void AMythicCharacter_Player::InitializeASC() {
+    if (AppearanceRenderer) AppearanceRenderer->RefreshBinding();
     auto OwningController = GetController();
     auto ASCInterface = Cast<IAbilitySystemInterface>(OwningController);
     if (ASCInterface) {

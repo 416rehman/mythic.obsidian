@@ -12,7 +12,7 @@
 #include "World/Entity/MythicEntityPresentationComponent.h"
 
 namespace {
-constexpr int32 MaxLeases=16,MaxMeshes=8,MaxLeaseBones=2048,MaxWorldBones=16384,MaxRetired=64;
+constexpr int32 MaxLeases=16,MaxMeshes=16,MaxLeaseBones=2048,MaxWorldBones=16384,MaxRetired=64;
 
 USkeletalMeshComponent* EvaluatedPoseSource(USkeletalMeshComponent* Visible) {
     if (!IsValid(Visible) || !Visible->IsRegistered() || !Visible->GetSkeletalMeshAsset()) return nullptr;
@@ -70,15 +70,19 @@ void UMythicAbilityPoseRemnantSubsystem::Receive(const FMythicAbilityPoseRemnant
     if (!EvaluatedPoseSource(Body)) return;
     TArray<USkeletalMeshComponent*> VisibleMeshes; VisibleMeshes.Reserve(MaxMeshes);
     Character->GatherAbilityPoseMeshes(VisibleMeshes);
+    if (VisibleMeshes.Num()>MaxMeshes) return;
+    int32 RequiredBones=0;
+    for (auto* Visible:VisibleMeshes) {
+        if (!EvaluatedPoseSource(Visible)) return;
+        RequiredBones+=Visible->GetSkeletalMeshAsset()->GetRefSkeleton().GetNum();
+    }
+    if (RequiredBones>MaxLeaseBones || TotalBones+RequiredBones>MaxWorldBones) return;
     FMythicAbilityPoseRemnantLease Lease;
     Lease.Event=Event; Lease.LocalExpiry=Now+Remaining; Lease.Presentation=Presentation;
     const FTransform Current=Character->GetActorTransform();
     for (auto* Visible:VisibleMeshes) {
-        if (Lease.Components.Num()>=MaxMeshes) break;
         auto* Source=EvaluatedPoseSource(Visible);
-        if (!Source) continue;
         const int32 Bones=Visible->GetSkeletalMeshAsset()->GetRefSkeleton().GetNum();
-        if (Lease.BoneCount+Bones>MaxLeaseBones || TotalBones+Lease.BoneCount+Bones>MaxWorldBones) break;
         auto* Pose=NewObject<UPoseableMeshComponent>(this);
         Pose->SetVisibility(false); Pose->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         Pose->SetGenerateOverlapEvents(false); Pose->SetCanEverAffectNavigation(false);

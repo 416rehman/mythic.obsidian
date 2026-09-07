@@ -68,6 +68,7 @@ private:
     void RefreshCounts();
     void RefreshPage();
     void Highlight(int32 Index);
+    void RefreshItemPreview();
     void SelectDirection(FVector2D Direction,bool bStick);
     void ChangePage(int32 Delta);
     void DeviceChanged(ECommonInputType Type);
@@ -86,6 +87,11 @@ private:
     UPROPERTY() TObjectPtr<UOverlay> SafeContent;
     UPROPERTY() TObjectPtr<UCommonTextBlock> Title;
     UPROPERTY() TObjectPtr<UCommonTextBlock> Detail;
+    UPROPERTY() TObjectPtr<USizeBox> ItemPreview;
+    UPROPERTY() TObjectPtr<UImage> PreviewIcon;
+    UPROPERTY() TObjectPtr<UCommonTextBlock> PreviewName;
+    UPROPERTY() TObjectPtr<UCommonTextBlock> PreviewCount;
+    UPROPERTY() TObjectPtr<UCommonTextBlock> PreviewDescription;
     UPROPERTY() TObjectPtr<UCommonTextBlock> PageLabel;
     UPROPERTY() TObjectPtr<UVerticalBox> Hint;
     UPROPERTY() TObjectPtr<UMythicControlGlyph> OpenerGlyph;

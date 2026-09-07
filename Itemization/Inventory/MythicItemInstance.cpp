@@ -132,6 +132,9 @@ void UMythicItemInstance::Serialize(FArchive &Ar) {
     Super::Serialize(Ar);
 
     if (!Ar.IsSaveGame() || Ar.IsError()) return;
+    auto CanonicalColors=AppearanceData.Colors;
+    if (!FMythicItemAppearanceData::NormalizeColors(CanonicalColors) || AppearanceData.Revision<0) { Ar.SetError(); return; }
+    if (Ar.IsLoading()) AppearanceData.Colors=MoveTemp(CanonicalColors);
 
     if (Ar.IsSaving()) {
         if (ItemFragments.Num() > MaxFragmentsPerItem
@@ -238,11 +241,10 @@ void UMythicItemInstance::Serialize(FArchive &Ar) {
 
         FMemoryReader PayloadReader(Payload, true);
         PayloadReader.ArMaxSerializeSize = MaxFragmentPayloadBytes;
-        PayloadReader.ArIsNetArchive = true;
+        // Match the save writer, including current-version FText metadata.
         FObjectAndNameAsStringProxyArchive PayloadArchive(PayloadReader, true);
         PayloadArchive.ArIsSaveGame = true;
         PayloadArchive.ArMaxSerializeSize = MaxFragmentPayloadBytes;
-        PayloadArchive.ArIsNetArchive = true;
         NewFragment->Serialize(PayloadArchive);
         if (PayloadArchive.IsError() || !PayloadReader.AtEnd()) {
             UE_LOG(MythSaveLoad, Error, TEXT("Corrupt payload for item fragment class %s"), *ClassPathString);
@@ -258,7 +260,7 @@ void UMythicItemInstance::Serialize(FArchive &Ar) {
     }
 
     // An authored opt-in repairs a historical empty action without rewriting any valid saved payload or identity.
-    if (const auto* Replacement=UItemDefinition::GetFragment<UConsumableEffectFragment>(ItemDefinition);
+    if (const auto* Replacement=ItemDefinition?UItemDefinition::GetFragment<UConsumableEffectFragment>(ItemDefinition):nullptr;
         Replacement && Replacement->ConsumableEffectConfig.bMigrateLegacyEmptyAction && !Replacement->ConsumableEffectConfig.Effects.IsEmpty()
         && !StagedFragments.ContainsByPredicate([](const UItemFragment* Fragment){return Fragment && Fragment->IsA<UConsumableEffectFragment>();})) {
         int32 EmptyIndex=INDEX_NONE;
@@ -346,11 +348,10 @@ UMythicItemInstance *UMythicItemInstance::CloneForStackSplit(
 
     FMemoryReader Reader(Payload, true);
     Reader.ArMaxSerializeSize = MaxSemanticCloneBytes;
-    Reader.ArIsNetArchive = true;
+    // Semantic clones use the same ordinary archive format as their writer.
     FObjectAndNameAsStringProxyArchive LoadArchive(Reader, false);
     LoadArchive.ArIsSaveGame = true;
     LoadArchive.ArMaxSerializeSize = MaxSemanticCloneBytes;
-    LoadArchive.ArIsNetArchive = true;
     Clone->Serialize(LoadArchive);
     if (LoadArchive.IsError() || !Reader.AtEnd()
         || Clone->ItemDefinition != ItemDefinition
@@ -836,6 +837,7 @@ void UMythicItemInstance::ServerApplyTransform(const FGameplayTag &NewItemType,
 }
 
 bool UMythicItemInstance::isStackableWith(const UMythicItemInstance *Other) const {
+    if (!Other || !AppearanceData.HasSameColors(Other->AppearanceData)) return false;
     if (ItemDefinition && ItemDefinition->StackSizeMax <= 0) {
         return false;
     }
@@ -919,3 +921,5 @@ void UMythicItemInstance::ServerSetMarkedJunk(bool bJunk) {
         OwningInventory->NotifyItemInstanceUpdated(SlotIndex);
     }
 }
+
+void UMythicItemInstance::OnRep_AppearanceData() { NotifyReplicatedItemState(); }

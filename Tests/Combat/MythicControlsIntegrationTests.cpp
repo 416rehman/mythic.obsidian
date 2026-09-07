@@ -11,6 +11,11 @@
 #include "Input/MythicTraversalComponent.h"
 #include "Subsystem/SaveSystem/Character/CharacterData.h"
 #include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SceneComponent.h"
+#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/WorldSettings.h"
+#include "UObject/StrongObjectPtr.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/RootMotionSource.h"
 #include "UObject/StructOnScope.h"
@@ -171,4 +176,181 @@ bool FMythicRestoreCancelsOwnedMantle::RunTest(const FString&) {
     Move->RemoveRootMotionSourceByID(SiblingId);
     return true;
 }
+
+
+namespace {
+UBoxComponent* MakeMantleRegressionBox(UWorld* World,const FVector& Center,const FVector& Extent) {
+    auto* Actor=World->SpawnActor<AActor>();
+    if (!Actor) return nullptr;
+    auto* Shape=NewObject<UBoxComponent>(Actor);
+    Actor->SetRootComponent(Shape); Actor->AddInstanceComponent(Shape);
+    Shape->InitBoxExtent(Extent); Shape->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    Shape->SetCollisionObjectType(ECC_WorldStatic); Shape->SetCollisionResponseToAllChannels(ECR_Block);
+    Shape->RegisterComponent(); Actor->SetActorLocation(Center);
+    return Shape;
+}
+
+class FMantleCompletionCommand final : public IAutomationLatentCommand {
+public:
+    FMantleCompletionCommand(FAutomationTestBase* InTest,UGameInstance* InGame,AMythicCharacter_Player* InAvatar,
+        const FVector& InStart,const FVector& InEnd)
+        : Test(InTest),Game(InGame),Avatar(InAvatar),Start(InStart),End(InEnd),Previous(InStart),
+          Deadline(FPlatformTime::Seconds()+15.0) {}
+    virtual ~FMantleCompletionCommand() override {
+        if (IsValid(Avatar.Get())) if (auto* Traversal=Avatar->FindComponentByClass<UMythicTraversalComponent>())
+            Traversal->CancelTraversal();
+        if (Game.IsValid()) DestroyOwnedAbilityTestWorld(Game.Get());
+    }
+    virtual bool Update() override {
+        if (FPlatformTime::Seconds()>Deadline) {
+            Test->AddError(TEXT("mantle completion exceeded its 15-second engine-frame deadline"));
+            return true;
+        }
+        // TickTaskManager/TimerManager gate on the real engine frame. Never spin
+        // repeated World::Tick calls inside one automation update.
+        if (LastEngineFrame==GFrameCounter) return false;
+        LastEngineFrame=GFrameCounter;
+        auto* World=Game->GetWorld();
+        auto* Traversal=Avatar->FindComponentByClass<UMythicTraversalComponent>();
+        auto* Move=Avatar->GetCharacterMovement();
+        if (!Traversal || !Move) { Test->AddError(TEXT("mantle lost its production owner")); return true; }
+        if (!bStarted) {
+            auto* PC=Cast<APlayerController>(Avatar->GetController());
+            if (!Test->TestNotNull(TEXT("fixture retains its actual player controller"),PC)) return true;
+            // At world time zero, GetPlayerViewPoint can ignore the camera cache
+            // and return its view target's actor rotation. Give both that fallback
+            // and CalcCamera an inert, explicit sideways target, without rotating
+            // the character or changing the gameplay aim implementation.
+            auto* ViewTarget=World->SpawnActor<AActor>();
+            if (!Test->TestNotNull(TEXT("fixture creates its inert view target"),ViewTarget)) return true;
+            auto* ViewRoot=NewObject<USceneComponent>(ViewTarget);
+            ViewTarget->SetRootComponent(ViewRoot); ViewTarget->AddInstanceComponent(ViewRoot);
+            ViewRoot->RegisterComponent();
+            ViewTarget->SetActorLocationAndRotation(Avatar->GetActorLocation(),FRotator(0,90,0));
+            PC->SetControlRotation(FRotator(0,90,0));
+            PC->SetViewTarget(ViewTarget);
+            if (PC->PlayerCameraManager) PC->PlayerCameraManager->UpdateCamera(1.0f/60.0f);
+            Avatar->AddMovementInput(FVector::ForwardVector,1.0f);
+            FVector Aim,Movement,ViewLocation; FRotator ViewRotation;
+            const bool bCaptured=UMythicTraversalComponent::CaptureDirections(Avatar.Get(),Aim,Movement);
+            PC->GetPlayerViewPoint(ViewLocation,ViewRotation);
+            Test->AddInfo(FString::Printf(TEXT("Mantle input fixture: world%.6f/cache%.6f, controller%s/viewtarget%s/viewrotation%s, captured%d/aim%s/movement%s/pending%s, moveignored%d/local%d"),
+                World->GetTimeSeconds(),PC->PlayerCameraManager?PC->PlayerCameraManager->GetCameraCacheTime():-1.0f,
+                *GetNameSafe(PC),*GetNameSafe(PC->GetViewTarget()),*ViewRotation.ToString(),bCaptured,
+                *Aim.ToString(),*Movement.ToString(),*Avatar->GetPendingMovementInputVector().ToString(),
+                PC->IsMoveInputIgnored(),Avatar->IsLocallyControlled()));
+            if (!Test->TestTrue(TEXT("fixture has sideways aim and a current forward movement command"),
+                bCaptured && FVector::DotProduct(Aim.GetSafeNormal2D(),FVector::RightVector)>0.99f
+                && Movement.Equals(FVector::ForwardVector,0.001f))) return true;
+            // Exercise the public fresh-jump executor. Do not inject an authority
+            // request, active ID, source, endpoint or successful movement state.
+            Traversal->Jump();
+            if (!Test->TestTrue(TEXT("fresh jump prefers current movement and admits the near-wall mantle"),Traversal->IsMantling())) return true;
+            Traversal->ReleaseJump(); Avatar->ConsumeMovementInputVector();
+            Test->TestTrue(TEXT("ordinary jump release preserves the admitted climb"),Traversal->IsMantling());
+            bStarted=true;
+        }
+        ObserveSources(Move);
+        World->Tick(LEVELTICK_All,1.0f/60.0f);
+        ObserveSources(Move);
+        ++Frames;
+        const FVector Position=Avatar->GetActorLocation();
+        MaximumStep=FMath::Max(MaximumStep,FVector::Distance(Position,Previous));
+        MaximumRise=FMath::Max(MaximumRise,Position.Z-Start.Z);
+        Previous=Position;
+        if (!Traversal->IsMantling()) ++SettledFrames;
+        else if (SettledFrames>0) { Test->AddError(TEXT("completed mantle unexpectedly rearmed")); return true; }
+        if (Frames>120) { Test->AddError(TEXT("mantle did not retire within two seconds of simulated movement")); return true; }
+        if (SettledFrames<20) return false;
+        Test->AddInfo(FString::Printf(TEXT("Mantle completed after %d frames: start%s/end%s/actual%s, maxstep%.3f/rise%.3f, mode%d, legs%d%d%d"),
+            Frames,*Start.ToString(),*End.ToString(),*Position.ToString(),MaximumStep,MaximumRise,
+            static_cast<int32>(Move->MovementMode),SeenLegs[0],SeenLegs[1],SeenLegs[2]));
+        Test->TestTrue(TEXT("all three production movement sources were observed"),SeenLegs[0] && SeenLegs[1] && SeenLegs[2]);
+        Test->TestTrue(TEXT("capsule really climbed the ledge"),MaximumRise>70.0f && FVector::Dist2D(Position,Start)>80.0f);
+        Test->TestTrue(TEXT("successive CMC movement remained continuous rather than teleporting"),MaximumStep>0.1f && MaximumStep<25.0f);
+        Test->TestTrue(TEXT("actual capsule settles on the admitted upper surface"),FVector::Dist2D(Position,End)<3.0f && FMath::Abs(Position.Z-End.Z)<3.0f && Move->IsMovingOnGround());
+        Test->TestFalse(TEXT("completed traversal releases its current owner"),Traversal->IsMantling());
+        for (int32 Leg=0;Leg<3;++Leg)
+            Test->TestFalse(TEXT("completed mantle source is removed after real CMC cleanup"),Move->GetRootMotionSource(SourceName(Leg)).IsValid());
+        return true;
+    }
+private:
+    static FName SourceName(int32 Leg) { return FName(*FString::Printf(TEXT("SystemMantle_1_%d"),Leg)); }
+    void ObserveSources(UCharacterMovementComponent* Move) {
+        for (int32 Leg=0;Leg<3;++Leg) SeenLegs[Leg]|=Move->GetRootMotionSource(SourceName(Leg)).IsValid();
+    }
+    FAutomationTestBase* Test;
+    TStrongObjectPtr<UGameInstance> Game;
+    TStrongObjectPtr<AMythicCharacter_Player> Avatar;
+    FVector Start,End,Previous;
+    double Deadline;
+    uint64 LastEngineFrame=MAX_uint64;
+    int32 Frames=0,SettledFrames=0;
+    double MaximumStep=0,MaximumRise=0;
+    bool bStarted=false,SeenLegs[3]={false,false,false};
+};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicMantleNearWallClearance,
+    "Mythic.Controls.MantleNearWallClearance",
+    EAutomationTestFlags_ApplicationContextMask|EAutomationTestFlags::ProductFilter)
+bool FMythicMantleNearWallClearance::RunTest(const FString&) {
+    auto* Game=NewObject<UGameInstance>(GEngine); Game->InitializeStandalone();
+    ON_SCOPE_EXIT { DestroyOwnedAbilityTestWorld(Game); };
+    auto* World=Game->GetWorld();
+    if (!TestNotNull(TEXT("real floor"),MakeMantleRegressionBox(World,FVector(0,0,-10),FVector(600,500,10)))
+        || !TestNotNull(TEXT("real 80cm ledge"),MakeMantleRegressionBox(World,FVector(160,0,40),FVector(80,140,40)))) return false;
+    auto* State=World->SpawnActor<AMythicPlayerState>();
+    if (!TestNotNull(TEXT("authority state"),State)) return false;
+    InitializeAbilityTestPlayer(State);
+    auto* Avatar=InitializeAbilityTestAvatar(State);
+    if (!TestNotNull(TEXT("production capsule avatar"),Avatar)) return false;
+    auto* Move=Avatar->GetCharacterMovement();
+    const float StandingZ=Avatar->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+2.5f;
+    TestEqual(TEXT("actual player radius in centimeters"),Avatar->GetCapsuleComponent()->GetScaledCapsuleRadius(),42.0f);
+    Move->SetMovementMode(MOVE_Walking);
+    FMythicMantleRoute Route;
+    Avatar->SetActorLocation(FVector(0,0,StandingZ),false,nullptr,ETeleportType::TeleportPhysics);
+    if (!TestTrue(TEXT("ordinary 130cm landing remains admitted"),UMythicTraversalComponent::BuildMantleRoute(Avatar,FVector::ForwardVector,Route))) return false;
+    TestTrue(TEXT("ordinary landing is physically nominated at 130cm"),FMath::IsNearlyEqual(FVector::Dist2D(Avatar->GetActorLocation(),Route.Points.Last()),130.0f,0.01f));
+    Avatar->SetActorLocation(FVector(37,0,StandingZ),false,nullptr,ETeleportType::TeleportPhysics);
+    if (!TestTrue(TEXT("one-centimeter wall clearance admits its real 93cm landing"),UMythicTraversalComponent::BuildMantleRoute(Avatar,FVector::ForwardVector,Route))) return false;
+    TestTrue(TEXT("near landing is physically nominated at 93cm"),FMath::IsNearlyEqual(FVector::Dist2D(Avatar->GetActorLocation(),Route.Points.Last()),93.0f,0.01f));
+    Avatar->SetActorLocation(FVector(-21,0,StandingZ),false,nullptr,ETeleportType::TeleportPhysics);
+    TestFalse(TEXT("151cm landing still exceeds maximum reach"),UMythicTraversalComponent::BuildMantleRoute(Avatar,FVector::ForwardVector,Route));
+    Avatar->SetActorLocation(FVector(37,0,StandingZ),false,nullptr,ETeleportType::TeleportPhysics);
+    if (!TestNotNull(TEXT("roof outside initial capsule and top trace"),MakeMantleRegressionBox(World,FVector(37,0,270),FVector(70,80,10)))) return false;
+    TestFalse(TEXT("near-wall fix still refuses blocked upward capsule clearance"),UMythicTraversalComponent::BuildMantleRoute(Avatar,FVector::ForwardVector,Route));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMythicMantleCompletesRealMovement,
+    "Mythic.Controls.MantleCompletesRealMovement",
+    EAutomationTestFlags_ApplicationContextMask|EAutomationTestFlags::ProductFilter)
+bool FMythicMantleCompletesRealMovement::RunTest(const FString&) {
+    auto* Game=NewObject<UGameInstance>(GEngine); Game->InitializeStandalone();
+    bool bLatentOwnsWorld=false;
+    ON_SCOPE_EXIT { if (!bLatentOwnsWorld) DestroyOwnedAbilityTestWorld(Game); };
+    auto* World=Game->GetWorld();
+    if (!TestNotNull(TEXT("real floor"),MakeMantleRegressionBox(World,FVector(0,0,-10),FVector(600,500,10)))
+        || !TestNotNull(TEXT("real 80cm ledge"),MakeMantleRegressionBox(World,FVector(160,0,40),FVector(80,140,40)))) return false;
+    auto* State=World->SpawnActor<AMythicPlayerState>();
+    if (!TestNotNull(TEXT("authority state"),State)) return false;
+    InitializeAbilityTestPlayer(State);
+    auto* Avatar=InitializeAbilityTestAvatar(State);
+    if (!TestNotNull(TEXT("real movable character"),Avatar)) return false;
+    World->GetWorldSettings()->NotifyBeginPlay();
+    if (!TestTrue(TEXT("fixture begins normal actor lifecycle"),World->HasBegunPlay() && Avatar->HasActorBegunPlay())) return false;
+    auto* Move=Avatar->GetCharacterMovement(); auto* Capsule=Avatar->GetCapsuleComponent();
+    const FVector Start(37,0,Capsule->GetScaledCapsuleHalfHeight()+2.5f);
+    Avatar->SetActorLocation(Start,false,nullptr,ETeleportType::TeleportPhysics);
+    Move->StopMovementImmediately(); Move->SetMovementMode(MOVE_Walking);
+    FMythicMantleRoute Route;
+    if (!TestTrue(TEXT("production near-wall route admits before input"),UMythicTraversalComponent::BuildMantleRoute(Avatar,FVector::ForwardVector,Route))) return false;
+    const FVector End=Route.Points.Last();
+    ADD_LATENT_AUTOMATION_COMMAND(FMantleCompletionCommand(this,Game,Avatar,Start,End));
+    bLatentOwnsWorld=true;
+    return true;
+}
+
 #endif

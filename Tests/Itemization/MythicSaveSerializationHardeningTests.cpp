@@ -156,6 +156,96 @@ bool FMythicCurrentAffixArraySerializationHardeningTest::RunTest(const FString &
                   Restored.Items[1].Affix.AffixDefinition.GetAsset(), Definition);
     }
 
+
+    // Exercise save-load publication bookkeeping, not a simulated network connection.
+    // Actual owner-only payload delivery is covered by the isolated multiplayer receipt.
+    if (!TestEqual(TEXT("bookkeeping fixture has both restored rows"), Restored.Items.Num(), 2)) return false;
+    Restored.SetOwner(Definition);
+    TSet<int32> OriginalIds;
+    for (const FMythicReplicatedAffixItem &Row : Restored.Items) {
+        TestTrue(TEXT("restored affix gets a fresh network identity"), Row.ReplicationID != INDEX_NONE);
+        TestTrue(TEXT("restored affix gets an initial row key"), Row.ReplicationKey != INDEX_NONE);
+        OriginalIds.Add(Row.ReplicationID);
+    }
+    TestEqual(TEXT("restored network identities are unique"), OriginalIds.Num(), 2);
+    TestTrue(TEXT("restored array differs from the empty default delta state"), Restored.ArrayReplicationKey > 0);
+    const auto WriteArray = [](FMythicReplicatedAffixArray &Array, TArray<uint8> &Bytes) {
+        FBufferArchive Out; Out.ArIsSaveGame = true;
+        const bool bResult = Array.Serialize(Out) && !Out.IsError();
+        Bytes = Out;
+        return bResult;
+    };
+    const auto ReadArray = [](TArray<uint8> &Bytes, FMythicReplicatedAffixArray &Array) {
+        FMemoryReader In(Bytes, true); In.ArIsSaveGame = true;
+        return Array.Serialize(In) && !In.IsError() && In.AtEnd();
+    };
+    TArray<uint8> Resaved;
+    TestTrue(TEXT("rehydrated affixes save without errors"), WriteArray(Restored, Resaved));
+    TestTrue(TEXT("new replication metadata does not change canonical save bytes"), Resaved == Buffer);
+
+    // Same cardinality and same persistent roll GUIDs must still replace changed payload.
+    const int32 BeforeReloadKey = Restored.ArrayReplicationKey;
+    const int32 BeforeReloadCounter = Restored.IDCounter;
+    Source.Items[0].Affix.Magnitude = 13.0f;
+    Source.Items[1].Affix.Magnitude = 17.0f;
+    Source.MarkItemDirty(Source.Items[0]);
+    Source.MarkItemDirty(Source.Items[1]);
+    TArray<uint8> ReplacementBytes;
+    if (!TestTrue(TEXT("same-size replacement saves"), WriteArray(Source, ReplacementBytes))
+        || !TestTrue(TEXT("same-size replacement loads"), ReadArray(ReplacementBytes, Restored))
+        || !TestEqual(TEXT("same-size replacement has both rows"), Restored.Items.Num(), 2)) return false;
+    TestTrue(TEXT("same-size reload advances the array key"), Restored.ArrayReplicationKey > BeforeReloadKey);
+    TestTrue(TEXT("same-size reload preserves monotonic ID allocation"), Restored.IDCounter > BeforeReloadCounter);
+    for (const FMythicReplicatedAffixItem &Row : Restored.Items) {
+        TestTrue(TEXT("replacement cannot reuse a prior connection's row identity"),
+                 Row.ReplicationID != INDEX_NONE && !OriginalIds.Contains(Row.ReplicationID));
+    }
+    TestEqual(TEXT("same-count first magnitude changes"), Restored.Items[0].Affix.Magnitude, 13.0f);
+    TestEqual(TEXT("same-count second magnitude changes"), Restored.Items[1].Affix.Magnitude, 17.0f);
+    TestTrue(TEXT("successful reload preserves the runtime callback owner"), Restored.Owner.Get() == Definition);
+
+    // First row is valid but different; the second framed row has an unsupported version.
+    // This fails without archive overflow and must not publish the already-read first row.
+    FBufferArchive Malformed;
+    Malformed.ArIsSaveGame = true;
+    int32 TwoRows = 2; Malformed << TwoRows;
+    FRolledAffix FirstStaged = Source.Items[0].Affix;
+    FirstStaged.Magnitude = 999.0f;
+    if (!TestTrue(TEXT("malformed fixture contains a complete valid first row"), FirstStaged.Serialize(Malformed))) return false;
+    FGuid RowMagic = MythicAffixSerialization::RolledAffixMagic;
+    int32 BadVersion = MythicAffixSerialization::RolledAffixVersion + 1;
+    Malformed << RowMagic; Malformed << BadVersion;
+    const int32 BeforeFailureKey = Restored.ArrayReplicationKey;
+    const int32 BeforeFailureCounter = Restored.IDCounter;
+    TArray<int32> BeforeFailureIds;
+    TArray<int32> BeforeFailureRowKeys;
+    for (const auto &Row : Restored.Items) { BeforeFailureIds.Add(Row.ReplicationID); BeforeFailureRowKeys.Add(Row.ReplicationKey); }
+    TArray<uint8> BeforeFailureBytes;
+    if (!TestTrue(TEXT("capture prior valid affix save"), WriteArray(Restored, BeforeFailureBytes))) return false;
+    TestFalse(TEXT("malformed second row rejects the complete replacement"), ReadArray(Malformed, Restored));
+    TArray<uint8> AfterFailureBytes;
+    TestTrue(TEXT("prior affixes still save after rejected load"), WriteArray(Restored, AfterFailureBytes));
+    TestTrue(TEXT("failed staged read leaves every saved field unchanged"), BeforeFailureBytes == AfterFailureBytes);
+    TestEqual(TEXT("failed read leaves array key unchanged"), Restored.ArrayReplicationKey, BeforeFailureKey);
+    TestEqual(TEXT("failed read leaves ID counter unchanged"), Restored.IDCounter, BeforeFailureCounter);
+    if (!TestEqual(TEXT("failed read keeps row count"), Restored.Items.Num(), BeforeFailureIds.Num())) return false;
+    for (int32 Index = 0; Index < Restored.Items.Num(); ++Index) {
+        TestEqual(TEXT("failed read preserves row identity"), Restored.Items[Index].ReplicationID, BeforeFailureIds[Index]);
+        TestEqual(TEXT("failed read preserves row key"), Restored.Items[Index].ReplicationKey, BeforeFailureRowKeys[Index]);
+    }
+    TestTrue(TEXT("failed read preserves callback owner"), Restored.Owner.Get() == Definition);
+
+    FMythicReplicatedAffixArray Empty;
+    TArray<uint8> EmptyBytes;
+    const int32 BeforeEmptyKey = Restored.ArrayReplicationKey;
+    const int32 BeforeEmptyCounter = Restored.IDCounter;
+    if (!TestTrue(TEXT("empty array saves"), WriteArray(Empty, EmptyBytes))
+        || !TestTrue(TEXT("empty replacement loads"), ReadArray(EmptyBytes, Restored))) return false;
+    TestTrue(TEXT("empty load removes every old row"), Restored.Items.IsEmpty());
+    TestTrue(TEXT("empty load advertises deletion to prior delta state"), Restored.ArrayReplicationKey > BeforeEmptyKey);
+    TestEqual(TEXT("empty load does not rewind ID allocation"), Restored.IDCounter, BeforeEmptyCounter);
+    TestTrue(TEXT("empty load preserves callback owner"), Restored.Owner.Get() == Definition);
+
     FBufferArchive OversizedBuffer;
     OversizedBuffer.ArIsSaveGame = true;
     int32 OversizedCount = MythicAffixSerialization::MaxAffixesPerContainer + 1;

@@ -23,7 +23,7 @@
 namespace {
 FText ControlGroup(EMythicControl C) {
     if (C<=EMythicControl::MoveRight || C==EMythicControl::Jump || C==EMythicControl::Dash || C==EMythicControl::Crouch) return NSLOCTEXT("Mythic","ControlsMovement","Movement");
-    if (C==EMythicControl::Heal || C==EMythicControl::Utility || C==EMythicControl::Ping || C==EMythicControl::Interact) return NSLOCTEXT("Mythic","ControlsItems","Items and communication");
+    if (C==EMythicControl::Heal || C==EMythicControl::Ping || C==EMythicControl::Interact) return NSLOCTEXT("Mythic","ControlsItems","Items and communication");
     if (C<=EMythicControl::AbilityLayer || C==EMythicControl::LockTarget) return NSLOCTEXT("Mythic","ControlsCombat","Combat");
     if (C==EMythicControl::Inspect || C==EMythicControl::CameraMode) return NSLOCTEXT("Mythic","ControlsCamera","Camera");
     return NSLOCTEXT("Mythic","ControlsMenus","Menus");
@@ -82,7 +82,8 @@ void UMythicControlsPage::Build() {
     SaveStatus=FMythicUIStyle::MakeText(this,EMythicTextRole::Subtle); SaveStatus->SetAutoWrapText(true); SaveRow->AddChildToHorizontalBox(SaveStatus)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
     UCommonTextBlock* RetryLabel=nullptr; Retry=AddButton(SaveRow,NSLOCTEXT("Mythic","RetryBindingsSave","Retry save"),RetryLabel);
     if (Retry) { Retry->OnClicked().AddUObject(this,&ThisClass::RetrySave); Retry->SetVisibility(ESlateVisibility::Collapsed); }
-    const auto& Bindings=GetDefault<UMythicControlsSettings>()->Bindings;
+    auto Bindings=GetDefault<UMythicControlsSettings>()->Bindings;
+    Bindings.RemoveAll([](const auto& Binding) { return !UMythicControlsSettings::IsAvailable(Binding.Control); });
     TArray<FText> Groups;
     for (const auto& Binding:Bindings) { const FText Group=ControlGroup(Binding.Control); if (!Groups.ContainsByPredicate([&](const FText& Old){return Old.EqualTo(Group);})) Groups.Add(Group); }
     for (const FText& Group:Groups) {

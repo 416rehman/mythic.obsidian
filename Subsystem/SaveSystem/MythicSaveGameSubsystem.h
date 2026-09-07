@@ -20,6 +20,7 @@ struct MYTHIC_API FMythicDurableCharacterSaveResult {
     FGuid OperationId;
     FString RoutingCharacterId;
     bool bSuccess = false;
+    FMythicAppearanceSaveStamp CapturedAppearance;
     FMythicHarvestReceiptLedgerSaveV1 CapturedHarvestReceipts;
     FMythicHarvestItemEscrowSaveV1 CapturedHarvestItemEscrow;
 };
@@ -122,6 +123,7 @@ private:
 
     struct FInFlightCharacterSave {
         FGuid OperationId;
+        FMythicAppearanceSaveStamp CapturedAppearance;
         FMythicHarvestReceiptLedgerSaveV1 CapturedHarvestReceipts;
         FMythicHarvestItemEscrowSaveV1 CapturedHarvestItemEscrow;
         TArray<FMythicDurableCharacterSaveComplete> Completions;

@@ -10,7 +10,7 @@ enum class EMythicControl : uint8 {
     MoveForward, MoveBackward, MoveLeft, MoveRight,
     Primary, Secondary, Jump, Dash, Crouch, Interact,
     SkillQ, SkillE, SkillR, SkillT, AbilityLayer,
-    Heal, Utility, LockTarget, Ping, Inspect, CameraMode, CharacterMenu, SystemMenu,
+    Heal, Utility UMETA(Hidden), LockTarget, Ping, Inspect, CameraMode, CharacterMenu, SystemMenu,
     Count UMETA(Hidden)
 };
 
@@ -45,5 +45,7 @@ public:
     UPROPERTY(Config, EditAnywhere, Category="Communication") float PingRange = 10000;
     UPROPERTY(Config, EditAnywhere, Category="Communication") float PingLifetime = 8;
     const FMythicControlBinding* Find(EMythicControl Control) const;
+    // Keep retired enum ordinals and saved mapping names stable, but never register or route them.
+    static bool IsAvailable(EMythicControl Control) { return Control < EMythicControl::Count && Control != EMythicControl::Utility; }
     static FName MappingName(EMythicControl Control, bool bGamepad);
 };

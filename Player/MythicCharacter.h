@@ -34,6 +34,7 @@ public:
     virtual void BeginPlay() override;
     virtual void PostInitializeComponents() override;
     virtual void PossessedBy(AController *NewController) override;
+    virtual void UnPossessed() override;
     virtual void OnRep_Controller() override;
     virtual void OnRep_PlayerState() override;
     virtual void InitializeASC() {};
@@ -145,7 +146,11 @@ public:
     // detach and destroy client-side spawned mesh component for Slot
     UFUNCTION(BlueprintCallable, Category = "Mythic|Equipment")
     void RemoveLocalEquipmentMesh(EInventorySlotType Slot);
-    /** Primary body and explicit equipped visuals only; excludes first-person duplicate arms and unrelated attachments. */
+    /** Configures authored modular body followers without adding gameplay or replicated state. */
+    void InitializeModularBodyPresentation();
+    /** Applies the current owning camera's explicit head-occlusion policy locally. */
+    void RefreshModularBodyVisibility();
+    /** Visible authored body and explicit equipped visuals; excludes hidden animation drivers and previews. */
     void GatherAbilityPoseMeshes(TArray<USkeletalMeshComponent*>& Out) const;
     /** Uses character relevancy; the persistent PlayerState ASC must not broadcast cosmetics to the whole server. */
     void PublishAbilityPoseRemnant(const FMythicAbilityPoseRemnantEvent& Event,bool bCancel);

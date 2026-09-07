@@ -20,6 +20,7 @@
 #include "World/Harvesting/MythicHarvestReceiptTypes.h"
 #include "World/Harvesting/MythicHarvestRewardEscrowTypes.h"
 #include "Input/MythicQuickUseComponent.h"
+#include "Character/Appearance/MythicAppearanceTypes.h"
 #include "CharacterData.generated.h"
 
 UENUM(BlueprintType)
@@ -47,6 +48,7 @@ enum class EMythicCharacterSaveVersion : uint8 {
     PrePlayerEntityIdentity,  // Canonical PlayerCharacter-domain identity was not present before this version.
     PreAbilityOwnership,
     PreCombatControls, // Version 22: two active slots and no selected quick-use items.
+    PreAppearance, // Version 23: no personal appearance recipe; canonical item tags remain backward compatible.
     LatestVersion,
     VersionPlusOne
 };
@@ -75,6 +77,11 @@ struct FSerializedCharacterData {
 
     UPROPERTY(BlueprintReadWrite)
     TArray<FSerializedInventoryData> Inventories;
+    UPROPERTY(BlueprintReadWrite) FMythicAppearanceRecipe AppearanceRecipe;
+    /** Explicit presence survives save-version fixups; pre-appearance saves use the catalog default. */
+    UPROPERTY() bool bHasAppearanceRecipe = false;
+    /** In-memory capture receipt, excluded from disk checksums and save content. */
+    FMythicAppearanceSaveStamp AppearanceStamp;
 
     /** Native authority-owned cumulative harvest receipts captured atomically with inventory, progression, and quests. */
     UPROPERTY()

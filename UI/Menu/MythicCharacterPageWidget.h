@@ -35,6 +35,7 @@ class UMythicItemDetailsWidget;
 class UMythicRuneDefinition;
 class UMythicRunePickerWidget;
 class UMythicAbilityPickerWidget;
+class UMythicAppearanceWidget;
 class UMythicSkillComponent;
 class UMythicControlGlyph;
 class UMythicRuneSocketWidget;
@@ -151,6 +152,12 @@ protected:
     virtual FReply NativeOnPreviewMouseButtonDown(
         const FGeometry &InGeometry,
         const FPointerEvent &InMouseEvent) override;
+    virtual FReply NativeOnMouseMove(const FGeometry &InGeometry, const FPointerEvent &InMouseEvent) override;
+    virtual void NativeOnMouseLeave(const FPointerEvent &InMouseEvent) override;
+    void HandleOwnerFocusChanging(const FFocusEvent &Event, const FWeakWidgetPath &PreviousPath,
+        const TSharedPtr<SWidget> &PreviousWidget, const FWidgetPath &NewPath,
+        const TSharedPtr<SWidget> &NewWidget);
+    FDelegateHandle DetailsFocusHandle;
 
     /** Performs the contextual primary verb for the selected slot (equip, unequip, use, or inspect). */
     UFUNCTION()
@@ -467,6 +474,9 @@ private:
     UPROPERTY()
     TObjectPtr<UMythicRunePickerWidget> RunePicker;
     UPROPERTY() TObjectPtr<UMythicAbilityPickerWidget> AbilityPicker;
+    UPROPERTY() TObjectPtr<UMythicAppearanceWidget> AppearanceEditor;
+    UPROPERTY() TObjectPtr<UMythicBoundActionButton> CustomizeButton;
+    void OpenAppearance();
     UPROPERTY() TArray<TObjectPtr<UMythicRuneSocketWidget>> AbilitySockets;
     UPROPERTY() TArray<TObjectPtr<UMythicControlGlyph>> AbilityGlyphs;
     UPROPERTY() TObjectPtr<UMythicSectionHeader> AbilityHeader;
@@ -563,8 +573,8 @@ private:
 
     void SetSelectedSlot(UItemSlotVM *SlotVM, UListViewBase *SourceList);
     void ClearOtherListSelections(UListViewBase *Except);
-    void ScheduleRestoreSelection();
-    void RestoreSelectionByGuid();
+    void ScheduleRestoreSelection(bool bRestoreFocus = false);
+    void RestoreSelectionByGuid(bool bRestoreFocus = false);
     UListViewBase *FindListSelecting(UObject *Item) const;
 
     UInventoryVM *ResolveInventoryVM() const;
@@ -601,6 +611,7 @@ private:
     int32 ActiveTargetSlotIndex = INDEX_NONE;
     bool bSynchronizingSelection = false;
     bool bSelectionRestoreScheduled = false;
+    bool bSelectionRestoreFocus = false;
     FGuid SelectedItemGuid;
     FGuid ActionSourceGuid;
     int32 LastSelectedSlotIndex = INDEX_NONE;
@@ -662,6 +673,8 @@ private:
     void BuildDetailsCard();
 
     void ShowDetailsFor(UObject *SlotVM);
+    bool IsPointerOverDetails() const;
+    void RefreshPointerDetails();
 
     void ScheduleDetailsPosition(UItemSlotVM *SlotVM);
 
@@ -676,6 +689,9 @@ private:
     TObjectPtr<UWidget> DetailsSurface;
 
     TWeakObjectPtr<UItemSlotVM> DisplayedDetailsSlot;
+    TWeakObjectPtr<UItemSlotVM> HoveredDetailsSlot;
+    TWeakObjectPtr<UItemSlotVM> NavigatedDetailsSlot;
+    bool bDetailsFromNavigation = false;
 
     FGuid HoveredItemGuid;
 

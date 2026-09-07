@@ -208,6 +208,7 @@ bool UMythicSaveGameSubsystem::StartCharacterSave(
 
     FInFlightCharacterSave InFlight;
     InFlight.OperationId = OperationId;
+    InFlight.CapturedAppearance = CharacterData.AppearanceStamp;
     InFlight.CapturedHarvestReceipts =
         CharacterData.HarvestReceiptLedger;
     InFlight.CapturedHarvestItemEscrow =
@@ -262,6 +263,7 @@ void UMythicSaveGameSubsystem::HandleAsyncSaveFinished(const FString &SlotName, 
         Result.RoutingCharacterId = SlotName;
         Result.bSuccess = bSuccess;
         if (bSuccess) {
+            Result.CapturedAppearance = CharacterSave.CapturedAppearance;
             Result.CapturedHarvestReceipts =
                 CharacterSave.CapturedHarvestReceipts;
             Result.CapturedHarvestItemEscrow =

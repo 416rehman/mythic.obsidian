@@ -31,6 +31,8 @@
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Components/Border.h"
+#include "Components/ScrollBox.h"
 
 namespace {
 FString WheelKey(const FMythicQuickUseKey& Key) { return Key.Definition.ToString()+TEXT("|")+Key.Variant.ToString(); }
@@ -39,8 +41,6 @@ const FText PingNames[] = {
     NSLOCTEXT("Mythic","PingHelp","Need help"),NSLOCTEXT("Mythic","PingLoot","Loot"),
     NSLOCTEXT("Mythic","PingWait","Wait"),NSLOCTEXT("Mythic","PingDefend","Defend here"),
     NSLOCTEXT("Mythic","PingRegroup","Regroup"),NSLOCTEXT("Mythic","PingAck","Acknowledge")};
-const FText UtilityNames[] = {NSLOCTEXT("Mythic","WheelCamera","Camera cycle"),
-    NSLOCTEXT("Mythic","WheelAdjust","Camera adjust"),NSLOCTEXT("Mythic","WheelInspect","Inspect")};
 }
 
 UMythicGameplayWheel::UMythicGameplayWheel(const FObjectInitializer& Initializer):Super(Initializer) {
@@ -108,6 +108,24 @@ void UMythicGameplayWheel::Build() {
     auto* ExitLine=MakeLine(); Text(ExitLine,NSLOCTEXT("Mythic","WheelCloseGlyph","Close:"));
     Glyph(ExitLine,EMythicControl::Jump); Text(ExitLine,NSLOCTEXT("Mythic","WheelJumpGlyph","Jump"));
     Glyph(ExitLine,EMythicControl::Dash); Text(ExitLine,NSLOCTEXT("Mythic","WheelDashGlyph","Dash"));
+
+    ItemPreview=WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(),TEXT("HealingItemPreview"));
+    auto* PreviewSlot=Overlay->AddChildToOverlay(ItemPreview);
+    PreviewSlot->SetHorizontalAlignment(HAlign_Right); PreviewSlot->SetVerticalAlignment(VAlign_Center);
+    PreviewSlot->SetPadding(FMargin(12));
+    auto* Panel=WidgetTree->ConstructWidget<UBorder>(); Panel->SetPadding(FMargin(16));
+    Panel->SetBrushColor(FLinearColor(0.025f,0.02f,0.015f,0.96f)); ItemPreview->AddChild(Panel);
+    auto* Scroll=WidgetTree->ConstructWidget<UScrollBox>(); Panel->AddChild(Scroll);
+    auto* Column=WidgetTree->ConstructWidget<UVerticalBox>(); Scroll->AddChild(Column);
+    PreviewIcon=WidgetTree->ConstructWidget<UImage>(); PreviewIcon->SetDesiredSizeOverride({64,64});
+    Column->AddChildToVerticalBox(PreviewIcon)->SetHorizontalAlignment(HAlign_Center);
+    PreviewName=FMythicUIStyle::MakeText(this,EMythicTextRole::Heading); PreviewName->SetAutoWrapText(true);
+    Column->AddChildToVerticalBox(PreviewName)->SetPadding(FMargin(0,10,0,4));
+    PreviewCount=FMythicUIStyle::MakeText(this,EMythicTextRole::Subtle);
+    Column->AddChildToVerticalBox(PreviewCount)->SetPadding(FMargin(0,0,0,12));
+    PreviewDescription=FMythicUIStyle::MakeText(this,EMythicTextRole::Body); PreviewDescription->SetAutoWrapText(true);
+    Column->AddChildToVerticalBox(PreviewDescription);
+    ItemPreview->SetVisibility(ESlateVisibility::Collapsed);
 }
 
 
@@ -124,7 +142,13 @@ void UMythicGameplayWheel::RefreshLayout() {
     if (Available.X<=0 || Available.Y<=0) return;
     // At the supported 640x482 minimum, maximum user UI scale still leaves this readable compact body.
     // Text is never render-scaled; title, count, page and help retain their original font sizes.
-    const float Scale=FMath::Clamp(FMath::Min((Available.X-16)/320.0,(Available.Y-124)/280.0),0.65,1.0);
+    // Reserve the preview's space for the entire opening, so highlighting cannot move the wheel under the pointer.
+    const bool bHasItems=Opener==EMythicControl::Heal && !Entries.IsEmpty();
+    const float PreviewWidth=bHasItems ? FMath::Clamp(Available.X*0.4,160.0,320.0):0;
+    const float ReservedWidth=bHasItems ? PreviewWidth+24:0;
+    const float Scale=FMath::Clamp(FMath::Min((Available.X-ReservedWidth-16)/320.0,(Available.Y-124)/280.0),0.65,1.0);
+    WheelSize->SetRenderTranslation({-ReservedWidth/2,0});
+    if (ItemPreview) { ItemPreview->SetWidthOverride(PreviewWidth); ItemPreview->SetMaxDesiredHeight(FMath::Max(100.0,Available.Y-32)); }
     const float Width=320*Scale,PageY=36+280*Scale;
     WheelSize->SetWidthOverride(Width); WheelSize->SetHeightOverride(PageY+72);
     WheelCenter={160*Scale,36+138*Scale}; PointerNeutralRadius=48*Scale;
@@ -147,7 +171,8 @@ void UMythicGameplayWheel::RefreshLayout() {
 
 void UMythicGameplayWheel::OpenFor(UMythicControlsComponent* Owner,const FMythicWheelOpenToken& Token) {
     CloseWithoutCommit();
-    if (!IsValid(Owner) || !Owner->IsWheelOpenCurrent(Token)) return;
+    if (!IsValid(Owner) || !Owner->IsWheelOpenCurrent(Token)
+        || (Token.Control!=EMythicControl::Heal && Token.Control!=EMythicControl::Ping)) return;
     Controls=Owner; Opener=Token.Control;
     const uint64 OpeningSerial=++OpenSerial;
     const TWeakObjectPtr<UMythicControlsComponent> ExpectedOwner=Owner;
@@ -221,6 +246,10 @@ void UMythicGameplayWheel::ReleaseObservers() {
     if (auto* Input=UCommonInputSubsystem::Get(GetOwningLocalPlayer())) Input->OnInputMethodChangedNative.Remove(DeviceHandle);
     InventoryChanged.Reset(); DeviceHandle.Reset(); ++IconRevision;
     for (auto& Load:IconLoads) if (Load) Load->CancelHandle(); IconLoads.Reset();
+    if (ItemPreview) {
+        ItemPreview->SetVisibility(ESlateVisibility::Collapsed); PreviewIcon->SetBrushFromTexture(nullptr);
+        PreviewName->SetText(FText::GetEmpty()); PreviewCount->SetText(FText::GetEmpty()); PreviewDescription->SetText(FText::GetEmpty());
+    }
 }
 void UMythicGameplayWheel::CloseWithoutCommit() {
     ++OpenSerial; bOpen=false; ReleaseObservers();
@@ -235,10 +264,10 @@ void UMythicGameplayWheel::NativeDestruct() { ReleaseObservers(); Super::NativeD
 UWidget* UMythicGameplayWheel::NativeGetDesiredFocusTarget() const { return const_cast<UMythicGameplayWheel*>(this); }
 bool UMythicGameplayWheel::NativeOnHandleBackAction() { if (Controls.IsValid()) Controls->CloseWheel(false); else CloseWithoutCommit(); return true; }
 
-int32 UMythicGameplayWheel::PageCount() const { const int32 Size=Opener==EMythicControl::Utility ? 5:8; return Opener==EMythicControl::Ping ? 1:FMath::Max(1,FMath::DivideAndRoundUp(Entries.Num(),Size)); }
+int32 UMythicGameplayWheel::PageCount() const { return Opener==EMythicControl::Ping ? 1:FMath::Max(1,FMath::DivideAndRoundUp(Entries.Num(),8)); }
 int32 UMythicGameplayWheel::ItemIndex(int32 Sector) const {
-    if (Sector<0 || Sector>=8 || Opener==EMythicControl::Ping || (Opener==EMythicControl::Utility && Sector<3)) return INDEX_NONE;
-    return Page*(Opener==EMythicControl::Utility ? 5:8)+Sector-(Opener==EMythicControl::Utility ? 3:0);
+    if (Sector<0 || Sector>=8 || Opener!=EMythicControl::Heal) return INDEX_NONE;
+    return Page*8+Sector;
 }
 void UMythicGameplayWheel::RefreshCounts() {
     if (!bOpen || !QuickUse.IsValid() || Opener==EMythicControl::Ping) return;
@@ -253,14 +282,13 @@ void UMythicGameplayWheel::RefreshCounts() {
 }
 void UMythicGameplayWheel::RefreshPage() {
     ++IconRevision; for (auto& Load:IconLoads) if (Load) Load->CancelHandle(); IconLoads.Reset();
-    Title->SetText(Opener==EMythicControl::Heal ? NSLOCTEXT("Mythic","WheelHealing","Healing") : Opener==EMythicControl::Utility ? NSLOCTEXT("Mythic","WheelUtility","Utility") : NSLOCTEXT("Mythic","WheelPing","Communicate"));
+    Title->SetText(Opener==EMythicControl::Heal ? NSLOCTEXT("Mythic","WheelHealing","Healing") : NSLOCTEXT("Mythic","WheelPing","Communicate"));
     PageLabel->SetText(FText::Format(NSLOCTEXT("Mythic","WheelPage","{0} / {1}"),FText::AsNumber(Page+1),FText::AsNumber(PageCount())));
     if (OpenerGlyph) OpenerGlyph->SetControl(Opener);
     for (int32 Index=0;Index<8;++Index) {
         auto& Cell=Cells[Index]; Cell.Icon->SetVisibility(ESlateVisibility::Hidden); Cell.Icon->SetBrushFromTexture(nullptr); Cell.Count->SetText(FText::GetEmpty()); Cell.Label->SetText(FText::GetEmpty());
         const int32 Item=ItemIndex(Index);
         if (Opener==EMythicControl::Ping) Cell.Label->SetText(PingNames[Index]);
-        else if (Opener==EMythicControl::Utility && Index<3) Cell.Label->SetText(UtilityNames[Index]);
         else if (Entries.IsValidIndex(Item)) {
             Cell.Count->SetText(FText::AsNumber(Entries[Item].Quantity)); Cell.Icon->SetRenderOpacity(Entries[Item].Quantity>0 ? 1:0.35f);
             const auto Icon=Entries[Item].Icon;
@@ -275,12 +303,13 @@ void UMythicGameplayWheel::RefreshPage() {
                         if (auto* Texture=Icon.Get()) {
                             Self->Cells[Index].Icon->SetBrushFromTexture(Texture);
                             Self->Cells[Index].Icon->SetVisibility(ESlateVisibility::HitTestInvisible);
+                            if (Self->Selected==Index) Self->RefreshItemPreview();
                         }
                     }
                 }));
             }
         }
-        Cell.Plate->SetRenderOpacity(Entries.IsValidIndex(Item) || Opener==EMythicControl::Ping || (Opener==EMythicControl::Utility && Index<3) ? 1:0.3f);
+        Cell.Plate->SetRenderOpacity(Entries.IsValidIndex(Item) || Opener==EMythicControl::Ping ? 1:0.3f);
     }
     Highlight(INDEX_NONE);
 }
@@ -289,10 +318,26 @@ void UMythicGameplayWheel::Highlight(int32 Index) {
     for (int32 I=0;I<Cells.Num();++I) Cells[I].Plate->SetColorAndOpacity(I==Index ? FMythicUIStyle::Get().AccentBright:FLinearColor::White);
     FText Text;
     if (Index!=INDEX_NONE && Opener==EMythicControl::Ping) Text=PingNames[Index];
-    else if (Index>=0 && Index<3 && Opener==EMythicControl::Utility) Text=UtilityNames[Index];
     else if (const int32 Item=ItemIndex(Index); Entries.IsValidIndex(Item)) Text=FText::Format(NSLOCTEXT("Mythic","WheelItem","{0}\n{1}"),Entries[Item].Name,FText::AsNumber(Entries[Item].Quantity));
     else Text=Entries.IsEmpty() && Opener==EMythicControl::Heal ? NSLOCTEXT("Mythic","NoHealingItems","No healing items") : NSLOCTEXT("Mythic","WheelNeutral","Keep current selection");
     Detail->SetText(Text);
+    RefreshItemPreview();
+}
+void UMythicGameplayWheel::RefreshItemPreview() {
+    if (!ItemPreview) return;
+    const int32 Index=ItemIndex(Selected);
+    if (!bOpen || !Entries.IsValidIndex(Index) || Entries[Index].Quantity<=0) {
+        ItemPreview->SetVisibility(ESlateVisibility::Collapsed); PreviewIcon->SetBrushFromTexture(nullptr);
+        PreviewName->SetText(FText::GetEmpty()); PreviewCount->SetText(FText::GetEmpty()); PreviewDescription->SetText(FText::GetEmpty());
+        return;
+    }
+    const auto& Entry=Entries[Index];
+    PreviewName->SetText(Entry.Name);
+    PreviewCount->SetText(FText::Format(NSLOCTEXT("Mythic","WheelItemQuantity","In inventory: {0}"),FText::AsNumber(Entry.Quantity)));
+    PreviewDescription->SetText(Entry.Description);
+    PreviewIcon->SetBrush(Cells[Selected].Icon->GetBrush());
+    PreviewIcon->SetVisibility(Cells[Selected].Icon->GetVisibility());
+    ItemPreview->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 void UMythicGameplayWheel::ChangePage(int32 Delta) {
     const int32 Next=FMath::Clamp(Page+Delta,0,PageCount()-1); if (Next==Page) return;
@@ -351,11 +396,7 @@ void UMythicGameplayWheel::CommitHighlighted() {
     bCommitted=true;
     const int32 Sector=Selected;
     if (Opener==EMythicControl::Ping) { CloseWithoutCommit(); Controls->ExecuteWheelCommand(EMythicControl::Ping,Sector); }
-    else if (Opener==EMythicControl::Utility && Sector<3) {
-        CloseWithoutCommit();
-        if (Sector==1) Controls->BeginCameraAdjustment();
-        else Controls->ExecuteWheelCommand(Sector==0 ? EMythicControl::CameraMode:EMythicControl::Inspect);
-    } else if (const int32 Item=ItemIndex(Sector); Entries.IsValidIndex(Item) && Entries[Item].Quantity>0 && QuickUse.IsValid()) {
+    else if (const int32 Item=ItemIndex(Sector); Entries.IsValidIndex(Item) && Entries[Item].Quantity>0 && QuickUse.IsValid()) {
         QuickUse->Select(Opener==EMythicControl::Heal,Entries[Item].Key);
         CloseWithoutCommit();
     } else CloseWithoutCommit();

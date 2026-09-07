@@ -52,7 +52,7 @@ void UMythicAbilityHudWidget::BuildCells() {
     AddHint(NSLOCTEXT("Mythic","CameraAdjustmentMode","Camera adjustment"));
     AddGlyph(EMythicControl::Secondary); AddGlyph(EMythicControl::Primary);
     AddHint(NSLOCTEXT("Mythic","CameraAdjustmentZoom","Zoom"));
-    AddGlyph(EMythicControl::Utility); AddHint(NSLOCTEXT("Mythic","CameraAdjustmentExit","Exit"));
+    AddGlyph(EMythicControl::CameraMode); AddHint(NSLOCTEXT("Mythic","CameraAdjustmentExit","Exit"));
     CameraAdjustmentHint->SetVisibility(ESlateVisibility::Collapsed);
     auto* Row=WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(),TEXT("AbilityRow"));
     Root->AddChildToVerticalBox(Row);
@@ -83,8 +83,6 @@ void UMythicAbilityHudWidget::BuildCells() {
         auto* StateSlot=Layers->AddChildToOverlay(Cell.State); StateSlot->SetHorizontalAlignment(HAlign_Center); StateSlot->SetVerticalAlignment(VAlign_Bottom);
         Cell.Icon->SetVisibility(ESlateVisibility::Collapsed); Cell.Sweep->SetVisibility(ESlateVisibility::Collapsed); Cell.Countdown->SetVisibility(ESlateVisibility::Collapsed);
     }
-    auto* Utility=WidgetTree->ConstructWidget<UMythicQuickUseHudCell>(); Utility->InitializePurpose(false);
-    auto* UtilitySlot=Row->AddChildToHorizontalBox(Utility); UtilitySlot->SetVerticalAlignment(VAlign_Bottom); UtilitySlot->SetPadding(FMargin(14,0,0,0));
     SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 

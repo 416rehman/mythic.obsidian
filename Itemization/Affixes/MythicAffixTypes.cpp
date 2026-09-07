@@ -245,14 +245,26 @@ bool FRolledAffix::NetSerialize(FArchive &Ar, UPackageMap *Map, bool &bOutSucces
 }
 
 bool FMythicReplicatedAffixArray::Serialize(FArchive &Ar) {
-    int32 Count = Items.Num();
+    int32 Count = Ar.IsLoading() ? 0 : Items.Num();
     Ar << Count;
-    if (Count < 0 || Count > MythicAffixSerialization::MaxAffixesPerContainer) {
+    if (Ar.IsError() || Count < 0 || Count > MythicAffixSerialization::MaxAffixesPerContainer) {
         Ar.SetError();
         return false;
     }
     if (Ar.IsLoading()) {
-        Items.SetNum(Count);
+        TArray<FRolledAffix> Restored;
+        Restored.SetNum(Count);
+        for (FRolledAffix& Affix:Restored) {
+            if (!Affix.Serialize(Ar) || Ar.IsError()) {
+                Ar.SetError();
+                return false;
+            }
+        }
+        // Save data contains semantic rolls, never replication identity. Fresh
+        // rows plus a new array key wake owner replication after every restore,
+        // including same-count replacements and clearing an existing array.
+        ReplaceAll(MoveTemp(Restored));
+        return true;
     }
     for (FMythicReplicatedAffixItem &Item : Items) {
         if (!Item.Affix.Serialize(Ar)) {

@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "ItemDefinition.h"
 #include "MythicItemFactoryTypes.h"
+#include "Character/Appearance/MythicAppearanceTypes.h"
 #include "Mythic/Utility/MythicReplicatedObject.h"
 #include "Net/UnrealNetwork.h"
 #include "MythicItemInstance.generated.h"
@@ -16,8 +17,12 @@ UCLASS(Blueprintable, BlueprintType)
 class MYTHIC_API UMythicItemInstance : public UMythicReplicatedObject {
     GENERATED_BODY()
     friend class UMythicInventoryComponent;
+    friend class UMythicAppearanceComponent;
 
 protected:
+    UPROPERTY(SaveGame, ReplicatedUsing=OnRep_AppearanceData)
+    FMythicItemAppearanceData AppearanceData;
+    UFUNCTION() void OnRep_AppearanceData();
     /** Item definition that supplied this instance's immutable authored data. */
     UPROPERTY(ReplicatedUsing=OnRep_ItemDefinition, BlueprintReadOnly, Category = "Item", SaveGame)
     UItemDefinition *ItemDefinition;
@@ -81,6 +86,8 @@ protected:
     void OnRep_SlotIndex();
 
 public:
+    UFUNCTION(BlueprintPure, Category="Item|Appearance")
+    FMythicItemAppearanceData GetAppearanceData() const { return AppearanceData; }
     virtual void Serialize(FArchive &Ar) override;
 
     /** Presentation-only replication arrival. Never refresh a replacement item in our former slot. */
@@ -97,6 +104,7 @@ public:
         DOREPLIFETIME_CONDITION(UMythicItemInstance, ItemInstanceGuid, COND_OwnerOnly);
         DOREPLIFETIME(UMythicItemInstance, ItemTags);
         DOREPLIFETIME(UMythicItemInstance, bMarkedJunk);
+        DOREPLIFETIME_CONDITION(UMythicItemInstance, AppearanceData, COND_OwnerOnly);
     }
 
     void SetStackSize(const int32 newQuantity);

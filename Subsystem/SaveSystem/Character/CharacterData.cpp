@@ -1,4 +1,6 @@
 #include "CharacterData.h"
+#include "Character/Appearance/MythicAppearanceComponent.h"
+#include "Misc/ScopeExit.h"
 #include "Input/MythicQuickUseComponent.h"
 #include "Input/MythicControlsComponent.h"
 #include "Input/MythicTraversalComponent.h"
@@ -55,6 +57,13 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
     APlayerState *PS = nullptr;
     APlayerController *PC = nullptr;
     ResolveCharacterActors(SourceActor, PS, PC);
+    OutData.AppearanceStamp={}; OutData.AppearanceRecipe={}; OutData.bHasAppearanceRecipe=false;
+    if (PS) if (auto* Appearance=PS->FindComponentByClass<UMythicAppearanceComponent>()) {
+        if (!Appearance->CanCaptureSave()) return false;
+        OutData.bHasAppearanceRecipe=Appearance->HasPersonalRecipe();
+        OutData.AppearanceRecipe=Appearance->GetState().Recipe;
+        OutData.AppearanceStamp=Appearance->CaptureSaveStamp();
+    }
     if (UMythicInventoryComponent::IsOwnerUseInProgress(PC ? static_cast<AActor*>(PC):SourceActor)) return false;
     if (PC) if (auto* Quick=PC->FindComponentByClass<UMythicQuickUseComponent>()) { OutData.SelectedHealingItem=Quick->GetSelected(true); OutData.SelectedUtilityItem=Quick->GetSelected(false); }
     AActor *ProfHost = PC ? static_cast<AActor *>(PC) : SourceActor;
@@ -287,6 +296,7 @@ bool FSerializedCharacterData::Serialize(AActor *SourceActor, FSerializedCharact
 
 
     OutData.DataVersion = static_cast<int32>(CurrentCharacterSaveVersion);
+    for (const auto& Inventory:OutData.Inventories) OutData.AppearanceStamp.Items.Append(Inventory.AppearanceStamps);
 
     UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Serialize: Serialized character '%s'"), *OutData.CharacterName);
     return true;
@@ -307,6 +317,10 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
     APlayerState *PS = nullptr;
     APlayerController *PC = nullptr;
     ResolveCharacterActors(TargetActor, PS, PC);
+    const TWeakObjectPtr<UMythicAppearanceComponent> Appearance=PS?PS->FindComponentByClass<UMythicAppearanceComponent>():nullptr;
+    bool bAppearanceRestored=false;
+    if (Appearance.IsValid()) Appearance->BeginRestore();
+    ON_SCOPE_EXIT { if (!bAppearanceRestored && Appearance.IsValid()) Appearance->FinishRestore(nullptr,false); };
     if (UMythicInventoryComponent::IsOwnerUseInProgress(PC ? static_cast<AActor*>(PC):TargetActor)) return false;
 
     if (!InData.HarvestReceiptLedger.WorldWatermarks.IsEmpty()) {
@@ -616,5 +630,7 @@ bool FSerializedCharacterData::Deserialize(AActor *TargetActor, const FSerialize
     }
     UE_LOG(MythSaveLoad, Log, TEXT("SerializedCharacterData::Deserialize: Applied character '%s'"), *InData.CharacterName);
     if (PC) if (auto* Quick=PC->FindComponentByClass<UMythicQuickUseComponent>()) Quick->RestoreSelections(InData.SelectedHealingItem,InData.SelectedUtilityItem);
+    if (Appearance.IsValid()) Appearance->FinishRestore(InData.bHasAppearanceRecipe?&InData.AppearanceRecipe:nullptr,true);
+    bAppearanceRestored=true;
     return true;
 }

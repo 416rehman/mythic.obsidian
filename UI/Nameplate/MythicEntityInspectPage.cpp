@@ -147,13 +147,11 @@ bool UMythicEntityInspectPage::RouteInspectKey(FKey Key,EInputEvent Event,bool b
     if (!Controls) return false;
     const bool Inspect=Controls->IsControlKey(Key,EMythicControl::Inspect);
     const bool Menu=Controls->IsControlKey(Key,EMythicControl::CharacterMenu) || Controls->IsControlKey(Key,EMythicControl::SystemMenu);
-    const bool Utility=Controls->IsControlKey(Key,EMythicControl::Utility);
-    if (!Inspect && !Menu && !Utility) return false;
+    if (!Inspect && !Menu) return false;
     if (Event==IE_Released) { Controls->HandleKey(Key,Event); return true; }
     if (Event!=IE_Pressed || bRepeat) return true;
     RequestInspectClose();
-    // Only menu navigation is handed off. Utility closes this local state without using an item;
-    // another fresh press can open its wheel. Inspect never manufactures a permanently held Alt.
+    // Only menu navigation is handed off. Inspect never manufactures a permanently held Alt.
     if (Menu) Controls->HandleKey(Key,Event);
     return true;
 }

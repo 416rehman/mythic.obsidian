@@ -632,6 +632,88 @@ bool FMythicSocketSaveFramingTest::RunTest(const FString &Parameters) {
               Loaded.SocketedAffixSnapshots[0].Provenance.OriginSocketGuid, Socket.SocketGuid);
     TestEqual(TEXT("replication id is rebuilt, never persisted"), Loaded.ReplicationID, INDEX_NONE);
     TestEqual(TEXT("replication key is rebuilt, never persisted"), Loaded.ReplicationKey, INDEX_NONE);
+
+    // The socket serializer deliberately leaves per-row IDs unallocated until a
+    // normal FastArray write. The container must nevertheless leave key zero.
+    TestEqual(TEXT("recent row key is also never persisted"), Loaded.MostRecentArrayReplicationKey, INDEX_NONE);
+    TestTrue(TEXT("restored sockets leave the empty default delta state"), Restored.ArrayReplicationKey > 0);
+    Restored.SetOwner(Definition);
+    const auto WriteSockets = [](FMythicReplicatedSocketArray &Array, TArray<uint8> &Bytes) {
+        FBufferArchive Out;
+        FObjectAndNameAsStringProxyArchive Ar(Out, false); Ar.ArIsSaveGame = true;
+        const bool bResult = Array.Serialize(Ar) && !Ar.IsError();
+        Bytes = Out;
+        return bResult;
+    };
+    const auto ReadSockets = [](TArray<uint8> &Bytes, FMythicReplicatedSocketArray &Array) {
+        FMemoryReader In(Bytes, true);
+        FObjectAndNameAsStringProxyArchive Ar(In, true); Ar.ArIsSaveGame = true;
+        return Array.Serialize(Ar) && !Ar.IsError() && In.AtEnd();
+    };
+    TArray<uint8> Resaved;
+    TestTrue(TEXT("rehydrated sockets save without errors"), WriteSockets(Restored, Resaved));
+    TestTrue(TEXT("socket bookkeeping does not alter canonical save bytes"), Resaved == Buffer);
+
+    // Use the engine's public allocation API, as its first delta write does.
+    // This is identity bookkeeping coverage, not a claim of network transport.
+    Restored.MarkItemDirty(Restored.Items[0]);
+    const int32 PreviousId = Restored.Items[0].ReplicationID;
+    const int32 BeforeReloadCounter = Restored.IDCounter;
+    const int32 BeforeReloadKey = Restored.ArrayReplicationKey;
+    TestTrue(TEXT("engine allocates the initial socket row identity"), PreviousId != INDEX_NONE);
+    Socket.SocketedAffixSnapshots[0].Magnitude += 1.0f;
+    Source.MarkItemDirty(Socket);
+    TArray<uint8> ReplacementBytes;
+    if (!TestTrue(TEXT("same-size socket replacement saves"), WriteSockets(Source, ReplacementBytes))
+        || !TestTrue(TEXT("same-size socket replacement loads"), ReadSockets(ReplacementBytes, Restored))
+        || !TestEqual(TEXT("replacement retains one socket"), Restored.Items.Num(), 1)) return false;
+    if (!TestEqual(TEXT("replacement retains one immutable gem grant"), Restored.Items[0].SocketedAffixSnapshots.Num(), 1)) return false;
+    TestEqual(TEXT("reload retains stable socket identity"), Restored.Items[0].SocketGuid, Socket.SocketGuid);
+    TestEqual(TEXT("reload changes contained grant payload"),
+              Restored.Items[0].SocketedAffixSnapshots[0].Magnitude, Socket.SocketedAffixSnapshots[0].Magnitude);
+    TestTrue(TEXT("socket reload advances its existing array key"), Restored.ArrayReplicationKey > BeforeReloadKey);
+    TestEqual(TEXT("socket reload does not reset existing ID counter"), Restored.IDCounter, BeforeReloadCounter);
+    TestEqual(TEXT("replacement socket has no inherited network identity"), Restored.Items[0].ReplicationID, INDEX_NONE);
+    TestEqual(TEXT("replacement socket has no inherited row key"), Restored.Items[0].ReplicationKey, INDEX_NONE);
+    Restored.MarkItemDirty(Restored.Items[0]);
+    TestTrue(TEXT("next normal allocation cannot reuse a prior socket delta identity"), Restored.Items[0].ReplicationID > PreviousId);
+    TestTrue(TEXT("socket reload retains runtime callback owner"), Restored.Owner.Get() == Definition);
+
+    // Production serialization rejects duplicate persistent socket GUIDs after
+    // reading the first valid row. Retain those bounded bytes for a load test.
+    FMythicReplicatedSocketArray Invalid;
+    Invalid.Items.Add(Socket);
+    Invalid.Items[0].SocketedAffixSnapshots[0].Magnitude = 999.0f;
+    Invalid.Items.Add(Socket);
+    TArray<uint8> MalformedBytes;
+    TestFalse(TEXT("duplicate-socket fixture is rejected by production writer"), WriteSockets(Invalid, MalformedBytes));
+    const int32 BeforeFailureKey = Restored.ArrayReplicationKey;
+    const int32 BeforeFailureCounter = Restored.IDCounter;
+    const int32 BeforeFailureId = Restored.Items[0].ReplicationID;
+    const int32 BeforeFailureRowKey = Restored.Items[0].ReplicationKey;
+    TArray<uint8> BeforeFailureBytes;
+    if (!TestTrue(TEXT("capture valid socket state"), WriteSockets(Restored, BeforeFailureBytes))) return false;
+    TestFalse(TEXT("malformed second socket rejects the entire staged load"), ReadSockets(MalformedBytes, Restored));
+    TArray<uint8> AfterFailureBytes;
+    TestTrue(TEXT("previous socket payload remains serializable"), WriteSockets(Restored, AfterFailureBytes));
+    TestTrue(TEXT("failed socket load preserves every saved field"), AfterFailureBytes == BeforeFailureBytes);
+    TestEqual(TEXT("failed socket load preserves array key"), Restored.ArrayReplicationKey, BeforeFailureKey);
+    TestEqual(TEXT("failed socket load preserves ID counter"), Restored.IDCounter, BeforeFailureCounter);
+    if (!TestEqual(TEXT("failed socket load preserves row count"), Restored.Items.Num(), 1)) return false;
+    TestEqual(TEXT("failed socket load preserves row ID"), Restored.Items[0].ReplicationID, BeforeFailureId);
+    TestEqual(TEXT("failed socket load preserves row key"), Restored.Items[0].ReplicationKey, BeforeFailureRowKey);
+    TestTrue(TEXT("failed socket load preserves callback owner"), Restored.Owner.Get() == Definition);
+
+    FMythicReplicatedSocketArray Empty;
+    TArray<uint8> EmptyBytes;
+    const int32 BeforeEmptyKey = Restored.ArrayReplicationKey;
+    const int32 BeforeEmptyCounter = Restored.IDCounter;
+    if (!TestTrue(TEXT("empty socket array saves"), WriteSockets(Empty, EmptyBytes))
+        || !TestTrue(TEXT("empty socket replacement loads"), ReadSockets(EmptyBytes, Restored))) return false;
+    TestTrue(TEXT("empty socket load removes all rows"), Restored.Items.IsEmpty());
+    TestTrue(TEXT("empty socket load advertises the deletion"), Restored.ArrayReplicationKey > BeforeEmptyKey);
+    TestEqual(TEXT("empty socket load preserves allocation history"), Restored.IDCounter, BeforeEmptyCounter);
+    TestTrue(TEXT("empty socket load preserves callback owner"), Restored.Owner.Get() == Definition);
     return true;
 }
 

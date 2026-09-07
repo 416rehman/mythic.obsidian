@@ -75,11 +75,10 @@ bool StageItem(UMythicInventoryComponent *Component, const int32 SaveIndex,
 
     FMemoryReader MemReader(SavedSlot.ItemData.ByteData, true);
     MemReader.ArMaxSerializeSize = MaxSerializedItemBytes;
-    MemReader.ArIsNetArchive = true;
+    // Match the ordinary save writer: network archives omit FText fields.
     FObjectAndNameAsStringProxyArchive Ar(MemReader, false);
     Ar.ArIsSaveGame = true;
     Ar.ArMaxSerializeSize = MaxSerializedItemBytes;
-    Ar.ArIsNetArchive = true;
     NewItem->Serialize(Ar);
     if (Ar.IsError() || !MemReader.AtEnd() || !NewItem->GetItemDefinition()
         || !NewItem->GetItemInstanceGuid().IsValid()) {
@@ -232,6 +231,7 @@ bool FSerializedInventoryData::Serialize(
     }
 
     TArray<FSerializedSlotData> StagedSlots;
+    TArray<FMythicAppearanceItemStamp> AppearanceStamps;
     StagedSlots.Reserve(SourceSlots.Num());
     int64 TotalSerializedBytes = 0;
     for (int32 Index = 0; Index < SourceSlots.Num(); ++Index) {
@@ -261,6 +261,7 @@ bool FSerializedInventoryData::Serialize(
                 return false;
             }
             TotalSerializedBytes += SavedSlot.ItemData.ByteData.Num();
+            AppearanceStamps.Add({Item->GetItemInstanceGuid(),Item->GetAppearanceData().Revision});
             if (TotalSerializedBytes > MaxSerializedInventoryBytes) {
                 UE_LOG(MythSaveLoad, Error,
                        TEXT("Inventory Serialize: aggregate item payload exceeded %lld bytes"),
@@ -275,6 +276,7 @@ bool FSerializedInventoryData::Serialize(
     OutData.SaveGameGuid = EffectiveContext.SaveGameGuid;
     OutData.StableContainerId = EffectiveContext.StableContainerId;
     OutData.Slots = MoveTemp(StagedSlots);
+    OutData.AppearanceStamps = MoveTemp(AppearanceStamps);
     return true;
 }
 

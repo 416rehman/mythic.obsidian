@@ -45,6 +45,7 @@ bool UMythicQuickUseComponent::Describe(UMythicItemInstance* Item,bool bHealing,
     if (!Authored || !Fragment->CanBeStackedWith(Authored)) return false;
     Out.Key.Definition=FSoftObjectPath(Item->GetItemDefinition()); Out.Key.Variant=Config.QuickUseVariant;
     Out.Name=Item->GetItemDefinition()->Name; Out.Icon=Item->GetItemDefinition()->Icon2d; Out.Quantity=Item->GetStacks();
+    Out.Description=Item->GetItemDefinition()->Description;
     Out.SortPriority=Authored->ConsumableEffectConfig.QuickUsePriority;
     return true;
 }

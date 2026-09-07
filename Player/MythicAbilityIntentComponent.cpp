@@ -1,5 +1,6 @@
 #include "Player/MythicAbilityIntentComponent.h"
 #include "Player/MythicPlayerController.h"
+#include "Player/MythicCharacter.h"
 #include "Input/MythicCombatUtilityComponent.h"
 #include "UI/Settings/MythicUserSettings.h"
 #include "Settings/MythicDeveloperSettings.h"
@@ -84,6 +85,8 @@ bool UMythicAbilityIntentComponent::CycleCameraMode() {
 }
 
 void UMythicAbilityIntentComponent::ApplyModeContext() {
+    if (const auto* PC=Cast<APlayerController>(GetOwner())) if (auto* Character=Cast<AMythicCharacter>(PC->GetPawn()))
+        Character->RefreshModularBodyVisibility();
     if (!BoundSubsystem.IsValid() || !Definition) return;
     UInputMappingContext* Next=GetSelectedCameraMode().AbilityAimPolicy==EMythicAbilityAimPolicy::WorldCursor ? Definition->WorldAimContext : Definition->ViewAimContext;
     if (InstalledContext.Get()==Next) return;
@@ -97,7 +100,11 @@ void UMythicAbilityIntentComponent::ResetHeldInput() {
     // Existing owner/mode/device/menu/application reset routes also suspend optional camera assistance.
     if (auto* Owner=GetOwner()) if (auto* Utility=Owner->FindComponentByClass<UMythicCombatUtilityComponent>()) Utility->SuppressLockYawAssist();
 }
-void UMythicAbilityIntentComponent::ResetPointer() { ResetHeldInput(); bHasVirtualPosition=false; PreviousView=FIntRect(); }
+void UMythicAbilityIntentComponent::ResetPointer() {
+    ResetHeldInput(); bHasVirtualPosition=false; PreviousView=FIntRect();
+    if (const auto* PC=Cast<APlayerController>(GetOwner())) if (auto* Character=Cast<AMythicCharacter>(PC->GetPawn()))
+        Character->RefreshModularBodyVisibility();
+}
 void UMythicAbilityIntentComponent::OnDeviceChanged(ECommonInputType) { ResetPointer(); RefreshGameplayInputConfig(); }
 
 void UMythicAbilityIntentComponent::RefreshGameplayInputConfig() {

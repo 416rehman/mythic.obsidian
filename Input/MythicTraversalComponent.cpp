@@ -127,7 +127,10 @@ bool UMythicTraversalComponent::BuildMantleRoute(ACharacter* Character,FVector D
     if (!Top.bBlockingHit || Top.bStartPenetrating || !Move->IsWalkable(Top) || Height<40 || Height>200 || !Top.GetComponent()) return false;
     const FVector End=Top.ImpactPoint+FVector(0,0,Half+2.5f);
     const float Reach=FVector::Dist2D(Start,End);
-    if (Reach<100 || Reach>150) return false;
+    // A capsule close to the wall can have a safe landing below 100cm away.
+    // The complete capsule route below owns clearance; only bound forward reach.
+    if (!FMath::IsFinite(Reach) || Reach<=UE_KINDA_SMALL_NUMBER || Reach>150
+        || FVector::DotProduct(End-Start,Direction)<=0) return false;
     // Up, over, then settle: every leg and the complete end capsule are admitted now and swept by CMC in motion.
     Route.Points.Add(FVector(Start.X,Start.Y,End.Z+5));
     Route.Points.Add(End+FVector(0,0,5)); Route.Points.Add(End);
@@ -149,9 +152,14 @@ void UMythicTraversalComponent::Jump() {
     bJumpHeld=true;
     if (IsMantling()) return;
     FVector Aim, Movement; FMythicMantleRoute Route;
-    if (CaptureDirections(Character,Aim,Movement) && BuildMantleRoute(Character,Aim,Route)) {
+    const bool bHasAim=CaptureDirections(Character,Aim,Movement);
+    // Mantle follows a current movement command first. This is local traversal
+    // nomination only: combat aim and the server's full route validation stay intact.
+    FVector Direction=Movement.ContainsNaN() ? FVector::ZeroVector : Movement.GetSafeNormal2D();
+    if (Direction.IsNearlyZero() && bHasAim) Direction=Aim.GetSafeNormal2D();
+    if (!Direction.IsNearlyZero() && BuildMantleRoute(Character,Direction,Route)) {
         PendingRequest=++NextRequest; if (!PendingRequest) PendingRequest=++NextRequest;
-        ServerRequestMantle(PendingRequest,Aim.GetSafeNormal2D());
+        ServerRequestMantle(PendingRequest,Direction);
     } else Character->Jump();
 }
 void UMythicTraversalComponent::ReleaseJump() {
